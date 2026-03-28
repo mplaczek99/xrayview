@@ -20,16 +20,25 @@ import (
 func main() {
 	a := app.New()
 	w := a.NewWindow("xrayview")
+
+	// Keep the selected path as explicit state instead of reading it back from the
+	// label. The label is only for presentation, while later GUI actions will need
+	// a stable value that represents the current selection.
+	selectedPath := ""
+
 	pathLabel := widget.NewLabel("No image selected")
 	preview := canvas.NewImageFromImage(nil)
 	preview.FillMode = canvas.ImageFillContain
 	preview.SetMinSize(fyne.NewSize(320, 240))
 	preview.Hide()
+
 	w.SetContent(container.NewVBox(
 		widget.NewLabel("xrayview GUI starting"),
 		pathLabel,
 		preview,
 		widget.NewButton("Open Image", func() {
+			// The portal picker can block while waiting for the desktop environment.
+			// Running it in a goroutine keeps the Fyne event loop responsive.
 			go func() {
 				uris, err := filechooser.OpenFile("", "Open Image", nil)
 				if err != nil {
@@ -67,13 +76,29 @@ func main() {
 				}
 
 				fmt.Println(path)
+
+				// Fyne UI state should be updated on the GUI thread. fyne.Do keeps the
+				// preview and labels synchronized with the result from the background picker.
 				fyne.Do(func() {
+					selectedPath = path
 					pathLabel.SetText(path)
 					preview.File = path
 					preview.Show()
 					preview.Refresh()
 				})
 			}()
+		}),
+		widget.NewButton("Process Image", func() {
+			// Refusing to process without a selection gives immediate feedback and keeps
+			// later processing code from needing to handle an impossible empty-input case.
+			if selectedPath == "" {
+				dialog.ShowError(fmt.Errorf("no image selected"), w)
+				return
+			}
+
+			// Real processing is intentionally deferred to a later step so the GUI can
+			// add controls incrementally without changing the existing CLI pipeline yet.
+			fmt.Println("process image clicked")
 		}),
 	))
 	w.ShowAndRun()
