@@ -1,6 +1,7 @@
 package com.xrayview.frontend;
 
 import java.io.File;
+import java.util.Locale;
 
 import javafx.application.Application;
 import javafx.geometry.Insets;
@@ -80,6 +81,17 @@ public final class XRayViewApp extends Application {
         // until the Java frontend shape is stable enough to connect safely to Go.
         Slider brightnessSlider = new Slider(-100, 100, 0);
         Slider contrastSlider = new Slider(0.5, 2.0, 1.0);
+        Label brightnessValueLabel = new Label();
+        Label contrastValueLabel = new Label();
+
+        // Visible value labels should stay synchronized with slider positions so
+        // users can read exact settings instead of inferring them from thumb
+        // location alone. Formatting is kept in the UI layer because display
+        // precision is a presentation concern, while UiState keeps raw values for
+        // later backend use. This remains a small behavior-preserving step because
+        // it only updates on-screen text and does not change processing flow.
+        updateBrightnessValueLabel(brightnessValueLabel, brightnessSlider.getValue());
+        updateContrastValueLabel(contrastValueLabel, contrastSlider.getValue());
 
         CheckBox invertCheckBox = new CheckBox("Invert");
         CheckBox equalizeCheckBox = new CheckBox("Equalize Histogram");
@@ -95,9 +107,17 @@ public final class XRayViewApp extends Application {
         // mirroring their values into UiState prepares a safer handoff point for
         // later Java-to-Go integration without changing the current workflow.
         brightnessSlider.valueProperty().addListener((observable, oldValue, newValue) ->
-                uiState.setBrightness(newValue.doubleValue()));
+        {
+            double value = newValue.doubleValue();
+            uiState.setBrightness(value);
+            updateBrightnessValueLabel(brightnessValueLabel, value);
+        });
         contrastSlider.valueProperty().addListener((observable, oldValue, newValue) ->
-                uiState.setContrast(newValue.doubleValue()));
+        {
+            double value = newValue.doubleValue();
+            uiState.setContrast(value);
+            updateContrastValueLabel(contrastValueLabel, value);
+        });
         invertCheckBox.selectedProperty().addListener((observable, oldValue, newValue) ->
                 uiState.setInvert(newValue));
         equalizeCheckBox.selectedProperty().addListener((observable, oldValue, newValue) ->
@@ -117,10 +137,10 @@ public final class XRayViewApp extends Application {
                 new Label("Image Controls"),
                 new Label("Brightness"),
                 brightnessSlider,
-                new Label("Brightness: 0"),
+                brightnessValueLabel,
                 new Label("Contrast"),
                 contrastSlider,
-                new Label("Contrast: 1.0"),
+                contrastValueLabel,
                 invertCheckBox,
                 equalizeCheckBox,
                 new Label("Palette"),
@@ -187,6 +207,14 @@ public final class XRayViewApp extends Application {
         previewFrame.setAlignment(Pos.CENTER);
         previewFrame.setStyle("-fx-border-color: gray; -fx-border-width: 1;");
         return previewFrame;
+    }
+
+    private static void updateBrightnessValueLabel(Label label, double value) {
+        label.setText(String.format(Locale.US, "Brightness: %d", (int) Math.round(value)));
+    }
+
+    private static void updateContrastValueLabel(Label label, double value) {
+        label.setText(String.format(Locale.US, "Contrast: %.1f", value));
     }
 
     private static VBox createPreviewPlaceholder(String title) {
