@@ -23,6 +23,12 @@ import javafx.stage.FileChooser;
 import javafx.stage.Stage;
 
 public final class XRayViewApp extends Application {
+    // State is being centralized early so future backend requests can read one
+    // stable object instead of pulling values back out of scattered controls.
+    // This step deliberately does not connect the state to widgets yet, because
+    // preserving current behavior while the structure improves keeps migration
+    // risk low and makes later Java-to-Go integration changes safer to review.
+    private final UiState uiState = new UiState();
     private final Label selectedPathLabel = new Label("No image selected yet");
     private final Label statusValueLabel = new Label("Ready");
     private final Label originalPlaceholderLabel = new Label("Preview placeholder");
