@@ -264,7 +264,12 @@ public final class XRayViewApp extends Application {
         // The saved bytes are always PNG, so enforce the extension here to keep
         // the filename aligned with the actual file format.
         if (!destinationFile.getName().toLowerCase(Locale.ROOT).endsWith(".png")) {
-            destinationFile = new File(destinationFile.getParentFile(), destinationFile.getName() + ".png");
+            File parentDirectory = destinationFile.getParentFile();
+            if (parentDirectory == null) {
+                destinationFile = new File(destinationFile.getPath() + ".png");
+            } else {
+                destinationFile = new File(parentDirectory, destinationFile.getName() + ".png");
+            }
         }
 
         try {
