@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/mplaczek99/xrayview/internal/colormap"
 	"github.com/mplaczek99/xrayview/internal/filters"
 	"github.com/mplaczek99/xrayview/internal/imageio"
 )
@@ -18,6 +19,7 @@ type config struct {
 	brightness int
 	contrast   float64
 	equalize   bool
+	palette    string
 }
 
 func main() {
@@ -41,7 +43,7 @@ func main() {
 	fmt.Printf("saved %s png image: %s\n", mode, cfg.outputPath)
 }
 
-func processImage(img image.Image, cfg config) (*image.Gray, string) {
+func processImage(img image.Image, cfg config) (image.Image, string) {
 	output := filters.Grayscale(img)
 	mode := "grayscale"
 
@@ -61,6 +63,9 @@ func processImage(img image.Image, cfg config) (*image.Gray, string) {
 		output = filters.EqualizeHistogram(output)
 		mode = fmt.Sprintf("%s with histogram equalization", mode)
 	}
+	if cfg.palette == "hot" {
+		return colormap.Hot(output), fmt.Sprintf("%s with hot palette", mode)
+	}
 
 	return output, mode
 }
@@ -74,6 +79,7 @@ func parseFlags() config {
 	flag.IntVar(&cfg.brightness, "brightness", 0, "brightness delta for grayscale output")
 	flag.Float64Var(&cfg.contrast, "contrast", 1.0, "contrast factor for grayscale output")
 	flag.BoolVar(&cfg.equalize, "equalize", false, "apply histogram equalization")
+	flag.StringVar(&cfg.palette, "palette", "none", "pseudocolor palette: none or hot")
 
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage of xrayview:\n")
@@ -81,6 +87,7 @@ func parseFlags() config {
 	}
 
 	flag.Parse()
+	cfg.palette = strings.ToLower(cfg.palette)
 
 	if err := validateConfig(cfg); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -98,6 +105,9 @@ func validateConfig(cfg config) error {
 
 	if !strings.HasSuffix(strings.ToLower(cfg.outputPath), ".png") {
 		return fmt.Errorf("output path must end with .png")
+	}
+	if cfg.palette != "none" && cfg.palette != "hot" {
+		return fmt.Errorf("palette must be one of: none, hot")
 	}
 
 	return nil
