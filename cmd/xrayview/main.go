@@ -24,15 +24,16 @@ func main() {
 	}
 
 	gray := filters.Grayscale(img)
+	inverted := filters.Invert(gray)
 
-	if err := imageio.SavePNG(cfg.outputPath, gray); err != nil {
+	if err := imageio.SavePNG(cfg.outputPath, inverted); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
 
 	bounds := img.Bounds()
 	fmt.Printf("loaded %s image: %dx%d\n", format, bounds.Dx(), bounds.Dy())
-	fmt.Printf("saved grayscale png image: %s\n", cfg.outputPath)
+	fmt.Printf("saved inverted grayscale png image: %s\n", cfg.outputPath)
 }
 
 func parseFlags() config {
