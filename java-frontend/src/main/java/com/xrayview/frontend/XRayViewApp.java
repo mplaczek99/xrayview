@@ -2,6 +2,7 @@ package com.xrayview.frontend;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
@@ -270,11 +271,18 @@ public final class XRayViewApp extends Application {
         ProcessBuilder processBuilder = new ProcessBuilder(command);
         processBuilder.directory(repoRoot);
         processBuilder.redirectOutput(ProcessBuilder.Redirect.DISCARD);
-        processBuilder.redirectError(ProcessBuilder.Redirect.DISCARD);
+
+        // Discarding stderr is dangerous because the Go CLI already reports
+        // useful failure details there, and hiding them makes backend problems
+        // look like silent UI failures. Surfacing stderr in the status line keeps
+        // debugging practical while staying a minimal step with no new UI or
+        // workflow changes beyond better visibility into existing errors.
+        String errorOutput;
 
         int exitCode;
         try {
             Process process = processBuilder.start();
+            errorOutput = readProcessErrorOutput(process);
             exitCode = process.waitFor();
         } catch (IOException e) {
             statusValueLabel.setText("Processing failed");
@@ -286,7 +294,7 @@ public final class XRayViewApp extends Application {
         }
 
         if (exitCode != 0) {
-            statusValueLabel.setText("Processing failed");
+            statusValueLabel.setText(formatProcessFailureStatus(errorOutput));
             return;
         }
 
@@ -354,6 +362,24 @@ public final class XRayViewApp extends Application {
 
     private static void updateContrastValueLabel(Label label, double value) {
         label.setText(String.format(Locale.US, "Contrast: %.1f", value));
+    }
+
+    private String readProcessErrorOutput(Process process) throws IOException {
+        return new String(process.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
+    }
+
+    private String formatProcessFailureStatus(String errorOutput) {
+        String compactError = errorOutput.replaceAll("\\s+", " ").trim();
+        if (compactError.isEmpty()) {
+            return "Processing failed";
+        }
+
+        String statusText = "Processing failed: " + compactError;
+        if (statusText.length() > 160) {
+            return statusText.substring(0, 157) + "...";
+        }
+
+        return statusText;
     }
 
     private File resolveRepoRoot() {
