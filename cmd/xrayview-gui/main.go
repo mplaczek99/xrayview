@@ -13,14 +13,18 @@ import (
 func main() {
 	a := app.New()
 	w := a.NewWindow("xrayview")
+	pathLabel := widget.NewLabel("No image selected")
 	w.SetContent(container.NewVBox(
 		widget.NewLabel("xrayview GUI starting"),
+		pathLabel,
 		widget.NewButton("Open Image", func() {
 			dialog.ShowFileOpen(func(reader fyne.URIReadCloser, err error) {
 				if err != nil || reader == nil {
 					return
 				}
-				fmt.Println(reader.URI().Path())
+				path := reader.URI().Path()
+				fmt.Println(path)
+				pathLabel.SetText(path)
 				reader.Close()
 			}, w)
 		}),
