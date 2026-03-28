@@ -11,10 +11,18 @@ import (
 // Keeping this in a shared package lets the GUI reuse the same image logic as
 // the rest of the project instead of quietly growing its own copy of the
 // filter sequence.
-func ProcessDefault(src image.Image, brightness int, contrast float64, equalize bool) *image.Gray {
+func ProcessDefault(src image.Image, invert bool, brightness int, contrast float64, equalize bool) *image.Gray {
 	// This helper wires one control at a time so the shared path stays easy to
 	// reason about while the GUI grows incrementally.
 	gray := filters.Grayscale(src)
+
+	// Invert is applied immediately after grayscale so it flips the base intensity
+	// values before any later tone shaping occurs. That keeps the rest of the
+	// pipeline operating on the same kind of gray image regardless of whether
+	// inversion is enabled.
+	if invert {
+		gray = filters.Invert(gray)
+	}
 
 	// Brightness is applied after grayscale because the current default pipeline
 	// treats brightness as a gray-level adjustment, not a color operation.
@@ -22,9 +30,9 @@ func ProcessDefault(src image.Image, brightness int, contrast float64, equalize 
 		gray = filters.AdjustBrightness(gray, brightness)
 	}
 
-	// Contrast follows brightness so it reshapes the already adjusted tones. That
-	// ordering matches the current GUI flow and keeps pipeline behavior centralized
-	// instead of scattering filter order decisions across multiple callers.
+	// Contrast follows brightness so it reshapes the already adjusted tones. The
+	// full order stays centralized here so GUI controls produce predictable results
+	// instead of relying on each caller to remember filter sequencing.
 	if contrast != 1.0 {
 		gray = filters.AdjustContrast(gray, contrast)
 	}

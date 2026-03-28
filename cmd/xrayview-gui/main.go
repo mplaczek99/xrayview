@@ -31,6 +31,7 @@ func main() {
 	// Control state lives separately from the processing call so the GUI can grow
 	// incrementally. That keeps widget behavior easy to test visually before each
 	// control is allowed to affect image results.
+	invertValue := false
 	brightnessValue := 0
 	contrastValue := 1.0
 	equalizeValue := false
@@ -59,6 +60,12 @@ func main() {
 		contrastValue = value
 		contrastValueLabel.SetText(fmt.Sprintf("Contrast: %.1f", contrastValue))
 	}
+
+	// Invert is another discrete processing choice, so a checkbox is the simplest
+	// way to expose it without suggesting any intermediate values.
+	invertCheckbox := widget.NewCheck("Invert", func(checked bool) {
+		invertValue = checked
+	})
 
 	// Histogram equalization is a discrete on/off choice, so a checkbox expresses
 	// the intent more clearly than another numeric control.
@@ -97,6 +104,7 @@ func main() {
 		widget.NewLabel("Contrast"),
 		contrastSlider,
 		contrastValueLabel,
+		invertCheckbox,
 		equalizeCheckbox,
 		widget.NewButton("Open Image", func() {
 			// The portal picker can block while waiting for the desktop environment.
@@ -168,6 +176,7 @@ func main() {
 			// Snapshot the current slider value before leaving the GUI callback. Passing
 			// explicit UI state into the shared pipeline keeps the GUI thin and avoids
 			// teaching the pipeline package anything about widgets.
+			invert := invertValue
 			brightness := brightnessValue
 			contrast := contrastValue
 			equalize := equalizeValue
@@ -189,7 +198,7 @@ func main() {
 				// with the project's default behavior while still letting one UI control at
 				// a time flow into the same in-process path. The pipeline remains centralized
 				// so filter ordering does not drift between GUI code and shared logic.
-				processed := pipeline.ProcessDefault(img, brightness, contrast, equalize)
+				processed := pipeline.ProcessDefault(img, invert, brightness, contrast, equalize)
 				fmt.Println("process image clicked")
 
 				// Updating the processed preview from memory avoids temporary files and keeps
