@@ -1,10 +1,7 @@
 package com.xrayview.frontend;
 
-// Centralizing UI state in one small object makes future backend integration
-// safer because the frontend can pass a coherent snapshot of settings instead of
-// reconstructing that data from individual widgets. The class starts with only
-// default values on purpose so this optimization improves structure first while
-// keeping behavior unchanged until later wiring steps are introduced.
+// UiState keeps processing settings separate from JavaFX widgets so backend
+// calls can use a stable snapshot of the current selections.
 public final class UiState {
     private double brightness;
     private double contrast;
@@ -13,8 +10,7 @@ public final class UiState {
     private String palette;
 
     public UiState() {
-        // These defaults intentionally match the current UI defaults so the new
-        // state holder reflects the existing frontend behavior without changing it.
+        // Match the initial control defaults.
         this.brightness = 0.0;
         this.contrast = 1.0;
         this.invert = false;

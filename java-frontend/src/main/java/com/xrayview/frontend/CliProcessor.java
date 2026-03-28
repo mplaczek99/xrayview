@@ -6,13 +6,8 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 
-// This optimization pass is being done in tiny slices so structure can improve
-// without disturbing the behavior that the Java frontend already relies on.
-// Backend invocation is a good first extraction point because it is a distinct
-// boundary between UI code and Go processing code, and keeping that boundary in
-// one helper reduces responsibility in XRayViewApp without changing workflow.
-// Behavior preservation matters here because the CLI call path is already the
-// integration contract, so refactoring should clarify it rather than redefine it.
+// CliProcessor owns the Java-to-Go process boundary so command setup and error
+// capture stay out of the UI layer.
 public final class CliProcessor {
     public ExecutionResult run(File inputFile, File outputFile, UiState uiState) throws IOException, InterruptedException {
         File repoRoot = resolveRepoRoot();

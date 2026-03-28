@@ -27,11 +27,8 @@ import javafx.stage.FileChooser;
 import javafx.stage.Stage;
 
 public final class XRayViewApp extends Application {
-    // State is being centralized early so future backend requests can read one
-    // stable object instead of pulling values back out of scattered controls.
-    // This step deliberately does not connect the state to widgets yet, because
-    // preserving current behavior while the structure improves keeps migration
-    // risk low and makes later Java-to-Go integration changes safer to review.
+    // Keep processing settings separate from JavaFX widgets so backend calls can
+    // read a stable snapshot of the current UI state.
     private final UiState uiState = new UiState();
     private final Label selectedPathLabel = new Label("No image selected yet");
     private final Label statusValueLabel = new Label("Ready");
@@ -47,11 +44,6 @@ public final class XRayViewApp extends Application {
 
     @Override
     public void start(Stage stage) {
-        // Building the layout before adding functionality keeps this migration
-        // low-risk because the new frontend can match the intended structure
-        // first, without mixing UI arrangement decisions with backend behavior.
-        // Mirroring the current Go GUI also makes the transition easier to judge,
-        // since both frontends can share the same mental model and screen shape.
         Label headerLabel = new Label("Image Visualization Tool");
         VBox headerSection = new VBox(4, headerLabel, selectedPathLabel);
 
@@ -72,48 +64,28 @@ public final class XRayViewApp extends Application {
         BorderPane.setMargin(headerSection, new Insets(0, 0, 16, 0));
         BorderPane.setMargin(previews, new Insets(0, 0, 16, 0));
 
-        // The earlier fixed window size became too restrictive once the Java UI
-        // started to include the real control stack and both preview panels.
-        // Sizing to the scene is a better default at this stage because it lets
-        // the window respect the current preferred content size without guessing
-        // at a hardcoded frame. This step changes only the initial window sizing,
-        // not the general layout behavior after the stage is shown.
+        // Size the window from the preferred content size instead of relying on a
+        // hardcoded frame that can drift as the UI changes.
         Scene scene = new Scene(root);
 
         stage.setTitle("XRayView");
         stage.setScene(scene);
         stage.sizeToScene();
-        // After removing the fixed startup size, the window can otherwise be
-        // shrunk until the current control-and-preview layout becomes cramped.
-        // Using the computed scene size as the minimum keeps the UI usable while
-        // avoiding arbitrary guessed dimensions that could drift from the actual
-        // preferred layout as the Java frontend continues to evolve.
+        // Keep the initial preferred size as the minimum so the controls and
+        // preview panes cannot be collapsed into an unusable layout.
         stage.setMinWidth(stage.getWidth());
         stage.setMinHeight(stage.getHeight());
         stage.show();
     }
 
     private VBox createControlsSection(Stage stage) {
-        // The Java migration mirrors the Go GUI on purpose so each small step can
-        // be compared against a working reference instead of inventing a second
-        // desktop workflow. Matching the same labels and control order reduces
-        // migration risk and makes later parity checks much more straightforward.
-        //
-        // The controls are added before wiring any functionality because layout
-        // and interaction can be validated separately. That keeps this step about
-        // screen structure only, while deliberately avoiding backend integration
-        // until the Java frontend shape is stable enough to connect safely to Go.
         Slider brightnessSlider = new Slider(-100, 100, 0);
         Slider contrastSlider = new Slider(0.5, 2.0, 1.0);
         Label brightnessValueLabel = new Label();
         Label contrastValueLabel = new Label();
 
-        // Visible value labels should stay synchronized with slider positions so
-        // users can read exact settings instead of inferring them from thumb
-        // location alone. Formatting is kept in the UI layer because display
-        // precision is a presentation concern, while UiState keeps raw values for
-        // later backend use. This remains a small behavior-preserving step because
-        // it only updates on-screen text and does not change processing flow.
+        // Keep the value labels next to the sliders so the exact setting is
+        // visible without relying on thumb position alone.
         updateBrightnessValueLabel(brightnessValueLabel, brightnessSlider.getValue());
         updateContrastValueLabel(contrastValueLabel, contrastSlider.getValue());
 
@@ -124,12 +96,8 @@ public final class XRayViewApp extends Application {
         paletteComboBox.getItems().addAll("none", "hot", "bone");
         paletteComboBox.setValue("none");
 
-        // This step uses one-way binding from widgets into UiState first so the
-        // state object can start collecting a backend-ready snapshot without yet
-        // influencing what the user sees. The UI is still the source of truth at
-        // this stage because the controls already define the visible behavior, and
-        // mirroring their values into UiState prepares a safer handoff point for
-        // later Java-to-Go integration without changing the current workflow.
+        // The widgets remain the source of truth; UiState just mirrors their
+        // current values so processing can read one settings object.
         brightnessSlider.valueProperty().addListener((observable, oldValue, newValue) ->
         {
             double value = newValue.doubleValue();
@@ -155,11 +123,8 @@ public final class XRayViewApp extends Application {
         Button openImageButton = new Button("Open Image");
         openImageButton.setOnAction(event -> handleOpenImage(stage));
 
-        // Guarding invalid actions improves UX because users can see the expected
-        // order of operations directly in button state instead of discovering it
-        // through errors. This is done before backend integration so workflow
-        // behavior is already stable once processing is wired in. Keeping this
-        // limited to enable/disable transitions makes it a tiny, low-risk step.
+        // Disable actions until the required input exists instead of relying on
+        // error handling to teach the workflow.
         processImageButton.setDisable(true);
         saveProcessedImageButton.setDisable(true);
         processImageButton.setOnAction(event -> handleProcessImage());
@@ -184,12 +149,8 @@ public final class XRayViewApp extends Application {
                 statusValueLabel);
     }
 
-    // Duplication is being reduced now because the original and processed preview
-    // sections have settled into the same shape, so a shared helper can remove
-    // repeated setup without changing any UI decisions. Preview sections are a
-    // safe extraction point because they already share identical structure and
-    // bindings, and behavior must remain identical during this pass so the refactor
-    // improves maintainability without changing what the user sees or how previews work.
+    // Original and processed previews share the same structure, so keep their
+    // sizing and bindings in one place.
     private VBox createPreviewSection(String title, ImageView imageView, Label placeholderLabel) {
         imageView.setPreserveRatio(true);
         imageView.setSmooth(true);
@@ -205,11 +166,8 @@ public final class XRayViewApp extends Application {
     }
 
     private void handleOpenImage(Stage stage) {
-        // Showing the original preview before any backend processing is a safe
-        // migration step because it proves the Java frontend can own desktop UI
-        // work such as file selection and local preview rendering on its own.
-        // This is still migration, not a new frontend design, because it follows
-        // the same original/processed workflow the Go GUI already established.
+        // Load the original preview locally. The backend only needs to run when
+        // the user asks for a processed result.
         FileChooser fileChooser = new FileChooser();
         fileChooser.setTitle("Open Image");
         fileChooser.getExtensionFilters().add(
@@ -275,11 +233,8 @@ public final class XRayViewApp extends Application {
 
         processedImageView.setImage(processedImage);
         processedPlaceholderLabel.setVisible(false);
-        // Reusing the processed temp file avoids re-running the CLI for save,
-        // which keeps export tied to the exact result already shown in the UI.
-        // Saving remains separate from processing so the user can inspect the
-        // preview first, and keeping that handoff as a file reference preserves a
-        // clean boundary between Java UI workflow and Go processing output.
+        // Save reuses the file produced by the CLI so export matches the preview
+        // without running processing twice.
         lastProcessedFile = tempOutput;
         saveProcessedImageButton.setDisable(false);
         statusValueLabel.setText("Image processed");
@@ -303,19 +258,11 @@ public final class XRayViewApp extends Application {
             Files.copy(lastProcessedFile.toPath(), destinationFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
             statusValueLabel.setText("Image saved");
         } catch (IOException e) {
-            // Keep this step minimal by leaving the current UI state alone when
-            // the copy fails. The core save path still stays synchronous and easy
-            // to reason about while export support is being introduced.
+            // Leave the current UI state unchanged if the copy fails.
         }
     }
 
-    // This optimization pass is being done in tiny slices so each cleanup stays
-    // easy to verify against the current behavior. Preserving behavior matters
-    // because the Go GUI is still the reference while the Java frontend catches
-    // up, so structure can improve without moving the target. This helper was a
-    // good first optimization because preview frame sizing and styling had begun
-    // to duplicate across the Java UI, and extracting it reduces repetition with
-    // essentially no workflow risk.
+    // Keep preview sizing and border styling consistent across both panes.
     private static StackPane createPreviewFrame(Node... children) {
         StackPane previewFrame = new StackPane(children);
         previewFrame.setMinSize(240, 220);
