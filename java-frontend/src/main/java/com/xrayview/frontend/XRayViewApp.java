@@ -2,11 +2,8 @@ package com.xrayview.frontend;
 
 import java.io.File;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Locale;
 
 import javafx.application.Application;
@@ -44,6 +41,7 @@ public final class XRayViewApp extends Application {
     private final ImageView processedImageView = new ImageView();
     private final Button processImageButton = new Button("Process Image");
     private final Button saveProcessedImageButton = new Button("Save Processed Image");
+    private final CliProcessor cliProcessor = new CliProcessor();
     private File selectedImageFile;
     private File lastProcessedFile;
 
@@ -251,13 +249,6 @@ public final class XRayViewApp extends Application {
             return;
         }
 
-        // The existing Go CLI is the first integration boundary because it
-        // already defines processing behavior used by the current app. Using
-        // ProcessBuilder is appropriate for this local handoff since Java can
-        // invoke the CLI directly without introducing a new protocol yet. This
-        // step stays intentionally synchronous so success and failure flow remain
-        // easy to reason about while the migration is still proving parity.
-        File repoRoot = resolveRepoRoot();
         File tempOutput;
         try {
             tempOutput = File.createTempFile("xrayview-processed-", ".png");
@@ -267,23 +258,9 @@ public final class XRayViewApp extends Application {
             return;
         }
 
-        List<String> command = buildCliCommand(repoRoot, selectedImageFile, tempOutput);
-        ProcessBuilder processBuilder = new ProcessBuilder(command);
-        processBuilder.directory(repoRoot);
-        processBuilder.redirectOutput(ProcessBuilder.Redirect.DISCARD);
-
-        // Discarding stderr is dangerous because the Go CLI already reports
-        // useful failure details there, and hiding them makes backend problems
-        // look like silent UI failures. Surfacing stderr in the status line keeps
-        // debugging practical while staying a minimal step with no new UI or
-        // workflow changes beyond better visibility into existing errors.
-        String errorOutput;
-
-        int exitCode;
+        CliProcessor.ExecutionResult executionResult;
         try {
-            Process process = processBuilder.start();
-            errorOutput = readProcessErrorOutput(process);
-            exitCode = process.waitFor();
+            executionResult = cliProcessor.run(selectedImageFile, tempOutput, uiState);
         } catch (IOException e) {
             statusValueLabel.setText("Processing failed");
             return;
@@ -293,8 +270,8 @@ public final class XRayViewApp extends Application {
             return;
         }
 
-        if (exitCode != 0) {
-            statusValueLabel.setText(formatProcessFailureStatus(errorOutput));
+        if (executionResult.exitCode() != 0) {
+            statusValueLabel.setText(formatProcessFailureStatus(executionResult.errorOutput()));
             return;
         }
 
@@ -364,10 +341,6 @@ public final class XRayViewApp extends Application {
         label.setText(String.format(Locale.US, "Contrast: %.1f", value));
     }
 
-    private String readProcessErrorOutput(Process process) throws IOException {
-        return new String(process.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
-    }
-
     private String formatProcessFailureStatus(String errorOutput) {
         String compactError = errorOutput.replaceAll("\\s+", " ").trim();
         if (compactError.isEmpty()) {
@@ -380,45 +353,6 @@ public final class XRayViewApp extends Application {
         }
 
         return statusText;
-    }
-
-    private File resolveRepoRoot() {
-        File currentDirectory = new File(System.getProperty("user.dir"));
-        if (new File(currentDirectory, "cmd/xrayview").isDirectory()) {
-            return currentDirectory;
-        }
-
-        File parentDirectory = currentDirectory.getParentFile();
-        if (parentDirectory != null && new File(parentDirectory, "cmd/xrayview").isDirectory()) {
-            return parentDirectory;
-        }
-
-        return currentDirectory;
-    }
-
-    private List<String> buildCliCommand(File repoRoot, File inputFile, File outputFile) {
-        List<String> command = new ArrayList<>();
-
-        File binary = new File(repoRoot, "xrayview");
-        if (binary.isFile() && binary.canExecute()) {
-            command.add(binary.getAbsolutePath());
-        } else {
-            command.add("go");
-            command.add("run");
-            command.add("./cmd/xrayview");
-        }
-
-        command.add("-input");
-        command.add(inputFile.getAbsolutePath());
-        command.add("-output");
-        command.add(outputFile.getAbsolutePath());
-        command.add("-invert=" + uiState.isInvert());
-        command.add("-brightness=" + (int) Math.round(uiState.getBrightness()));
-        command.add("-contrast=" + Double.toString(uiState.getContrast()));
-        command.add("-equalize=" + uiState.isEqualize());
-        command.add("-palette=" + uiState.getPalette());
-
-        return command;
     }
 
     public static void main(String[] args) {
