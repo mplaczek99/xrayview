@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/mplaczek99/xrayview/internal/filters"
 	"github.com/mplaczek99/xrayview/internal/imageio"
 )
 
@@ -22,14 +23,16 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := imageio.SavePNG(cfg.outputPath, img); err != nil {
+	gray := filters.Grayscale(img)
+
+	if err := imageio.SavePNG(cfg.outputPath, gray); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
 
 	bounds := img.Bounds()
 	fmt.Printf("loaded %s image: %dx%d\n", format, bounds.Dx(), bounds.Dy())
-	fmt.Printf("saved png image: %s\n", cfg.outputPath)
+	fmt.Printf("saved grayscale png image: %s\n", cfg.outputPath)
 }
 
 func parseFlags() config {
