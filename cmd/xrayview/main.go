@@ -1,7 +1,8 @@
-// Command xrayview is a CLI tool for visualizing X-ray-style images.
+// Command xrayview loads an image, applies visualization steps, and writes a
+// PNG result.
 //
-// It loads an image, applies a configurable grayscale processing pipeline,
-// optionally applies pseudocolor, and writes a PNG output.
+// It is the CLI entry point that wires together flag parsing, image loading,
+// grayscale processing, optional pseudocolor, and output generation.
 
 package main
 

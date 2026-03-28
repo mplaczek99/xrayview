@@ -1,3 +1,6 @@
+// compare.go contains helpers for building side-by-side comparison images used
+// by the xrayview command.
+
 package main
 
 import (
