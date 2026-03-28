@@ -22,9 +22,14 @@ func main() {
 		os.Exit(1)
 	}
 
+	if err := imageio.SavePNG(cfg.outputPath, img); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+
 	bounds := img.Bounds()
-	fmt.Printf("loaded %s image: %dx%d -> %s\n", format, bounds.Dx(), bounds.Dy(), cfg.outputPath)
-	fmt.Printf("planned output: %s\n", cfg.outputPath)
+	fmt.Printf("loaded %s image: %dx%d\n", format, bounds.Dx(), bounds.Dy())
+	fmt.Printf("saved png image: %s\n", cfg.outputPath)
 }
 
 func parseFlags() config {
