@@ -3,6 +3,7 @@ package pipeline
 import (
 	"image"
 
+	"github.com/mplaczek99/xrayview/internal/colormap"
 	"github.com/mplaczek99/xrayview/internal/filters"
 )
 
@@ -11,7 +12,7 @@ import (
 // Keeping this in a shared package lets the GUI reuse the same image logic as
 // the rest of the project instead of quietly growing its own copy of the
 // filter sequence.
-func ProcessDefault(src image.Image, invert bool, brightness int, contrast float64, equalize bool) *image.Gray {
+func ProcessDefault(src image.Image, invert bool, brightness int, contrast float64, equalize bool, palette string) image.Image {
 	// This helper wires one control at a time so the shared path stays easy to
 	// reason about while the GUI grows incrementally.
 	gray := filters.Grayscale(src)
@@ -42,6 +43,13 @@ func ProcessDefault(src image.Image, invert bool, brightness int, contrast float
 	// here preserves one centralized definition of the default pipeline.
 	if equalize {
 		gray = filters.EqualizeHistogram(gray)
+	}
+
+	// Palette mapping stays separate from grayscale processing because it changes
+	// how final intensities are visualized rather than how those intensities are
+	// computed. Applying it last ensures the color map reflects the finished gray result.
+	if palette == "hot" {
+		return colormap.Hot(gray)
 	}
 
 	return gray

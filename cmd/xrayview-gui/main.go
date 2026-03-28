@@ -35,6 +35,7 @@ func main() {
 	brightnessValue := 0
 	contrastValue := 1.0
 	equalizeValue := false
+	paletteValue := "none"
 
 	pathLabel := widget.NewLabel("No image selected")
 	brightnessValueLabel := widget.NewLabel("Brightness: 0")
@@ -73,6 +74,13 @@ func main() {
 		equalizeValue = checked
 	})
 
+	// Start with one palette option beyond grayscale so the GUI can introduce color
+	// mapping without expanding the shared pipeline surface too quickly.
+	paletteSelect := widget.NewSelect([]string{"none", "hot"}, func(value string) {
+		paletteValue = value
+	})
+	paletteSelect.SetSelected("none")
+
 	// Keep original and processed previews separate so the GUI can show a stable
 	// before/after view without overwriting the user's source image preview.
 	originalPreview := canvas.NewImageFromImage(emptyPreviewImage())
@@ -106,6 +114,8 @@ func main() {
 		contrastValueLabel,
 		invertCheckbox,
 		equalizeCheckbox,
+		widget.NewLabel("Palette"),
+		paletteSelect,
 		widget.NewButton("Open Image", func() {
 			// The portal picker can block while waiting for the desktop environment.
 			// Running it in a goroutine keeps the Fyne event loop responsive.
@@ -180,6 +190,7 @@ func main() {
 			brightness := brightnessValue
 			contrast := contrastValue
 			equalize := equalizeValue
+			palette := paletteValue
 
 			// Loading and processing can take noticeable time for larger images, so the
 			// work stays off the GUI thread and only the final widget update is marshaled
@@ -197,8 +208,10 @@ func main() {
 				// filter knowledge here. That keeps the first GUI processing step aligned
 				// with the project's default behavior while still letting one UI control at
 				// a time flow into the same in-process path. The pipeline remains centralized
-				// so filter ordering does not drift between GUI code and shared logic.
-				processed := pipeline.ProcessDefault(img, invert, brightness, contrast, equalize)
+				// so filter ordering does not drift between GUI code and shared logic. Palette
+				// selection is passed in as plain state so the GUI stays responsible only for
+				// user input while the shared pipeline owns all image transformation order.
+				processed := pipeline.ProcessDefault(img, invert, brightness, contrast, equalize, palette)
 				fmt.Println("process image clicked")
 
 				// Updating the processed preview from memory avoids temporary files and keeps
