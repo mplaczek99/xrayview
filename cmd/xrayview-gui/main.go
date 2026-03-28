@@ -65,8 +65,21 @@ func main() {
 	// workflow. This step stays intentionally lightweight so the GUI becomes more
 	// informative without adding new controls, progress handling, or processing rules.
 	statusValueLabel := widget.NewLabel("Ready")
-	brightnessValueLabel := widget.NewLabel("Brightness: 0")
-	contrastValueLabel := widget.NewLabel("Contrast: 1.0")
+	brightnessValueLabel := widget.NewLabel("")
+	contrastValueLabel := widget.NewLabel("")
+	// Consistent numeric formatting improves readability because slider feedback is
+	// easier to scan when whole-step values always look like whole numbers and
+	// fractional values always use the same precision. Formatting is handled here in
+	// the UI layer because presentation rules belong next to labels, while the image
+	// pipeline should stay focused only on processing numeric values.
+	updateBrightnessValueLabel := func() {
+		brightnessValueLabel.SetText(fmt.Sprintf("Brightness: %d", brightnessValue))
+	}
+	updateContrastValueLabel := func() {
+		contrastValueLabel.SetText(fmt.Sprintf("Contrast: %.1f", contrastValue))
+	}
+	updateBrightnessValueLabel()
+	updateContrastValueLabel()
 
 	// Brightness uses a symmetric range around zero because zero naturally means
 	// "leave the image unchanged" while negative and positive values map cleanly to
@@ -75,7 +88,7 @@ func main() {
 	brightnessSlider.Step = 1
 	brightnessSlider.OnChanged = func(value float64) {
 		brightnessValue = int(value)
-		brightnessValueLabel.SetText(fmt.Sprintf("Brightness: %d", brightnessValue))
+		updateBrightnessValueLabel()
 	}
 
 	// Contrast defaults to 1.0 because that preserves the original tonal spread.
@@ -86,7 +99,7 @@ func main() {
 	contrastSlider.Value = 1.0
 	contrastSlider.OnChanged = func(value float64) {
 		contrastValue = value
-		contrastValueLabel.SetText(fmt.Sprintf("Contrast: %.1f", contrastValue))
+		updateContrastValueLabel()
 	}
 
 	// Invert is another discrete processing choice, so a checkbox is the simplest
