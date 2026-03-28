@@ -14,6 +14,8 @@ import (
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/widget"
+	"github.com/mplaczek99/xrayview/internal/imageio"
+	"github.com/mplaczek99/xrayview/internal/pipeline"
 	"github.com/rymdport/portal/filechooser"
 )
 
@@ -96,9 +98,35 @@ func main() {
 				return
 			}
 
-			// Real processing is intentionally deferred to a later step so the GUI can
-			// add controls incrementally without changing the existing CLI pipeline yet.
-			fmt.Println("process image clicked")
+			path := selectedPath
+
+			// Loading and processing can take noticeable time for larger images, so the
+			// work stays off the GUI thread and only the final widget update is marshaled
+			// back through fyne.Do.
+			go func() {
+				img, _, err := imageio.Load(path)
+				if err != nil {
+					fyne.Do(func() {
+						dialog.ShowError(err, w)
+					})
+					return
+				}
+
+				// The GUI deliberately reuses shared processing logic instead of embedding
+				// filter knowledge here. That keeps the first GUI processing step aligned
+				// with the project's default behavior.
+				processed := pipeline.ProcessDefault(img)
+				fmt.Println("process image clicked")
+
+				// Updating the preview from memory avoids writing temporary files and keeps
+				// this step focused on in-process integration with the existing logic.
+				fyne.Do(func() {
+					preview.File = ""
+					preview.Image = processed
+					preview.Show()
+					preview.Refresh()
+				})
+			}()
 		}),
 	))
 	w.ShowAndRun()
