@@ -262,19 +262,13 @@ func main() {
 	// a selectable source file is already a valid export target.
 	saveButton.Disable()
 
-	w.SetContent(container.NewVBox(
-		widget.NewLabel("xrayview GUI starting"),
-		pathLabel,
-		container.NewGridWithColumns(2,
-			container.NewVBox(
-				widget.NewLabel("Original"),
-				originalPreview,
-			),
-			container.NewVBox(
-				widget.NewLabel("Processed"),
-				processedPreview,
-			),
-		),
+	// Grouping related controls into their own container makes the interface easier
+	// to scan because previews stay visually separate from the inputs that change
+	// them. This small layout cleanup is done after the button behavior is already
+	// working so the UI can become more structured without mixing visual changes
+	// into the earlier functionality steps.
+	controlsSection := container.NewVBox(
+		widget.NewLabel("Controls"),
 		// Controls are added and wired one at a time so UI behavior can evolve in
 		// tiny steps without making several processing changes harder to isolate.
 		widget.NewLabel("Brightness"),
@@ -290,6 +284,22 @@ func main() {
 		openButton,
 		processButton,
 		saveButton,
+	)
+
+	w.SetContent(container.NewVBox(
+		widget.NewLabel("xrayview GUI starting"),
+		pathLabel,
+		container.NewGridWithColumns(2,
+			container.NewVBox(
+				widget.NewLabel("Original"),
+				originalPreview,
+			),
+			container.NewVBox(
+				widget.NewLabel("Processed"),
+				processedPreview,
+			),
+		),
+		controlsSection,
 	))
 	w.ShowAndRun()
 }
