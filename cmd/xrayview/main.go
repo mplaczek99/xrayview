@@ -4,6 +4,8 @@ import (
 	"flag"
 	"fmt"
 	"os"
+
+	"github.com/mplaczek99/xrayview/internal/imageio"
 )
 
 type config struct {
@@ -13,7 +15,16 @@ type config struct {
 
 func main() {
 	cfg := parseFlags()
-	fmt.Printf("xrayview starting: input=%s output=%s\n", cfg.inputPath, cfg.outputPath)
+
+	img, format, err := imageio.Load(cfg.inputPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+
+	bounds := img.Bounds()
+	fmt.Printf("loaded %s image: %dx%d -> %s\n", format, bounds.Dx(), bounds.Dy(), cfg.outputPath)
+	fmt.Printf("planned output: %s\n", cfg.outputPath)
 }
 
 func parseFlags() config {
