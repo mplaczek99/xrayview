@@ -20,6 +20,7 @@ type config struct {
 	brightness int
 	contrast   float64
 	equalize   bool
+	compare    bool
 	palette    string
 }
 
@@ -34,7 +35,12 @@ func main() {
 		os.Exit(1)
 	}
 
+	originalGray := filters.Grayscale(img)
 	output, mode := processImage(img, cfg)
+	if cfg.compare {
+		output = combineComparison(originalGray, output)
+		mode = fmt.Sprintf("comparison of grayscale and %s", mode)
+	}
 
 	if err := imageio.SavePNG(cfg.outputPath, output); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -97,6 +103,7 @@ func parseFlags() config {
 	flag.IntVar(&cfg.brightness, "brightness", 0, "brightness delta for grayscale output")
 	flag.Float64Var(&cfg.contrast, "contrast", 1.0, "contrast factor for grayscale output")
 	flag.BoolVar(&cfg.equalize, "equalize", false, "apply histogram equalization")
+	flag.BoolVar(&cfg.compare, "compare", false, "save grayscale and processed output side-by-side")
 	flag.StringVar(&cfg.palette, "palette", "none", "pseudocolor palette: none, hot, or bone")
 
 	flag.Usage = func() {
