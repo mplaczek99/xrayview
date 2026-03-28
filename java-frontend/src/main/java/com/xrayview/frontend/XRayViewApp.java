@@ -84,6 +84,13 @@ public final class XRayViewApp extends Application {
         stage.setTitle("XRayView");
         stage.setScene(scene);
         stage.sizeToScene();
+        // After removing the fixed startup size, the window can otherwise be
+        // shrunk until the current control-and-preview layout becomes cramped.
+        // Using the computed scene size as the minimum keeps the UI usable while
+        // avoiding arbitrary guessed dimensions that could drift from the actual
+        // preferred layout as the Java frontend continues to evolve.
+        stage.setMinWidth(stage.getWidth());
+        stage.setMinHeight(stage.getHeight());
         stage.show();
     }
 
