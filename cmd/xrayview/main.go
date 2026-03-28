@@ -17,6 +17,7 @@ type config struct {
 	invert     bool
 	brightness int
 	contrast   float64
+	equalize   bool
 }
 
 func main() {
@@ -56,6 +57,10 @@ func processImage(img image.Image, cfg config) (*image.Gray, string) {
 		output = filters.AdjustContrast(output, cfg.contrast)
 		mode = fmt.Sprintf("%s with contrast %g", mode, cfg.contrast)
 	}
+	if cfg.equalize {
+		output = filters.EqualizeHistogram(output)
+		mode = fmt.Sprintf("%s with histogram equalization", mode)
+	}
 
 	return output, mode
 }
@@ -68,6 +73,7 @@ func parseFlags() config {
 	flag.BoolVar(&cfg.invert, "invert", false, "invert grayscale output")
 	flag.IntVar(&cfg.brightness, "brightness", 0, "brightness delta for grayscale output")
 	flag.Float64Var(&cfg.contrast, "contrast", 1.0, "contrast factor for grayscale output")
+	flag.BoolVar(&cfg.equalize, "equalize", false, "apply histogram equalization")
 
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage of xrayview:\n")
