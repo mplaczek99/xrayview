@@ -16,6 +16,7 @@ import (
 type config struct {
 	inputPath  string
 	outputPath string
+	preset     string
 	invert     bool
 	brightness int
 	contrast   float64
@@ -26,6 +27,34 @@ type config struct {
 }
 
 type grayFilter func(*image.Gray) *image.Gray
+
+type presetConfig struct {
+	brightness int
+	contrast   float64
+	equalize   bool
+	palette    string
+}
+
+var presetConfigs = map[string]presetConfig{
+	"default": {
+		brightness: 0,
+		contrast:   1.0,
+		equalize:   false,
+		palette:    "none",
+	},
+	"xray": {
+		brightness: 10,
+		contrast:   1.4,
+		equalize:   true,
+		palette:    "bone",
+	},
+	"high-contrast": {
+		brightness: 0,
+		contrast:   1.8,
+		equalize:   true,
+		palette:    "none",
+	},
+}
 
 func main() {
 	cfg := parseFlags()
@@ -113,6 +142,7 @@ func parseFlags() config {
 
 	flag.StringVar(&cfg.inputPath, "input", "", "input image path")
 	flag.StringVar(&cfg.outputPath, "output", "", "output PNG path (default: input_processed.png)")
+	flag.StringVar(&cfg.preset, "preset", "default", "preset: default, xray, or high-contrast")
 	flag.BoolVar(&cfg.invert, "invert", false, "invert grayscale output")
 	flag.IntVar(&cfg.brightness, "brightness", 0, "brightness delta for grayscale output")
 	flag.Float64Var(&cfg.contrast, "contrast", 1.0, "contrast factor for grayscale output")
@@ -127,9 +157,23 @@ func parseFlags() config {
 	}
 
 	flag.Parse()
+	explicit := make(map[string]bool)
+	flag.Visit(func(f *flag.Flag) {
+		explicit[f.Name] = true
+	})
+
 	cfg.palette = strings.ToLower(cfg.palette)
+	cfg.preset = strings.ToLower(cfg.preset)
 	if cfg.outputPath == "" && cfg.inputPath != "" {
 		cfg.outputPath = defaultOutputPath(cfg.inputPath)
+	}
+
+	var err error
+	cfg, err = applyPreset(cfg, explicit)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		flag.Usage()
+		os.Exit(2)
 	}
 
 	if err := validateConfig(cfg); err != nil {
@@ -145,6 +189,13 @@ func validateConfig(cfg config) error {
 	if cfg.inputPath == "" {
 		return fmt.Errorf("-input is required")
 	}
+	preset := cfg.preset
+	if preset == "" {
+		preset = "default"
+	}
+	if _, ok := presetConfigs[preset]; !ok {
+		return fmt.Errorf("preset must be one of: default, xray, high-contrast")
+	}
 
 	if !strings.HasSuffix(strings.ToLower(cfg.outputPath), ".png") {
 		return fmt.Errorf("output path must end with .png")
@@ -157,6 +208,32 @@ func validateConfig(cfg config) error {
 	}
 
 	return nil
+}
+
+func applyPreset(cfg config, explicit map[string]bool) (config, error) {
+	if cfg.preset == "" {
+		cfg.preset = "default"
+	}
+
+	preset, ok := presetConfigs[cfg.preset]
+	if !ok {
+		return cfg, fmt.Errorf("preset must be one of: default, xray, high-contrast")
+	}
+
+	if !explicit["brightness"] {
+		cfg.brightness = preset.brightness
+	}
+	if !explicit["contrast"] {
+		cfg.contrast = preset.contrast
+	}
+	if !explicit["equalize"] {
+		cfg.equalize = preset.equalize
+	}
+	if !explicit["palette"] {
+		cfg.palette = preset.palette
+	}
+
+	return cfg, nil
 }
 
 func pipelineSteps(pipeline string) ([]string, error) {
