@@ -276,7 +276,9 @@ public final class XRayViewApp extends Application {
             Files.copy(lastProcessedFile.toPath(), destinationFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
             statusValueLabel.setText("Image saved");
         } catch (IOException e) {
-            // Leave the current UI state unchanged if the copy fails.
+            // Silent save failures leave the user with no explanation. Reuse the
+            // status line here so the error is visible without interrupting the workflow.
+            statusValueLabel.setText("Save failed");
         }
     }
 
