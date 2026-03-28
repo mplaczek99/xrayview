@@ -22,6 +22,8 @@ type config struct {
 	palette    string
 }
 
+type grayFilter func(*image.Gray) *image.Gray
+
 func main() {
 	cfg := parseFlags()
 
@@ -46,23 +48,35 @@ func main() {
 func processImage(img image.Image, cfg config) (image.Image, string) {
 	output := filters.Grayscale(img)
 	mode := "grayscale"
+	pipeline := make([]grayFilter, 0, 4)
 
 	if cfg.invert {
-		output = filters.Invert(output)
+		pipeline = append(pipeline, filters.Invert)
 		mode = "inverted grayscale"
 	}
 	if cfg.brightness != 0 {
-		output = filters.AdjustBrightness(output, cfg.brightness)
+		delta := cfg.brightness
+		pipeline = append(pipeline, func(img *image.Gray) *image.Gray {
+			return filters.AdjustBrightness(img, delta)
+		})
 		mode = fmt.Sprintf("%s with brightness %+d", mode, cfg.brightness)
 	}
 	if cfg.contrast != 1.0 {
-		output = filters.AdjustContrast(output, cfg.contrast)
+		factor := cfg.contrast
+		pipeline = append(pipeline, func(img *image.Gray) *image.Gray {
+			return filters.AdjustContrast(img, factor)
+		})
 		mode = fmt.Sprintf("%s with contrast %g", mode, cfg.contrast)
 	}
 	if cfg.equalize {
-		output = filters.EqualizeHistogram(output)
+		pipeline = append(pipeline, filters.EqualizeHistogram)
 		mode = fmt.Sprintf("%s with histogram equalization", mode)
 	}
+
+	for _, filter := range pipeline {
+		output = filter(output)
+	}
+
 	if cfg.palette == "hot" {
 		return colormap.Hot(output), fmt.Sprintf("%s with hot palette", mode)
 	}
