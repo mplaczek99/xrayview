@@ -261,6 +261,12 @@ public final class XRayViewApp extends Application {
             return;
         }
 
+        // The saved bytes are always PNG, so enforce the extension here to keep
+        // the filename aligned with the actual file format.
+        if (!destinationFile.getName().toLowerCase(Locale.ROOT).endsWith(".png")) {
+            destinationFile = new File(destinationFile.getParentFile(), destinationFile.getName() + ".png");
+        }
+
         try {
             Files.copy(lastProcessedFile.toPath(), destinationFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
             statusValueLabel.setText("Image saved");
