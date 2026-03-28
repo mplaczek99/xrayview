@@ -1,3 +1,8 @@
+// Command xrayview is a CLI tool for visualizing X-ray-style images.
+//
+// It loads an image, applies a configurable grayscale processing pipeline,
+// optionally applies pseudocolor, and writes a PNG output.
+
 package main
 
 import (
@@ -14,6 +19,9 @@ import (
 )
 
 type config struct {
+	// config stores the fully resolved runtime settings after flags, defaults,
+	// and presets have been merged. The rest of the program can then process
+	// images without needing to know where a value originally came from.
 	inputPath  string
 	outputPath string
 	preset     string
@@ -26,9 +34,15 @@ type config struct {
 	palette    string
 }
 
+// grayFilter keeps the pipeline limited to single-channel transforms.
+// Pseudocolor stays outside this pipeline because it changes the image into
+// RGBA and should only happen after grayscale processing is finished.
 type grayFilter func(*image.Gray) *image.Gray
 
 type presetConfig struct {
+	// presetConfig only covers visualization knobs that make sense as reusable
+	// defaults. Output paths, comparison mode, and pipeline ordering stay outside
+	// presets so a preset does not silently change file handling or control flow.
 	brightness int
 	contrast   float64
 	equalize   bool
@@ -65,6 +79,8 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Comparison mode always uses the untouched grayscale baseline on the left,
+	// even if the processed output later becomes color.
 	originalGray := filters.Grayscale(img)
 	output, mode := processImage(img, cfg)
 	if cfg.compare {
@@ -83,9 +99,15 @@ func main() {
 }
 
 func processImage(img image.Image, cfg config) (image.Image, string) {
+	// Grayscale is always first because every configurable filter in the pipeline
+	// operates on a single intensity channel. This also gives comparison mode a
+	// stable baseline regardless of the input file's original color model.
 	output := filters.Grayscale(img)
 	mode := "grayscale"
 	pipeline := make([]grayFilter, 0, 4)
+
+	// An explicit pipeline only changes ordering. The existing flags still decide
+	// whether a step is active and what parameters it uses.
 	steps, _ := pipelineSteps(cfg.pipeline)
 	if len(steps) == 0 {
 		steps = []string{"grayscale", "invert", "brightness", "contrast", "equalize"}
@@ -94,13 +116,19 @@ func processImage(img image.Image, cfg config) (image.Image, string) {
 	for _, step := range steps {
 		switch step {
 		case "grayscale":
+			// The grayscale step is already applied before pipeline assembly. Keeping
+			// it in the allowed list makes explicit pipelines easier to read.
 		case "invert":
 			if cfg.invert {
 				pipeline = append(pipeline, filters.Invert)
+				// Only the first "grayscale" token is replaced so later suffixes such as
+				// brightness or contrast descriptions stay intact.
 				mode = strings.Replace(mode, "grayscale", "inverted grayscale", 1)
 			}
 		case "brightness":
 			if cfg.brightness != 0 {
+				// Capture the current value in a local variable so the closure keeps the
+				// chosen flag or preset value when the pipeline runs later.
 				delta := cfg.brightness
 				pipeline = append(pipeline, func(img *image.Gray) *image.Gray {
 					return filters.AdjustBrightness(img, delta)
@@ -109,6 +137,8 @@ func processImage(img image.Image, cfg config) (image.Image, string) {
 			}
 		case "contrast":
 			if cfg.contrast != 1.0 {
+				// Capture the factor for the same reason as brightness: the function is
+				// stored now and executed later when the pipeline is applied.
 				factor := cfg.contrast
 				pipeline = append(pipeline, func(img *image.Gray) *image.Gray {
 					return filters.AdjustContrast(img, factor)
@@ -123,10 +153,14 @@ func processImage(img image.Image, cfg config) (image.Image, string) {
 		}
 	}
 
+	// The loop is the actual execution point. Building the pipeline first keeps
+	// ordering decisions separate from the filter implementations themselves.
 	for _, filter := range pipeline {
 		output = filter(output)
 	}
 
+	// Pseudocolor is intentionally last so the palette reflects the final gray
+	// intensities after all grayscale processing has already been decided.
 	if cfg.palette == "hot" {
 		return colormap.Hot(output), fmt.Sprintf("%s with hot palette", mode)
 	}
@@ -157,6 +191,9 @@ func parseFlags() config {
 	}
 
 	flag.Parse()
+
+	// Visit reports only flags the user actually set. That lets presets supply
+	// defaults first while still allowing explicit CLI values to win.
 	explicit := make(map[string]bool)
 	flag.Visit(func(f *flag.Flag) {
 		explicit[f.Name] = true
@@ -164,10 +201,15 @@ func parseFlags() config {
 
 	cfg.palette = strings.ToLower(cfg.palette)
 	cfg.preset = strings.ToLower(cfg.preset)
+
+	// Default output generation happens before validation so the rest of the code
+	// can treat the output path as already resolved.
 	if cfg.outputPath == "" && cfg.inputPath != "" {
 		cfg.outputPath = defaultOutputPath(cfg.inputPath)
 	}
 
+	// Presets are applied before validation so derived values such as palette or
+	// contrast are checked in their final form.
 	var err error
 	cfg, err = applyPreset(cfg, explicit)
 	if err != nil {
@@ -186,6 +228,8 @@ func parseFlags() config {
 }
 
 func validateConfig(cfg config) error {
+	// Validation runs after defaults and presets have been resolved so it checks
+	// the exact configuration that processing will use.
 	if cfg.inputPath == "" {
 		return fmt.Errorf("-input is required")
 	}
@@ -211,6 +255,8 @@ func validateConfig(cfg config) error {
 }
 
 func applyPreset(cfg config, explicit map[string]bool) (config, error) {
+	// Presets provide convenient starting points, but any flag the user typed
+	// explicitly should override the preset rather than be overwritten by it.
 	if cfg.preset == "" {
 		cfg.preset = "default"
 	}
@@ -237,6 +283,8 @@ func applyPreset(cfg config, explicit map[string]bool) (config, error) {
 }
 
 func pipelineSteps(pipeline string) ([]string, error) {
+	// Returning nil for an empty value lets processImage keep a single default
+	// ordering path instead of duplicating that order in validation code.
 	if pipeline == "" {
 		return nil, nil
 	}
@@ -261,6 +309,8 @@ func pipelineSteps(pipeline string) ([]string, error) {
 }
 
 func defaultOutputPath(inputPath string) string {
+	// Using the input directory avoids surprising output locations when -output is
+	// omitted, and the suffix makes it clear the file is derived rather than raw.
 	dir := filepath.Dir(inputPath)
 	base := filepath.Base(inputPath)
 	ext := filepath.Ext(base)

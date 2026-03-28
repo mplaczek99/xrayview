@@ -9,6 +9,8 @@ import (
 )
 
 func Load(path string) (image.Image, string, error) {
+	// The blank imports register decoders up front so image.Decode can choose the
+	// format automatically without the caller having to branch on file type.
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, "", fmt.Errorf("open input image: %w", err)

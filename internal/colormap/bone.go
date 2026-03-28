@@ -6,6 +6,8 @@ import (
 )
 
 func Bone(src *image.Gray) *image.RGBA {
+	// Bone keeps a cooler, X-ray-like appearance while still preserving monotonic
+	// brightness, which makes it a reasonable default pseudocolor preset choice.
 	bounds := src.Bounds()
 	dst := image.NewRGBA(bounds)
 
@@ -20,6 +22,8 @@ func Bone(src *image.Gray) *image.RGBA {
 }
 
 func boneColor(v int) color.RGBA {
+	// The extra white boost in brighter regions nudges the palette toward the pale
+	// highlights people often expect from an X-ray-style view.
 	whiteBoost := v - 128
 	if whiteBoost < 0 {
 		whiteBoost = 0
@@ -33,6 +37,8 @@ func boneColor(v int) color.RGBA {
 }
 
 func clamp8(v int) uint8 {
+	// Keeping the helper local avoids repeating clamping logic while preserving a
+	// predictable 0..255 output for the palette math.
 	if v < 0 {
 		return 0
 	}
