@@ -202,6 +202,38 @@ go run ./cmd/xrayview -input chest.jpg -compare
 go run ./cmd/xrayview -input chest.jpg -preset xray -compare
 ```
 
+## Example Outputs
+
+### Grayscale vs equalized
+
+```bash
+go run ./cmd/xrayview -input chest.jpg -output images/example1.png -equalize
+```
+
+![Grayscale vs equalized](images/example1.png)
+
+Caption: Histogram equalization spreads midtone detail more aggressively, which can make faint structures stand out compared with plain grayscale.
+
+### Hot palette
+
+```bash
+go run ./cmd/xrayview -input chest.jpg -output images/example2.png -palette hot
+```
+
+![Hot palette output](images/example2.png)
+
+Caption: The hot palette maps low intensities to dark reds and high intensities to yellow-white, making intensity differences easier to spot quickly.
+
+### Bone palette with preset
+
+```bash
+go run ./cmd/xrayview -input chest.jpg -output images/example3.png -preset xray
+```
+
+![Bone palette preset output](images/example3.png)
+
+Caption: The `xray` preset combines higher contrast, equalization, and the bone palette for a cooler X-ray-style presentation with brighter highlights.
+
 ## Before/After Comparison
 
 When `-compare` is enabled, `xrayview` writes one combined PNG:
