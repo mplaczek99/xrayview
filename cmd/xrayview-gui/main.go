@@ -29,15 +29,30 @@ func main() {
 	selectedPath := ""
 
 	pathLabel := widget.NewLabel("No image selected")
-	preview := canvas.NewImageFromImage(nil)
-	preview.FillMode = canvas.ImageFillContain
-	preview.SetMinSize(fyne.NewSize(320, 240))
-	preview.Hide()
+
+	// Keep original and processed previews separate so the GUI can show a stable
+	// before/after view without overwriting the user's source image preview.
+	originalPreview := canvas.NewImageFromImage(emptyPreviewImage())
+	originalPreview.FillMode = canvas.ImageFillContain
+	originalPreview.SetMinSize(fyne.NewSize(320, 240))
+
+	processedPreview := canvas.NewImageFromImage(emptyPreviewImage())
+	processedPreview.FillMode = canvas.ImageFillContain
+	processedPreview.SetMinSize(fyne.NewSize(320, 240))
 
 	w.SetContent(container.NewVBox(
 		widget.NewLabel("xrayview GUI starting"),
 		pathLabel,
-		preview,
+		container.NewGridWithColumns(2,
+			container.NewVBox(
+				widget.NewLabel("Original"),
+				originalPreview,
+			),
+			container.NewVBox(
+				widget.NewLabel("Processed"),
+				processedPreview,
+			),
+		),
 		widget.NewButton("Open Image", func() {
 			// The portal picker can block while waiting for the desktop environment.
 			// Running it in a goroutine keeps the Fyne event loop responsive.
@@ -84,9 +99,15 @@ func main() {
 				fyne.Do(func() {
 					selectedPath = path
 					pathLabel.SetText(path)
-					preview.File = path
-					preview.Show()
-					preview.Refresh()
+					originalPreview.Image = nil
+					originalPreview.File = path
+					originalPreview.Refresh()
+
+					// Processing belongs to an explicit user action, so choosing a new file
+					// resets the processed side back to an empty state until Process Image runs.
+					processedPreview.File = ""
+					processedPreview.Image = emptyPreviewImage()
+					processedPreview.Refresh()
 				})
 			}()
 		}),
@@ -118,18 +139,24 @@ func main() {
 				processed := pipeline.ProcessDefault(img)
 				fmt.Println("process image clicked")
 
-				// Updating the preview from memory avoids writing temporary files and keeps
-				// this step focused on in-process integration with the existing logic.
+				// Updating the processed preview from memory avoids temporary files and keeps
+				// the GUI path separate from export concerns. The shared pipeline is still
+				// used so the image result matches the project's in-process default behavior.
 				fyne.Do(func() {
-					preview.File = ""
-					preview.Image = processed
-					preview.Show()
-					preview.Refresh()
+					processedPreview.File = ""
+					processedPreview.Image = processed
+					processedPreview.Refresh()
 				})
 			}()
 		}),
 	))
 	w.ShowAndRun()
+}
+
+func emptyPreviewImage() image.Image {
+	// A transparent in-memory placeholder reserves preview space from the start so
+	// the layout does not jump around while the user selects and processes images.
+	return image.NewRGBA(image.Rect(0, 0, 1, 1))
 }
 
 func pickerPath(raw string) (string, error) {
