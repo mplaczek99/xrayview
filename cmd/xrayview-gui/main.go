@@ -5,6 +5,8 @@ import (
 	"image"
 	_ "image/jpeg"
 	_ "image/png"
+	"net/url"
+	"os"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
@@ -12,6 +14,7 @@ import (
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/widget"
+	"github.com/rymdport/portal/filechooser"
 )
 
 func main() {
@@ -27,29 +30,62 @@ func main() {
 		pathLabel,
 		preview,
 		widget.NewButton("Open Image", func() {
-			dialog.ShowFileOpen(func(reader fyne.URIReadCloser, err error) {
+			go func() {
+				uris, err := filechooser.OpenFile("", "Open Image", nil)
 				if err != nil {
-					dialog.ShowError(err, w)
+					fyne.Do(func() {
+						dialog.ShowError(err, w)
+					})
 					return
 				}
-				if reader == nil {
-					return
-				}
-				defer reader.Close()
-
-				if _, _, err := image.DecodeConfig(reader); err != nil {
-					dialog.ShowError(err, w)
+				if len(uris) == 0 {
 					return
 				}
 
-				path := reader.URI().Path()
+				path, err := pickerPath(uris[0])
+				if err != nil {
+					fyne.Do(func() {
+						dialog.ShowError(err, w)
+					})
+					return
+				}
+
+				file, err := os.Open(path)
+				if err != nil {
+					fyne.Do(func() {
+						dialog.ShowError(err, w)
+					})
+					return
+				}
+				defer file.Close()
+
+				if _, _, err := image.DecodeConfig(file); err != nil {
+					fyne.Do(func() {
+						dialog.ShowError(err, w)
+					})
+					return
+				}
+
 				fmt.Println(path)
-				pathLabel.SetText(path)
-				preview.File = path
-				preview.Show()
-				preview.Refresh()
-			}, w)
+				fyne.Do(func() {
+					pathLabel.SetText(path)
+					preview.File = path
+					preview.Show()
+					preview.Refresh()
+				})
+			}()
 		}),
 	))
 	w.ShowAndRun()
+}
+
+func pickerPath(raw string) (string, error) {
+	uri, err := url.Parse(raw)
+	if err != nil {
+		return "", err
+	}
+	if uri.Scheme == "file" {
+		return uri.Path, nil
+	}
+	return raw, nil
 }
