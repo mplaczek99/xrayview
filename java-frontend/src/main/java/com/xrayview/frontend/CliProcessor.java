@@ -9,12 +9,13 @@ import java.util.List;
 // CliProcessor owns the Java-to-Go process boundary so command setup and error
 // capture stay out of the UI layer.
 public final class CliProcessor {
+    private final File projectRoot = resolveProjectRoot();
+
     public ExecutionResult run(File inputFile, File outputFile, UiState uiState) throws IOException, InterruptedException {
-        File repoRoot = resolveRepoRoot();
-        List<String> command = buildCliCommand(repoRoot, inputFile, outputFile, uiState);
+        List<String> command = buildCliCommand(inputFile, outputFile, uiState);
 
         ProcessBuilder processBuilder = new ProcessBuilder(command);
-        processBuilder.directory(repoRoot);
+        processBuilder.directory(projectRoot);
         processBuilder.redirectOutput(ProcessBuilder.Redirect.DISCARD);
 
         Process process = processBuilder.start();
@@ -23,24 +24,51 @@ public final class CliProcessor {
         return new ExecutionResult(exitCode, errorOutput);
     }
 
-    private File resolveRepoRoot() {
-        File currentDirectory = new File(System.getProperty("user.dir"));
-        if (new File(currentDirectory, "cmd/xrayview").isDirectory()) {
-            return currentDirectory;
+    // Resolving the project root once keeps CLI execution from depending on the
+    // process working directory, which can vary between Maven, IDE, and packaged runs.
+    private File resolveProjectRoot() {
+        File rootFromCodeSource = findProjectRoot(resolveCodeSourceLocation());
+        if (rootFromCodeSource != null) {
+            return rootFromCodeSource;
         }
 
-        File parentDirectory = currentDirectory.getParentFile();
-        if (parentDirectory != null && new File(parentDirectory, "cmd/xrayview").isDirectory()) {
-            return parentDirectory;
+        File currentDirectory = new File(System.getProperty("user.dir")).getAbsoluteFile();
+        File rootFromWorkingDirectory = findProjectRoot(currentDirectory);
+        if (rootFromWorkingDirectory != null) {
+            return rootFromWorkingDirectory;
         }
 
         return currentDirectory;
     }
 
-    private List<String> buildCliCommand(File repoRoot, File inputFile, File outputFile, UiState uiState) {
+    private File resolveCodeSourceLocation() {
+        try {
+            return new File(CliProcessor.class.getProtectionDomain().getCodeSource().getLocation().toURI()).getAbsoluteFile();
+        } catch (Exception e) {
+            return new File(System.getProperty("user.dir")).getAbsoluteFile();
+        }
+    }
+
+    private File findProjectRoot(File start) {
+        File directory = start;
+        if (directory.isFile()) {
+            directory = directory.getParentFile();
+        }
+
+        while (directory != null) {
+            if (new File(directory, "cmd/xrayview").isDirectory()) {
+                return directory.getAbsoluteFile();
+            }
+            directory = directory.getParentFile();
+        }
+
+        return null;
+    }
+
+    private List<String> buildCliCommand(File inputFile, File outputFile, UiState uiState) {
         List<String> command = new ArrayList<>();
 
-        File binary = new File(repoRoot, "xrayview");
+        File binary = new File(projectRoot, "xrayview");
         if (binary.isFile() && binary.canExecute()) {
             command.add(binary.getAbsolutePath());
         } else {
