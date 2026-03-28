@@ -96,9 +96,9 @@ func main() {
 		equalizeValue = checked
 	})
 
-	// Start with one palette option beyond grayscale so the GUI can introduce color
-	// mapping without expanding the shared pipeline surface too quickly.
-	paletteSelect := widget.NewSelect([]string{"none", "hot"}, func(value string) {
+	// The picker should stay aligned with the shared pipeline and CLI so every
+	// palette the interface advertises is actually available when the user tries it.
+	paletteSelect := widget.NewSelect([]string{"none", "hot", "bone"}, func(value string) {
 		paletteValue = value
 	})
 	paletteSelect.SetSelected("none")

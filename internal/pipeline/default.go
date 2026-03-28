@@ -47,9 +47,13 @@ func ProcessDefault(src image.Image, invert bool, brightness int, contrast float
 
 	// Palette mapping stays separate from grayscale processing because it changes
 	// how final intensities are visualized rather than how those intensities are
-	// computed. Applying it last ensures the color map reflects the finished gray result.
+	// computed. Applying it last ensures the color map reflects the finished gray
+	// result, and keeping every supported palette here keeps GUI and CLI output aligned.
 	if palette == "hot" {
 		return colormap.Hot(gray)
+	}
+	if palette == "bone" {
+		return colormap.Bone(gray)
 	}
 
 	return gray
