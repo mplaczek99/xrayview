@@ -96,6 +96,172 @@ func main() {
 	processedPreview.FillMode = canvas.ImageFillContain
 	processedPreview.SetMinSize(fyne.NewSize(320, 240))
 
+	var processButton *widget.Button
+	var saveButton *widget.Button
+
+	openButton := widget.NewButton("Open Image", func() {
+		// The portal picker can block while waiting for the desktop environment.
+		// Running it in a goroutine keeps the Fyne event loop responsive.
+		go func() {
+			uris, err := filechooser.OpenFile("", "Open Image", nil)
+			if err != nil {
+				fyne.Do(func() {
+					dialog.ShowError(err, w)
+				})
+				return
+			}
+			if len(uris) == 0 {
+				return
+			}
+
+			path, err := pickerPath(uris[0])
+			if err != nil {
+				fyne.Do(func() {
+					dialog.ShowError(err, w)
+				})
+				return
+			}
+
+			file, err := os.Open(path)
+			if err != nil {
+				fyne.Do(func() {
+					dialog.ShowError(err, w)
+				})
+				return
+			}
+			defer file.Close()
+
+			if _, _, err := image.DecodeConfig(file); err != nil {
+				fyne.Do(func() {
+					dialog.ShowError(err, w)
+				})
+				return
+			}
+
+			fmt.Println(path)
+
+			// Fyne UI state should be updated on the GUI thread. fyne.Do keeps the
+			// preview and labels synchronized with the result from the background picker.
+			fyne.Do(func() {
+				selectedPath = path
+				pathLabel.SetText(path)
+				originalPreview.Image = nil
+				originalPreview.File = path
+				originalPreview.Refresh()
+
+				// Selecting a different source image makes any previously processed result
+				// untrustworthy because that output was derived from older pixels. Clearing
+				// the processed state and disabling save prevents exporting an image that no
+				// longer matches the currently selected original preview.
+				processedImage = nil
+				processedPreview.File = ""
+				processedPreview.Image = emptyPreviewImage()
+				processedPreview.Refresh()
+				processButton.Enable()
+				saveButton.Disable()
+			})
+		}()
+	})
+
+	processButton = widget.NewButton("Process Image", func() {
+		// Refusing to process without a selection gives immediate feedback and keeps
+		// later processing code from needing to handle an impossible empty-input case.
+		if selectedPath == "" {
+			dialog.ShowError(fmt.Errorf("no image selected"), w)
+			return
+		}
+
+		path := selectedPath
+		// Snapshot the current slider value before leaving the GUI callback. Passing
+		// explicit UI state into the shared pipeline keeps the GUI thin and avoids
+		// teaching the pipeline package anything about widgets.
+		invert := invertValue
+		brightness := brightnessValue
+		contrast := contrastValue
+		equalize := equalizeValue
+		palette := paletteValue
+
+		// Loading and processing can take noticeable time for larger images, so the
+		// work stays off the GUI thread and only the final widget update is marshaled
+		// back through fyne.Do.
+		go func() {
+			img, _, err := imageio.Load(path)
+			if err != nil {
+				fyne.Do(func() {
+					dialog.ShowError(err, w)
+				})
+				return
+			}
+
+			// The GUI deliberately reuses shared processing logic instead of embedding
+			// filter knowledge here. That keeps the first GUI processing step aligned
+			// with the project's default behavior while still letting one UI control at
+			// a time flow into the same in-process path. The pipeline remains centralized
+			// so filter ordering does not drift between GUI code and shared logic. Palette
+			// selection is passed in as plain state so the GUI stays responsible only for
+			// user input while the shared pipeline owns all image transformation order.
+			processed := pipeline.ProcessDefault(img, invert, brightness, contrast, equalize, palette)
+			fmt.Println("process image clicked")
+
+			// Updating the processed preview from memory avoids temporary files and keeps
+			// the GUI path separate from export concerns. The shared pipeline is still
+			// used so the image result matches the project's in-process default behavior.
+			fyne.Do(func() {
+				processedImage = processed
+				processedPreview.File = ""
+				processedPreview.Image = processed
+				processedPreview.Refresh()
+
+				// Save only becomes available after processing succeeds because disabled
+				// actions communicate the required workflow earlier than an error dialog.
+				// That keeps export tied to a real in-memory processed image instead of
+				// inviting the user to click into a state the program already knows is invalid.
+				saveButton.Enable()
+			})
+		}()
+	})
+	// Disabling Process Image until a valid file is selected is better than letting
+	// the user click into a predictable error, because the button state itself shows
+	// that opening an image is the required next step before processing can work.
+	processButton.Disable()
+
+	saveButton = widget.NewButton("Save Processed Image", func() {
+		// Saving is separate from processing so the user can inspect the current
+		// preview result before deciding whether it is worth exporting.
+		if processedImage == nil {
+			dialog.ShowError(fmt.Errorf("no processed image to save"), w)
+			return
+		}
+
+		imageToSave := processedImage
+		dialog.ShowFileSave(func(writer fyne.URIWriteCloser, err error) {
+			if err != nil {
+				dialog.ShowError(err, w)
+				return
+			}
+			if writer == nil {
+				return
+			}
+
+			// Save uses the in-memory processed image directly so export writes exactly
+			// what the user is looking at, without re-running the pipeline and risking
+			// drift between preview state and saved output.
+			path := writer.URI().Path()
+			if err := writer.Close(); err != nil {
+				dialog.ShowError(err, w)
+				return
+			}
+			if err := imageio.SavePNG(path, imageToSave); err != nil {
+				dialog.ShowError(err, w)
+				return
+			}
+		}, w)
+	})
+	// Save starts disabled because exporting only makes sense after the GUI has a
+	// fresh processed image in memory. Keeping it off beforehand avoids implying that
+	// a selectable source file is already a valid export target.
+	saveButton.Disable()
+
 	w.SetContent(container.NewVBox(
 		widget.NewLabel("xrayview GUI starting"),
 		pathLabel,
@@ -121,148 +287,9 @@ func main() {
 		equalizeCheckbox,
 		widget.NewLabel("Palette"),
 		paletteSelect,
-		widget.NewButton("Open Image", func() {
-			// The portal picker can block while waiting for the desktop environment.
-			// Running it in a goroutine keeps the Fyne event loop responsive.
-			go func() {
-				uris, err := filechooser.OpenFile("", "Open Image", nil)
-				if err != nil {
-					fyne.Do(func() {
-						dialog.ShowError(err, w)
-					})
-					return
-				}
-				if len(uris) == 0 {
-					return
-				}
-
-				path, err := pickerPath(uris[0])
-				if err != nil {
-					fyne.Do(func() {
-						dialog.ShowError(err, w)
-					})
-					return
-				}
-
-				file, err := os.Open(path)
-				if err != nil {
-					fyne.Do(func() {
-						dialog.ShowError(err, w)
-					})
-					return
-				}
-				defer file.Close()
-
-				if _, _, err := image.DecodeConfig(file); err != nil {
-					fyne.Do(func() {
-						dialog.ShowError(err, w)
-					})
-					return
-				}
-
-				fmt.Println(path)
-
-				// Fyne UI state should be updated on the GUI thread. fyne.Do keeps the
-				// preview and labels synchronized with the result from the background picker.
-				fyne.Do(func() {
-					selectedPath = path
-					pathLabel.SetText(path)
-					originalPreview.Image = nil
-					originalPreview.File = path
-					originalPreview.Refresh()
-
-					// Processing belongs to an explicit user action, so choosing a new file
-					// resets the processed side back to an empty state until Process Image runs.
-					processedImage = nil
-					processedPreview.File = ""
-					processedPreview.Image = emptyPreviewImage()
-					processedPreview.Refresh()
-				})
-			}()
-		}),
-		widget.NewButton("Process Image", func() {
-			// Refusing to process without a selection gives immediate feedback and keeps
-			// later processing code from needing to handle an impossible empty-input case.
-			if selectedPath == "" {
-				dialog.ShowError(fmt.Errorf("no image selected"), w)
-				return
-			}
-
-			path := selectedPath
-			// Snapshot the current slider value before leaving the GUI callback. Passing
-			// explicit UI state into the shared pipeline keeps the GUI thin and avoids
-			// teaching the pipeline package anything about widgets.
-			invert := invertValue
-			brightness := brightnessValue
-			contrast := contrastValue
-			equalize := equalizeValue
-			palette := paletteValue
-
-			// Loading and processing can take noticeable time for larger images, so the
-			// work stays off the GUI thread and only the final widget update is marshaled
-			// back through fyne.Do.
-			go func() {
-				img, _, err := imageio.Load(path)
-				if err != nil {
-					fyne.Do(func() {
-						dialog.ShowError(err, w)
-					})
-					return
-				}
-
-				// The GUI deliberately reuses shared processing logic instead of embedding
-				// filter knowledge here. That keeps the first GUI processing step aligned
-				// with the project's default behavior while still letting one UI control at
-				// a time flow into the same in-process path. The pipeline remains centralized
-				// so filter ordering does not drift between GUI code and shared logic. Palette
-				// selection is passed in as plain state so the GUI stays responsible only for
-				// user input while the shared pipeline owns all image transformation order.
-				processed := pipeline.ProcessDefault(img, invert, brightness, contrast, equalize, palette)
-				fmt.Println("process image clicked")
-
-				// Updating the processed preview from memory avoids temporary files and keeps
-				// the GUI path separate from export concerns. The shared pipeline is still
-				// used so the image result matches the project's in-process default behavior.
-				fyne.Do(func() {
-					processedImage = processed
-					processedPreview.File = ""
-					processedPreview.Image = processed
-					processedPreview.Refresh()
-				})
-			}()
-		}),
-		widget.NewButton("Save Processed Image", func() {
-			// Saving is separate from processing so the user can inspect the current
-			// preview result before deciding whether it is worth exporting.
-			if processedImage == nil {
-				dialog.ShowError(fmt.Errorf("no processed image to save"), w)
-				return
-			}
-
-			imageToSave := processedImage
-			dialog.ShowFileSave(func(writer fyne.URIWriteCloser, err error) {
-				if err != nil {
-					dialog.ShowError(err, w)
-					return
-				}
-				if writer == nil {
-					return
-				}
-
-				// Save uses the in-memory processed image directly so export writes exactly
-				// what the user is looking at, without re-running the pipeline and risking
-				// drift between preview state and saved output.
-				path := writer.URI().Path()
-				if err := writer.Close(); err != nil {
-					dialog.ShowError(err, w)
-					return
-				}
-				if err := imageio.SavePNG(path, imageToSave); err != nil {
-					dialog.ShowError(err, w)
-					return
-				}
-			}, w)
-		}),
+		openButton,
+		processButton,
+		saveButton,
 	))
 	w.ShowAndRun()
 }
