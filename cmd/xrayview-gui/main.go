@@ -7,21 +7,26 @@ import (
 	_ "image/png"
 	"net/url"
 	"os"
+	"path/filepath"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
+	"fyne.io/fyne/v2/driver"
 	"fyne.io/fyne/v2/widget"
 	"github.com/mplaczek99/xrayview/internal/imageio"
 	"github.com/mplaczek99/xrayview/internal/pipeline"
+	"github.com/rymdport/portal"
 	"github.com/rymdport/portal/filechooser"
 )
 
+const appWindowTitle = "xrayview"
+
 func main() {
 	a := app.New()
-	w := a.NewWindow("xrayview")
+	w := a.NewWindow(appWindowTitle)
 	// A larger default window gives the side-by-side previews enough room to be
 	// useful immediately, so the user can inspect image detail without first having
 	// to resize the app just to reach a comfortable starting layout.
@@ -104,10 +109,11 @@ func main() {
 	var saveButton *widget.Button
 
 	openButton := widget.NewButton("Open Image", func() {
-		// The portal picker can block while waiting for the desktop environment.
-		// Running it in a goroutine keeps the Fyne event loop responsive.
+		// Keep using the desktop portal so the native system picker still appears.
+		// Reusing the app title gives the spawned chooser a predictable window title
+		// that window-manager floating rules can match more easily.
 		go func() {
-			uris, err := filechooser.OpenFile("", "Open Image", nil)
+			uris, err := filechooser.OpenFile(portalParentWindowHandle(w), appWindowTitle, imageFileChooserOptions(selectedPath))
 			if err != nil {
 				fyne.Do(func() {
 					dialog.ShowError(err, w)
@@ -144,8 +150,6 @@ func main() {
 
 			fmt.Println(path)
 
-			// Fyne UI state should be updated on the GUI thread. fyne.Do keeps the
-			// preview and labels synchronized with the result from the background picker.
 			fyne.Do(func() {
 				selectedPath = path
 				pathLabel.SetText(path)
@@ -238,28 +242,35 @@ func main() {
 		}
 
 		imageToSave := processedImage
-		dialog.ShowFileSave(func(writer fyne.URIWriteCloser, err error) {
+		go func() {
+			uris, err := filechooser.SaveFile(portalParentWindowHandle(w), appWindowTitle, imageSaveFileChooserOptions(selectedPath))
 			if err != nil {
-				dialog.ShowError(err, w)
+				fyne.Do(func() {
+					dialog.ShowError(err, w)
+				})
 				return
 			}
-			if writer == nil {
+			if len(uris) == 0 {
 				return
 			}
 
 			// Save uses the in-memory processed image directly so export writes exactly
 			// what the user is looking at, without re-running the pipeline and risking
 			// drift between preview state and saved output.
-			path := writer.URI().Path()
-			if err := writer.Close(); err != nil {
-				dialog.ShowError(err, w)
+			path, err := pickerPath(uris[0])
+			if err != nil {
+				fyne.Do(func() {
+					dialog.ShowError(err, w)
+				})
 				return
 			}
 			if err := imageio.SavePNG(path, imageToSave); err != nil {
-				dialog.ShowError(err, w)
+				fyne.Do(func() {
+					dialog.ShowError(err, w)
+				})
 				return
 			}
-		}, w)
+		}()
 	})
 	// Save starts disabled because exporting only makes sense after the GUI has a
 	// fresh processed image in memory. Keeping it off beforehand avoids implying that
@@ -331,6 +342,92 @@ func emptyPreviewImage() image.Image {
 	// A transparent in-memory placeholder reserves preview space from the start so
 	// the layout does not jump around while the user selects and processes images.
 	return image.NewRGBA(image.Rect(0, 0, 1, 1))
+}
+
+func portalParentWindowHandle(window fyne.Window) string {
+	nativeWindow, ok := window.(driver.NativeWindow)
+	if !ok {
+		return ""
+	}
+
+	windowHandle := ""
+	nativeWindow.RunNative(func(context any) {
+		x11Window, ok := context.(driver.X11WindowContext)
+		if !ok || x11Window.WindowHandle == 0 {
+			return
+		}
+
+		windowHandle = portal.FormatX11WindowHandle(x11Window.WindowHandle)
+	})
+
+	return windowHandle
+}
+
+func imageFileChooserOptions(currentPath string) *filechooser.OpenFileOptions {
+	imageFilter := &filechooser.Filter{
+		Name: "Images",
+		Rules: []filechooser.Rule{
+			{Type: filechooser.GlobPattern, Pattern: "*.png"},
+			{Type: filechooser.GlobPattern, Pattern: "*.PNG"},
+			{Type: filechooser.GlobPattern, Pattern: "*.jpg"},
+			{Type: filechooser.GlobPattern, Pattern: "*.JPG"},
+			{Type: filechooser.GlobPattern, Pattern: "*.jpeg"},
+			{Type: filechooser.GlobPattern, Pattern: "*.JPEG"},
+		},
+	}
+
+	options := &filechooser.OpenFileOptions{
+		Filters:       []*filechooser.Filter{imageFilter},
+		CurrentFilter: imageFilter,
+	}
+	if currentPath != "" {
+		options.CurrentFolder = filepath.Dir(currentPath)
+	}
+
+	return options
+}
+
+func imageSaveFileChooserOptions(currentPath string) *filechooser.SaveFileOptions {
+	pngFilter := &filechooser.Filter{
+		Name: "PNG Images",
+		Rules: []filechooser.Rule{
+			{Type: filechooser.GlobPattern, Pattern: "*.png"},
+			{Type: filechooser.GlobPattern, Pattern: "*.PNG"},
+		},
+	}
+
+	options := &filechooser.SaveFileOptions{
+		CurrentName:   suggestedProcessedFileName(currentPath),
+		Filters:       []*filechooser.Filter{pngFilter},
+		CurrentFilter: pngFilter,
+	}
+	if currentPath != "" {
+		options.CurrentFolder = filepath.Dir(currentPath)
+	}
+
+	return options
+}
+
+func suggestedProcessedFileName(inputPath string) string {
+	if inputPath == "" {
+		return "processed.png"
+	}
+
+	base := filepath.Base(inputPath)
+	if base == "" || base == "." {
+		return "processed.png"
+	}
+
+	ext := filepath.Ext(base)
+	name := base
+	if ext != "" {
+		name = base[:len(base)-len(ext)]
+	}
+	if name == "" || name == "." {
+		name = "processed"
+	}
+
+	return name + "_processed.png"
 }
 
 func pickerPath(raw string) (string, error) {
