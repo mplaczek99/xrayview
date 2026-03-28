@@ -34,6 +34,8 @@ public final class XRayViewApp extends Application {
     private final Label statusValueLabel = new Label("Ready");
     private final Label originalPlaceholderLabel = new Label("Preview placeholder");
     private final ImageView originalImageView = new ImageView();
+    private final Button processImageButton = new Button("Process Image");
+    private final Button saveProcessedImageButton = new Button("Save Processed Image");
 
     @Override
     public void start(Stage stage) {
@@ -130,8 +132,15 @@ public final class XRayViewApp extends Application {
 
         Button openImageButton = new Button("Open Image");
         openImageButton.setOnAction(event -> handleOpenImage(stage));
-        Button processImageButton = new Button("Process Image");
-        Button saveProcessedImageButton = new Button("Save Processed Image");
+
+        // Guarding invalid actions improves UX because users can see the expected
+        // order of operations directly in button state instead of discovering it
+        // through errors. This is done before backend integration so workflow
+        // behavior is already stable once processing is wired in. Keeping this
+        // limited to enable/disable transitions makes it a tiny, low-risk step.
+        processImageButton.setDisable(true);
+        saveProcessedImageButton.setDisable(true);
+        processImageButton.setOnAction(event -> saveProcessedImageButton.setDisable(false));
 
         return new VBox(8,
                 new Label("Image Controls"),
@@ -191,6 +200,8 @@ public final class XRayViewApp extends Application {
         originalPlaceholderLabel.setVisible(false);
         selectedPathLabel.setText(selectedFile.getAbsolutePath());
         statusValueLabel.setText("Image loaded");
+        processImageButton.setDisable(false);
+        saveProcessedImageButton.setDisable(true);
     }
 
     // This optimization pass is being done in tiny slices so each cleanup stays
