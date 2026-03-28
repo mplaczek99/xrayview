@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"image"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/mplaczek99/xrayview/internal/colormap"
@@ -91,7 +92,7 @@ func parseFlags() config {
 	var cfg config
 
 	flag.StringVar(&cfg.inputPath, "input", "", "input image path")
-	flag.StringVar(&cfg.outputPath, "output", "", "output image path")
+	flag.StringVar(&cfg.outputPath, "output", "", "output PNG path (default: input_processed.png)")
 	flag.BoolVar(&cfg.invert, "invert", false, "invert grayscale output")
 	flag.IntVar(&cfg.brightness, "brightness", 0, "brightness delta for grayscale output")
 	flag.Float64Var(&cfg.contrast, "contrast", 1.0, "contrast factor for grayscale output")
@@ -105,6 +106,9 @@ func parseFlags() config {
 
 	flag.Parse()
 	cfg.palette = strings.ToLower(cfg.palette)
+	if cfg.outputPath == "" && cfg.inputPath != "" {
+		cfg.outputPath = defaultOutputPath(cfg.inputPath)
+	}
 
 	if err := validateConfig(cfg); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -116,8 +120,8 @@ func parseFlags() config {
 }
 
 func validateConfig(cfg config) error {
-	if cfg.inputPath == "" || cfg.outputPath == "" {
-		return fmt.Errorf("both -input and -output are required")
+	if cfg.inputPath == "" {
+		return fmt.Errorf("-input is required")
 	}
 
 	if !strings.HasSuffix(strings.ToLower(cfg.outputPath), ".png") {
@@ -128,4 +132,16 @@ func validateConfig(cfg config) error {
 	}
 
 	return nil
+}
+
+func defaultOutputPath(inputPath string) string {
+	dir := filepath.Dir(inputPath)
+	base := filepath.Base(inputPath)
+	ext := filepath.Ext(base)
+	name := strings.TrimSuffix(base, ext)
+	if name == "" {
+		name = base
+	}
+
+	return filepath.Join(dir, name+"_processed.png")
 }
