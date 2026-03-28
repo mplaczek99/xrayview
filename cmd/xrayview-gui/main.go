@@ -33,6 +33,7 @@ func main() {
 	// control is allowed to affect image results.
 	brightnessValue := 0
 	contrastValue := 1.0
+	equalizeValue := false
 
 	pathLabel := widget.NewLabel("No image selected")
 	brightnessValueLabel := widget.NewLabel("Brightness: 0")
@@ -58,6 +59,12 @@ func main() {
 		contrastValue = value
 		contrastValueLabel.SetText(fmt.Sprintf("Contrast: %.1f", contrastValue))
 	}
+
+	// Histogram equalization is a discrete on/off choice, so a checkbox expresses
+	// the intent more clearly than another numeric control.
+	equalizeCheckbox := widget.NewCheck("Equalize Histogram", func(checked bool) {
+		equalizeValue = checked
+	})
 
 	// Keep original and processed previews separate so the GUI can show a stable
 	// before/after view without overwriting the user's source image preview.
@@ -90,6 +97,7 @@ func main() {
 		widget.NewLabel("Contrast"),
 		contrastSlider,
 		contrastValueLabel,
+		equalizeCheckbox,
 		widget.NewButton("Open Image", func() {
 			// The portal picker can block while waiting for the desktop environment.
 			// Running it in a goroutine keeps the Fyne event loop responsive.
@@ -162,6 +170,7 @@ func main() {
 			// teaching the pipeline package anything about widgets.
 			brightness := brightnessValue
 			contrast := contrastValue
+			equalize := equalizeValue
 
 			// Loading and processing can take noticeable time for larger images, so the
 			// work stays off the GUI thread and only the final widget update is marshaled
@@ -180,7 +189,7 @@ func main() {
 				// with the project's default behavior while still letting one UI control at
 				// a time flow into the same in-process path. The pipeline remains centralized
 				// so filter ordering does not drift between GUI code and shared logic.
-				processed := pipeline.ProcessDefault(img, brightness, contrast)
+				processed := pipeline.ProcessDefault(img, brightness, contrast, equalize)
 				fmt.Println("process image clicked")
 
 				// Updating the processed preview from memory avoids temporary files and keeps
