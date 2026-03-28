@@ -80,6 +80,9 @@ func processImage(img image.Image, cfg config) (image.Image, string) {
 	if cfg.palette == "hot" {
 		return colormap.Hot(output), fmt.Sprintf("%s with hot palette", mode)
 	}
+	if cfg.palette == "bone" {
+		return colormap.Bone(output), fmt.Sprintf("%s with bone palette", mode)
+	}
 
 	return output, mode
 }
@@ -93,7 +96,7 @@ func parseFlags() config {
 	flag.IntVar(&cfg.brightness, "brightness", 0, "brightness delta for grayscale output")
 	flag.Float64Var(&cfg.contrast, "contrast", 1.0, "contrast factor for grayscale output")
 	flag.BoolVar(&cfg.equalize, "equalize", false, "apply histogram equalization")
-	flag.StringVar(&cfg.palette, "palette", "none", "pseudocolor palette: none or hot")
+	flag.StringVar(&cfg.palette, "palette", "none", "pseudocolor palette: none, hot, or bone")
 
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage of xrayview:\n")
@@ -120,8 +123,8 @@ func validateConfig(cfg config) error {
 	if !strings.HasSuffix(strings.ToLower(cfg.outputPath), ".png") {
 		return fmt.Errorf("output path must end with .png")
 	}
-	if cfg.palette != "none" && cfg.palette != "hot" {
-		return fmt.Errorf("palette must be one of: none, hot")
+	if cfg.palette != "none" && cfg.palette != "hot" && cfg.palette != "bone" {
+		return fmt.Errorf("palette must be one of: none, hot, bone")
 	}
 
 	return nil
