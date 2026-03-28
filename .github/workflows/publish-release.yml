@@ -21,13 +21,13 @@ jobs:
             platform: linux
             backend_output: java-frontend/target/xrayview
             artifact_name: xrayview-linux-release-asset
-            asset_name: xrayview-${GITHUB_REF_NAME}-linux-app-image.tar.gz
+            asset_suffix: linux-app-image.tar.gz
           - os: windows-latest
             label: Windows
             platform: windows
             backend_output: java-frontend/target/xrayview.exe
             artifact_name: xrayview-windows-release-asset
-            asset_name: xrayview-${GITHUB_REF_NAME}-windows-msi.msi
+            asset_suffix: windows-msi.msi
 
     defaults:
       run:
@@ -79,7 +79,7 @@ jobs:
       - name: Archive Linux app-image
         if: runner.os == 'Linux'
         run: |
-          asset_name="${{ matrix.asset_name }}"
+          asset_name="xrayview-${GITHUB_REF_NAME}-${{ matrix.asset_suffix }}"
           tar -czf "$asset_name" -C java-frontend/target/app-image XRayView
           printf 'ASSET_NAME=%s\n' "$asset_name" >> "$GITHUB_ENV"
 
@@ -91,7 +91,7 @@ jobs:
             printf 'Expected an MSI in java-frontend/target/windows-installer\n' >&2
             exit 1
           fi
-          asset_name="${{ matrix.asset_name }}"
+          asset_name="xrayview-${GITHUB_REF_NAME}-${{ matrix.asset_suffix }}"
           cp "${msi_files[0]}" "$asset_name"
           printf 'ASSET_NAME=%s\n' "$asset_name" >> "$GITHUB_ENV"
 

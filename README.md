@@ -36,6 +36,13 @@ mvn -f java-frontend/pom.xml package
 mvn -f java-frontend/pom.xml javafx:run
 ```
 
+## Releases
+
+Prebuilt desktop packages are published on GitHub Releases starting with `v0.1.0`.
+
+- Linux: download `xrayview-vX.Y.Z-linux-app-image.tar.gz`, extract it, then run `XRayView/bin/XRayView`
+- Windows: download `xrayview-vX.Y.Z-windows-msi.msi` and run the installer
+
 ## Basic Usage
 
 ```bash
