@@ -1,6 +1,9 @@
 package com.xrayview.frontend;
 
 import java.io.File;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 
 import javafx.application.Application;
@@ -33,9 +36,12 @@ public final class XRayViewApp extends Application {
     private final Label selectedPathLabel = new Label("No image selected yet");
     private final Label statusValueLabel = new Label("Ready");
     private final Label originalPlaceholderLabel = new Label("Preview placeholder");
+    private final Label processedPlaceholderLabel = new Label("Preview placeholder");
     private final ImageView originalImageView = new ImageView();
+    private final ImageView processedImageView = new ImageView();
     private final Button processImageButton = new Button("Process Image");
     private final Button saveProcessedImageButton = new Button("Save Processed Image");
+    private File selectedImageFile;
 
     @Override
     public void start(Stage stage) {
@@ -48,7 +54,7 @@ public final class XRayViewApp extends Application {
         VBox headerSection = new VBox(4, headerLabel, selectedPathLabel);
 
         VBox originalSection = createOriginalPreviewSection();
-        VBox processedSection = createPreviewPlaceholder("Processed Image");
+        VBox processedSection = createProcessedPreviewSection();
 
         HBox previews = new HBox(16, originalSection, processedSection);
         HBox.setHgrow(originalSection, Priority.ALWAYS);
@@ -140,7 +146,7 @@ public final class XRayViewApp extends Application {
         // limited to enable/disable transitions makes it a tiny, low-risk step.
         processImageButton.setDisable(true);
         saveProcessedImageButton.setDisable(true);
-        processImageButton.setOnAction(event -> saveProcessedImageButton.setDisable(false));
+        processImageButton.setOnAction(event -> handleProcessImage());
 
         return new VBox(8,
                 new Label("Image Controls"),
@@ -175,6 +181,20 @@ public final class XRayViewApp extends Application {
         return section;
     }
 
+    private VBox createProcessedPreviewSection() {
+        processedImageView.setPreserveRatio(true);
+        processedImageView.setSmooth(true);
+
+        StackPane placeholder = createPreviewFrame(processedPlaceholderLabel, processedImageView);
+
+        processedImageView.fitWidthProperty().bind(placeholder.widthProperty().subtract(24));
+        processedImageView.fitHeightProperty().bind(placeholder.heightProperty().subtract(24));
+
+        VBox section = new VBox(8, new Label("Processed Image"), placeholder);
+        VBox.setVgrow(placeholder, Priority.ALWAYS);
+        return section;
+    }
+
     private void handleOpenImage(Stage stage) {
         // Showing the original preview before any backend processing is a safe
         // migration step because it proves the Java frontend can own desktop UI
@@ -198,10 +218,69 @@ public final class XRayViewApp extends Application {
 
         originalImageView.setImage(image);
         originalPlaceholderLabel.setVisible(false);
+        selectedImageFile = selectedFile;
         selectedPathLabel.setText(selectedFile.getAbsolutePath());
         statusValueLabel.setText("Image loaded");
         processImageButton.setDisable(false);
         saveProcessedImageButton.setDisable(true);
+    }
+
+    private void handleProcessImage() {
+        if (selectedImageFile == null) {
+            statusValueLabel.setText("Processing failed");
+            return;
+        }
+
+        // The existing Go CLI is the first integration boundary because it
+        // already defines processing behavior used by the current app. Using
+        // ProcessBuilder is appropriate for this local handoff since Java can
+        // invoke the CLI directly without introducing a new protocol yet. This
+        // step stays intentionally synchronous so success and failure flow remain
+        // easy to reason about while the migration is still proving parity.
+        File repoRoot = resolveRepoRoot();
+        File tempOutput;
+        try {
+            tempOutput = File.createTempFile("xrayview-processed-", ".png");
+            tempOutput.deleteOnExit();
+        } catch (IOException e) {
+            statusValueLabel.setText("Processing failed");
+            return;
+        }
+
+        List<String> command = buildCliCommand(repoRoot, selectedImageFile, tempOutput);
+        ProcessBuilder processBuilder = new ProcessBuilder(command);
+        processBuilder.directory(repoRoot);
+        processBuilder.redirectOutput(ProcessBuilder.Redirect.DISCARD);
+        processBuilder.redirectError(ProcessBuilder.Redirect.DISCARD);
+
+        int exitCode;
+        try {
+            Process process = processBuilder.start();
+            exitCode = process.waitFor();
+        } catch (IOException e) {
+            statusValueLabel.setText("Processing failed");
+            return;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            statusValueLabel.setText("Processing failed");
+            return;
+        }
+
+        if (exitCode != 0) {
+            statusValueLabel.setText("Processing failed");
+            return;
+        }
+
+        Image processedImage = new Image(tempOutput.toURI().toString());
+        if (processedImage.isError()) {
+            statusValueLabel.setText("Processing failed");
+            return;
+        }
+
+        processedImageView.setImage(processedImage);
+        processedPlaceholderLabel.setVisible(false);
+        saveProcessedImageButton.setDisable(false);
+        statusValueLabel.setText("Image processed");
     }
 
     // This optimization pass is being done in tiny slices so each cleanup stays
@@ -228,15 +307,43 @@ public final class XRayViewApp extends Application {
         label.setText(String.format(Locale.US, "Contrast: %.1f", value));
     }
 
-    private static VBox createPreviewPlaceholder(String title) {
-        Label titleLabel = new Label(title);
-        Label placeholderLabel = new Label("Preview placeholder");
+    private File resolveRepoRoot() {
+        File currentDirectory = new File(System.getProperty("user.dir"));
+        if (new File(currentDirectory, "cmd/xrayview").isDirectory()) {
+            return currentDirectory;
+        }
 
-        StackPane placeholder = createPreviewFrame(placeholderLabel);
+        File parentDirectory = currentDirectory.getParentFile();
+        if (parentDirectory != null && new File(parentDirectory, "cmd/xrayview").isDirectory()) {
+            return parentDirectory;
+        }
 
-        VBox section = new VBox(8, titleLabel, placeholder);
-        VBox.setVgrow(placeholder, Priority.ALWAYS);
-        return section;
+        return currentDirectory;
+    }
+
+    private List<String> buildCliCommand(File repoRoot, File inputFile, File outputFile) {
+        List<String> command = new ArrayList<>();
+
+        File binary = new File(repoRoot, "xrayview");
+        if (binary.isFile() && binary.canExecute()) {
+            command.add(binary.getAbsolutePath());
+        } else {
+            command.add("go");
+            command.add("run");
+            command.add("./cmd/xrayview");
+        }
+
+        command.add("-input");
+        command.add(inputFile.getAbsolutePath());
+        command.add("-output");
+        command.add(outputFile.getAbsolutePath());
+        command.add("-invert=" + uiState.isInvert());
+        command.add("-brightness=" + (int) Math.round(uiState.getBrightness()));
+        command.add("-contrast=" + Double.toString(uiState.getContrast()));
+        command.add("-equalize=" + uiState.isEqualize());
+        command.add("-palette=" + uiState.getPalette());
+
+        return command;
     }
 
     public static void main(String[] args) {
