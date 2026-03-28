@@ -195,7 +195,7 @@ public final class XRayViewApp extends Application {
 
     private void handleProcessImage() {
         if (selectedImageFile == null) {
-            statusValueLabel.setText("Processing failed");
+            setProcessingFailedStatus();
             return;
         }
 
@@ -204,7 +204,7 @@ public final class XRayViewApp extends Application {
             tempOutput = File.createTempFile("xrayview-processed-", ".png");
             tempOutput.deleteOnExit();
         } catch (IOException e) {
-            statusValueLabel.setText("Processing failed");
+            setProcessingFailedStatus();
             return;
         }
 
@@ -212,11 +212,11 @@ public final class XRayViewApp extends Application {
         try {
             executionResult = cliProcessor.run(selectedImageFile, tempOutput, uiState);
         } catch (IOException e) {
-            statusValueLabel.setText("Processing failed");
+            setProcessingFailedStatus();
             return;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            statusValueLabel.setText("Processing failed");
+            setProcessingFailedStatus();
             return;
         }
 
@@ -227,7 +227,7 @@ public final class XRayViewApp extends Application {
 
         Image processedImage = new Image(tempOutput.toURI().toString());
         if (processedImage.isError()) {
-            statusValueLabel.setText("Processing failed");
+            setProcessingFailedStatus();
             return;
         }
 
@@ -278,6 +278,10 @@ public final class XRayViewApp extends Application {
 
     private static void updateContrastValueLabel(Label label, double value) {
         label.setText(String.format(Locale.US, "Contrast: %.1f", value));
+    }
+
+    private void setProcessingFailedStatus() {
+        statusValueLabel.setText("Processing failed");
     }
 
     private String formatProcessFailureStatus(String errorOutput) {
