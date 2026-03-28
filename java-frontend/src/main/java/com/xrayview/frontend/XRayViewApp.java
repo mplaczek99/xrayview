@@ -88,6 +88,26 @@ public final class XRayViewApp extends Application {
         paletteComboBox.getItems().addAll("none", "hot", "bone");
         paletteComboBox.setValue("none");
 
+        // This step uses one-way binding from widgets into UiState first so the
+        // state object can start collecting a backend-ready snapshot without yet
+        // influencing what the user sees. The UI is still the source of truth at
+        // this stage because the controls already define the visible behavior, and
+        // mirroring their values into UiState prepares a safer handoff point for
+        // later Java-to-Go integration without changing the current workflow.
+        brightnessSlider.valueProperty().addListener((observable, oldValue, newValue) ->
+                uiState.setBrightness(newValue.doubleValue()));
+        contrastSlider.valueProperty().addListener((observable, oldValue, newValue) ->
+                uiState.setContrast(newValue.doubleValue()));
+        invertCheckBox.selectedProperty().addListener((observable, oldValue, newValue) ->
+                uiState.setInvert(newValue));
+        equalizeCheckBox.selectedProperty().addListener((observable, oldValue, newValue) ->
+                uiState.setEqualize(newValue));
+        paletteComboBox.valueProperty().addListener((observable, oldValue, newValue) -> {
+            if (newValue != null) {
+                uiState.setPalette(newValue);
+            }
+        });
+
         Button openImageButton = new Button("Open Image");
         openImageButton.setOnAction(event -> handleOpenImage(stage));
         Button processImageButton = new Button("Process Image");
