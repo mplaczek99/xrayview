@@ -303,17 +303,27 @@ func main() {
 			processedPreview,
 		),
 	)
-
-	w.SetContent(container.NewBorder(
-		container.NewVBox(
-			widget.NewLabel("xrayview GUI starting"),
-			pathLabel,
-		),
-		controlsSection,
+	headerSection := container.NewPadded(container.NewVBox(
+		widget.NewLabel("xrayview GUI starting"),
+		pathLabel,
+	))
+	paddedControlsSection := container.NewPadded(controlsSection)
+	// Padding improves readability because the eye can separate the header,
+	// previews, and controls more quickly when those regions are not pressed
+	// directly against each other or against the window edges.
+	//
+	// This spacing pass happens after the Border layout is already settled so the
+	// structure stays stable first, then visual breathing room can be tuned without
+	// mixing polish work into the earlier layout and behavior steps.
+	content := container.NewPadded(container.NewBorder(
+		headerSection,
+		paddedControlsSection,
 		nil,
 		nil,
 		previewsSection,
 	))
+
+	w.SetContent(content)
 	w.ShowAndRun()
 }
 
