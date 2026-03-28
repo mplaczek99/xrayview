@@ -11,6 +11,7 @@ import java.util.List;
 public final class CliProcessor {
     private static final String BACKEND_PATH_PROPERTY = "xrayview.backend.path";
     private static final String BACKEND_PATH_ENV = "XRAYVIEW_BACKEND_PATH";
+    private static final String BUNDLED_BACKEND_RELATIVE_PATH = "backend/xrayview";
 
     private final File projectRoot = resolveProjectRoot();
 
@@ -71,17 +72,22 @@ public final class CliProcessor {
     private List<String> buildCliCommand(File inputFile, File outputFile, UiState uiState) {
         List<String> command = new ArrayList<>();
 
-        File explicitBinary = resolveExplicitBackendBinary();
-        if (explicitBinary != null) {
-            command.add(explicitBinary.getAbsolutePath());
+        File bundledBinary = resolveBundledBackendBinary();
+        if (bundledBinary != null) {
+            command.add(bundledBinary.getAbsolutePath());
         } else {
-            File binary = new File(projectRoot, "xrayview");
-            if (binary.isFile() && binary.canExecute()) {
-                command.add(binary.getAbsolutePath());
+            File explicitBinary = resolveExplicitBackendBinary();
+            if (explicitBinary != null) {
+                command.add(explicitBinary.getAbsolutePath());
             } else {
-                command.add("go");
-                command.add("run");
-                command.add("./cmd/xrayview");
+                File binary = new File(projectRoot, "xrayview");
+                if (isExecutableFile(binary)) {
+                    command.add(binary.getAbsolutePath());
+                } else {
+                    command.add("go");
+                    command.add("run");
+                    command.add("./cmd/xrayview");
+                }
             }
         }
 
@@ -98,6 +104,23 @@ public final class CliProcessor {
         return command;
     }
 
+    // jpackage app-images place extra input files next to the main jar under
+    // lib/app, so a sibling backend path stays stable for local packaging.
+    private File resolveBundledBackendBinary() {
+        File codeSourceLocation = resolveCodeSourceLocation();
+        File appDirectory = codeSourceLocation.isFile() ? codeSourceLocation.getParentFile() : codeSourceLocation;
+        if (appDirectory == null) {
+            return null;
+        }
+
+        File binary = new File(appDirectory, BUNDLED_BACKEND_RELATIVE_PATH).getAbsoluteFile();
+        if (isExecutableFile(binary)) {
+            return binary;
+        }
+
+        return null;
+    }
+
     // Packaged desktop builds can point at a bundled backend without depending
     // on the source checkout layout.
     private File resolveExplicitBackendBinary() {
@@ -110,11 +133,15 @@ public final class CliProcessor {
         }
 
         File binary = new File(configuredPath).getAbsoluteFile();
-        if (binary.isFile() && binary.canExecute()) {
+        if (isExecutableFile(binary)) {
             return binary;
         }
 
         return null;
+    }
+
+    private boolean isExecutableFile(File file) {
+        return file.isFile() && file.canExecute();
     }
 
     private String readProcessErrorOutput(Process process) throws IOException {
