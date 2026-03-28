@@ -28,7 +28,23 @@ func main() {
 	// a stable value that represents the current selection.
 	selectedPath := ""
 
+	// Control state lives separately from the processing call so the GUI can grow
+	// incrementally. That keeps widget behavior easy to test visually before each
+	// control is allowed to affect image results.
+	brightnessValue := 0
+
 	pathLabel := widget.NewLabel("No image selected")
+	brightnessValueLabel := widget.NewLabel("Brightness: 0")
+
+	// Brightness uses a symmetric range around zero because zero naturally means
+	// "leave the image unchanged" while negative and positive values map cleanly to
+	// darker and brighter adjustments once the control is wired into processing.
+	brightnessSlider := widget.NewSlider(-100, 100)
+	brightnessSlider.Step = 1
+	brightnessSlider.OnChanged = func(value float64) {
+		brightnessValue = int(value)
+		brightnessValueLabel.SetText(fmt.Sprintf("Brightness: %d", brightnessValue))
+	}
 
 	// Keep original and processed previews separate so the GUI can show a stable
 	// before/after view without overwriting the user's source image preview.
@@ -53,6 +69,11 @@ func main() {
 				processedPreview,
 			),
 		),
+		// Controls are added before they are wired into processing so the UI shape can
+		// settle in small steps without changing the underlying image logic at the same time.
+		widget.NewLabel("Brightness"),
+		brightnessSlider,
+		brightnessValueLabel,
 		widget.NewButton("Open Image", func() {
 			// The portal picker can block while waiting for the desktop environment.
 			// Running it in a goroutine keeps the Fyne event loop responsive.
