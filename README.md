@@ -25,6 +25,18 @@ It is **not** a medical device and must **not** be used for medical diagnosis, c
 go build -o /tmp/xrayview ./cmd/xrayview
 ```
 
+## GUI
+
+The repository also includes a small Fyne GUI:
+
+```bash
+go build ./cmd/xrayview-gui
+go run ./cmd/xrayview-gui
+```
+
+The GUI opens with a roomier default window size and keeps the side-by-side image
+previews visually prioritized, while the controls stay grouped below them.
+
 ## Basic Usage
 
 ```bash

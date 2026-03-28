@@ -22,6 +22,10 @@ import (
 func main() {
 	a := app.New()
 	w := a.NewWindow("xrayview")
+	// A larger default window gives the side-by-side previews enough room to be
+	// useful immediately, so the user can inspect image detail without first having
+	// to resize the app just to reach a comfortable starting layout.
+	w.Resize(fyne.NewSize(960, 720))
 
 	// Keep the selected path as explicit state instead of reading it back from the
 	// label. The label is only for presentation, while later GUI actions will need
@@ -285,21 +289,30 @@ func main() {
 		processButton,
 		saveButton,
 	)
+	// The preview area is the primary focus of this application because users spend
+	// more time judging image changes than interacting with the controls. Putting
+	// previews in the center region gives them the extra space, while the controls
+	// stay below as a secondary section that remains visible but less dominant.
+	previewsSection := container.NewGridWithColumns(2,
+		container.NewVBox(
+			widget.NewLabel("Original"),
+			originalPreview,
+		),
+		container.NewVBox(
+			widget.NewLabel("Processed"),
+			processedPreview,
+		),
+	)
 
-	w.SetContent(container.NewVBox(
-		widget.NewLabel("xrayview GUI starting"),
-		pathLabel,
-		container.NewGridWithColumns(2,
-			container.NewVBox(
-				widget.NewLabel("Original"),
-				originalPreview,
-			),
-			container.NewVBox(
-				widget.NewLabel("Processed"),
-				processedPreview,
-			),
+	w.SetContent(container.NewBorder(
+		container.NewVBox(
+			widget.NewLabel("xrayview GUI starting"),
+			pathLabel,
 		),
 		controlsSection,
+		nil,
+		nil,
+		previewsSection,
 	))
 	w.ShowAndRun()
 }
