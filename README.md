@@ -37,7 +37,7 @@ If `-output` is omitted, the tool writes a file next to the input using this pat
 
 ## Flags
 
-### Required Input
+### Input
 
 - `-input`
   - Path to the source image
@@ -59,7 +59,7 @@ If `-output` is omitted, the tool writes a file next to the input using this pat
   - Presets set a combination of brightness, contrast, equalization, and palette
   - Explicit CLI flags override preset values
 
-Preset summary:
+#### Preset summary
 
 - `default`
   - brightness `0`
@@ -142,61 +142,71 @@ Notes:
 
 ## Examples
 
-### Default processing
+### Basic processing
 
 ```bash
 go run ./cmd/xrayview -input chest.jpg
 ```
 
-### Explicit output file
+#### Explicit output file
 
 ```bash
 go run ./cmd/xrayview -input chest.jpg -output chest_out.png
 ```
 
-### Inverted grayscale with brightness adjustment
+### Tone adjustments
+
+#### Inverted grayscale with brightness adjustment
 
 ```bash
 go run ./cmd/xrayview -input chest.jpg -invert -brightness 15
 ```
 
-### Higher contrast with histogram equalization
+#### Higher contrast with histogram equalization
 
 ```bash
 go run ./cmd/xrayview -input chest.jpg -contrast 1.6 -equalize
 ```
 
-### Use a preset
+### Presets
+
+#### Use a preset
 
 ```bash
 go run ./cmd/xrayview -input chest.jpg -preset xray
 ```
 
-### Use a preset but override one value
+#### Use a preset but override one value
 
 ```bash
 go run ./cmd/xrayview -input chest.jpg -preset xray -brightness 5
 ```
 
-### Apply a custom grayscale step order
+### Pipeline ordering
+
+#### Apply a custom grayscale step order
 
 ```bash
 go run ./cmd/xrayview -input chest.jpg -invert -contrast 1.5 -equalize -pipeline grayscale,contrast,invert,equalize
 ```
 
-### Apply a pseudocolor palette
+### Pseudocolor
+
+#### Apply a pseudocolor palette
 
 ```bash
 go run ./cmd/xrayview -input chest.jpg -palette hot
 ```
 
-### Write a before/after comparison image
+### Comparison output
+
+#### Write a before/after comparison image
 
 ```bash
 go run ./cmd/xrayview -input chest.jpg -compare
 ```
 
-### Comparison with processing and pseudocolor
+#### Comparison with processing and pseudocolor
 
 ```bash
 go run ./cmd/xrayview -input chest.jpg -preset xray -compare
