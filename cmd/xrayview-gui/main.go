@@ -32,9 +32,11 @@ func main() {
 	// incrementally. That keeps widget behavior easy to test visually before each
 	// control is allowed to affect image results.
 	brightnessValue := 0
+	contrastValue := 1.0
 
 	pathLabel := widget.NewLabel("No image selected")
 	brightnessValueLabel := widget.NewLabel("Brightness: 0")
+	contrastValueLabel := widget.NewLabel("Contrast: 1.0")
 
 	// Brightness uses a symmetric range around zero because zero naturally means
 	// "leave the image unchanged" while negative and positive values map cleanly to
@@ -44,6 +46,17 @@ func main() {
 	brightnessSlider.OnChanged = func(value float64) {
 		brightnessValue = int(value)
 		brightnessValueLabel.SetText(fmt.Sprintf("Brightness: %d", brightnessValue))
+	}
+
+	// Contrast defaults to 1.0 because that preserves the original tonal spread.
+	// Values below and above that midpoint naturally represent softer and stronger
+	// contrast without needing a separate enable/disable toggle.
+	contrastSlider := widget.NewSlider(0.5, 2.0)
+	contrastSlider.Step = 0.1
+	contrastSlider.Value = 1.0
+	contrastSlider.OnChanged = func(value float64) {
+		contrastValue = value
+		contrastValueLabel.SetText(fmt.Sprintf("Contrast: %.1f", contrastValue))
 	}
 
 	// Keep original and processed previews separate so the GUI can show a stable
@@ -69,11 +82,14 @@ func main() {
 				processedPreview,
 			),
 		),
-		// Controls are added before they are wired into processing so the UI shape can
-		// settle in small steps without changing the underlying image logic at the same time.
+		// Controls are added and wired one at a time so UI behavior can evolve in
+		// tiny steps without making several processing changes harder to isolate.
 		widget.NewLabel("Brightness"),
 		brightnessSlider,
 		brightnessValueLabel,
+		widget.NewLabel("Contrast"),
+		contrastSlider,
+		contrastValueLabel,
 		widget.NewButton("Open Image", func() {
 			// The portal picker can block while waiting for the desktop environment.
 			// Running it in a goroutine keeps the Fyne event loop responsive.
@@ -145,6 +161,7 @@ func main() {
 			// explicit UI state into the shared pipeline keeps the GUI thin and avoids
 			// teaching the pipeline package anything about widgets.
 			brightness := brightnessValue
+			contrast := contrastValue
 
 			// Loading and processing can take noticeable time for larger images, so the
 			// work stays off the GUI thread and only the final widget update is marshaled
@@ -161,8 +178,9 @@ func main() {
 				// The GUI deliberately reuses shared processing logic instead of embedding
 				// filter knowledge here. That keeps the first GUI processing step aligned
 				// with the project's default behavior while still letting one UI control at
-				// a time flow into the same in-process path.
-				processed := pipeline.ProcessDefault(img, brightness)
+				// a time flow into the same in-process path. The pipeline remains centralized
+				// so filter ordering does not drift between GUI code and shared logic.
+				processed := pipeline.ProcessDefault(img, brightness, contrast)
 				fmt.Println("process image clicked")
 
 				// Updating the processed preview from memory avoids temporary files and keeps
