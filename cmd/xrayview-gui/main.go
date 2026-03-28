@@ -141,6 +141,10 @@ func main() {
 			}
 
 			path := selectedPath
+			// Snapshot the current slider value before leaving the GUI callback. Passing
+			// explicit UI state into the shared pipeline keeps the GUI thin and avoids
+			// teaching the pipeline package anything about widgets.
+			brightness := brightnessValue
 
 			// Loading and processing can take noticeable time for larger images, so the
 			// work stays off the GUI thread and only the final widget update is marshaled
@@ -156,8 +160,9 @@ func main() {
 
 				// The GUI deliberately reuses shared processing logic instead of embedding
 				// filter knowledge here. That keeps the first GUI processing step aligned
-				// with the project's default behavior.
-				processed := pipeline.ProcessDefault(img)
+				// with the project's default behavior while still letting one UI control at
+				// a time flow into the same in-process path.
+				processed := pipeline.ProcessDefault(img, brightness)
 				fmt.Println("process image clicked")
 
 				// Updating the processed preview from memory avoids temporary files and keeps
