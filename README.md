@@ -1,8 +1,10 @@
 # xrayview
 
-`xrayview` is a small Go CLI for X-ray-style image visualization.
+`xrayview` is a small image-visualization project with a Java desktop frontend and a Go processing backend.
 
-It loads a PNG or JPEG image, applies grayscale-oriented visualization steps, and writes a PNG output image. It can also produce pseudocolor output and side-by-side comparison images.
+The primary desktop UI now lives in `java-frontend/`. The Go CLI in `cmd/xrayview` is the backend processing entry point used by that Java frontend, and it also remains usable directly from the command line. The older Fyne-based Go GUI in `cmd/xrayview-gui` is still present as a transitional reference, but it is no longer the primary desktop path.
+
+The Go backend loads a PNG or JPEG image, applies grayscale-oriented visualization steps, and writes a PNG output image. It can also produce pseudocolor output and side-by-side comparison images.
 
 ## What It Does
 
@@ -25,17 +27,25 @@ It is **not** a medical device and must **not** be used for medical diagnosis, c
 go build -o /tmp/xrayview ./cmd/xrayview
 ```
 
-## GUI
+## Java Frontend
 
-The repository also includes a small Fyne GUI:
+The primary desktop UI is the JavaFX frontend:
+
+```bash
+mvn -f java-frontend/pom.xml package
+mvn -f java-frontend/pom.xml javafx:run
+```
+
+## Transitional Go GUI
+
+The repository also still includes the older Fyne GUI as a transitional / legacy reference:
 
 ```bash
 go build ./cmd/xrayview-gui
 go run ./cmd/xrayview-gui
 ```
 
-The GUI opens with a roomier default window size and keeps the side-by-side image
-previews visually prioritized, while the controls stay grouped below them.
+It is not the primary desktop frontend going forward.
 
 ## Basic Usage
 
@@ -229,30 +239,30 @@ go run ./cmd/xrayview -input chest.jpg -preset xray -compare
 ### Grayscale vs equalized
 
 ```bash
-go run ./cmd/xrayview -input chest.jpg -output images/example1.png -equalize
+go run ./cmd/xrayview -input chest.jpg -output images/equalized.png -equalize
 ```
 
-![Grayscale vs equalized](images/example1.png)
+![Grayscale vs equalized](images/equalized.png)
 
 Caption: Histogram equalization spreads midtone detail more aggressively, which can make faint structures stand out compared with plain grayscale.
 
 ### Hot palette
 
 ```bash
-go run ./cmd/xrayview -input chest.jpg -output images/example2.png -palette hot
+go run ./cmd/xrayview -input chest.jpg -output images/hot.png -palette hot
 ```
 
-![Hot palette output](images/example2.png)
+![Hot palette output](images/hot.png)
 
 Caption: The hot palette maps low intensities to dark reds and high intensities to yellow-white, making intensity differences easier to spot quickly.
 
 ### Bone palette with preset
 
 ```bash
-go run ./cmd/xrayview -input chest.jpg -output images/example3.png -preset xray
+go run ./cmd/xrayview -input chest.jpg -output images/bone.png -preset xray
 ```
 
-![Bone palette preset output](images/example3.png)
+![Bone palette preset output](images/bone.png)
 
 Caption: The `xray` preset combines higher contrast, equalization, and the bone palette for a cooler X-ray-style presentation with brighter highlights.
 
