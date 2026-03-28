@@ -9,6 +9,9 @@ import java.util.List;
 // CliProcessor owns the Java-to-Go process boundary so command setup and error
 // capture stay out of the UI layer.
 public final class CliProcessor {
+    private static final String BACKEND_PATH_PROPERTY = "xrayview.backend.path";
+    private static final String BACKEND_PATH_ENV = "XRAYVIEW_BACKEND_PATH";
+
     private final File projectRoot = resolveProjectRoot();
 
     public ExecutionResult run(File inputFile, File outputFile, UiState uiState) throws IOException, InterruptedException {
@@ -68,13 +71,18 @@ public final class CliProcessor {
     private List<String> buildCliCommand(File inputFile, File outputFile, UiState uiState) {
         List<String> command = new ArrayList<>();
 
-        File binary = new File(projectRoot, "xrayview");
-        if (binary.isFile() && binary.canExecute()) {
-            command.add(binary.getAbsolutePath());
+        File explicitBinary = resolveExplicitBackendBinary();
+        if (explicitBinary != null) {
+            command.add(explicitBinary.getAbsolutePath());
         } else {
-            command.add("go");
-            command.add("run");
-            command.add("./cmd/xrayview");
+            File binary = new File(projectRoot, "xrayview");
+            if (binary.isFile() && binary.canExecute()) {
+                command.add(binary.getAbsolutePath());
+            } else {
+                command.add("go");
+                command.add("run");
+                command.add("./cmd/xrayview");
+            }
         }
 
         command.add("-input");
@@ -88,6 +96,25 @@ public final class CliProcessor {
         command.add("-palette=" + uiState.getPalette());
 
         return command;
+    }
+
+    // Packaged desktop builds can point at a bundled backend without depending
+    // on the source checkout layout.
+    private File resolveExplicitBackendBinary() {
+        String configuredPath = System.getProperty(BACKEND_PATH_PROPERTY);
+        if (configuredPath == null || configuredPath.isBlank()) {
+            configuredPath = System.getenv(BACKEND_PATH_ENV);
+        }
+        if (configuredPath == null || configuredPath.isBlank()) {
+            return null;
+        }
+
+        File binary = new File(configuredPath).getAbsoluteFile();
+        if (binary.isFile() && binary.canExecute()) {
+            return binary;
+        }
+
+        return null;
     }
 
     private String readProcessErrorOutput(Process process) throws IOException {
