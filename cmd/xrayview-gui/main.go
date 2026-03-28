@@ -60,6 +60,11 @@ func main() {
 	// That keeps earlier steps focused on behavior, then uses final copy cleanup to
 	// make the finished app read more clearly in demos and portfolio screenshots.
 	pathLabel := widget.NewLabel("No image selected yet")
+	// A small status line improves usability because it confirms the last successful
+	// action without interrupting the user with extra dialogs or changing the main
+	// workflow. This step stays intentionally lightweight so the GUI becomes more
+	// informative without adding new controls, progress handling, or processing rules.
+	statusValueLabel := widget.NewLabel("Ready")
 	brightnessValueLabel := widget.NewLabel("Brightness: 0")
 	contrastValueLabel := widget.NewLabel("Contrast: 1.0")
 
@@ -175,6 +180,7 @@ func main() {
 				processedPreview.Refresh()
 				processButton.Enable()
 				saveButton.Disable()
+				statusValueLabel.SetText("Image loaded")
 			})
 		}()
 	})
@@ -233,6 +239,7 @@ func main() {
 				// That keeps export tied to a real in-memory processed image instead of
 				// inviting the user to click into a state the program already knows is invalid.
 				saveButton.Enable()
+				statusValueLabel.SetText("Image processed")
 			})
 		}()
 	})
@@ -278,6 +285,10 @@ func main() {
 				})
 				return
 			}
+
+			fyne.Do(func() {
+				statusValueLabel.SetText("Image saved")
+			})
 		}()
 	})
 	// Save starts disabled because exporting only makes sense after the GUI has a
@@ -307,6 +318,8 @@ func main() {
 		openButton,
 		processButton,
 		saveButton,
+		widget.NewLabel("Status"),
+		statusValueLabel,
 	)
 	// The preview area is the primary focus of this application because users spend
 	// more time judging image changes than interacting with the controls. Putting
