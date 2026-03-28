@@ -22,7 +22,11 @@ import (
 	"github.com/rymdport/portal/filechooser"
 )
 
-const appWindowTitle = "xrayview"
+// The window title should present the product name clearly because that is the
+// first piece of text users notice in screenshots, task switchers, and window
+// decorations. Using the product name directly keeps the app identity cleaner
+// and more memorable without changing any CLI or GUI behavior.
+const appWindowTitle = "XRayView"
 
 func main() {
 	a := app.New()
@@ -51,7 +55,11 @@ func main() {
 	equalizeValue := false
 	paletteValue := "none"
 
-	pathLabel := widget.NewLabel("No image selected")
+	// Wording refinements are done at the end of the incremental build-out because
+	// labels are easiest to polish once the layout and workflow are already stable.
+	// That keeps earlier steps focused on behavior, then uses final copy cleanup to
+	// make the finished app read more clearly in demos and portfolio screenshots.
+	pathLabel := widget.NewLabel("No image selected yet")
 	brightnessValueLabel := widget.NewLabel("Brightness: 0")
 	contrastValueLabel := widget.NewLabel("Contrast: 1.0")
 
@@ -283,7 +291,7 @@ func main() {
 	// working so the UI can become more structured without mixing visual changes
 	// into the earlier functionality steps.
 	controlsSection := container.NewVBox(
-		widget.NewLabel("Controls"),
+		widget.NewLabel("Image Controls"),
 		// Controls are added and wired one at a time so UI behavior can evolve in
 		// tiny steps without making several processing changes harder to isolate.
 		widget.NewLabel("Brightness"),
@@ -306,16 +314,16 @@ func main() {
 	// stay below as a secondary section that remains visible but less dominant.
 	previewsSection := container.NewGridWithColumns(2,
 		container.NewVBox(
-			widget.NewLabel("Original"),
+			widget.NewLabel("Original Image"),
 			originalPreview,
 		),
 		container.NewVBox(
-			widget.NewLabel("Processed"),
+			widget.NewLabel("Processed Image"),
 			processedPreview,
 		),
 	)
 	headerSection := container.NewPadded(container.NewVBox(
-		widget.NewLabel("xrayview GUI starting"),
+		widget.NewLabel("Image Visualization Tool"),
 		pathLabel,
 	))
 	paddedControlsSection := container.NewPadded(controlsSection)
