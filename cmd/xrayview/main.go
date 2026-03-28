@@ -14,6 +14,7 @@ type config struct {
 	outputPath string
 	invert     bool
 	brightness int
+	contrast   float64
 }
 
 func main() {
@@ -36,6 +37,10 @@ func main() {
 		output = filters.AdjustBrightness(output, cfg.brightness)
 		mode = fmt.Sprintf("%s with brightness %+d", mode, cfg.brightness)
 	}
+	if cfg.contrast != 1.0 {
+		output = filters.AdjustContrast(output, cfg.contrast)
+		mode = fmt.Sprintf("%s with contrast %g", mode, cfg.contrast)
+	}
 
 	if err := imageio.SavePNG(cfg.outputPath, output); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -54,6 +59,7 @@ func parseFlags() config {
 	flag.StringVar(&cfg.outputPath, "output", "", "output image path")
 	flag.BoolVar(&cfg.invert, "invert", false, "invert grayscale output")
 	flag.IntVar(&cfg.brightness, "brightness", 0, "brightness delta for grayscale output")
+	flag.Float64Var(&cfg.contrast, "contrast", 1.0, "contrast factor for grayscale output")
 
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage of xrayview:\n")
