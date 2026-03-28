@@ -2,6 +2,8 @@ package com.xrayview.frontend;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -42,6 +44,7 @@ public final class XRayViewApp extends Application {
     private final Button processImageButton = new Button("Process Image");
     private final Button saveProcessedImageButton = new Button("Save Processed Image");
     private File selectedImageFile;
+    private File lastProcessedFile;
 
     @Override
     public void start(Stage stage) {
@@ -147,6 +150,7 @@ public final class XRayViewApp extends Application {
         processImageButton.setDisable(true);
         saveProcessedImageButton.setDisable(true);
         processImageButton.setOnAction(event -> handleProcessImage());
+        saveProcessedImageButton.setOnAction(event -> handleSaveProcessedImage(stage));
 
         return new VBox(8,
                 new Label("Image Controls"),
@@ -219,6 +223,7 @@ public final class XRayViewApp extends Application {
         originalImageView.setImage(image);
         originalPlaceholderLabel.setVisible(false);
         selectedImageFile = selectedFile;
+        lastProcessedFile = null;
         selectedPathLabel.setText(selectedFile.getAbsolutePath());
         statusValueLabel.setText("Image loaded");
         processImageButton.setDisable(false);
@@ -279,8 +284,38 @@ public final class XRayViewApp extends Application {
 
         processedImageView.setImage(processedImage);
         processedPlaceholderLabel.setVisible(false);
+        // Reusing the processed temp file avoids re-running the CLI for save,
+        // which keeps export tied to the exact result already shown in the UI.
+        // Saving remains separate from processing so the user can inspect the
+        // preview first, and keeping that handoff as a file reference preserves a
+        // clean boundary between Java UI workflow and Go processing output.
+        lastProcessedFile = tempOutput;
         saveProcessedImageButton.setDisable(false);
         statusValueLabel.setText("Image processed");
+    }
+
+    private void handleSaveProcessedImage(Stage stage) {
+        if (lastProcessedFile == null) {
+            return;
+        }
+
+        FileChooser fileChooser = new FileChooser();
+        fileChooser.setTitle("Save Processed Image");
+        fileChooser.getExtensionFilters().add(new FileChooser.ExtensionFilter("PNG Images", "*.png", "*.PNG"));
+
+        File destinationFile = fileChooser.showSaveDialog(stage);
+        if (destinationFile == null) {
+            return;
+        }
+
+        try {
+            Files.copy(lastProcessedFile.toPath(), destinationFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
+            statusValueLabel.setText("Image saved");
+        } catch (IOException e) {
+            // Keep this step minimal by leaving the current UI state alone when
+            // the copy fails. The core save path still stays synchronous and easy
+            // to reason about while export support is being introduced.
+        }
     }
 
     // This optimization pass is being done in tiny slices so each cleanup stays
