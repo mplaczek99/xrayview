@@ -28,6 +28,11 @@ func main() {
 	// a stable value that represents the current selection.
 	selectedPath := ""
 
+	// Track the processed image separately from the preview widget so save behavior
+	// can reuse the exact in-memory result that is currently shown, without having
+	// to infer state back from UI objects.
+	var processedImage image.Image
+
 	// Control state lives separately from the processing call so the GUI can grow
 	// incrementally. That keeps widget behavior easy to test visually before each
 	// control is allowed to affect image results.
@@ -168,6 +173,7 @@ func main() {
 
 					// Processing belongs to an explicit user action, so choosing a new file
 					// resets the processed side back to an empty state until Process Image runs.
+					processedImage = nil
 					processedPreview.File = ""
 					processedPreview.Image = emptyPreviewImage()
 					processedPreview.Refresh()
@@ -218,11 +224,44 @@ func main() {
 				// the GUI path separate from export concerns. The shared pipeline is still
 				// used so the image result matches the project's in-process default behavior.
 				fyne.Do(func() {
+					processedImage = processed
 					processedPreview.File = ""
 					processedPreview.Image = processed
 					processedPreview.Refresh()
 				})
 			}()
+		}),
+		widget.NewButton("Save Processed Image", func() {
+			// Saving is separate from processing so the user can inspect the current
+			// preview result before deciding whether it is worth exporting.
+			if processedImage == nil {
+				dialog.ShowError(fmt.Errorf("no processed image to save"), w)
+				return
+			}
+
+			imageToSave := processedImage
+			dialog.ShowFileSave(func(writer fyne.URIWriteCloser, err error) {
+				if err != nil {
+					dialog.ShowError(err, w)
+					return
+				}
+				if writer == nil {
+					return
+				}
+
+				// Save uses the in-memory processed image directly so export writes exactly
+				// what the user is looking at, without re-running the pipeline and risking
+				// drift between preview state and saved output.
+				path := writer.URI().Path()
+				if err := writer.Close(); err != nil {
+					dialog.ShowError(err, w)
+					return
+				}
+				if err := imageio.SavePNG(path, imageToSave); err != nil {
+					dialog.ShowError(err, w)
+					return
+				}
+			}, w)
 		}),
 	))
 	w.ShowAndRun()
