@@ -1,22 +1,33 @@
 package com.xrayview.frontend;
 
+import java.io.File;
+
 import javafx.application.Application;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
+import javafx.scene.Node;
 import javafx.scene.Scene;
 import javafx.scene.control.Button;
 import javafx.scene.control.CheckBox;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.Slider;
+import javafx.scene.image.Image;
+import javafx.scene.image.ImageView;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
+import javafx.stage.FileChooser;
 import javafx.stage.Stage;
 
 public final class XRayViewApp extends Application {
+    private final Label selectedPathLabel = new Label("No image selected yet");
+    private final Label statusValueLabel = new Label("Ready");
+    private final Label originalPlaceholderLabel = new Label("Preview placeholder");
+    private final ImageView originalImageView = new ImageView();
+
     @Override
     public void start(Stage stage) {
         // Building the layout before adding functionality keeps this migration
@@ -25,22 +36,23 @@ public final class XRayViewApp extends Application {
         // Mirroring the current Go GUI also makes the transition easier to judge,
         // since both frontends can share the same mental model and screen shape.
         Label headerLabel = new Label("Image Visualization Tool");
+        VBox headerSection = new VBox(4, headerLabel, selectedPathLabel);
 
-        VBox originalSection = createPreviewPlaceholder("Original Image");
+        VBox originalSection = createOriginalPreviewSection();
         VBox processedSection = createPreviewPlaceholder("Processed Image");
 
         HBox previews = new HBox(16, originalSection, processedSection);
         HBox.setHgrow(originalSection, Priority.ALWAYS);
         HBox.setHgrow(processedSection, Priority.ALWAYS);
 
-        VBox controlsSection = createControlsSection();
+        VBox controlsSection = createControlsSection(stage);
 
         BorderPane root = new BorderPane();
         root.setPadding(new Insets(24));
-        root.setTop(headerLabel);
+        root.setTop(headerSection);
         root.setCenter(previews);
         root.setBottom(controlsSection);
-        BorderPane.setMargin(headerLabel, new Insets(0, 0, 16, 0));
+        BorderPane.setMargin(headerSection, new Insets(0, 0, 16, 0));
         BorderPane.setMargin(previews, new Insets(0, 0, 16, 0));
 
         Scene scene = new Scene(root, 720, 480);
@@ -50,7 +62,7 @@ public final class XRayViewApp extends Application {
         stage.show();
     }
 
-    private static VBox createControlsSection() {
+    private VBox createControlsSection(Stage stage) {
         // The Java migration mirrors the Go GUI on purpose so each small step can
         // be compared against a working reference instead of inventing a second
         // desktop workflow. Matching the same labels and control order reduces
@@ -71,6 +83,7 @@ public final class XRayViewApp extends Application {
         paletteComboBox.setValue("none");
 
         Button openImageButton = new Button("Open Image");
+        openImageButton.setOnAction(event -> handleOpenImage(stage));
         Button processImageButton = new Button("Process Image");
         Button saveProcessedImageButton = new Button("Save Processed Image");
 
@@ -90,18 +103,71 @@ public final class XRayViewApp extends Application {
                 processImageButton,
                 saveProcessedImageButton,
                 new Label("Status"),
-                new Label("Ready"));
+                statusValueLabel);
+    }
+
+    private VBox createOriginalPreviewSection() {
+        originalImageView.setPreserveRatio(true);
+        originalImageView.setSmooth(true);
+
+        StackPane placeholder = createPreviewFrame(originalPlaceholderLabel, originalImageView);
+
+        originalImageView.fitWidthProperty().bind(placeholder.widthProperty().subtract(24));
+        originalImageView.fitHeightProperty().bind(placeholder.heightProperty().subtract(24));
+
+        VBox section = new VBox(8, new Label("Original Image"), placeholder);
+        VBox.setVgrow(placeholder, Priority.ALWAYS);
+        return section;
+    }
+
+    private void handleOpenImage(Stage stage) {
+        // Showing the original preview before any backend processing is a safe
+        // migration step because it proves the Java frontend can own desktop UI
+        // work such as file selection and local preview rendering on its own.
+        // This is still migration, not a new frontend design, because it follows
+        // the same original/processed workflow the Go GUI already established.
+        FileChooser fileChooser = new FileChooser();
+        fileChooser.setTitle("Open Image");
+        fileChooser.getExtensionFilters().add(
+                new FileChooser.ExtensionFilter("Image Files", "*.png", "*.jpg", "*.jpeg", "*.PNG", "*.JPG", "*.JPEG"));
+
+        File selectedFile = fileChooser.showOpenDialog(stage);
+        if (selectedFile == null) {
+            return;
+        }
+
+        Image image = new Image(selectedFile.toURI().toString());
+        if (image.isError()) {
+            return;
+        }
+
+        originalImageView.setImage(image);
+        originalPlaceholderLabel.setVisible(false);
+        selectedPathLabel.setText(selectedFile.getAbsolutePath());
+        statusValueLabel.setText("Image loaded");
+    }
+
+    // This optimization pass is being done in tiny slices so each cleanup stays
+    // easy to verify against the current behavior. Preserving behavior matters
+    // because the Go GUI is still the reference while the Java frontend catches
+    // up, so structure can improve without moving the target. This helper was a
+    // good first optimization because preview frame sizing and styling had begun
+    // to duplicate across the Java UI, and extracting it reduces repetition with
+    // essentially no workflow risk.
+    private static StackPane createPreviewFrame(Node... children) {
+        StackPane previewFrame = new StackPane(children);
+        previewFrame.setMinSize(240, 220);
+        previewFrame.setPrefSize(320, 240);
+        previewFrame.setAlignment(Pos.CENTER);
+        previewFrame.setStyle("-fx-border-color: gray; -fx-border-width: 1;");
+        return previewFrame;
     }
 
     private static VBox createPreviewPlaceholder(String title) {
         Label titleLabel = new Label(title);
         Label placeholderLabel = new Label("Preview placeholder");
 
-        StackPane placeholder = new StackPane(placeholderLabel);
-        placeholder.setMinSize(240, 220);
-        placeholder.setPrefSize(320, 240);
-        placeholder.setAlignment(Pos.CENTER);
-        placeholder.setStyle("-fx-border-color: gray; -fx-border-width: 1;");
+        StackPane placeholder = createPreviewFrame(placeholderLabel);
 
         VBox section = new VBox(8, titleLabel, placeholder);
         VBox.setVgrow(placeholder, Priority.ALWAYS);
