@@ -55,8 +55,8 @@ public final class XRayViewApp extends Application {
         Label headerLabel = new Label("Image Visualization Tool");
         VBox headerSection = new VBox(4, headerLabel, selectedPathLabel);
 
-        VBox originalSection = createOriginalPreviewSection();
-        VBox processedSection = createProcessedPreviewSection();
+        VBox originalSection = createPreviewSection("Original Image", originalImageView, originalPlaceholderLabel);
+        VBox processedSection = createPreviewSection("Processed Image", processedImageView, processedPlaceholderLabel);
 
         HBox previews = new HBox(16, originalSection, processedSection);
         HBox.setHgrow(originalSection, Priority.ALWAYS);
@@ -184,30 +184,22 @@ public final class XRayViewApp extends Application {
                 statusValueLabel);
     }
 
-    private VBox createOriginalPreviewSection() {
-        originalImageView.setPreserveRatio(true);
-        originalImageView.setSmooth(true);
+    // Duplication is being reduced now because the original and processed preview
+    // sections have settled into the same shape, so a shared helper can remove
+    // repeated setup without changing any UI decisions. Preview sections are a
+    // safe extraction point because they already share identical structure and
+    // bindings, and behavior must remain identical during this pass so the refactor
+    // improves maintainability without changing what the user sees or how previews work.
+    private VBox createPreviewSection(String title, ImageView imageView, Label placeholderLabel) {
+        imageView.setPreserveRatio(true);
+        imageView.setSmooth(true);
 
-        StackPane placeholder = createPreviewFrame(originalPlaceholderLabel, originalImageView);
+        StackPane placeholder = createPreviewFrame(placeholderLabel, imageView);
 
-        originalImageView.fitWidthProperty().bind(placeholder.widthProperty().subtract(24));
-        originalImageView.fitHeightProperty().bind(placeholder.heightProperty().subtract(24));
+        imageView.fitWidthProperty().bind(placeholder.widthProperty().subtract(24));
+        imageView.fitHeightProperty().bind(placeholder.heightProperty().subtract(24));
 
-        VBox section = new VBox(8, new Label("Original Image"), placeholder);
-        VBox.setVgrow(placeholder, Priority.ALWAYS);
-        return section;
-    }
-
-    private VBox createProcessedPreviewSection() {
-        processedImageView.setPreserveRatio(true);
-        processedImageView.setSmooth(true);
-
-        StackPane placeholder = createPreviewFrame(processedPlaceholderLabel, processedImageView);
-
-        processedImageView.fitWidthProperty().bind(placeholder.widthProperty().subtract(24));
-        processedImageView.fitHeightProperty().bind(placeholder.heightProperty().subtract(24));
-
-        VBox section = new VBox(8, new Label("Processed Image"), placeholder);
+        VBox section = new VBox(8, new Label(title), placeholder);
         VBox.setVgrow(placeholder, Priority.ALWAYS);
         return section;
     }
