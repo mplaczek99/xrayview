@@ -224,6 +224,10 @@ public final class XRayViewApp extends Application {
         }
 
         if (executionResult.exitCode() != 0) {
+            processedImageView.setImage(null);
+            processedPlaceholderLabel.setVisible(true);
+            lastProcessedFile = null;
+            saveProcessedImageButton.setDisable(true);
             statusValueLabel.setText(formatProcessFailureStatus(executionResult.errorOutput()));
             return;
         }
@@ -284,6 +288,12 @@ public final class XRayViewApp extends Application {
     }
 
     private void setProcessingFailedStatus() {
+        // Clear any previous processed result so the preview always matches the
+        // current processing state instead of showing stale output after a failure.
+        processedImageView.setImage(null);
+        processedPlaceholderLabel.setVisible(true);
+        lastProcessedFile = null;
+        saveProcessedImageButton.setDisable(true);
         statusValueLabel.setText("Processing failed");
     }
 
