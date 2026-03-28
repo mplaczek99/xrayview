@@ -2,7 +2,7 @@
 
 `xrayview` is a small image-visualization project with a Java desktop frontend and a Go processing backend.
 
-The primary desktop UI now lives in `java-frontend/`. The Go CLI in `cmd/xrayview` is the backend processing entry point used by that Java frontend, and it also remains usable directly from the command line. The older Fyne-based Go GUI in `cmd/xrayview-gui` is still present as a transitional reference, but it is no longer the primary desktop path.
+The primary desktop UI now lives in `java-frontend/`. The Go CLI in `cmd/xrayview` is the backend processing entry point used by that Java frontend, and it also remains usable directly from the command line.
 
 The Go backend loads a PNG or JPEG image, applies grayscale-oriented visualization steps, and writes a PNG output image. It can also produce pseudocolor output and side-by-side comparison images.
 
@@ -35,17 +35,6 @@ The primary desktop UI is the JavaFX frontend:
 mvn -f java-frontend/pom.xml package
 mvn -f java-frontend/pom.xml javafx:run
 ```
-
-## Transitional Go GUI
-
-The repository also still includes the older Fyne GUI as a transitional / legacy reference:
-
-```bash
-go build ./cmd/xrayview-gui
-go run ./cmd/xrayview-gui
-```
-
-It is not the primary desktop frontend going forward.
 
 ## Basic Usage
 
