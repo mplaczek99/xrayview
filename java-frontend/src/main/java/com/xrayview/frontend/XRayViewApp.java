@@ -186,6 +186,9 @@ public final class XRayViewApp extends Application {
         originalImageView.setImage(image);
         originalPlaceholderLabel.setVisible(false);
         selectedImageFile = selectedFile;
+        // A processed preview only applies to the currently selected source.
+        processedImageView.setImage(null);
+        processedPlaceholderLabel.setVisible(true);
         lastProcessedFile = null;
         selectedPathLabel.setText(selectedFile.getAbsolutePath());
         statusValueLabel.setText("Image loaded");
