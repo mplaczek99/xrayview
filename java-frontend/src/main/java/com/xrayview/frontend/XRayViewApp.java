@@ -73,10 +73,17 @@ public final class XRayViewApp extends Application {
         BorderPane.setMargin(headerSection, new Insets(0, 0, 16, 0));
         BorderPane.setMargin(previews, new Insets(0, 0, 16, 0));
 
-        Scene scene = new Scene(root, 720, 480);
+        // The earlier fixed window size became too restrictive once the Java UI
+        // started to include the real control stack and both preview panels.
+        // Sizing to the scene is a better default at this stage because it lets
+        // the window respect the current preferred content size without guessing
+        // at a hardcoded frame. This step changes only the initial window sizing,
+        // not the general layout behavior after the stage is shown.
+        Scene scene = new Scene(root);
 
         stage.setTitle("XRayView");
         stage.setScene(scene);
+        stage.sizeToScene();
         stage.show();
     }
 
