@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/mplaczek99/xrayview/internal/filters"
 	"github.com/mplaczek99/xrayview/internal/imageio"
@@ -30,7 +31,7 @@ func main() {
 	output := gray
 	mode := "grayscale"
 	if cfg.invert {
-		output = filters.Invert(gray)
+		output = filters.Invert(output)
 		mode = "inverted grayscale"
 	}
 	if cfg.brightness != 0 {
@@ -68,11 +69,23 @@ func parseFlags() config {
 
 	flag.Parse()
 
-	if cfg.inputPath == "" || cfg.outputPath == "" {
-		fmt.Fprintln(os.Stderr, "both -input and -output are required")
+	if err := validateConfig(cfg); err != nil {
+		fmt.Fprintln(os.Stderr, err)
 		flag.Usage()
 		os.Exit(2)
 	}
 
 	return cfg
+}
+
+func validateConfig(cfg config) error {
+	if cfg.inputPath == "" || cfg.outputPath == "" {
+		return fmt.Errorf("both -input and -output are required")
+	}
+
+	if !strings.HasSuffix(strings.ToLower(cfg.outputPath), ".png") {
+		return fmt.Errorf("output path must end with .png")
+	}
+
+	return nil
 }
