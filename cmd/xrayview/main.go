@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"image"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -61,6 +62,8 @@ var presetConfigs = map[string]presetConfig{
 	},
 }
 
+var defaultPipelineOrder = []string{"grayscale", "invert", "brightness", "contrast", "equalize"}
+
 func main() {
 	cfg := parseFlags()
 
@@ -95,9 +98,7 @@ func processImage(img image.Image, cfg config) (image.Image, string) {
 	pipeline := make([]grayFilter, 0, 4)
 
 	steps, _ := pipelineSteps(cfg.pipeline)
-	if len(steps) == 0 {
-		steps = []string{"grayscale", "invert", "brightness", "contrast", "equalize"}
-	}
+	steps = effectivePipelineSteps(steps, cfg)
 
 	for _, step := range steps {
 		switch step {
@@ -214,6 +215,9 @@ func validateConfig(cfg config) error {
 	if !strings.HasSuffix(strings.ToLower(cfg.outputPath), ".png") {
 		return fmt.Errorf("output path must end with .png")
 	}
+	if math.IsNaN(cfg.contrast) || math.IsInf(cfg.contrast, 0) || cfg.contrast < 0 {
+		return fmt.Errorf("contrast must be a finite value greater than or equal to 0")
+	}
 	if cfg.palette != "none" && cfg.palette != "hot" && cfg.palette != "bone" {
 		return fmt.Errorf("palette must be one of: none, hot, bone")
 	}
@@ -257,6 +261,7 @@ func pipelineSteps(pipeline string) ([]string, error) {
 
 	parts := strings.Split(pipeline, ",")
 	steps := make([]string, 0, len(parts))
+	seen := make(map[string]bool, len(parts))
 	for _, part := range parts {
 		step := strings.ToLower(strings.TrimSpace(part))
 		if step == "" {
@@ -265,6 +270,10 @@ func pipelineSteps(pipeline string) ([]string, error) {
 
 		switch step {
 		case "grayscale", "invert", "brightness", "contrast", "equalize":
+			if seen[step] {
+				return nil, fmt.Errorf("duplicate pipeline step: %s", step)
+			}
+			seen[step] = true
 			steps = append(steps, step)
 		default:
 			return nil, fmt.Errorf("unknown pipeline step: %s", step)
@@ -272,6 +281,37 @@ func pipelineSteps(pipeline string) ([]string, error) {
 	}
 
 	return steps, nil
+}
+
+func effectivePipelineSteps(requested []string, cfg config) []string {
+	if len(requested) == 0 {
+		return append([]string(nil), defaultPipelineOrder...)
+	}
+
+	enabled := map[string]bool{
+		"invert":     cfg.invert,
+		"brightness": cfg.brightness != 0,
+		"contrast":   cfg.contrast != 1.0,
+		"equalize":   cfg.equalize,
+	}
+	steps := []string{"grayscale"}
+	used := map[string]bool{"grayscale": true}
+
+	for _, step := range requested {
+		if step == "grayscale" || !enabled[step] || used[step] {
+			continue
+		}
+		steps = append(steps, step)
+		used[step] = true
+	}
+
+	for _, step := range defaultPipelineOrder[1:] {
+		if enabled[step] && !used[step] {
+			steps = append(steps, step)
+		}
+	}
+
+	return steps
 }
 
 func defaultOutputPath(inputPath string) string {

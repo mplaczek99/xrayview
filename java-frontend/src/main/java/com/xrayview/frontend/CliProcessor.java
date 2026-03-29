@@ -5,12 +5,15 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 /** Runs the Go CLI backend from the Java frontend. */
 public final class CliProcessor {
     private static final String BACKEND_PATH_PROPERTY = "xrayview.backend.path";
     private static final String BACKEND_PATH_ENV = "XRAYVIEW_BACKEND_PATH";
-    private static final String BUNDLED_BACKEND_RELATIVE_PATH = "backend/xrayview";
+    private static final String BACKEND_DIRECTORY_NAME = "backend";
+    private static final String BACKEND_BASE_NAME = "xrayview";
+    private static final String WINDOWS_EXECUTABLE_SUFFIX = ".exe";
 
     private final File projectRoot = resolveProjectRoot();
 
@@ -67,18 +70,18 @@ public final class CliProcessor {
         return null;
     }
 
-    private List<String> buildCliCommand(File inputFile, File outputFile, UiState uiState) {
+    private List<String> buildCliCommand(File inputFile, File outputFile, UiState uiState) throws IOException {
         List<String> command = new ArrayList<>();
 
-        File bundledBinary = resolveBundledBackendBinary();
-        if (bundledBinary != null) {
-            command.add(bundledBinary.getAbsolutePath());
+        File explicitBinary = resolveExplicitBackendBinary();
+        if (explicitBinary != null) {
+            command.add(explicitBinary.getAbsolutePath());
         } else {
-            File explicitBinary = resolveExplicitBackendBinary();
-            if (explicitBinary != null) {
-                command.add(explicitBinary.getAbsolutePath());
+            File bundledBinary = resolveBundledBackendBinary();
+            if (bundledBinary != null) {
+                command.add(bundledBinary.getAbsolutePath());
             } else {
-                File binary = new File(projectRoot, "xrayview");
+                File binary = resolveProjectBackendBinary();
                 if (isExecutableFile(binary)) {
                     command.add(binary.getAbsolutePath());
                 } else {
@@ -110,16 +113,18 @@ public final class CliProcessor {
             return null;
         }
 
-        File binary = new File(appDirectory, BUNDLED_BACKEND_RELATIVE_PATH).getAbsoluteFile();
-        if (isExecutableFile(binary)) {
-            return binary;
+        for (String fileName : backendBinaryNames()) {
+            File binary = new File(new File(appDirectory, BACKEND_DIRECTORY_NAME), fileName).getAbsoluteFile();
+            if (isExecutableFile(binary)) {
+                return binary;
+            }
         }
 
         return null;
     }
 
     // Allow an explicit backend override.
-    private File resolveExplicitBackendBinary() {
+    private File resolveExplicitBackendBinary() throws IOException {
         String configuredPath = System.getProperty(BACKEND_PATH_PROPERTY);
         if (configuredPath == null || configuredPath.isBlank()) {
             configuredPath = System.getenv(BACKEND_PATH_ENV);
@@ -129,15 +134,56 @@ public final class CliProcessor {
         }
 
         File binary = new File(configuredPath).getAbsoluteFile();
-        if (isExecutableFile(binary)) {
-            return binary;
+        if (!isExecutableFile(binary)) {
+            throw new IOException("Configured backend binary is not runnable: " + binary.getAbsolutePath());
         }
 
-        return null;
+        return binary;
+    }
+
+    private File resolveProjectBackendBinary() {
+        for (String fileName : backendBinaryNames()) {
+            File binary = new File(projectRoot, fileName).getAbsoluteFile();
+            if (isExecutableFile(binary)) {
+                return binary;
+            }
+        }
+
+        return new File(projectRoot, preferredBackendBinaryName()).getAbsoluteFile();
     }
 
     private boolean isExecutableFile(File file) {
-        return file.isFile() && file.canExecute();
+        if (!file.isFile()) {
+            return false;
+        }
+
+        if (isWindows()) {
+            return file.getName().toLowerCase(Locale.ROOT).endsWith(WINDOWS_EXECUTABLE_SUFFIX);
+        }
+
+        return file.canExecute();
+    }
+
+    private List<String> backendBinaryNames() {
+        List<String> names = new ArrayList<>(2);
+        names.add(preferredBackendBinaryName());
+        String legacyName = BACKEND_BASE_NAME;
+        if (!names.contains(legacyName)) {
+            names.add(legacyName);
+        }
+        return names;
+    }
+
+    private String preferredBackendBinaryName() {
+        if (isWindows()) {
+            return BACKEND_BASE_NAME + WINDOWS_EXECUTABLE_SUFFIX;
+        }
+        return BACKEND_BASE_NAME;
+    }
+
+    private boolean isWindows() {
+        String osName = System.getProperty("os.name", "");
+        return osName.toLowerCase(Locale.ROOT).contains("win");
     }
 
     private String readProcessErrorOutput(Process process) throws IOException {

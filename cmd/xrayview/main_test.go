@@ -1,6 +1,11 @@
 package main
 
-import "testing"
+import (
+	"image"
+	"image/color"
+	"math"
+	"testing"
+)
 
 func TestDefaultOutputPath(t *testing.T) {
 	got := defaultOutputPath("images/scan.jpg")
@@ -96,5 +101,53 @@ func TestValidateConfigRejectsUnknownPreset(t *testing.T) {
 
 	if err.Error() != "preset must be one of: default, xray, high-contrast" {
 		t.Fatalf("error = %q, want %q", err.Error(), "preset must be one of: default, xray, high-contrast")
+	}
+}
+
+func TestValidateConfigRejectsNonFiniteContrast(t *testing.T) {
+	err := validateConfig(config{
+		inputPath:  "input.jpg",
+		outputPath: "output.png",
+		preset:     "default",
+		palette:    "none",
+		contrast:   math.NaN(),
+	})
+	if err == nil {
+		t.Fatal("expected validation error for non-finite contrast")
+	}
+
+	if err.Error() != "contrast must be a finite value greater than or equal to 0" {
+		t.Fatalf("error = %q, want %q", err.Error(), "contrast must be a finite value greater than or equal to 0")
+	}
+}
+
+func TestPipelineStepsRejectsDuplicateSteps(t *testing.T) {
+	_, err := pipelineSteps("grayscale,contrast,contrast")
+	if err == nil {
+		t.Fatal("expected validation error for duplicate pipeline steps")
+	}
+
+	if err.Error() != "duplicate pipeline step: contrast" {
+		t.Fatalf("error = %q, want %q", err.Error(), "duplicate pipeline step: contrast")
+	}
+}
+
+func TestProcessImageCustomPipelineKeepsOmittedEnabledFilters(t *testing.T) {
+	src := image.NewRGBA(image.Rect(0, 0, 1, 1))
+	src.Set(0, 0, color.RGBA{R: 100, G: 100, B: 100, A: 255})
+
+	output, _ := processImage(src, config{
+		brightness: 20,
+		contrast:   2.0,
+		pipeline:   "contrast",
+	})
+
+	gray, ok := output.(*image.Gray)
+	if !ok {
+		t.Fatalf("output type = %T, want *image.Gray", output)
+	}
+
+	if got := gray.GrayAt(0, 0).Y; got != 92 {
+		t.Fatalf("pixel = %d, want %d", got, 92)
 	}
 }

@@ -129,12 +129,14 @@ If `-output` is omitted, the tool writes a file next to the input using this pat
 - `-pipeline`
   - Comma-separated list of grayscale processing steps
   - Lets you control the order of enabled grayscale filters
+  - Enabled steps omitted from the list still run afterward in the default order
   - Supported step names:
     - `grayscale`
     - `invert`
     - `brightness`
     - `contrast`
     - `equalize`
+  - Duplicate step names are rejected
 
 If `-pipeline` is omitted, the default order is:
 

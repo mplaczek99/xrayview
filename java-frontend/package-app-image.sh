@@ -8,6 +8,7 @@ APP_NAME="XRayView"
 APP_IMAGE_DIR="$TARGET_DIR/app-image"
 APP_INPUT_DIR="$TARGET_DIR/jpackage-input"
 BACKEND_BINARY="${1:-}"
+BACKEND_NAME=""
 
 if ! command -v jpackage >/dev/null 2>&1; then
     printf 'jpackage is required but was not found on PATH.\n' >&2
@@ -34,14 +35,16 @@ if [ ! -f "$BACKEND_BINARY" ] || [ ! -x "$BACKEND_BINARY" ]; then
     exit 1
 fi
 
+BACKEND_NAME="$(basename "$BACKEND_BINARY")"
+
 rm -rf "$APP_IMAGE_DIR" "$APP_INPUT_DIR"
 mkdir -p "$APP_INPUT_DIR/lib" "$APP_INPUT_DIR/backend"
 
 PROJECT_JAR="$(basename "$TARGET_DIR"/xrayview-java-frontend-*.jar)"
 cp "$TARGET_DIR/$PROJECT_JAR" "$APP_INPUT_DIR/"
 cp "$TARGET_DIR"/lib/*.jar "$APP_INPUT_DIR/lib/"
-cp "$BACKEND_BINARY" "$APP_INPUT_DIR/backend/xrayview"
-chmod +x "$APP_INPUT_DIR/backend/xrayview"
+cp "$BACKEND_BINARY" "$APP_INPUT_DIR/backend/$BACKEND_NAME"
+chmod +x "$APP_INPUT_DIR/backend/$BACKEND_NAME"
 
 jpackage \
     --type app-image \
@@ -53,4 +56,4 @@ jpackage \
     --java-options "--enable-native-access=ALL-UNNAMED"
 
 printf 'Created app image at %s/%s\n' "$APP_IMAGE_DIR" "$APP_NAME"
-printf 'Bundled backend copied to lib/app/backend/xrayview inside the app image.\n'
+printf 'Bundled backend copied to lib/app/backend/%s inside the app image.\n' "$BACKEND_NAME"

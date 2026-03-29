@@ -3,7 +3,7 @@
 The base packaging target is a local `jpackage` app-image on the current OS.
 
 - It produces a self-contained runnable app without adding installer, signing, or platform-specific packaging work yet.
-- This step stages a separately built Go backend binary into the app-image at `lib/app/backend/xrayview`.
+- This step stages a separately built Go backend binary into the app-image at `lib/app/backend/` using its platform-specific filename.
 - Linux releases wrap that app-image in a single `.AppImage` executable with `appimagetool`.
 
 Requirements:

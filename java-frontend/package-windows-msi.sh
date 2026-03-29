@@ -12,6 +12,7 @@ APP_INPUT_DIR="$TARGET_DIR/jpackage-input"
 ICON_FILE="$TARGET_DIR/xrayview-placeholder.ico"
 BACKEND_BINARY="${1:-}"
 APP_VERSION="${2:-}"
+BACKEND_NAME=""
 
 if ! command -v jpackage >/dev/null 2>&1; then
     printf 'jpackage is required but was not found on PATH.\n' >&2
@@ -43,6 +44,8 @@ if [ ! -f "$BACKEND_BINARY" ] || [ ! -x "$BACKEND_BINARY" ]; then
     exit 1
 fi
 
+BACKEND_NAME="$(basename "$BACKEND_BINARY")"
+
 if [ -z "$APP_VERSION" ]; then
     printf 'Pass the numeric app version as the second argument, for example 0.1.0.\n' >&2
     exit 1
@@ -54,7 +57,7 @@ mkdir -p "$INSTALLER_DIR" "$APP_INPUT_DIR/lib" "$APP_INPUT_DIR/backend"
 PROJECT_JAR="$(basename "$TARGET_DIR"/xrayview-java-frontend-*.jar)"
 cp "$TARGET_DIR/$PROJECT_JAR" "$APP_INPUT_DIR/"
 cp "$TARGET_DIR"/lib/*.jar "$APP_INPUT_DIR/lib/"
-cp "$BACKEND_BINARY" "$APP_INPUT_DIR/backend/xrayview"
+cp "$BACKEND_BINARY" "$APP_INPUT_DIR/backend/$BACKEND_NAME"
 
 cat <<'EOF' | base64 --decode > "$ICON_FILE"
 AAABAAEAEBAAAAEAIABoBAAAFgAAACgAAAAQAAAAIAAAAAEAIAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAD6+PX/PCgV/zwoFf88KBX/PCgV/zwoFf88KBX/PCgV/zwoFf88KBX/PCgV/zwoFf88KBX/PCgV/zwoFf/6+PX/PCgV//r49f+HXi7/h14u/4deLv+HXi7/h14u/4deLv+HXi7/h14u/4deLv+HXi7/h14u/4deLv/6+PX/PCgV/zwoFf+HXi7/+vj1/4deLv+HXi7/h14u/4deLv+HXi7/h14u/4deLv+HXi7/h14u/4deLv/6+PX/h14u/zwoFf88KBX/h14u/4deLv/6+PX/h14u/4deLv+HXi7/h14u/4deLv+HXi7/h14u/4deLv/6+PX/h14u/4deLv88KBX/PCgV/4deLv+HXi7/h14u//r49f+HXi7/h14u/4deLv+HXi7/h14u/4deLv/6+PX/h14u/4deLv+HXi7/PCgV/zwoFf+HXi7/h14u/4deLv+HXi7/+vj1/4deLv+HXi7/h14u/4deLv/6+PX/h14u/4deLv+HXi7/h14u/zwoFf88KBX/h14u/4deLv+HXi7/h14u/4deLv/6+PX/h14u/4deLv/6+PX/h14u/4deLv+HXi7/h14u/4deLv88KBX/PCgV/4deLv+HXi7/h14u/4deLv+HXi7/h14u//r49f/6+PX/h14u/4deLv+HXi7/h14u/4deLv+HXi7/PCgV/zwoFf+HXi7/h14u/4deLv+HXi7/h14u/4deLv/6+PX/+vj1/4deLv+HXi7/h14u/4deLv+HXi7/h14u/zwoFf88KBX/h14u/4deLv+HXi7/h14u/4deLv/6+PX/h14u/4deLv/6+PX/h14u/4deLv+HXi7/h14u/4deLv88KBX/PCgV/4deLv+HXi7/h14u/4deLv/6+PX/h14u/4deLv+HXi7/h14u//r49f+HXi7/h14u/4deLv+HXi7/PCgV/zwoFf+HXi7/h14u/4deLv/6+PX/h14u/4deLv+HXi7/h14u/4deLv+HXi7/+vj1/4deLv+HXi7/h14u/zwoFf88KBX/h14u/4deLv/6+PX/h14u/4deLv+HXi7/h14u/4deLv+HXi7/h14u/4deLv/6+PX/h14u/4deLv88KBX/PCgV/4deLv/6+PX/h14u/4deLv+HXi7/h14u/4deLv+HXi7/h14u/4deLv+HXi7/h14u//r49f+HXi7/PCgV/zwoFf/6+PX/h14u/4deLv+HXi7/h14u/4deLv+HXi7/h14u/4deLv+HXi7/h14u/4deLv+HXi7/+vj1/zwoFf/6+PX/PCgV/zwoFf88KBX/PCgV/zwoFf88KBX/PCgV/zwoFf88KBX/PCgV/zwoFf88KBX/PCgV/zwoFf/6+PX/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==
