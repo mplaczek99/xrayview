@@ -6,8 +6,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 
-// CliProcessor owns the Java-to-Go process boundary so command setup and error
-// capture stay out of the UI layer.
+/** Runs the Go CLI backend from the Java frontend. */
 public final class CliProcessor {
     private static final String BACKEND_PATH_PROPERTY = "xrayview.backend.path";
     private static final String BACKEND_PATH_ENV = "XRAYVIEW_BACKEND_PATH";
@@ -28,8 +27,7 @@ public final class CliProcessor {
         return new ExecutionResult(exitCode, errorOutput);
     }
 
-    // Resolving the project root once keeps CLI execution from depending on the
-    // process working directory, which can vary between Maven, IDE, and packaged runs.
+    // Resolve the project root once.
     private File resolveProjectRoot() {
         File rootFromCodeSource = findProjectRoot(resolveCodeSourceLocation());
         if (rootFromCodeSource != null) {
@@ -104,8 +102,7 @@ public final class CliProcessor {
         return command;
     }
 
-    // jpackage app-images place extra input files next to the main jar under
-    // lib/app, so a sibling backend path stays stable for local packaging.
+    // Check for a backend bundled next to the app image.
     private File resolveBundledBackendBinary() {
         File codeSourceLocation = resolveCodeSourceLocation();
         File appDirectory = codeSourceLocation.isFile() ? codeSourceLocation.getParentFile() : codeSourceLocation;
@@ -121,8 +118,7 @@ public final class CliProcessor {
         return null;
     }
 
-    // Packaged desktop builds can point at a bundled backend without depending
-    // on the source checkout layout.
+    // Allow an explicit backend override.
     private File resolveExplicitBackendBinary() {
         String configuredPath = System.getProperty(BACKEND_PATH_PROPERTY);
         if (configuredPath == null || configuredPath.isBlank()) {

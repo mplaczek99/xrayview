@@ -2,9 +2,8 @@ package filters
 
 import "image"
 
+// AdjustBrightness adds delta to each grayscale pixel.
 func AdjustBrightness(src *image.Gray, delta int) *image.Gray {
-	// Brightness is expressed as an additive delta because it maps cleanly to the
-	// CLI flag and composes predictably with the other grayscale-only stages.
 	bounds := src.Bounds()
 	dst := image.NewGray(bounds)
 
@@ -12,7 +11,7 @@ func AdjustBrightness(src *image.Gray, delta int) *image.Gray {
 		for x := bounds.Min.X; x < bounds.Max.X; x++ {
 			value := int(src.GrayAt(x, y).Y) + delta
 
-			// Clamp into the byte range so later stages always receive valid gray values.
+			// Clamp to 0..255.
 			if value < 0 {
 				value = 0
 			}

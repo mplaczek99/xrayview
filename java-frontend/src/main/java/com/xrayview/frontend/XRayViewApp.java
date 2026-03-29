@@ -27,8 +27,7 @@ import javafx.stage.FileChooser;
 import javafx.stage.Stage;
 
 public final class XRayViewApp extends Application {
-    // Keep processing settings separate from JavaFX widgets so backend calls can
-    // read a stable snapshot of the current UI state.
+    // Current processing options.
     private final UiState uiState = new UiState();
     private final Label selectedPathLabel = new Label("No image selected yet");
     private final Label statusValueLabel = new Label("Ready");
@@ -64,15 +63,13 @@ public final class XRayViewApp extends Application {
         BorderPane.setMargin(headerSection, new Insets(0, 0, 16, 0));
         BorderPane.setMargin(previews, new Insets(0, 0, 16, 0));
 
-        // Size the window from the preferred content size instead of relying on a
-        // hardcoded frame that can drift as the UI changes.
+        // Let the scene determine the initial window size.
         Scene scene = new Scene(root);
 
         stage.setTitle("XRayView");
         stage.setScene(scene);
         stage.sizeToScene();
-        // Keep the initial preferred size as the minimum so the controls and
-        // preview panes cannot be collapsed into an unusable layout.
+        // Keep the initial size as the minimum.
         stage.setMinWidth(stage.getWidth());
         stage.setMinHeight(stage.getHeight());
         stage.show();
@@ -84,8 +81,7 @@ public final class XRayViewApp extends Application {
         Label brightnessValueLabel = new Label();
         Label contrastValueLabel = new Label();
 
-        // Keep the value labels next to the sliders so the exact setting is
-        // visible without relying on thumb position alone.
+        // Show the exact slider values next to the controls.
         updateBrightnessValueLabel(brightnessValueLabel, brightnessSlider.getValue());
         updateContrastValueLabel(contrastValueLabel, contrastSlider.getValue());
 
@@ -96,8 +92,7 @@ public final class XRayViewApp extends Application {
         paletteComboBox.getItems().addAll("none", "hot", "bone");
         paletteComboBox.setValue("none");
 
-        // The widgets remain the source of truth; UiState just mirrors their
-        // current values so processing can read one settings object.
+        // Mirror widget changes into UiState.
         brightnessSlider.valueProperty().addListener((observable, oldValue, newValue) ->
         {
             double value = newValue.doubleValue();
@@ -123,8 +118,7 @@ public final class XRayViewApp extends Application {
         Button openImageButton = new Button("Open Image");
         openImageButton.setOnAction(event -> handleOpenImage(stage));
 
-        // Disable actions until the required input exists instead of relying on
-        // error handling to teach the workflow.
+        // Actions stay disabled until an image is loaded.
         processImageButton.setDisable(true);
         saveProcessedImageButton.setDisable(true);
         processImageButton.setOnAction(event -> handleProcessImage());
@@ -149,8 +143,7 @@ public final class XRayViewApp extends Application {
                 statusValueLabel);
     }
 
-    // Original and processed previews share the same structure, so keep their
-    // sizing and bindings in one place.
+    // Build both preview panes the same way.
     private VBox createPreviewSection(String title, ImageView imageView, Label placeholderLabel) {
         imageView.setPreserveRatio(true);
         imageView.setSmooth(true);
@@ -166,8 +159,7 @@ public final class XRayViewApp extends Application {
     }
 
     private void handleOpenImage(Stage stage) {
-        // Load the original preview locally. The backend only needs to run when
-        // the user asks for a processed result.
+        // Loading the original preview does not require the backend.
         FileChooser fileChooser = new FileChooser();
         fileChooser.setTitle("Open Image");
         fileChooser.getExtensionFilters().add(
@@ -186,7 +178,7 @@ public final class XRayViewApp extends Application {
         originalImageView.setImage(image);
         originalPlaceholderLabel.setVisible(false);
         selectedImageFile = selectedFile;
-        // A processed preview only applies to the currently selected source.
+        // Clear any stale processed preview.
         processedImageView.setImage(null);
         processedPlaceholderLabel.setVisible(true);
         lastProcessedFile = null;
@@ -240,8 +232,7 @@ public final class XRayViewApp extends Application {
 
         processedImageView.setImage(processedImage);
         processedPlaceholderLabel.setVisible(false);
-        // Save reuses the file produced by the CLI so export matches the preview
-        // without running processing twice.
+        // Reuse the generated file when saving.
         lastProcessedFile = tempOutput;
         saveProcessedImageButton.setDisable(false);
         statusValueLabel.setText("Image processed");
@@ -261,8 +252,7 @@ public final class XRayViewApp extends Application {
             return;
         }
 
-        // The saved bytes are always PNG, so enforce the extension here to keep
-        // the filename aligned with the actual file format.
+        // Processed output is always PNG.
         if (!destinationFile.getName().toLowerCase(Locale.ROOT).endsWith(".png")) {
             File parentDirectory = destinationFile.getParentFile();
             if (parentDirectory == null) {
@@ -276,13 +266,12 @@ public final class XRayViewApp extends Application {
             Files.copy(lastProcessedFile.toPath(), destinationFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
             statusValueLabel.setText("Image saved");
         } catch (IOException e) {
-            // Silent save failures leave the user with no explanation. Reuse the
-            // status line here so the error is visible without interrupting the workflow.
+            // Show save failures in the status line.
             statusValueLabel.setText("Save failed");
         }
     }
 
-    // Keep preview sizing and border styling consistent across both panes.
+    // Shared preview frame styling.
     private static StackPane createPreviewFrame(Node... children) {
         StackPane previewFrame = new StackPane(children);
         previewFrame.setMinSize(240, 220);
@@ -301,8 +290,7 @@ public final class XRayViewApp extends Application {
     }
 
     private void setProcessingFailedStatus() {
-        // Clear any previous processed result so the preview always matches the
-        // current processing state instead of showing stale output after a failure.
+        // Clear stale output after a failed run.
         processedImageView.setImage(null);
         processedPlaceholderLabel.setVisible(true);
         lastProcessedFile = null;

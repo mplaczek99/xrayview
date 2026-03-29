@@ -5,9 +5,8 @@ import (
 	"image/color"
 )
 
+// Hot maps grayscale values to a black-red-yellow-white palette.
 func Hot(src *image.Gray) *image.RGBA {
-	// The palette is applied after grayscale processing so color encodes the final
-	// intensity distribution rather than hiding intermediate filter effects.
 	bounds := src.Bounds()
 	dst := image.NewRGBA(bounds)
 
@@ -22,8 +21,7 @@ func Hot(src *image.Gray) *image.RGBA {
 }
 
 func hotColor(v int) color.RGBA {
-	// A simple piecewise ramp is enough here because the goal is readability and a
-	// clear low-to-high heat map, not an exact scientific color standard.
+	// Use a simple piecewise ramp.
 	switch {
 	case v < 85:
 		return color.RGBA{R: uint8(v * 3), A: 255}

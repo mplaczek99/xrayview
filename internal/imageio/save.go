@@ -7,9 +7,8 @@ import (
 	"os"
 )
 
+// SavePNG writes img to path as a PNG file.
 func SavePNG(path string, img image.Image) error {
-	// Every output is normalized to PNG so callers can save grayscale and RGBA
-	// results through one path without negotiating multiple file formats.
 	file, err := os.Create(path)
 	if err != nil {
 		return fmt.Errorf("create output image: %w", err)

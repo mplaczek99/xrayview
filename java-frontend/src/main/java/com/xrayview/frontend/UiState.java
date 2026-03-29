@@ -1,7 +1,6 @@
 package com.xrayview.frontend;
 
-// UiState keeps processing settings separate from JavaFX widgets so backend
-// calls can use a stable snapshot of the current selections.
+/** Holds the current processing options. */
 public final class UiState {
     private double brightness;
     private double contrast;
@@ -10,7 +9,7 @@ public final class UiState {
     private String palette;
 
     public UiState() {
-        // Match the initial control defaults.
+        // Match the default control values.
         this.brightness = 0.0;
         this.contrast = 1.0;
         this.invert = false;

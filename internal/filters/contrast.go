@@ -5,9 +5,8 @@ import (
 	"math"
 )
 
+// AdjustContrast scales contrast around mid-gray.
 func AdjustContrast(src *image.Gray, factor float64) *image.Gray {
-	// Contrast is adjusted around mid-gray so a factor of 1.0 is a no-op and the
-	// midpoint remains visually stable while darker and lighter tones spread out.
 	bounds := src.Bounds()
 	dst := image.NewGray(bounds)
 
@@ -15,7 +14,7 @@ func AdjustContrast(src *image.Gray, factor float64) *image.Gray {
 		for x := bounds.Min.X; x < bounds.Max.X; x++ {
 			value := 128 + factor*(float64(src.GrayAt(x, y).Y)-128)
 
-			// Clamp before writing so strong factors cannot produce invalid bytes.
+			// Clamp to 0..255.
 			if value < 0 {
 				value = 0
 			}
