@@ -35,7 +35,7 @@ fi
 OUTPUT_DIR="$(dirname "$OUTPUT_APPIMAGE")"
 mkdir -p "$OUTPUT_DIR"
 
-bash "$PROJECT_DIR/package-app-image.sh" "$BACKEND_BINARY"
+bash "$PROJECT_DIR/package-app-image.sh" "$BACKEND_BINARY" "$APP_VERSION"
 
 if [ ! -d "$APP_BUNDLE_DIR" ]; then
     printf 'Expected jpackage app-image at %s\n' "$APP_BUNDLE_DIR" >&2

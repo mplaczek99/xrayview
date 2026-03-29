@@ -13,6 +13,29 @@ ICON_FILE="$TARGET_DIR/xrayview-placeholder.ico"
 BACKEND_BINARY="${1:-}"
 APP_VERSION="${2:-}"
 BACKEND_NAME=""
+PROJECT_JAR=""
+
+resolve_project_jar() {
+    local candidates=()
+    local latest=""
+
+    shopt -s nullglob
+    candidates=("$TARGET_DIR"/xrayview-java-frontend-*.jar)
+    shopt -u nullglob
+
+    if [ "${#candidates[@]}" -eq 0 ]; then
+        return 1
+    fi
+
+    latest="${candidates[0]}"
+    for candidate in "${candidates[@]:1}"; do
+        if [ "$candidate" -nt "$latest" ]; then
+            latest="$candidate"
+        fi
+    done
+
+    basename "$latest"
+}
 
 if ! command -v jpackage >/dev/null 2>&1; then
     printf 'jpackage is required but was not found on PATH.\n' >&2
@@ -47,14 +70,14 @@ fi
 BACKEND_NAME="$(basename "$BACKEND_BINARY")"
 
 if [ -z "$APP_VERSION" ]; then
-    printf 'Pass the numeric app version as the second argument, for example 0.1.0.\n' >&2
+    printf 'Pass the numeric app version as the second argument, for example 0.1.1.\n' >&2
     exit 1
 fi
 
 rm -rf "$INSTALLER_DIR" "$APP_INPUT_DIR"
 mkdir -p "$INSTALLER_DIR" "$APP_INPUT_DIR/lib" "$APP_INPUT_DIR/backend"
 
-PROJECT_JAR="$(basename "$TARGET_DIR"/xrayview-java-frontend-*.jar)"
+PROJECT_JAR="$(resolve_project_jar)"
 cp "$TARGET_DIR/$PROJECT_JAR" "$APP_INPUT_DIR/"
 cp "$TARGET_DIR"/lib/*.jar "$APP_INPUT_DIR/lib/"
 cp "$BACKEND_BINARY" "$APP_INPUT_DIR/backend/$BACKEND_NAME"

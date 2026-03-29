@@ -45,6 +45,6 @@ chmod +x appimagetool-x86_64.AppImage
 bash java-frontend/package-linux-appimage.sh \
   java-frontend/target/xrayview \
   java-frontend/target/release/XRayView.AppImage \
-  0.1.0 \
+  0.1.1 \
   ./appimagetool-x86_64.AppImage
 ```

@@ -4,7 +4,7 @@
 
     <groupId>com.xrayview</groupId>
     <artifactId>xrayview-java-frontend</artifactId>
-    <version>0.1.0-SNAPSHOT</version>
+    <version>0.1.1</version>
     <name>XRayView Java Frontend</name>
 
     <properties>
