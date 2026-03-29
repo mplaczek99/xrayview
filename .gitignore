@@ -1,3 +1,7 @@
+/xrayview
+/xrayview.exe
+
+java-frontend/bin/
 java-frontend/target/
 java-frontend/.classpath
 java-frontend/.project
