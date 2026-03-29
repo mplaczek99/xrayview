@@ -46,7 +46,7 @@ Prebuilt desktop packages are published on GitHub Releases starting with `v0.1.0
 ## Basic Usage
 
 ```bash
-go run ./cmd/xrayview -input teeth-test.jpg
+go run ./cmd/xrayview -input images/teeth-test.jpg
 ```
 
 If `-output` is omitted, the tool writes a file next to the input using this pattern:
@@ -163,13 +163,13 @@ Notes:
 ### Basic processing
 
 ```bash
-go run ./cmd/xrayview -input teeth-test.jpg
+go run ./cmd/xrayview -input images/teeth-test.jpg
 ```
 
 #### Explicit output file
 
 ```bash
-go run ./cmd/xrayview -input teeth-test.jpg -output teeth-test_out.png
+go run ./cmd/xrayview -input images/teeth-test.jpg -output images/teeth-test_out.png
 ```
 
 ### Tone adjustments
@@ -177,13 +177,13 @@ go run ./cmd/xrayview -input teeth-test.jpg -output teeth-test_out.png
 #### Inverted grayscale with brightness adjustment
 
 ```bash
-go run ./cmd/xrayview -input teeth-test.jpg -invert -brightness 15
+go run ./cmd/xrayview -input images/teeth-test.jpg -invert -brightness 15
 ```
 
 #### Higher contrast with histogram equalization
 
 ```bash
-go run ./cmd/xrayview -input teeth-test.jpg -contrast 1.6 -equalize
+go run ./cmd/xrayview -input images/teeth-test.jpg -contrast 1.6 -equalize
 ```
 
 ### Presets
@@ -191,13 +191,13 @@ go run ./cmd/xrayview -input teeth-test.jpg -contrast 1.6 -equalize
 #### Use a preset
 
 ```bash
-go run ./cmd/xrayview -input teeth-test.jpg -preset xray
+go run ./cmd/xrayview -input images/teeth-test.jpg -preset xray
 ```
 
 #### Use a preset but override one value
 
 ```bash
-go run ./cmd/xrayview -input teeth-test.jpg -preset xray -brightness 5
+go run ./cmd/xrayview -input images/teeth-test.jpg -preset xray -brightness 5
 ```
 
 ### Pipeline ordering
@@ -205,7 +205,7 @@ go run ./cmd/xrayview -input teeth-test.jpg -preset xray -brightness 5
 #### Apply a custom grayscale step order
 
 ```bash
-go run ./cmd/xrayview -input teeth-test.jpg -invert -contrast 1.5 -equalize -pipeline grayscale,contrast,invert,equalize
+go run ./cmd/xrayview -input images/teeth-test.jpg -invert -contrast 1.5 -equalize -pipeline grayscale,contrast,invert,equalize
 ```
 
 ### Pseudocolor
@@ -213,7 +213,7 @@ go run ./cmd/xrayview -input teeth-test.jpg -invert -contrast 1.5 -equalize -pip
 #### Apply a pseudocolor palette
 
 ```bash
-go run ./cmd/xrayview -input teeth-test.jpg -palette hot
+go run ./cmd/xrayview -input images/teeth-test.jpg -palette hot
 ```
 
 ### Comparison output
@@ -221,13 +221,13 @@ go run ./cmd/xrayview -input teeth-test.jpg -palette hot
 #### Write a before/after comparison image
 
 ```bash
-go run ./cmd/xrayview -input teeth-test.jpg -compare
+go run ./cmd/xrayview -input images/teeth-test.jpg -compare
 ```
 
 #### Comparison with processing and pseudocolor
 
 ```bash
-go run ./cmd/xrayview -input teeth-test.jpg -preset xray -compare
+go run ./cmd/xrayview -input images/teeth-test.jpg -preset xray -compare
 ```
 
 ## Example Outputs
@@ -235,7 +235,7 @@ go run ./cmd/xrayview -input teeth-test.jpg -preset xray -compare
 ### Grayscale vs equalized
 
 ```bash
-go run ./cmd/xrayview -input teeth-test.jpg -output images/equalized.png -equalize
+go run ./cmd/xrayview -input images/teeth-test.jpg -output images/equalized.png -equalize
 ```
 
 ![Grayscale vs equalized](images/equalized.png)
@@ -245,7 +245,7 @@ Caption: Histogram equalization spreads midtone detail more aggressively, which 
 ### Hot palette
 
 ```bash
-go run ./cmd/xrayview -input teeth-test.jpg -output images/hot.png -palette hot
+go run ./cmd/xrayview -input images/teeth-test.jpg -output images/hot.png -palette hot
 ```
 
 ![Hot palette output](images/hot.png)
@@ -255,7 +255,7 @@ Caption: The hot palette maps low intensities to dark reds and high intensities 
 ### Bone palette with preset
 
 ```bash
-go run ./cmd/xrayview -input teeth-test.jpg -output images/bone.png -preset xray
+go run ./cmd/xrayview -input images/teeth-test.jpg -output images/bone.png -preset xray
 ```
 
 ![Bone palette preset output](images/bone.png)
