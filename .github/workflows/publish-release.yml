@@ -24,13 +24,13 @@ jobs:
             platform: linux
             backend_output: java-frontend/target/xrayview
             artifact_name: xrayview-linux-release-asset
-            asset_suffix: linux-x86_64.AppImage
+            asset_suffix: linux.AppImage
           - os: windows-latest
             label: Windows
             platform: windows
             backend_output: java-frontend/target/xrayview.exe
             artifact_name: xrayview-windows-release-asset
-            asset_suffix: windows-msi.msi
+            asset_suffix: windows.msi
 
     defaults:
       run:
