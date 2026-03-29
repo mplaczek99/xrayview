@@ -1,9 +1,10 @@
 # Packaging
 
-The first packaging target is a local `jpackage` app-image on the current OS.
+The base packaging target is a local `jpackage` app-image on the current OS.
 
 - It produces a self-contained runnable app without adding installer, signing, or platform-specific packaging work yet.
 - This step stages a separately built Go backend binary into the app-image at `lib/app/backend/xrayview`.
+- Linux releases wrap that app-image in a single `.AppImage` executable with `appimagetool`.
 
 Requirements:
 
@@ -33,4 +34,17 @@ Run the packaged app:
 
 ```bash
 ./java-frontend/target/app-image/XRayView/bin/XRayView
+```
+
+Build the Linux `.AppImage`:
+
+```bash
+curl -fsSL -o appimagetool-x86_64.AppImage \
+  https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+chmod +x appimagetool-x86_64.AppImage
+bash java-frontend/package-linux-appimage.sh \
+  java-frontend/target/xrayview \
+  java-frontend/target/release/XRayView.AppImage \
+  0.1.0 \
+  ./appimagetool-x86_64.AppImage
 ```

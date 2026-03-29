@@ -24,7 +24,7 @@ jobs:
             platform: linux
             backend_output: java-frontend/target/xrayview
             artifact_name: xrayview-linux-release-asset
-            asset_suffix: linux-app-image.tar.gz
+            asset_suffix: linux-x86_64.AppImage
           - os: windows-latest
             label: Windows
             platform: windows
@@ -70,20 +70,27 @@ jobs:
       - name: Build Java frontend
         run: mvn -B -f java-frontend/pom.xml package
 
-      - name: Build app-image
+      - name: Download appimagetool
         if: runner.os == 'Linux'
-        run: bash java-frontend/package-app-image.sh "${{ matrix.backend_output }}"
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/appimagetool-x86_64.AppImage" \
+            https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x "$RUNNER_TEMP/appimagetool-x86_64.AppImage"
+
+      - name: Build Linux AppImage
+        if: runner.os == 'Linux'
+        run: |
+          asset_name="xrayview-${GITHUB_REF_NAME}-${{ matrix.asset_suffix }}"
+          bash java-frontend/package-linux-appimage.sh \
+            "${{ matrix.backend_output }}" \
+            "$asset_name" \
+            "${GITHUB_REF_NAME#v}" \
+            "$RUNNER_TEMP/appimagetool-x86_64.AppImage"
+          printf 'ASSET_NAME=%s\n' "$asset_name" >> "$GITHUB_ENV"
 
       - name: Build Windows MSI
         if: runner.os == 'Windows'
         run: bash java-frontend/package-windows-msi.sh "${{ matrix.backend_output }}" "${GITHUB_REF_NAME#v}"
-
-      - name: Archive Linux app-image
-        if: runner.os == 'Linux'
-        run: |
-          asset_name="xrayview-${GITHUB_REF_NAME}-${{ matrix.asset_suffix }}"
-          tar -czf "$asset_name" -C java-frontend/target/app-image XRayView
-          printf 'ASSET_NAME=%s\n' "$asset_name" >> "$GITHUB_ENV"
 
       - name: Prepare Windows MSI asset
         if: runner.os == 'Windows'

@@ -10,8 +10,8 @@ on:
       - main
 
 jobs:
-  build-app-image:
-    name: Build app-image (${{ matrix.label }})
+  build-desktop-package:
+    name: Build desktop package (${{ matrix.label }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -19,12 +19,14 @@ jobs:
         include:
           - os: ubuntu-latest
             label: Linux
-            artifact_name: xrayview-linux-app-image
+            artifact_name: xrayview-linux-appimage
             backend_output: java-frontend/target/xrayview
+            artifact_path: java-frontend/target/release/XRayView.AppImage
           - os: windows-latest
             label: Windows
             artifact_name: xrayview-windows-app-image
             backend_output: java-frontend/target/xrayview.exe
+            artifact_path: java-frontend/target/app-image/XRayView
 
     defaults:
       run:
@@ -52,12 +54,24 @@ jobs:
       - name: Build Java frontend
         run: mvn -B -f java-frontend/pom.xml package
 
-      - name: Build app-image
+      - name: Download appimagetool
+        if: runner.os == 'Linux'
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/appimagetool-x86_64.AppImage" \
+            https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x "$RUNNER_TEMP/appimagetool-x86_64.AppImage"
+
+      - name: Build Linux AppImage
+        if: runner.os == 'Linux'
+        run: bash java-frontend/package-linux-appimage.sh "${{ matrix.backend_output }}" "${{ matrix.artifact_path }}" "" "$RUNNER_TEMP/appimagetool-x86_64.AppImage"
+
+      - name: Build Windows app-image
+        if: runner.os == 'Windows'
         run: bash java-frontend/package-app-image.sh "${{ matrix.backend_output }}"
 
-      - name: Upload app-image artifact
+      - name: Upload desktop package artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact_name }}
-          path: java-frontend/target/app-image/XRayView
+          path: ${{ matrix.artifact_path }}
           if-no-files-found: error
