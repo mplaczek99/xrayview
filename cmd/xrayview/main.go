@@ -30,9 +30,6 @@ type config struct {
 	palette    string
 }
 
-// grayFilter applies one grayscale-only processing step.
-type grayFilter func(*image.Gray) *image.Gray
-
 // presetConfig holds preset processing defaults.
 type presetConfig struct {
 	brightness int
@@ -75,7 +72,7 @@ func main() {
 
 	// Keep the original grayscale image for comparison output.
 	originalGray := filters.Grayscale(img)
-	output, mode := processImage(img, cfg)
+	output, mode := processGrayImage(originalGray, cfg)
 	if cfg.compare {
 		output = combineComparison(originalGray, output)
 		mode = fmt.Sprintf("comparison of grayscale and %s", mode)
@@ -92,13 +89,24 @@ func main() {
 }
 
 func processImage(img image.Image, cfg config) (image.Image, string) {
-	// Start in grayscale before applying optional filters.
-	output := filters.Grayscale(img)
+	return processGrayImage(filters.Grayscale(img), cfg)
+}
+
+func processGrayImage(output *image.Gray, cfg config) (image.Image, string) {
 	mode := "grayscale"
-	pipeline := make([]grayFilter, 0, 4)
 
 	steps, _ := pipelineSteps(cfg.pipeline)
 	steps = effectivePipelineSteps(steps, cfg)
+	lookup := identityLookupTable()
+	pendingLookup := false
+	flushLookup := func() {
+		if !pendingLookup {
+			return
+		}
+		output = filters.ApplyLookupTable(output, lookup)
+		lookup = identityLookupTable()
+		pendingLookup = false
+	}
 
 	for _, step := range steps {
 		switch step {
@@ -106,36 +114,32 @@ func processImage(img image.Image, cfg config) (image.Image, string) {
 			// Already applied.
 		case "invert":
 			if cfg.invert {
-				pipeline = append(pipeline, filters.Invert)
+				composeInvertLookup(&lookup)
+				pendingLookup = true
 				mode = strings.Replace(mode, "grayscale", "inverted grayscale", 1)
 			}
 		case "brightness":
 			if cfg.brightness != 0 {
-				delta := cfg.brightness
-				pipeline = append(pipeline, func(img *image.Gray) *image.Gray {
-					return filters.AdjustBrightness(img, delta)
-				})
+				composeBrightnessLookup(&lookup, cfg.brightness)
+				pendingLookup = true
 				mode = fmt.Sprintf("%s with brightness %+d", mode, cfg.brightness)
 			}
 		case "contrast":
 			if cfg.contrast != 1.0 {
-				factor := cfg.contrast
-				pipeline = append(pipeline, func(img *image.Gray) *image.Gray {
-					return filters.AdjustContrast(img, factor)
-				})
+				composeContrastLookup(&lookup, cfg.contrast)
+				pendingLookup = true
 				mode = fmt.Sprintf("%s with contrast %g", mode, cfg.contrast)
 			}
 		case "equalize":
 			if cfg.equalize {
-				pipeline = append(pipeline, filters.EqualizeHistogram)
+				flushLookup()
+				output = filters.EqualizeHistogram(output)
 				mode = fmt.Sprintf("%s with histogram equalization", mode)
 			}
 		}
 	}
 
-	for _, filter := range pipeline {
-		output = filter(output)
-	}
+	flushLookup()
 
 	// Apply pseudocolor after grayscale filters.
 	if cfg.palette == "hot" {
@@ -146,6 +150,43 @@ func processImage(img image.Image, cfg config) (image.Image, string) {
 	}
 
 	return output, mode
+}
+
+func identityLookupTable() [256]uint8 {
+	var lut [256]uint8
+	for i := range lut {
+		lut[i] = uint8(i)
+	}
+	return lut
+}
+
+func composeInvertLookup(lut *[256]uint8) {
+	for i, value := range lut {
+		lut[i] = 255 - value
+	}
+}
+
+func composeBrightnessLookup(lut *[256]uint8, delta int) {
+	for i, value := range lut {
+		lut[i] = clampLookupValue(int(value) + delta)
+	}
+}
+
+func composeContrastLookup(lut *[256]uint8, factor float64) {
+	for i, value := range lut {
+		adjusted := 128 + factor*(float64(value)-128)
+		lut[i] = clampLookupValue(int(math.Round(adjusted)))
+	}
+}
+
+func clampLookupValue(value int) uint8 {
+	if value < 0 {
+		return 0
+	}
+	if value > 255 {
+		return 255
+	}
+	return uint8(value)
 }
 
 func parseFlags() config {

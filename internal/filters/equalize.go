@@ -6,15 +6,18 @@ import "image"
 func EqualizeHistogram(src *image.Gray) *image.Gray {
 	bounds := src.Bounds()
 	dst := image.NewGray(bounds)
-	total := bounds.Dx() * bounds.Dy()
+	width := bounds.Dx()
+	total := width * bounds.Dy()
 	if total == 0 {
 		return dst
 	}
 
 	var hist [256]int
 	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
-		for x := bounds.Min.X; x < bounds.Max.X; x++ {
-			hist[src.GrayAt(x, y).Y]++
+		rowStart := src.PixOffset(bounds.Min.X, y)
+		row := src.Pix[rowStart : rowStart+width]
+		for _, value := range row {
+			hist[value]++
 		}
 	}
 
@@ -32,11 +35,7 @@ func EqualizeHistogram(src *image.Gray) *image.Gray {
 
 	// Leave flat images unchanged.
 	if cdfMin == total {
-		for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
-			for x := bounds.Min.X; x < bounds.Max.X; x++ {
-				dst.SetGray(x, y, src.GrayAt(x, y))
-			}
-		}
+		copyGrayRows(dst, src)
 		return dst
 	}
 
@@ -53,10 +52,12 @@ func EqualizeHistogram(src *image.Gray) *image.Gray {
 	}
 
 	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
-		for x := bounds.Min.X; x < bounds.Max.X; x++ {
-			gray := src.GrayAt(x, y)
-			gray.Y = lut[gray.Y]
-			dst.SetGray(x, y, gray)
+		srcStart := src.PixOffset(bounds.Min.X, y)
+		dstStart := dst.PixOffset(bounds.Min.X, y)
+		srcRow := src.Pix[srcStart : srcStart+width]
+		dstRow := dst.Pix[dstStart : dstStart+width]
+		for x, value := range srcRow {
+			dstRow[x] = lut[value]
 		}
 	}
 

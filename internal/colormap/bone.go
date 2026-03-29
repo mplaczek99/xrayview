@@ -5,19 +5,11 @@ import (
 	"image/color"
 )
 
+var bonePalette = buildPalette(boneColor)
+
 // Bone maps grayscale values to a cool X-ray-style palette.
 func Bone(src *image.Gray) *image.RGBA {
-	bounds := src.Bounds()
-	dst := image.NewRGBA(bounds)
-
-	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
-		for x := bounds.Min.X; x < bounds.Max.X; x++ {
-			v := int(src.GrayAt(x, y).Y)
-			dst.SetRGBA(x, y, boneColor(v))
-		}
-	}
-
-	return dst
+	return applyPalette(src, bonePalette)
 }
 
 func boneColor(v int) color.RGBA {

@@ -5,19 +5,11 @@ import (
 	"image/color"
 )
 
+var hotPalette = buildPalette(hotColor)
+
 // Hot maps grayscale values to a black-red-yellow-white palette.
 func Hot(src *image.Gray) *image.RGBA {
-	bounds := src.Bounds()
-	dst := image.NewRGBA(bounds)
-
-	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
-		for x := bounds.Min.X; x < bounds.Max.X; x++ {
-			v := int(src.GrayAt(x, y).Y)
-			dst.SetRGBA(x, y, hotColor(v))
-		}
-	}
-
-	return dst
+	return applyPalette(src, hotPalette)
 }
 
 func hotColor(v int) color.RGBA {
