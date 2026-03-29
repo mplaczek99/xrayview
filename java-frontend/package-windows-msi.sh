@@ -71,7 +71,6 @@ jpackage \
     --icon "$ICON_FILE" \
     --main-jar "$PROJECT_JAR" \
     --main-class "com.xrayview.frontend.XRayViewLauncher" \
-    --java-options "--enable-native-access=javafx.graphics" \
-    --java-options "--sun-misc-unsafe-memory-access=allow"
+    --java-options "--enable-native-access=ALL-UNNAMED"
 
 printf 'Created MSI in %s\n' "$INSTALLER_DIR"

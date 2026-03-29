@@ -50,8 +50,7 @@ jpackage \
     --name "$APP_NAME" \
     --main-jar "$PROJECT_JAR" \
     --main-class "com.xrayview.frontend.XRayViewLauncher" \
-    --java-options "--enable-native-access=javafx.graphics" \
-    --java-options "--sun-misc-unsafe-memory-access=allow"
+    --java-options "--enable-native-access=ALL-UNNAMED"
 
 printf 'Created app image at %s/%s\n' "$APP_IMAGE_DIR" "$APP_NAME"
 printf 'Bundled backend copied to lib/app/backend/xrayview inside the app image.\n'

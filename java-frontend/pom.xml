@@ -71,8 +71,7 @@
                 <configuration>
                     <mainClass>${main.class}</mainClass>
                     <options>
-                        <option>--enable-native-access=javafx.graphics</option>
-                        <option>--sun-misc-unsafe-memory-access=allow</option>
+                        <option>--enable-native-access=ALL-UNNAMED</option>
                     </options>
                 </configuration>
             </plugin>
