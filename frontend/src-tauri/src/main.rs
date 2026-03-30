@@ -73,7 +73,7 @@ struct BackendSpec {
 #[tauri::command]
 fn pick_dicom_file() -> Option<String> {
     FileDialog::new()
-        .add_filter("DICOM", &["dcm", "dicom"])
+        .set_title("Open DICOM Study")
         .pick_file()
         .map(path_to_string)
 }
@@ -94,7 +94,6 @@ async fn run_backend_preview(
     input_path: String,
 ) -> Result<PreviewResponse, String> {
     let preview_path = create_temp_file(".png")?;
-    let study_description = describe_study(&app, &input_path).await?;
 
     let args = vec![
         "-input".to_string(),
@@ -107,7 +106,7 @@ async fn run_backend_preview(
 
     Ok(PreviewResponse {
         preview_path: path_to_string(preview_path),
-        measurement_scale: study_description.measurement_scale,
+        measurement_scale: describe_study_if_available(&app, &args[1]).await,
     })
 }
 
@@ -135,12 +134,12 @@ async fn run_backend_process(
     ];
 
     let _ = run_backend_command(&app, &args).await?;
-    let study_description = describe_study(&app, &path_to_string(dicom_path.clone())).await?;
+    let dicom_path_string = path_to_string(dicom_path.clone());
 
     Ok(ProcessResponse {
         preview_path: path_to_string(preview_path),
         dicom_path: path_to_string(dicom_path),
-        measurement_scale: study_description.measurement_scale,
+        measurement_scale: describe_study_if_available(&app, &dicom_path_string).await,
     })
 }
 
@@ -179,6 +178,16 @@ async fn describe_study(
 
     serde_json::from_str(&stdout)
         .map_err(|error| format!("failed to parse backend study description: {error}"))
+}
+
+async fn describe_study_if_available(
+    app: &tauri::AppHandle,
+    input_path: &str,
+) -> Option<MeasurementScale> {
+    describe_study(app, input_path)
+        .await
+        .ok()
+        .and_then(|description| description.measurement_scale)
 }
 
 fn create_temp_file(suffix: &str) -> Result<PathBuf, String> {
