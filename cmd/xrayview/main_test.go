@@ -8,25 +8,65 @@ import (
 )
 
 func TestDefaultOutputPath(t *testing.T) {
-	got := defaultOutputPath("images/scan.jpg")
-	want := "images/scan_processed.png"
+	got := defaultOutputPath("images/scan.dcm")
+	want := "images/scan_processed.dcm"
 
 	if got != want {
 		t.Fatalf("output path = %q, want %q", got, want)
 	}
 }
 
-func TestValidateConfigRejectsNonPNGOutput(t *testing.T) {
+func TestValidateConfigRejectsUnsupportedOutput(t *testing.T) {
 	err := validateConfig(config{
-		inputPath:  "input.jpg",
+		inputPath:  "input.dcm",
 		outputPath: "output.jpg",
 	})
 	if err == nil {
-		t.Fatal("expected validation error for non-png output")
+		t.Fatal("expected validation error for unsupported output")
 	}
 
-	if err.Error() != "output path must end with .png" {
-		t.Fatalf("error = %q, want %q", err.Error(), "output path must end with .png")
+	if err.Error() != "output path must end with .dcm or .dicom" {
+		t.Fatalf("error = %q, want %q", err.Error(), "output path must end with .dcm or .dicom")
+	}
+}
+
+func TestValidateConfigAllowsDICOMOutput(t *testing.T) {
+	err := validateConfig(config{
+		inputPath:  "input.dcm",
+		outputPath: "output.dcm",
+		preset:     "default",
+		palette:    "none",
+	})
+	if err != nil {
+		t.Fatalf("validateConfig returned error: %v", err)
+	}
+}
+
+func TestValidateConfigRejectsNonDICOMInput(t *testing.T) {
+	err := validateConfig(config{
+		inputPath:  "input.jpg",
+		outputPath: "output.dcm",
+		preset:     "default",
+		palette:    "none",
+	})
+	if err == nil {
+		t.Fatal("expected validation error for non-dicom input")
+	}
+
+	if err.Error() != "input path must end with .dcm or .dicom" {
+		t.Fatalf("error = %q, want %q", err.Error(), "input path must end with .dcm or .dicom")
+	}
+}
+
+func TestValidateConfigAllowsPreviewOutputWithoutDICOMSave(t *testing.T) {
+	err := validateConfig(config{
+		inputPath:         "input.dcm",
+		previewOutputPath: "preview.png",
+		preset:            "default",
+		palette:           "none",
+	})
+	if err != nil {
+		t.Fatalf("validateConfig returned error: %v", err)
 	}
 }
 
@@ -50,8 +90,8 @@ func TestPipelineStepsParsesExplicitOrder(t *testing.T) {
 
 func TestValidateConfigRejectsUnknownPipelineStep(t *testing.T) {
 	err := validateConfig(config{
-		inputPath:  "input.jpg",
-		outputPath: "output.png",
+		inputPath:  "input.dcm",
+		outputPath: "output.dcm",
 		preset:     "default",
 		palette:    "none",
 		pipeline:   "grayscale,sharpen",
@@ -90,8 +130,8 @@ func TestApplyPresetUsesPresetAndKeepsExplicitOverrides(t *testing.T) {
 
 func TestValidateConfigRejectsUnknownPreset(t *testing.T) {
 	err := validateConfig(config{
-		inputPath:  "input.jpg",
-		outputPath: "output.png",
+		inputPath:  "input.dcm",
+		outputPath: "output.dcm",
 		preset:     "unknown",
 		palette:    "none",
 	})
@@ -106,8 +146,8 @@ func TestValidateConfigRejectsUnknownPreset(t *testing.T) {
 
 func TestValidateConfigRejectsNonFiniteContrast(t *testing.T) {
 	err := validateConfig(config{
-		inputPath:  "input.jpg",
-		outputPath: "output.png",
+		inputPath:  "input.dcm",
+		outputPath: "output.dcm",
 		preset:     "default",
 		palette:    "none",
 		contrast:   math.NaN(),

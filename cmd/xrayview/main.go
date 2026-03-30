@@ -1,4 +1,4 @@
-// Command xrayview applies visualization filters to an image and writes PNG output.
+// Command xrayview applies visualization filters to a DICOM image and writes DICOM output.
 
 package main
 
@@ -18,16 +18,17 @@ import (
 
 // config holds resolved CLI settings.
 type config struct {
-	inputPath  string
-	outputPath string
-	preset     string
-	invert     bool
-	brightness int
-	contrast   float64
-	equalize   bool
-	compare    bool
-	pipeline   string
-	palette    string
+	inputPath         string
+	outputPath        string
+	previewOutputPath string
+	preset            string
+	invert            bool
+	brightness        int
+	contrast          float64
+	equalize          bool
+	compare           bool
+	pipeline          string
+	palette           string
 }
 
 // presetConfig holds preset processing defaults.
@@ -64,28 +65,42 @@ var defaultPipelineOrder = []string{"grayscale", "invert", "brightness", "contra
 func main() {
 	cfg := parseFlags()
 
-	img, format, err := imageio.Load(cfg.inputPath)
+	loaded, err := imageio.Load(cfg.inputPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
 
 	// Keep the original grayscale image for comparison output.
-	originalGray := filters.Grayscale(img)
+	originalGray := filters.Grayscale(loaded.Image)
 	output, mode := processGrayImage(originalGray, cfg)
 	if cfg.compare {
 		output = combineComparison(originalGray, output)
 		mode = fmt.Sprintf("comparison of grayscale and %s", mode)
 	}
 
-	if err := imageio.SavePNG(cfg.outputPath, output); err != nil {
-		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(1)
+	if cfg.previewOutputPath != "" {
+		if err := imageio.SavePreviewPNG(cfg.previewOutputPath, output); err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
 	}
 
-	bounds := img.Bounds()
-	fmt.Printf("loaded %s image: %dx%d\n", format, bounds.Dx(), bounds.Dy())
-	fmt.Printf("saved %s png image: %s\n", mode, cfg.outputPath)
+	if cfg.outputPath != "" {
+		if err := imageio.SaveDICOM(cfg.outputPath, output, loaded); err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
+	}
+
+	bounds := loaded.Image.Bounds()
+	fmt.Printf("loaded %s image: %dx%d\n", loaded.Format, bounds.Dx(), bounds.Dy())
+	if cfg.previewOutputPath != "" {
+		fmt.Printf("saved %s preview image: %s\n", mode, cfg.previewOutputPath)
+	}
+	if cfg.outputPath != "" {
+		fmt.Printf("saved %s dicom image: %s\n", mode, cfg.outputPath)
+	}
 }
 
 func processImage(img image.Image, cfg config) (image.Image, string) {
@@ -192,8 +207,9 @@ func clampLookupValue(value int) uint8 {
 func parseFlags() config {
 	var cfg config
 
-	flag.StringVar(&cfg.inputPath, "input", "", "input image path")
-	flag.StringVar(&cfg.outputPath, "output", "", "output PNG path (default: input_processed.png)")
+	flag.StringVar(&cfg.inputPath, "input", "", "input DICOM path")
+	flag.StringVar(&cfg.outputPath, "output", "", "output DICOM path (default: input_processed.dcm)")
+	flag.StringVar(&cfg.previewOutputPath, "preview-output", "", "internal preview PNG path")
 	flag.StringVar(&cfg.preset, "preset", "default", "preset: default, xray, or high-contrast")
 	flag.BoolVar(&cfg.invert, "invert", false, "invert grayscale output")
 	flag.IntVar(&cfg.brightness, "brightness", 0, "brightness delta for grayscale output")
@@ -204,8 +220,28 @@ func parseFlags() config {
 	flag.StringVar(&cfg.palette, "palette", "none", "pseudocolor palette: none, hot, or bone")
 
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage of xrayview:\n")
-		flag.PrintDefaults()
+		out := flag.CommandLine.Output()
+		fmt.Fprintln(out, "Usage of xrayview:")
+		fmt.Fprintln(out, "  -input string")
+		fmt.Fprintln(out, "        input DICOM path")
+		fmt.Fprintln(out, "  -output string")
+		fmt.Fprintln(out, "        output DICOM path (default: input_processed.dcm)")
+		fmt.Fprintln(out, "  -preset string")
+		fmt.Fprintln(out, "        preset: default, xray, or high-contrast")
+		fmt.Fprintln(out, "  -invert")
+		fmt.Fprintln(out, "        invert grayscale output")
+		fmt.Fprintln(out, "  -brightness int")
+		fmt.Fprintln(out, "        brightness delta for grayscale output")
+		fmt.Fprintln(out, "  -contrast float")
+		fmt.Fprintln(out, "        contrast factor for grayscale output")
+		fmt.Fprintln(out, "  -equalize")
+		fmt.Fprintln(out, "        apply histogram equalization")
+		fmt.Fprintln(out, "  -compare")
+		fmt.Fprintln(out, "        save grayscale and processed output side-by-side")
+		fmt.Fprintln(out, "  -pipeline string")
+		fmt.Fprintln(out, "        comma-separated grayscale steps")
+		fmt.Fprintln(out, "  -palette string")
+		fmt.Fprintln(out, "        pseudocolor palette: none, hot, or bone")
 	}
 
 	flag.Parse()
@@ -220,7 +256,7 @@ func parseFlags() config {
 	cfg.preset = strings.ToLower(cfg.preset)
 
 	// Fill in the default output path before validation.
-	if cfg.outputPath == "" && cfg.inputPath != "" {
+	if cfg.outputPath == "" && cfg.previewOutputPath == "" && cfg.inputPath != "" {
 		cfg.outputPath = defaultOutputPath(cfg.inputPath)
 	}
 
@@ -245,6 +281,9 @@ func validateConfig(cfg config) error {
 	if cfg.inputPath == "" {
 		return fmt.Errorf("-input is required")
 	}
+	if !hasDICOMExtension(cfg.inputPath) {
+		return fmt.Errorf("input path must end with .dcm or .dicom")
+	}
 	preset := cfg.preset
 	if preset == "" {
 		preset = "default"
@@ -253,8 +292,14 @@ func validateConfig(cfg config) error {
 		return fmt.Errorf("preset must be one of: default, xray, high-contrast")
 	}
 
-	if !strings.HasSuffix(strings.ToLower(cfg.outputPath), ".png") {
-		return fmt.Errorf("output path must end with .png")
+	if cfg.outputPath == "" && cfg.previewOutputPath == "" {
+		return fmt.Errorf("either -output or internal preview output must be set")
+	}
+	if cfg.outputPath != "" && !hasDICOMExtension(cfg.outputPath) {
+		return fmt.Errorf("output path must end with .dcm or .dicom")
+	}
+	if cfg.previewOutputPath != "" && !strings.HasSuffix(strings.ToLower(cfg.previewOutputPath), ".png") {
+		return fmt.Errorf("preview output path must end with .png")
 	}
 	if math.IsNaN(cfg.contrast) || math.IsInf(cfg.contrast, 0) || cfg.contrast < 0 {
 		return fmt.Errorf("contrast must be a finite value greater than or equal to 0")
@@ -364,5 +409,10 @@ func defaultOutputPath(inputPath string) string {
 		name = base
 	}
 
-	return filepath.Join(dir, name+"_processed.png")
+	return filepath.Join(dir, name+"_processed.dcm")
+}
+
+func hasDICOMExtension(path string) bool {
+	lowered := strings.ToLower(path)
+	return strings.HasSuffix(lowered, ".dcm") || strings.HasSuffix(lowered, ".dicom")
 }

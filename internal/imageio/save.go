@@ -7,8 +7,8 @@ import (
 	"os"
 )
 
-// SavePNG writes img to path as a PNG file.
-func SavePNG(path string, img image.Image) error {
+// SavePreviewPNG writes img to path as an internal PNG preview file.
+func SavePreviewPNG(path string, img image.Image) error {
 	file, err := os.Create(path)
 	if err != nil {
 		return fmt.Errorf("create output image: %w", err)
@@ -24,4 +24,9 @@ func SavePNG(path string, img image.Image) error {
 	}
 
 	return nil
+}
+
+// SaveDICOM writes img to path as a derived DICOM image.
+func SaveDICOM(path string, img image.Image, source LoadedImage) error {
+	return saveDICOM(path, img, source)
 }

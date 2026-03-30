@@ -1,19 +1,19 @@
 # xrayview
 
-`xrayview` is a small image-visualization project with a Java desktop frontend and a Go processing backend.
+`xrayview` is a DICOM-first X-ray visualization project with a Java desktop frontend and a Go processing backend.
 
-The primary desktop UI now lives in `java-frontend/`. The Go CLI in `cmd/xrayview` is the backend processing entry point used by that Java frontend, and it also remains usable directly from the command line.
-
-The Go backend loads a PNG or JPEG image, applies grayscale-oriented visualization steps, and writes a PNG output image. It can also produce pseudocolor output and side-by-side comparison images.
+The primary desktop UI lives in `java-frontend/`. The Go CLI in `cmd/xrayview` is the backend processing entry point used by that Java frontend, and it also remains usable directly from the command line for DICOM workflows.
 
 ## What It Does
 
-- Loads an input image from disk (`.png`, `.jpg`, `.jpeg`)
-- Converts the image to grayscale
+- Loads a DICOM study from disk (`.dcm`, `.dicom`)
+- Renders the study into a grayscale working image
 - Optionally applies invert, brightness, contrast, and histogram equalization
 - Optionally applies a pseudocolor palette
-- Optionally writes a side-by-side comparison image
-- Saves the result as a PNG file
+- Optionally builds a side-by-side comparison image
+- Saves the result as a derived DICOM image
+
+The desktop frontend renders internal PNG previews so JavaFX can display the study, but the user-facing workflow is DICOM in and DICOM out.
 
 ## Important Notice
 
@@ -46,28 +46,28 @@ Prebuilt desktop packages are published on GitHub Releases starting with `v0.1.0
 ## Basic Usage
 
 ```bash
-go run ./cmd/xrayview -input images/teeth-test.jpg
+go run ./cmd/xrayview -input path/to/study.dcm
 ```
 
 If `-output` is omitted, the tool writes a file next to the input using this pattern:
 
-- `input.jpg` -> `input_processed.png`
+- `study.dcm` -> `study_processed.dcm`
 
 ## Flags
 
 ### Input
 
 - `-input`
-  - Path to the source image
-  - Supports PNG and JPEG input
+  - Path to the source DICOM study
+  - Supports `.dcm` and `.dicom`
 
 ### Output
 
 - `-output`
-  - Output PNG path
+  - Output DICOM path
   - Optional
-  - Must end with `.png`
-  - If omitted, `xrayview` generates `input_processed.png` in the same directory as the input
+  - Must end with `.dcm` or `.dicom`
+  - If omitted, `xrayview` generates `input_processed.dcm` in the same directory as the input
 
 ### Presets
 
@@ -119,10 +119,9 @@ If `-output` is omitted, the tool writes a file next to the input using this pat
 ### Comparison Output
 
 - `-compare`
-  - Writes a side-by-side comparison PNG
+  - Writes a side-by-side comparison image into the derived DICOM output
   - Left side: original grayscale image
   - Right side: processed output image
-  - Output width becomes `2x` the original width
 
 ### Pipeline Ordering
 
@@ -165,118 +164,62 @@ Notes:
 ### Basic processing
 
 ```bash
-go run ./cmd/xrayview -input images/teeth-test.jpg
+go run ./cmd/xrayview -input path/to/study.dcm
 ```
 
-#### Explicit output file
+### Explicit output file
 
 ```bash
-go run ./cmd/xrayview -input images/teeth-test.jpg -output images/teeth-test_out.png
+go run ./cmd/xrayview -input path/to/study.dcm -output path/to/study_processed.dcm
 ```
 
 ### Tone adjustments
 
-#### Inverted grayscale with brightness adjustment
-
 ```bash
-go run ./cmd/xrayview -input images/teeth-test.jpg -invert -brightness 15
+go run ./cmd/xrayview -input path/to/study.dcm -invert -brightness 15
 ```
 
-#### Higher contrast with histogram equalization
-
 ```bash
-go run ./cmd/xrayview -input images/teeth-test.jpg -contrast 1.6 -equalize
+go run ./cmd/xrayview -input path/to/study.dcm -contrast 1.6 -equalize
 ```
 
 ### Presets
 
-#### Use a preset
-
 ```bash
-go run ./cmd/xrayview -input images/teeth-test.jpg -preset xray
+go run ./cmd/xrayview -input path/to/study.dcm -preset xray
 ```
 
-#### Use a preset but override one value
-
 ```bash
-go run ./cmd/xrayview -input images/teeth-test.jpg -preset xray -brightness 5
+go run ./cmd/xrayview -input path/to/study.dcm -preset xray -brightness 5
 ```
 
 ### Pipeline ordering
 
-#### Apply a custom grayscale step order
-
 ```bash
-go run ./cmd/xrayview -input images/teeth-test.jpg -invert -contrast 1.5 -equalize -pipeline grayscale,contrast,invert,equalize
+go run ./cmd/xrayview -input path/to/study.dcm -invert -contrast 1.5 -equalize -pipeline grayscale,contrast,invert,equalize
 ```
 
 ### Pseudocolor
 
-#### Apply a pseudocolor palette
-
 ```bash
-go run ./cmd/xrayview -input images/teeth-test.jpg -palette hot
+go run ./cmd/xrayview -input path/to/study.dcm -palette hot
 ```
 
 ### Comparison output
 
-#### Write a before/after comparison image
-
 ```bash
-go run ./cmd/xrayview -input images/teeth-test.jpg -compare
+go run ./cmd/xrayview -input path/to/study.dcm -compare
 ```
 
-#### Comparison with processing and pseudocolor
-
 ```bash
-go run ./cmd/xrayview -input images/teeth-test.jpg -preset xray -compare
+go run ./cmd/xrayview -input path/to/study.dcm -preset xray -compare
 ```
-
-## Example Outputs
-
-### Grayscale vs equalized
-
-```bash
-go run ./cmd/xrayview -input images/teeth-test.jpg -output images/equalized.png -equalize
-```
-
-![Grayscale vs equalized](images/equalized.png)
-
-Caption: Histogram equalization spreads midtone detail more aggressively, which can make faint structures stand out compared with plain grayscale.
-
-### Hot palette
-
-```bash
-go run ./cmd/xrayview -input images/teeth-test.jpg -output images/hot.png -palette hot
-```
-
-![Hot palette output](images/hot.png)
-
-Caption: The hot palette maps low intensities to dark reds and high intensities to yellow-white, making intensity differences easier to spot quickly.
-
-### Bone palette with preset
-
-```bash
-go run ./cmd/xrayview -input images/teeth-test.jpg -output images/bone.png -preset xray
-```
-
-![Bone palette preset output](images/bone.png)
-
-Caption: The `xray` preset combines higher contrast, equalization, and the bone palette for a cooler X-ray-style presentation with brighter highlights.
-
-## Before/After Comparison
-
-When `-compare` is enabled, `xrayview` writes one combined PNG:
-
-- Left half: the original image converted to grayscale
-- Right half: the fully processed result
-
-This makes it easier to inspect how the selected filters and palette change the image without opening two separate files.
 
 ## Validation Rules
 
 - `-input` is required
-- Output must be a `.png` file
+- Input must be a `.dcm` or `.dicom` file
+- Output must be a `.dcm` or `.dicom` file
 - `-palette` must be `none`, `hot`, or `bone`
 - `-preset` must be `default`, `xray`, or `high-contrast`
 - `-pipeline` may only contain `grayscale`, `invert`, `brightness`, `contrast`, and `equalize`

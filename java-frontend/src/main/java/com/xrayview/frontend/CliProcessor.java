@@ -21,6 +21,14 @@ public final class CliProcessor {
     public ExecutionResult run(File inputFile, File outputFile, UiState uiState) throws IOException, InterruptedException {
         List<String> command = buildCliCommand(inputFile, outputFile, uiState);
 
+        return runCommand(command);
+    }
+
+    public ExecutionResult renderPreview(File inputFile, File outputFile) throws IOException, InterruptedException {
+        return run(inputFile, outputFile, new UiState());
+    }
+
+    private ExecutionResult runCommand(List<String> command) throws IOException, InterruptedException {
         ProcessBuilder processBuilder = new ProcessBuilder(command);
         processBuilder.directory(projectRoot);
         processBuilder.redirectOutput(ProcessBuilder.Redirect.DISCARD);
@@ -95,7 +103,7 @@ public final class CliProcessor {
 
         command.add("-input");
         command.add(inputFile.getAbsolutePath());
-        command.add("-output");
+        command.add(isPreviewOutputFile(outputFile) ? "-preview-output" : "-output");
         command.add(outputFile.getAbsolutePath());
         command.add("-invert=" + uiState.isInvert());
         command.add("-brightness=" + (int) Math.round(uiState.getBrightness()));
@@ -104,6 +112,10 @@ public final class CliProcessor {
         command.add("-palette=" + uiState.getPalette());
 
         return command;
+    }
+
+    private boolean isPreviewOutputFile(File outputFile) {
+        return outputFile.getName().toLowerCase(Locale.ROOT).endsWith(".png");
     }
 
     // Check for a backend bundled next to the app image.

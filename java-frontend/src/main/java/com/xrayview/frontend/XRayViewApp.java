@@ -2,8 +2,6 @@ package com.xrayview.frontend;
 
 import java.io.File;
 import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.StandardCopyOption;
 import java.util.Locale;
 
 import javafx.application.Application;
@@ -35,17 +33,19 @@ public final class XRayViewApp extends Application {
     private static final double DEFAULT_WINDOW_HEIGHT = 760.0;
     private static final double MIN_WINDOW_WIDTH = 520.0;
     private static final double MIN_WINDOW_HEIGHT = 480.0;
+    private static final FileChooser.ExtensionFilter DICOM_EXTENSION_FILTER =
+            new FileChooser.ExtensionFilter("DICOM Files", "*.dcm", "*.dicom", "*.DCM", "*.DICOM");
 
     // Current processing options.
     private final UiState uiState = new UiState();
-    private final Label selectedPathLabel = new Label("No image selected yet");
+    private final Label selectedPathLabel = new Label("No DICOM study selected yet");
     private final Label statusValueLabel = new Label("Ready");
     private final Label originalPlaceholderLabel = new Label("Preview placeholder");
     private final Label processedPlaceholderLabel = new Label("Preview placeholder");
     private final ImageView originalImageView = new ImageView();
     private final ImageView processedImageView = new ImageView();
-    private final Button processImageButton = new Button("Process Image");
-    private final Button saveProcessedImageButton = new Button("Save Processed Image");
+    private final Button processImageButton = new Button("Process DICOM");
+    private final Button saveProcessedImageButton = new Button("Save Processed DICOM");
     private final CliProcessor cliProcessor = new CliProcessor();
     private File selectedImageFile;
     private File lastProcessedFile;
@@ -57,7 +57,7 @@ public final class XRayViewApp extends Application {
         statusValueLabel.setWrapText(true);
         statusValueLabel.setMaxWidth(Double.MAX_VALUE);
 
-        Label headerLabel = new Label("Image Visualization Tool");
+        Label headerLabel = new Label("DICOM X-Ray Viewer");
         VBox headerSection = new VBox(4, headerLabel, selectedPathLabel);
         headerSection.setFillWidth(true);
 
@@ -196,19 +196,18 @@ public final class XRayViewApp extends Application {
     }
 
     private void handleOpenImage(Stage stage) {
-        // Loading the original preview does not require the backend.
         FileChooser fileChooser = new FileChooser();
-        fileChooser.setTitle("Open Image");
-        fileChooser.getExtensionFilters().add(
-                new FileChooser.ExtensionFilter("Image Files", "*.png", "*.jpg", "*.jpeg", "*.PNG", "*.JPG", "*.JPEG"));
+        fileChooser.setTitle("Open DICOM");
+        fileChooser.getExtensionFilters().add(DICOM_EXTENSION_FILTER);
 
         File selectedFile = fileChooser.showOpenDialog(stage);
         if (selectedFile == null) {
             return;
         }
 
-        Image image = new Image(selectedFile.toURI().toString());
-        if (image.isError()) {
+        Image image = loadDicomPreview(selectedFile);
+        if (image == null || image.isError()) {
+            statusValueLabel.setText("DICOM load failed");
             return;
         }
 
@@ -220,7 +219,7 @@ public final class XRayViewApp extends Application {
         processedPlaceholderLabel.setVisible(true);
         lastProcessedFile = null;
         selectedPathLabel.setText(selectedFile.getAbsolutePath());
-        statusValueLabel.setText("Image loaded");
+        statusValueLabel.setText("DICOM loaded");
         processImageButton.setDisable(false);
         saveProcessedImageButton.setDisable(true);
     }
@@ -269,10 +268,10 @@ public final class XRayViewApp extends Application {
 
         processedImageView.setImage(processedImage);
         processedPlaceholderLabel.setVisible(false);
-        // Reuse the generated file when saving.
+        // Keep the rendered preview so the save action stays enabled.
         lastProcessedFile = tempOutput;
         saveProcessedImageButton.setDisable(false);
-        statusValueLabel.setText("Image processed");
+        statusValueLabel.setText("DICOM processed");
     }
 
     private void handleSaveProcessedImage(Stage stage) {
@@ -281,29 +280,29 @@ public final class XRayViewApp extends Application {
         }
 
         FileChooser fileChooser = new FileChooser();
-        fileChooser.setTitle("Save Processed Image");
-        fileChooser.getExtensionFilters().add(new FileChooser.ExtensionFilter("PNG Images", "*.png", "*.PNG"));
+        fileChooser.setTitle("Save Processed DICOM");
+        fileChooser.getExtensionFilters().add(DICOM_EXTENSION_FILTER);
 
         File destinationFile = fileChooser.showSaveDialog(stage);
         if (destinationFile == null) {
             return;
         }
 
-        // Processed output is always PNG.
-        if (!destinationFile.getName().toLowerCase(Locale.ROOT).endsWith(".png")) {
-            File parentDirectory = destinationFile.getParentFile();
-            if (parentDirectory == null) {
-                destinationFile = new File(destinationFile.getPath() + ".png");
-            } else {
-                destinationFile = new File(parentDirectory, destinationFile.getName() + ".png");
-            }
+        if (!isDicomFile(destinationFile)) {
+            destinationFile = appendDefaultExtension(destinationFile, ".dcm");
         }
 
         try {
-            Files.copy(lastProcessedFile.toPath(), destinationFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
-            statusValueLabel.setText("Image saved");
+            CliProcessor.ExecutionResult executionResult = cliProcessor.run(selectedImageFile, destinationFile, uiState);
+            if (executionResult.exitCode() == 0) {
+                statusValueLabel.setText("DICOM saved");
+            } else {
+                statusValueLabel.setText(formatProcessFailureStatus(executionResult.errorOutput()));
+            }
         } catch (IOException e) {
-            // Show save failures in the status line.
+            statusValueLabel.setText("Save failed");
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
             statusValueLabel.setText("Save failed");
         }
     }
@@ -347,6 +346,43 @@ public final class XRayViewApp extends Application {
         }
 
         return statusText;
+    }
+
+    private Image loadDicomPreview(File selectedFile) {
+        File tempPreview;
+        try {
+            tempPreview = File.createTempFile("xrayview-preview-", ".png");
+            tempPreview.deleteOnExit();
+        } catch (IOException e) {
+            return null;
+        }
+
+        try {
+            CliProcessor.ExecutionResult executionResult = cliProcessor.renderPreview(selectedFile, tempPreview);
+            if (executionResult.exitCode() != 0) {
+                return null;
+            }
+        } catch (IOException e) {
+            return null;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return null;
+        }
+
+        return new Image(tempPreview.toURI().toString());
+    }
+
+    private static boolean isDicomFile(File file) {
+        String name = file.getName().toLowerCase(Locale.ROOT);
+        return name.endsWith(".dcm") || name.endsWith(".dicom");
+    }
+
+    private static File appendDefaultExtension(File file, String extension) {
+        File parentDirectory = file.getParentFile();
+        if (parentDirectory == null) {
+            return new File(file.getPath() + extension);
+        }
+        return new File(parentDirectory, file.getName() + extension);
     }
 
     public static void main(String[] args) {

@@ -1,2 +1,2 @@
-// Package imageio loads input images and writes PNG output.
+// Package imageio loads DICOM studies and writes DICOM output or internal PNG previews.
 package imageio

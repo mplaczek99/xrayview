@@ -3,23 +3,23 @@ package imageio
 import (
 	"fmt"
 	"image"
-	_ "image/jpeg" // Register JPEG decoder.
-	_ "image/png"  // Register PNG decoder.
-	"os"
+
+	"github.com/suyashkumar/dicom"
 )
 
-// Load opens and decodes an image file.
-func Load(path string) (image.Image, string, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, "", fmt.Errorf("open input image: %w", err)
-	}
-	defer file.Close()
+// LoadedImage contains the decoded image together with its source format.
+type LoadedImage struct {
+	Image  image.Image
+	Format string
+	DICOM  *dicom.Dataset
+}
 
-	img, format, err := image.Decode(file)
+// Load opens and decodes a DICOM file.
+func Load(path string) (LoadedImage, error) {
+	loaded, err := loadDICOM(path)
 	if err != nil {
-		return nil, "", fmt.Errorf("decode input image: %w", err)
+		return LoadedImage{}, fmt.Errorf("decode input image: %w", err)
 	}
 
-	return img, format, nil
+	return loaded, nil
 }
