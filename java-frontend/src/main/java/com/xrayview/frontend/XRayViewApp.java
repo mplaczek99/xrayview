@@ -9,24 +9,33 @@ import java.util.Locale;
 import javafx.application.Application;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
+import javafx.geometry.Rectangle2D;
 import javafx.scene.Node;
 import javafx.scene.Scene;
 import javafx.scene.control.Button;
 import javafx.scene.control.CheckBox;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
+import javafx.scene.control.ScrollPane;
 import javafx.scene.control.Slider;
 import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
 import javafx.scene.layout.BorderPane;
-import javafx.scene.layout.HBox;
+import javafx.scene.layout.FlowPane;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 import javafx.stage.FileChooser;
+import javafx.stage.Screen;
 import javafx.stage.Stage;
 
 public final class XRayViewApp extends Application {
+    private static final double WINDOW_MARGIN = 40.0;
+    private static final double DEFAULT_WINDOW_WIDTH = 860.0;
+    private static final double DEFAULT_WINDOW_HEIGHT = 760.0;
+    private static final double MIN_WINDOW_WIDTH = 520.0;
+    private static final double MIN_WINDOW_HEIGHT = 480.0;
+
     // Current processing options.
     private final UiState uiState = new UiState();
     private final Label selectedPathLabel = new Label("No image selected yet");
@@ -43,17 +52,26 @@ public final class XRayViewApp extends Application {
 
     @Override
     public void start(Stage stage) {
+        selectedPathLabel.setWrapText(true);
+        selectedPathLabel.setMaxWidth(Double.MAX_VALUE);
+        statusValueLabel.setWrapText(true);
+        statusValueLabel.setMaxWidth(Double.MAX_VALUE);
+
         Label headerLabel = new Label("Image Visualization Tool");
         VBox headerSection = new VBox(4, headerLabel, selectedPathLabel);
+        headerSection.setFillWidth(true);
 
         VBox originalSection = createPreviewSection("Original Image", originalImageView, originalPlaceholderLabel);
         VBox processedSection = createPreviewSection("Processed Image", processedImageView, processedPlaceholderLabel);
+        originalSection.setMaxWidth(Double.MAX_VALUE);
+        processedSection.setMaxWidth(Double.MAX_VALUE);
 
-        HBox previews = new HBox(16, originalSection, processedSection);
-        HBox.setHgrow(originalSection, Priority.ALWAYS);
-        HBox.setHgrow(processedSection, Priority.ALWAYS);
+        FlowPane previews = new FlowPane(16, 16, originalSection, processedSection);
+        previews.setAlignment(Pos.CENTER);
+        previews.setPrefWrapLength(720);
 
         VBox controlsSection = createControlsSection(stage);
+        controlsSection.setFillWidth(true);
 
         BorderPane root = new BorderPane();
         root.setPadding(new Insets(24));
@@ -63,16 +81,35 @@ public final class XRayViewApp extends Application {
         BorderPane.setMargin(headerSection, new Insets(0, 0, 16, 0));
         BorderPane.setMargin(previews, new Insets(0, 0, 16, 0));
 
+        ScrollPane scrollPane = new ScrollPane(root);
+        scrollPane.setFitToWidth(true);
+        scrollPane.setPannable(true);
+
         // Let the scene determine the initial window size.
-        Scene scene = new Scene(root);
+        Scene scene = new Scene(scrollPane);
 
         stage.setTitle("XRayView");
         stage.setScene(scene);
         stage.sizeToScene();
-        // Keep the initial size as the minimum.
-        stage.setMinWidth(stage.getWidth());
-        stage.setMinHeight(stage.getHeight());
+        fitStageToScreen(stage);
         stage.show();
+    }
+
+    private void fitStageToScreen(Stage stage) {
+        Rectangle2D visualBounds = Screen.getPrimary().getVisualBounds();
+        double availableWidth = Math.min(visualBounds.getWidth(), Math.max(320.0, visualBounds.getWidth() - WINDOW_MARGIN));
+        double availableHeight = Math.min(visualBounds.getHeight(), Math.max(320.0, visualBounds.getHeight() - WINDOW_MARGIN));
+
+        stage.setMinWidth(Math.min(MIN_WINDOW_WIDTH, availableWidth));
+        stage.setMinHeight(Math.min(MIN_WINDOW_HEIGHT, availableHeight));
+
+        double targetWidth = Math.max(stage.getWidth(), Math.min(DEFAULT_WINDOW_WIDTH, availableWidth));
+        double targetHeight = Math.max(stage.getHeight(), Math.min(DEFAULT_WINDOW_HEIGHT, availableHeight));
+        stage.setWidth(Math.min(targetWidth, availableWidth));
+        stage.setHeight(Math.min(targetHeight, availableHeight));
+        stage.centerOnScreen();
+        stage.setX(Math.max(visualBounds.getMinX(), stage.getX()));
+        stage.setY(Math.max(visualBounds.getMinY(), stage.getY()));
     }
 
     private VBox createControlsSection(Stage stage) {
