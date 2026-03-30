@@ -2,9 +2,10 @@
 
 The base packaging target is a local `jpackage` app-image on the current OS.
 
-- It produces a self-contained runnable app without adding installer, signing, or platform-specific packaging work yet.
-- This step stages a separately built Go backend binary into the app-image at `lib/app/backend/` using its platform-specific filename.
+- It produces a self-contained runnable app image locally; release workflows turn that app image into the final Linux and Windows release assets.
+- This step stages a separately built Go backend binary into the app-image at `lib/app/backend/xrayview-backend[.exe]` so the packaged app exposes the frontend launcher instead of the raw CLI name.
 - Linux releases wrap that app-image in a single `.AppImage` executable with `appimagetool`.
+- Windows releases publish a portable `.zip` archive containing the packaged `XRayView/` app folder so users can unzip and run `XRayView.exe` without an installer.
 
 Requirements:
 
@@ -48,3 +49,10 @@ bash java-frontend/package-linux-appimage.sh \
   0.1.1 \
   ./appimagetool-x86_64.AppImage
 ```
+
+## Windows portable release
+
+Tagged releases build the Windows app-image and then zip the `XRayView/` folder for distribution.
+
+- Extract the zip on Windows.
+- Run `XRayView.exe` from the extracted `XRayView/` folder.

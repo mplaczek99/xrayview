@@ -10,10 +10,21 @@ APP_DESCRIPTION="Desktop image visualization tool with a bundled Go backend"
 INSTALLER_DIR="$TARGET_DIR/windows-installer"
 APP_INPUT_DIR="$TARGET_DIR/jpackage-input"
 ICON_FILE="$TARGET_DIR/xrayview-placeholder.ico"
+BUNDLED_BACKEND_BASE_NAME="xrayview-backend"
+APP_UPGRADE_UUID="3a7755d5-099d-41dc-8945-f0171d21a052"
 BACKEND_BINARY="${1:-}"
 APP_VERSION="${2:-}"
 BACKEND_NAME=""
 PROJECT_JAR=""
+
+resolve_bundled_backend_name() {
+    if [[ "$1" == *.exe ]]; then
+        printf '%s.exe\n' "$BUNDLED_BACKEND_BASE_NAME"
+        return
+    fi
+
+    printf '%s\n' "$BUNDLED_BACKEND_BASE_NAME"
+}
 
 resolve_project_jar() {
     local candidates=()
@@ -67,7 +78,7 @@ if [ ! -f "$BACKEND_BINARY" ] || [ ! -x "$BACKEND_BINARY" ]; then
     exit 1
 fi
 
-BACKEND_NAME="$(basename "$BACKEND_BINARY")"
+BACKEND_NAME="$(resolve_bundled_backend_name "$BACKEND_BINARY")"
 
 if [ -z "$APP_VERSION" ]; then
     printf 'Pass the numeric app version as the second argument, for example 0.1.1.\n' >&2
@@ -97,6 +108,11 @@ jpackage \
     --icon "$ICON_FILE" \
     --main-jar "$PROJECT_JAR" \
     --main-class "com.xrayview.frontend.XRayViewLauncher" \
+    --win-menu \
+    --win-menu-group "$APP_NAME" \
+    --win-per-user-install \
+    --win-shortcut \
+    --win-upgrade-uuid "$APP_UPGRADE_UUID" \
     --java-options "--enable-native-access=ALL-UNNAMED"
 
 printf 'Created MSI in %s\n' "$INSTALLER_DIR"

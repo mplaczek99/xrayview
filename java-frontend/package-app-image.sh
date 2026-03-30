@@ -7,10 +7,20 @@ TARGET_DIR="$PROJECT_DIR/target"
 APP_NAME="XRayView"
 APP_IMAGE_DIR="$TARGET_DIR/app-image"
 APP_INPUT_DIR="$TARGET_DIR/jpackage-input"
+BUNDLED_BACKEND_BASE_NAME="xrayview-backend"
 BACKEND_BINARY="${1:-}"
 APP_VERSION="${2:-}"
 BACKEND_NAME=""
 PROJECT_JAR=""
+
+resolve_bundled_backend_name() {
+    if [[ "$1" == *.exe ]]; then
+        printf '%s.exe\n' "$BUNDLED_BACKEND_BASE_NAME"
+        return
+    fi
+
+    printf '%s\n' "$BUNDLED_BACKEND_BASE_NAME"
+}
 
 resolve_project_jar() {
     local candidates=()
@@ -59,7 +69,7 @@ if [ ! -f "$BACKEND_BINARY" ] || [ ! -x "$BACKEND_BINARY" ]; then
     exit 1
 fi
 
-BACKEND_NAME="$(basename "$BACKEND_BINARY")"
+BACKEND_NAME="$(resolve_bundled_backend_name "$BACKEND_BINARY")"
 
 rm -rf "$APP_IMAGE_DIR" "$APP_INPUT_DIR"
 mkdir -p "$APP_INPUT_DIR/lib" "$APP_INPUT_DIR/backend"

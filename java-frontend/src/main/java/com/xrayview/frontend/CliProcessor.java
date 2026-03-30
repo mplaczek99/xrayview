@@ -12,7 +12,8 @@ public final class CliProcessor {
     private static final String BACKEND_PATH_PROPERTY = "xrayview.backend.path";
     private static final String BACKEND_PATH_ENV = "XRAYVIEW_BACKEND_PATH";
     private static final String BACKEND_DIRECTORY_NAME = "backend";
-    private static final String BACKEND_BASE_NAME = "xrayview";
+    private static final String PROJECT_BACKEND_BASE_NAME = "xrayview";
+    private static final String BUNDLED_BACKEND_BASE_NAME = "xrayview-backend";
     private static final String WINDOWS_EXECUTABLE_SUFFIX = ".exe";
 
     private final File projectRoot = resolveProjectRoot();
@@ -113,7 +114,7 @@ public final class CliProcessor {
             return null;
         }
 
-        for (String fileName : backendBinaryNames()) {
+        for (String fileName : bundledBackendBinaryNames()) {
             File binary = new File(new File(appDirectory, BACKEND_DIRECTORY_NAME), fileName).getAbsoluteFile();
             if (isExecutableFile(binary)) {
                 return binary;
@@ -142,14 +143,14 @@ public final class CliProcessor {
     }
 
     private File resolveProjectBackendBinary() {
-        for (String fileName : backendBinaryNames()) {
+        for (String fileName : projectBackendBinaryNames()) {
             File binary = new File(projectRoot, fileName).getAbsoluteFile();
             if (isExecutableFile(binary)) {
                 return binary;
             }
         }
 
-        return new File(projectRoot, preferredBackendBinaryName()).getAbsoluteFile();
+        return new File(projectRoot, preferredProjectBackendBinaryName()).getAbsoluteFile();
     }
 
     private boolean isExecutableFile(File file) {
@@ -164,21 +165,39 @@ public final class CliProcessor {
         return file.canExecute();
     }
 
-    private List<String> backendBinaryNames() {
-        List<String> names = new ArrayList<>(2);
-        names.add(preferredBackendBinaryName());
-        String legacyName = BACKEND_BASE_NAME;
-        if (!names.contains(legacyName)) {
-            names.add(legacyName);
-        }
+    private List<String> bundledBackendBinaryNames() {
+        List<String> names = new ArrayList<>(3);
+        addIfMissing(names, preferredBundledBackendBinaryName());
+        addIfMissing(names, preferredProjectBackendBinaryName());
+        addIfMissing(names, PROJECT_BACKEND_BASE_NAME);
         return names;
     }
 
-    private String preferredBackendBinaryName() {
-        if (isWindows()) {
-            return BACKEND_BASE_NAME + WINDOWS_EXECUTABLE_SUFFIX;
+    private List<String> projectBackendBinaryNames() {
+        List<String> names = new ArrayList<>(2);
+        addIfMissing(names, preferredProjectBackendBinaryName());
+        addIfMissing(names, PROJECT_BACKEND_BASE_NAME);
+        return names;
+    }
+
+    private void addIfMissing(List<String> names, String fileName) {
+        if (!names.contains(fileName)) {
+            names.add(fileName);
         }
-        return BACKEND_BASE_NAME;
+    }
+
+    private String preferredProjectBackendBinaryName() {
+        if (isWindows()) {
+            return PROJECT_BACKEND_BASE_NAME + WINDOWS_EXECUTABLE_SUFFIX;
+        }
+        return PROJECT_BACKEND_BASE_NAME;
+    }
+
+    private String preferredBundledBackendBinaryName() {
+        if (isWindows()) {
+            return BUNDLED_BACKEND_BASE_NAME + WINDOWS_EXECUTABLE_SUFFIX;
+        }
+        return BUNDLED_BACKEND_BASE_NAME;
     }
 
     private boolean isWindows() {
