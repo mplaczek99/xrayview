@@ -1,5 +1,7 @@
 import type { Palette } from "./types";
 
+const previewCache = new Map<string, string>();
+
 function encodeSvg(svg: string): string {
   return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
 }
@@ -38,7 +40,13 @@ function overlayMarkup(palette: Palette, processed: boolean): string {
 }
 
 export function createMockPreview(processed: boolean, palette: Palette): string {
-  return encodeSvg(`
+  const cacheKey = `${processed}:${palette}`;
+  const cached = previewCache.get(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
+  const preview = encodeSvg(`
     <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="820" viewBox="0 0 1200 820">
       <defs>
         <linearGradient id="bg" x1="0" x2="1">
@@ -74,4 +82,7 @@ export function createMockPreview(processed: boolean, palette: Palette): string 
       ${overlayMarkup(palette, processed)}
     </svg>
   `);
+
+  previewCache.set(cacheKey, preview);
+  return preview;
 }

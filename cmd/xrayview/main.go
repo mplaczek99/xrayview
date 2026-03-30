@@ -72,7 +72,7 @@ func main() {
 	}
 
 	// Keep the original grayscale image for comparison output.
-	originalGray := filters.Grayscale(loaded.Image)
+	originalGray := asGrayImage(loaded.Image)
 	output, mode := processGrayImage(originalGray, cfg)
 	if cfg.compare {
 		output = combineComparison(originalGray, output)
@@ -104,7 +104,15 @@ func main() {
 }
 
 func processImage(img image.Image, cfg config) (image.Image, string) {
-	return processGrayImage(filters.Grayscale(img), cfg)
+	return processGrayImage(asGrayImage(img), cfg)
+}
+
+func asGrayImage(img image.Image) *image.Gray {
+	if gray, ok := img.(*image.Gray); ok {
+		return gray
+	}
+
+	return filters.Grayscale(img)
 }
 
 func processGrayImage(output *image.Gray, cfg config) (image.Image, string) {
