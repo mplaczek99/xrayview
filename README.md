@@ -59,7 +59,7 @@ Prebuilt desktop packages are published on GitHub Releases.
 
 ## Basic Usage
 
-The repository includes a public dental radiograph sample at `images/sample-dental-radiograph.dcm`. This DICOM file is derived from the ACTA-DIRECT dataset radiograph `001.tif` (CC BY 4.0). See `images/README.md` for provenance details.
+The repository includes a public dental radiograph sample at `images/sample-dental-radiograph.dcm`. This DICOM file is derived from the Wikimedia Commons panoramic image `Dental Panorama X-ray.jpg` (CC BY 4.0). See `images/README.md` for provenance details.
 
 ```bash
 go run ./cmd/xrayview -input images/sample-dental-radiograph.dcm
