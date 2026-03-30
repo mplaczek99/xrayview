@@ -45,10 +45,10 @@ Prebuilt desktop packages are published on GitHub Releases starting with `v0.1.0
 
 ## Basic Usage
 
-The repository includes a public sample radiograph at `images/sample-radiograph.dcm` sourced from `pydicom-data` (`RG1_UNCR.dcm`). See `images/README.md` for provenance details.
+The repository includes a public dental radiograph sample at `images/sample-dental-radiograph.dcm`. This DICOM file is derived from the ACTA-DIRECT dataset radiograph `001.tif` (CC BY 4.0). See `images/README.md` for provenance details.
 
 ```bash
-go run ./cmd/xrayview -input images/sample-radiograph.dcm
+go run ./cmd/xrayview -input images/sample-dental-radiograph.dcm
 ```
 
 If `-output` is omitted, the tool writes a file next to the input using this pattern:
@@ -166,55 +166,55 @@ Notes:
 ### Basic processing
 
 ```bash
-go run ./cmd/xrayview -input images/sample-radiograph.dcm
+go run ./cmd/xrayview -input images/sample-dental-radiograph.dcm
 ```
 
 ### Explicit output file
 
 ```bash
-go run ./cmd/xrayview -input images/sample-radiograph.dcm -output images/sample-radiograph_processed.dcm
+go run ./cmd/xrayview -input images/sample-dental-radiograph.dcm -output images/sample-dental-radiograph_processed.dcm
 ```
 
 ### Tone adjustments
 
 ```bash
-go run ./cmd/xrayview -input images/sample-radiograph.dcm -invert -brightness 15
+go run ./cmd/xrayview -input images/sample-dental-radiograph.dcm -invert -brightness 15
 ```
 
 ```bash
-go run ./cmd/xrayview -input images/sample-radiograph.dcm -contrast 1.6 -equalize
+go run ./cmd/xrayview -input images/sample-dental-radiograph.dcm -contrast 1.6 -equalize
 ```
 
 ### Presets
 
 ```bash
-go run ./cmd/xrayview -input images/sample-radiograph.dcm -preset xray
+go run ./cmd/xrayview -input images/sample-dental-radiograph.dcm -preset xray
 ```
 
 ```bash
-go run ./cmd/xrayview -input images/sample-radiograph.dcm -preset xray -brightness 5
+go run ./cmd/xrayview -input images/sample-dental-radiograph.dcm -preset xray -brightness 5
 ```
 
 ### Pipeline ordering
 
 ```bash
-go run ./cmd/xrayview -input images/sample-radiograph.dcm -invert -contrast 1.5 -equalize -pipeline grayscale,contrast,invert,equalize
+go run ./cmd/xrayview -input images/sample-dental-radiograph.dcm -invert -contrast 1.5 -equalize -pipeline grayscale,contrast,invert,equalize
 ```
 
 ### Pseudocolor
 
 ```bash
-go run ./cmd/xrayview -input images/sample-radiograph.dcm -palette hot
+go run ./cmd/xrayview -input images/sample-dental-radiograph.dcm -palette hot
 ```
 
 ### Comparison output
 
 ```bash
-go run ./cmd/xrayview -input images/sample-radiograph.dcm -compare
+go run ./cmd/xrayview -input images/sample-dental-radiograph.dcm -compare
 ```
 
 ```bash
-go run ./cmd/xrayview -input images/sample-radiograph.dcm -preset xray -compare
+go run ./cmd/xrayview -input images/sample-dental-radiograph.dcm -preset xray -compare
 ```
 
 ## Validation Rules
