@@ -2,7 +2,7 @@
 
 `xrayview` is a DICOM-first X-ray visualization project with a Tauri desktop frontend and a Go processing backend.
 
-The primary desktop UI lives in `frontend-app/`. The Go CLI in `cmd/xrayview` is the backend processing entry point used by that desktop frontend, and it also remains usable directly from the command line for DICOM workflows.
+The primary desktop UI lives in `frontend/`. The Go CLI in `cmd/xrayview` is the backend processing entry point used by that desktop frontend, and it also remains usable directly from the command line for DICOM workflows.
 
 ## What It Does
 

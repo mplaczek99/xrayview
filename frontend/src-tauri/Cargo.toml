@@ -1,5 +1,5 @@
 [package]
-name = "xrayview-frontend-app"
+name = "xrayview-frontend"
 version = "0.1.0"
 description = "Tauri frontend shell for XRayView"
 authors = ["OpenCode"]

@@ -3,10 +3,10 @@
   "private": true,
   "version": "0.1.0",
   "scripts": {
-    "postinstall": "npm --prefix frontend-app install",
-    "dev": "npm --prefix frontend-app run dev --",
-    "tauri": "npm --prefix frontend-app run tauri --",
-    "tauri:dev": "npm --prefix frontend-app run tauri:dev --",
-    "tauri:build": "npm --prefix frontend-app run tauri:build --"
+    "postinstall": "npm --prefix frontend install",
+    "dev": "npm --prefix frontend run dev --",
+    "tauri": "npm --prefix frontend run tauri --",
+    "tauri:dev": "npm --prefix frontend run tauri:dev --",
+    "tauri:build": "npm --prefix frontend run tauri:build --"
   }
 }

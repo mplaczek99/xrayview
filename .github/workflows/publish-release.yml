@@ -23,12 +23,12 @@ jobs:
             label: Linux
             bundle: appimage
             artifact_name: xrayview-linux-release-asset
-            artifact_glob: frontend-app/src-tauri/target/release/bundle/appimage/*.AppImage
+            artifact_glob: frontend/src-tauri/target/release/bundle/appimage/*.AppImage
           - os: windows-latest
             label: Windows
             bundle: msi
             artifact_name: xrayview-windows-release-asset
-            artifact_glob: frontend-app/src-tauri/target/release/bundle/msi/*.msi
+            artifact_glob: frontend/src-tauri/target/release/bundle/msi/*.msi
 
     defaults:
       run:
@@ -54,7 +54,7 @@ jobs:
         with:
           node-version: lts/*
           cache: npm
-          cache-dependency-path: frontend-app/package-lock.json
+          cache-dependency-path: frontend/package-lock.json
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
@@ -62,15 +62,15 @@ jobs:
       - name: Cache Rust artifacts
         uses: swatinem/rust-cache@v2
         with:
-          workspaces: frontend-app/src-tauri -> target
+          workspaces: frontend/src-tauri -> target
 
       - name: Install frontend dependencies
         run: npm ci
-        working-directory: frontend-app
+        working-directory: frontend
 
       - name: Build release bundle
         run: npm run tauri:build -- --bundles "${{ matrix.bundle }}"
-        working-directory: frontend-app
+        working-directory: frontend
 
       - name: Resolve release asset
         run: |

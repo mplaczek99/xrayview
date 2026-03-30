@@ -5520,7 +5520,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "xrayview-frontend-app"
+name = "xrayview-frontend"
 version = "0.1.0"
 dependencies = [
  "glib",
