@@ -9,7 +9,7 @@
     "prepare:sidecar": "node ./scripts/prepare-sidecar.mjs",
     "preview": "vite preview",
     "tauri": "tauri",
-    "tauri:dev": "tauri dev",
+    "tauri:dev": "node ./scripts/tauri-dev.mjs",
     "tauri:build": "npm run prepare:sidecar && node ./scripts/tauri-build.mjs"
   },
   "dependencies": {
