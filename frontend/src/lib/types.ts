@@ -23,9 +23,20 @@ export interface StudySession {
 }
 
 export interface ProcessingPreset {
+  id: string;
   label: string;
   description: string;
   controls: ProcessingControls;
+}
+
+export interface ProcessingPresetDefinition {
+  id: string;
+  controls: ProcessingControls;
+}
+
+export interface ProcessingManifest {
+  defaultPresetId: string;
+  presets: ProcessingPresetDefinition[];
 }
 
 export interface PreviewResult {

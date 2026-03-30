@@ -22,7 +22,7 @@ export function ProcessingLab({ controls, presets, busy, dirty, onPresetSelect, 
         <div className="preset-grid">
           {presets.map((preset) => (
             <button
-              key={preset.label}
+              key={preset.id}
               className="preset-chip"
               type="button"
               onClick={() => onPresetSelect(preset)}

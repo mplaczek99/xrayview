@@ -1,10 +1,12 @@
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { MOCK_PROCESSING_MANIFEST } from "./mockProcessingManifest";
 import { createMockPreview } from "./mockStudy";
 import type {
   Palette,
   PreviewResult,
   ProcessResult,
   ProcessingControls,
+  ProcessingManifest,
   RuntimeMode,
 } from "./types";
 
@@ -25,6 +27,8 @@ const PALETTE_LABELS: Record<Palette, string> = {
   hot: "Hot",
   bone: "Bone",
 };
+
+export const FALLBACK_PROCESSING_MANIFEST = MOCK_PROCESSING_MANIFEST;
 
 function isTauriRuntime(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -61,6 +65,13 @@ function asProcessResult(previewPath: string, dicomPath: string, runtime: Runtim
     ...asPreviewResult(previewPath, runtime),
     dicomPath,
   };
+}
+
+export async function loadProcessingManifest(): Promise<ProcessingManifest> {
+  return runInRuntime({
+    mock: () => MOCK_PROCESSING_MANIFEST,
+    tauri: () => invoke<ProcessingManifest>("get_processing_manifest"),
+  });
 }
 
 export async function pickDicomFile(): Promise<string | null> {

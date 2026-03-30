@@ -21,6 +21,7 @@ type config struct {
 	inputPath         string
 	outputPath        string
 	previewOutputPath string
+	describePresets   bool
 	preset            string
 	invert            bool
 	brightness        int
@@ -31,39 +32,17 @@ type config struct {
 	palette           string
 }
 
-// presetConfig holds preset processing defaults.
-type presetConfig struct {
-	brightness int
-	contrast   float64
-	equalize   bool
-	palette    string
-}
-
-var presetConfigs = map[string]presetConfig{
-	"default": {
-		brightness: 0,
-		contrast:   1.0,
-		equalize:   false,
-		palette:    "none",
-	},
-	"xray": {
-		brightness: 10,
-		contrast:   1.4,
-		equalize:   true,
-		palette:    "bone",
-	},
-	"high-contrast": {
-		brightness: 0,
-		contrast:   1.8,
-		equalize:   true,
-		palette:    "none",
-	},
-}
-
 var defaultPipelineOrder = []string{"grayscale", "invert", "brightness", "contrast", "equalize"}
 
 func main() {
 	cfg := parseFlags()
+	if cfg.describePresets {
+		if err := writeProcessingManifest(os.Stdout); err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	loaded, err := imageio.Load(cfg.inputPath)
 	if err != nil {
@@ -218,7 +197,8 @@ func parseFlags() config {
 	flag.StringVar(&cfg.inputPath, "input", "", "input DICOM path")
 	flag.StringVar(&cfg.outputPath, "output", "", "output DICOM path (default: input_processed.dcm)")
 	flag.StringVar(&cfg.previewOutputPath, "preview-output", "", "internal preview PNG path")
-	flag.StringVar(&cfg.preset, "preset", "default", "preset: default, xray, or high-contrast")
+	flag.BoolVar(&cfg.describePresets, "describe-presets", false, "print processing preset metadata as JSON")
+	flag.StringVar(&cfg.preset, "preset", defaultPresetID, "preset: "+supportedPresetList())
 	flag.BoolVar(&cfg.invert, "invert", false, "invert grayscale output")
 	flag.IntVar(&cfg.brightness, "brightness", 0, "brightness delta for grayscale output")
 	flag.Float64Var(&cfg.contrast, "contrast", 1.0, "contrast factor for grayscale output")
@@ -234,8 +214,10 @@ func parseFlags() config {
 		fmt.Fprintln(out, "        input DICOM path")
 		fmt.Fprintln(out, "  -output string")
 		fmt.Fprintln(out, "        output DICOM path (default: input_processed.dcm)")
+		fmt.Fprintln(out, "  -describe-presets")
+		fmt.Fprintln(out, "        print processing preset metadata as JSON")
 		fmt.Fprintln(out, "  -preset string")
-		fmt.Fprintln(out, "        preset: default, xray, or high-contrast")
+		fmt.Fprintln(out, "        preset: "+supportedPresetList())
 		fmt.Fprintln(out, "  -invert")
 		fmt.Fprintln(out, "        invert grayscale output")
 		fmt.Fprintln(out, "  -brightness int")
@@ -262,6 +244,9 @@ func parseFlags() config {
 
 	cfg.palette = strings.ToLower(cfg.palette)
 	cfg.preset = strings.ToLower(cfg.preset)
+	if cfg.describePresets {
+		return cfg
+	}
 
 	// Fill in the default output path before validation.
 	if cfg.outputPath == "" && cfg.previewOutputPath == "" && cfg.inputPath != "" {
@@ -294,10 +279,10 @@ func validateConfig(cfg config) error {
 	}
 	preset := cfg.preset
 	if preset == "" {
-		preset = "default"
+		preset = defaultPresetID
 	}
-	if _, ok := presetConfigs[preset]; !ok {
-		return fmt.Errorf("preset must be one of: default, xray, high-contrast")
+	if _, ok := lookupProcessingPreset(preset); !ok {
+		return fmt.Errorf("preset must be one of: %s", supportedPresetList())
 	}
 
 	if cfg.outputPath == "" && cfg.previewOutputPath == "" {
@@ -324,25 +309,28 @@ func validateConfig(cfg config) error {
 
 func applyPreset(cfg config, explicit map[string]bool) (config, error) {
 	if cfg.preset == "" {
-		cfg.preset = "default"
+		cfg.preset = defaultPresetID
 	}
 
-	preset, ok := presetConfigs[cfg.preset]
+	preset, ok := lookupProcessingPreset(cfg.preset)
 	if !ok {
-		return cfg, fmt.Errorf("preset must be one of: default, xray, high-contrast")
+		return cfg, fmt.Errorf("preset must be one of: %s", supportedPresetList())
 	}
 
 	if !explicit["brightness"] {
-		cfg.brightness = preset.brightness
+		cfg.brightness = preset.Controls.Brightness
 	}
 	if !explicit["contrast"] {
-		cfg.contrast = preset.contrast
+		cfg.contrast = preset.Controls.Contrast
+	}
+	if !explicit["invert"] {
+		cfg.invert = preset.Controls.Invert
 	}
 	if !explicit["equalize"] {
-		cfg.equalize = preset.equalize
+		cfg.equalize = preset.Controls.Equalize
 	}
 	if !explicit["palette"] {
-		cfg.palette = preset.palette
+		cfg.palette = preset.Controls.Palette
 	}
 
 	return cfg, nil

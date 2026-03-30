@@ -1,54 +1,95 @@
-import type { ProcessingControls, ProcessingPreset } from "../../lib/types";
+import type {
+  ProcessingControls,
+  ProcessingManifest,
+  ProcessingPreset,
+} from "../../lib/types";
 
-export const DEFAULT_CONTROLS: ProcessingControls = {
-  brightness: 0,
-  contrast: 1.0,
-  invert: false,
-  equalize: false,
-  palette: "none",
-};
+interface ProcessingUiState {
+  defaultControls: ProcessingControls;
+  presets: ProcessingPreset[];
+}
 
-export const PROCESSING_PRESETS: ProcessingPreset[] = [
-  {
+const CUSTOM_PRESET_LABEL = "Custom";
+
+const PRESET_COPY_BY_ID: Record<string, { label: string; description: string }> = {
+  default: {
     label: "Neutral",
     description: "Balanced grayscale for a first review pass.",
-    controls: { ...DEFAULT_CONTROLS },
   },
-  {
+  xray: {
     label: "Bone Focus",
     description: "Bone palette with added punch and equalized detail.",
-    controls: {
-      brightness: 10,
-      contrast: 1.4,
-      invert: false,
-      equalize: true,
-      palette: "bone",
-    },
   },
-  {
+  "high-contrast": {
     label: "High Contrast",
     description: "Sharper tonal separation without pseudocolor.",
-    controls: {
-      brightness: 0,
-      contrast: 1.8,
-      invert: false,
-      equalize: true,
-      palette: "none",
-    },
   },
-];
+};
 
-export function matchPreset(controls: ProcessingControls): string {
-  const matched = PROCESSING_PRESETS.find((preset) => {
-    const candidate = preset.controls;
-    return (
-      candidate.brightness === controls.brightness &&
-      Math.abs(candidate.contrast - controls.contrast) < 0.05 &&
-      candidate.invert === controls.invert &&
-      candidate.equalize === controls.equalize &&
-      candidate.palette === controls.palette
-    );
-  });
+function toTitleCase(value: string): string {
+  return value
+    .split("-")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
 
-  return matched?.label ?? "Custom";
+function presetCopy(presetId: string): { label: string; description: string } {
+  return (
+    PRESET_COPY_BY_ID[presetId] ?? {
+      label: toTitleCase(presetId),
+      description: "Backend-defined processing preset.",
+    }
+  );
+}
+
+export function processingControlsEqual(
+  left: ProcessingControls,
+  right: ProcessingControls,
+): boolean {
+  return (
+    left.brightness === right.brightness &&
+    Math.abs(left.contrast - right.contrast) < 0.05 &&
+    left.invert === right.invert &&
+    left.equalize === right.equalize &&
+    left.palette === right.palette
+  );
+}
+
+export function buildProcessingUiState(
+  manifest: ProcessingManifest,
+): ProcessingUiState {
+  const presets = manifest.presets.map((preset) => ({
+    id: preset.id,
+    controls: { ...preset.controls },
+    ...presetCopy(preset.id),
+  }));
+
+  const defaultPreset =
+    manifest.presets.find((preset) => preset.id === manifest.defaultPresetId) ??
+    manifest.presets[0];
+
+  return {
+    defaultControls: defaultPreset
+      ? { ...defaultPreset.controls }
+      : {
+          brightness: 0,
+          contrast: 1.0,
+          invert: false,
+          equalize: false,
+          palette: "none",
+        },
+    presets,
+  };
+}
+
+export function matchPreset(
+  controls: ProcessingControls,
+  presets: readonly ProcessingPreset[],
+): string {
+  const matched = presets.find((preset) =>
+    processingControlsEqual(preset.controls, controls),
+  );
+
+  return matched?.label ?? CUSTOM_PRESET_LABEL;
 }

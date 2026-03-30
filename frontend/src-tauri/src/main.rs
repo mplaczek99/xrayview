@@ -10,7 +10,7 @@ use tauri::Manager;
 use tauri_plugin_shell::ShellExt;
 use tempfile::Builder;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ProcessingOptions {
     brightness: i32,
@@ -18,6 +18,20 @@ struct ProcessingOptions {
     invert: bool,
     equalize: bool,
     palette: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProcessingPreset {
+    id: String,
+    controls: ProcessingOptions,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProcessingManifest {
+    default_preset_id: String,
+    presets: Vec<ProcessingPreset>,
 }
 
 #[derive(Debug, Serialize)]
@@ -72,7 +86,7 @@ async fn run_backend_preview(
         path_to_string(preview_path.clone()),
     ];
 
-    run_backend_command(&app, &args).await?;
+    let _ = run_backend_command(&app, &args).await?;
 
     Ok(PreviewResponse {
         preview_path: path_to_string(preview_path),
@@ -102,7 +116,7 @@ async fn run_backend_process(
         format!("-palette={}", options.palette),
     ];
 
-    run_backend_command(&app, &args).await?;
+    let _ = run_backend_command(&app, &args).await?;
 
     Ok(ProcessResponse {
         preview_path: path_to_string(preview_path),
@@ -121,6 +135,14 @@ fn copy_processed_output(source_path: String, destination_path: String) -> Resul
     Ok(path_to_string(destination))
 }
 
+#[tauri::command]
+async fn get_processing_manifest(app: tauri::AppHandle) -> Result<ProcessingManifest, String> {
+    let stdout = run_backend_command(&app, &["-describe-presets".to_string()]).await?;
+
+    serde_json::from_str(&stdout)
+        .map_err(|error| format!("failed to parse backend preset manifest: {error}"))
+}
+
 fn create_temp_file(suffix: &str) -> Result<PathBuf, String> {
     let temp_file = Builder::new()
         .prefix("xrayview-frontend-")
@@ -135,7 +157,7 @@ fn create_temp_file(suffix: &str) -> Result<PathBuf, String> {
     Ok(path)
 }
 
-async fn run_backend_command(app: &tauri::AppHandle, args: &[String]) -> Result<(), String> {
+async fn run_backend_command(app: &tauri::AppHandle, args: &[String]) -> Result<String, String> {
     if let Ok(sidecar) = app.shell().sidecar("xrayview-backend") {
         let output = sidecar
             .args(args.iter().map(String::as_str))
@@ -174,13 +196,13 @@ fn handle_backend_output(
     status_text: String,
     stdout_bytes: Vec<u8>,
     stderr_bytes: Vec<u8>,
-) -> Result<(), String> {
+) -> Result<String, String> {
+    let stdout = String::from_utf8_lossy(&stdout_bytes).trim().to_string();
     if succeeded {
-        return Ok(());
+        return Ok(stdout);
     }
 
     let stderr = String::from_utf8_lossy(&stderr_bytes).trim().to_string();
-    let stdout = String::from_utf8_lossy(&stdout_bytes).trim().to_string();
     let message = if !stderr.is_empty() {
         stderr
     } else if !stdout.is_empty() {
@@ -313,6 +335,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             pick_dicom_file,
             pick_save_dicom_path,
+            get_processing_manifest,
             run_backend_preview,
             run_backend_process,
             copy_processed_output,

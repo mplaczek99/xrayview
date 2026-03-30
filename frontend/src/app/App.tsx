@@ -1,19 +1,30 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ProcessingLab } from "../components/controls/ProcessingLab";
 import { TopBar } from "../components/shell/TopBar";
 import { ViewerStage } from "../components/viewer/ViewerStage";
-import { DEFAULT_CONTROLS, PROCESSING_PRESETS, matchPreset } from "../features/processing/presets";
 import {
+  buildProcessingUiState,
+  matchPreset,
+  processingControlsEqual,
+} from "../features/processing/presets";
+import {
+  FALLBACK_PROCESSING_MANIFEST,
   buildOutputName,
   copyProcessedOutput,
   ensureDicomExtension,
+  loadProcessingManifest,
   paletteLabel,
   pickDicomFile,
   pickSaveDicomPath,
   runBackendPreview,
   runBackendProcess,
 } from "../lib/backend";
-import type { ProcessingControls, StudySession, ViewerMode } from "../lib/types";
+import type {
+  ProcessingControls,
+  ProcessingPreset,
+  StudySession,
+  ViewerMode,
+} from "../lib/types";
 
 const INITIAL_SESSION: StudySession = {
   inputPath: null,
@@ -40,6 +51,8 @@ interface SessionTask {
   run: () => Promise<void>;
 }
 
+const INITIAL_PROCESSING_UI_STATE = buildProcessingUiState(FALLBACK_PROCESSING_MANIFEST);
+
 function compactPath(path: string | null): string {
   if (!path) {
     return "Waiting for a file selection";
@@ -63,12 +76,51 @@ function describeError(error: unknown, fallback: string): string {
 }
 
 export function App() {
-  const [controls, setControls] = useState<ProcessingControls>(DEFAULT_CONTROLS);
+  const [processingState, setProcessingState] = useState(INITIAL_PROCESSING_UI_STATE);
+  const [controls, setControls] = useState<ProcessingControls>(
+    INITIAL_PROCESSING_UI_STATE.defaultControls,
+  );
   const [session, setSession] = useState<StudySession>(INITIAL_SESSION);
   const [activeMode, setActiveMode] = useState<ViewerMode>("original");
   const [busy, setBusy] = useState(false);
 
-  const recipeName = useMemo(() => matchPreset(controls), [controls]);
+  useEffect(() => {
+    let cancelled = false;
+
+    void loadProcessingManifest()
+      .then((manifest) => {
+        if (cancelled) {
+          return;
+        }
+
+        const nextProcessingState = buildProcessingUiState(manifest);
+        setProcessingState(nextProcessingState);
+        setControls((current) =>
+          processingControlsEqual(current, INITIAL_PROCESSING_UI_STATE.defaultControls)
+            ? { ...nextProcessingState.defaultControls }
+            : current,
+        );
+      })
+      .catch((error) => {
+        if (cancelled) {
+          return;
+        }
+
+        setSession((current) => ({
+          ...current,
+          status: describeError(error, "Processing preset loading failed."),
+        }));
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const recipeName = useMemo(
+    () => matchPreset(controls, processingState.presets),
+    [controls, processingState.presets],
+  );
   const toneLabel = `B ${controls.brightness >= 0 ? `+${controls.brightness}` : controls.brightness} | C ${controls.contrast.toFixed(1)}`;
   const canRender = Boolean(session.inputPath);
   const canSave = Boolean(session.processedDicomPath) && !session.dirty;
@@ -128,7 +180,7 @@ export function App() {
       failureStatus: "Preview loading failed.",
       run: async () => {
         const result = await runBackendPreview(selectedPath);
-        setControls(DEFAULT_CONTROLS);
+        setControls({ ...processingState.defaultControls });
         setSession({
           inputPath: selectedPath,
           inputName: selectedPath.split(/[\\/]/).pop() ?? selectedPath,
@@ -219,12 +271,12 @@ export function App() {
     });
   }
 
-  function applyPreset(preset: (typeof PROCESSING_PRESETS)[number]) {
+  function applyPreset(preset: ProcessingPreset) {
     if (busy) {
       return;
     }
 
-    setControls(preset.controls);
+    setControls({ ...preset.controls });
     setSession((current) => ({
       ...current,
       dirty: Boolean(current.processedDicomPath),
@@ -383,12 +435,12 @@ export function App() {
               VSCode-style right rail for presets, tone controls, and render safety state.
             </p>
 
-            <ProcessingLab
-              controls={controls}
-              presets={PROCESSING_PRESETS}
-              busy={busy}
-              dirty={session.dirty}
-              onPresetSelect={applyPreset}
+              <ProcessingLab
+                controls={controls}
+                presets={processingState.presets}
+                busy={busy}
+                dirty={session.dirty}
+                onPresetSelect={applyPreset}
               onChange={updateControls}
             />
           </section>
