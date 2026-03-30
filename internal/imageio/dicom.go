@@ -93,6 +93,17 @@ type nativeSample interface {
 	~uint8 | ~int8 | ~uint16 | ~int16 | ~uint32 | ~int32 | ~int
 }
 
+type nativeRenderConfig struct {
+	bitsStored          int
+	pixelRepresentation int
+	slope               float64
+	intercept           float64
+	windowCenter        float64
+	windowWidth         float64
+	useWindow           bool
+	invert              bool
+}
+
 func renderNativeFrame(nativeFrame frame.INativeFrame, ds *dicom.Dataset) (*image.Gray, error) {
 	if nativeFrame.SamplesPerPixel() != 1 {
 		frameImage, err := nativeFrame.GetImage()
@@ -109,52 +120,41 @@ func renderNativeFrame(nativeFrame frame.INativeFrame, ds *dicom.Dataset) (*imag
 	rows := nativeFrame.Rows()
 	cols := nativeFrame.Cols()
 	gray := image.NewGray(image.Rect(0, 0, cols, rows))
-
-	bitsStored := nativeFrame.BitsPerSample()
-	if value, ok := lookupInt(ds, tag.BitsStored); ok && value > 0 {
-		bitsStored = value
-	}
-	pixelRepresentation, _ := lookupInt(ds, tag.PixelRepresentation)
-	slope, ok := lookupFloat(ds, tag.RescaleSlope)
-	if !ok {
-		slope = 1
-	}
-	intercept, ok := lookupFloat(ds, tag.RescaleIntercept)
-	if !ok {
-		intercept = 0
-	}
-	windowCenter, hasWindowCenter := lookupFloat(ds, tag.WindowCenter)
-	windowWidth, hasWindowWidth := lookupFloat(ds, tag.WindowWidth)
-	useWindow := hasWindowCenter && hasWindowWidth && windowWidth > 1
-	invert := isMonochromeOne(ds)
+	cfg := resolveNativeRenderConfig(ds, nativeFrame)
 
 	switch raw := nativeFrame.RawDataSlice().(type) {
 	case []uint8:
-		if err := renderNativeSamples(gray.Pix, raw, bitsStored, pixelRepresentation, slope, intercept, windowCenter, windowWidth, useWindow, invert); err != nil {
+		if err := renderNativeSamples(gray.Pix, raw, cfg); err != nil {
 			return nil, err
 		}
 	case []int8:
-		if err := renderNativeSamples(gray.Pix, raw, bitsStored, pixelRepresentation, slope, intercept, windowCenter, windowWidth, useWindow, invert); err != nil {
+		if err := renderNativeSamples(gray.Pix, raw, cfg); err != nil {
 			return nil, err
 		}
 	case []uint16:
-		if err := renderNativeSamples(gray.Pix, raw, bitsStored, pixelRepresentation, slope, intercept, windowCenter, windowWidth, useWindow, invert); err != nil {
+		if cfg.pixelRepresentation == 0 {
+			if err := renderUnsignedUint16Samples(gray.Pix, raw, cfg); err != nil {
+				return nil, err
+			}
+			break
+		}
+		if err := renderNativeSamples(gray.Pix, raw, cfg); err != nil {
 			return nil, err
 		}
 	case []int16:
-		if err := renderNativeSamples(gray.Pix, raw, bitsStored, pixelRepresentation, slope, intercept, windowCenter, windowWidth, useWindow, invert); err != nil {
+		if err := renderNativeSamples(gray.Pix, raw, cfg); err != nil {
 			return nil, err
 		}
 	case []uint32:
-		if err := renderNativeSamples(gray.Pix, raw, bitsStored, pixelRepresentation, slope, intercept, windowCenter, windowWidth, useWindow, invert); err != nil {
+		if err := renderNativeSamples(gray.Pix, raw, cfg); err != nil {
 			return nil, err
 		}
 	case []int32:
-		if err := renderNativeSamples(gray.Pix, raw, bitsStored, pixelRepresentation, slope, intercept, windowCenter, windowWidth, useWindow, invert); err != nil {
+		if err := renderNativeSamples(gray.Pix, raw, cfg); err != nil {
 			return nil, err
 		}
 	case []int:
-		if err := renderNativeSamples(gray.Pix, raw, bitsStored, pixelRepresentation, slope, intercept, windowCenter, windowWidth, useWindow, invert); err != nil {
+		if err := renderNativeSamples(gray.Pix, raw, cfg); err != nil {
 			return nil, err
 		}
 	default:
@@ -164,7 +164,54 @@ func renderNativeFrame(nativeFrame frame.INativeFrame, ds *dicom.Dataset) (*imag
 	return gray, nil
 }
 
-func renderNativeSamples[T nativeSample](dst []uint8, raw []T, bitsStored, pixelRepresentation int, slope, intercept, windowCenter, windowWidth float64, useWindow, invert bool) error {
+func resolveNativeRenderConfig(ds *dicom.Dataset, nativeFrame frame.INativeFrame) nativeRenderConfig {
+	cfg := nativeRenderConfig{
+		bitsStored: nativeFrame.BitsPerSample(),
+		slope:      1,
+	}
+
+	var hasWindowCenter bool
+	var hasWindowWidth bool
+	for _, elem := range ds.Elements {
+		switch elem.Tag {
+		case tag.BitsStored:
+			if value, ok := intValueFromElement(elem); ok && value > 0 {
+				cfg.bitsStored = value
+			}
+		case tag.PixelRepresentation:
+			if value, ok := intValueFromElement(elem); ok {
+				cfg.pixelRepresentation = value
+			}
+		case tag.RescaleSlope:
+			if value, ok := floatValueFromElement(elem); ok {
+				cfg.slope = value
+			}
+		case tag.RescaleIntercept:
+			if value, ok := floatValueFromElement(elem); ok {
+				cfg.intercept = value
+			}
+		case tag.WindowCenter:
+			if value, ok := floatValueFromElement(elem); ok {
+				cfg.windowCenter = value
+				hasWindowCenter = true
+			}
+		case tag.WindowWidth:
+			if value, ok := floatValueFromElement(elem); ok {
+				cfg.windowWidth = value
+				hasWindowWidth = true
+			}
+		case tag.PhotometricInterpretation:
+			if value, ok := stringValueFromElement(elem); ok {
+				cfg.invert = strings.EqualFold(value, "MONOCHROME1")
+			}
+		}
+	}
+
+	cfg.useWindow = hasWindowCenter && hasWindowWidth && cfg.windowWidth > 1
+	return cfg
+}
+
+func renderUnsignedUint16Samples(dst []uint8, raw []uint16, cfg nativeRenderConfig) error {
 	if len(raw) == 0 {
 		return fmt.Errorf("dicom frame contained no samples")
 	}
@@ -176,29 +223,47 @@ func renderNativeSamples[T nativeSample](dst []uint8, raw []T, bitsStored, pixel
 		raw = raw[:len(dst)]
 	}
 
-	if useWindow {
-		windowScale := 255 / (windowWidth - 1)
-		windowOffset := 127.5 - (windowCenter-0.5)*windowScale
-		lower := windowCenter - 0.5 - (windowWidth-1)/2
-		upper := windowCenter - 0.5 + (windowWidth-1)/2
+	bitsStored := cfg.bitsStored
+	if bitsStored <= 0 || bitsStored > 16 {
+		bitsStored = 16
+	}
 
-		if invert {
+	mask := ^uint16(0)
+	if bitsStored < 16 {
+		mask = uint16((1 << bitsStored) - 1)
+	}
+
+	if cfg.slope == 1 && cfg.intercept == 0 {
+		return renderUnsignedUint16NoRescale(dst, raw, mask, cfg)
+	}
+
+	return renderUnsignedUint16Rescaled(dst, raw, mask, cfg)
+}
+
+func renderUnsignedUint16NoRescale(dst []uint8, raw []uint16, mask uint16, cfg nativeRenderConfig) error {
+	if cfg.useWindow {
+		windowScale := 255 / (cfg.windowWidth - 1)
+		windowOffset := 127.5 - (cfg.windowCenter-0.5)*windowScale
+		lower := cfg.windowCenter - 0.5 - (cfg.windowWidth-1)/2
+		upper := cfg.windowCenter - 0.5 + (cfg.windowWidth-1)/2
+
+		if cfg.invert {
 			for idx, rawValue := range raw {
-				dst[idx] = 255 - mapWindowValue(scaledStoredPixelValue(uint32(rawValue), bitsStored, pixelRepresentation, slope, intercept), lower, upper, windowScale, windowOffset)
+				dst[idx] = 255 - mapWindowValue(float64(rawValue&mask), lower, upper, windowScale, windowOffset)
 			}
 			return nil
 		}
 
 		for idx, rawValue := range raw {
-			dst[idx] = mapWindowValue(scaledStoredPixelValue(uint32(rawValue), bitsStored, pixelRepresentation, slope, intercept), lower, upper, windowScale, windowOffset)
+			dst[idx] = mapWindowValue(float64(rawValue&mask), lower, upper, windowScale, windowOffset)
 		}
 		return nil
 	}
 
-	minValue := math.Inf(1)
-	maxValue := math.Inf(-1)
-	for _, rawValue := range raw {
-		value := scaledStoredPixelValue(uint32(rawValue), bitsStored, pixelRepresentation, slope, intercept)
+	minValue := float64(raw[0] & mask)
+	maxValue := minValue
+	for _, rawValue := range raw[1:] {
+		value := float64(rawValue & mask)
 		if value < minValue {
 			minValue = value
 		}
@@ -206,6 +271,48 @@ func renderNativeSamples[T nativeSample](dst []uint8, raw []T, bitsStored, pixel
 			maxValue = value
 		}
 	}
+
+	return renderLinearUint16(dst, raw, mask, cfg.invert, minValue, maxValue, 1, 0)
+}
+
+func renderUnsignedUint16Rescaled(dst []uint8, raw []uint16, mask uint16, cfg nativeRenderConfig) error {
+	if cfg.useWindow {
+		windowScale := 255 / (cfg.windowWidth - 1)
+		windowOffset := 127.5 - (cfg.windowCenter-0.5)*windowScale
+		lower := cfg.windowCenter - 0.5 - (cfg.windowWidth-1)/2
+		upper := cfg.windowCenter - 0.5 + (cfg.windowWidth-1)/2
+
+		if cfg.invert {
+			for idx, rawValue := range raw {
+				value := float64(rawValue&mask)*cfg.slope + cfg.intercept
+				dst[idx] = 255 - mapWindowValue(value, lower, upper, windowScale, windowOffset)
+			}
+			return nil
+		}
+
+		for idx, rawValue := range raw {
+			value := float64(rawValue&mask)*cfg.slope + cfg.intercept
+			dst[idx] = mapWindowValue(value, lower, upper, windowScale, windowOffset)
+		}
+		return nil
+	}
+
+	minValue := float64(raw[0]&mask)*cfg.slope + cfg.intercept
+	maxValue := minValue
+	for _, rawValue := range raw[1:] {
+		value := float64(rawValue&mask)*cfg.slope + cfg.intercept
+		if value < minValue {
+			minValue = value
+		}
+		if value > maxValue {
+			maxValue = value
+		}
+	}
+
+	return renderLinearUint16(dst, raw, mask, cfg.invert, minValue, maxValue, cfg.slope, cfg.intercept)
+}
+
+func renderLinearUint16(dst []uint8, raw []uint16, mask uint16, invert bool, minValue, maxValue, slope, intercept float64) error {
 	if maxValue <= minValue {
 		fill := uint8(0)
 		if invert {
@@ -222,13 +329,85 @@ func renderNativeSamples[T nativeSample](dst []uint8, raw []T, bitsStored, pixel
 
 	if invert {
 		for idx, rawValue := range raw {
-			dst[idx] = 255 - clampToByte(scaledStoredPixelValue(uint32(rawValue), bitsStored, pixelRepresentation, slope, intercept)*linearScale+linearOffset)
+			value := (float64(rawValue&mask)*slope + intercept) * linearScale
+			dst[idx] = 255 - clampToByte(value+linearOffset)
 		}
 		return nil
 	}
 
 	for idx, rawValue := range raw {
-		dst[idx] = clampToByte(scaledStoredPixelValue(uint32(rawValue), bitsStored, pixelRepresentation, slope, intercept)*linearScale + linearOffset)
+		value := (float64(rawValue&mask)*slope + intercept) * linearScale
+		dst[idx] = clampToByte(value + linearOffset)
+	}
+
+	return nil
+}
+
+func renderNativeSamples[T nativeSample](dst []uint8, raw []T, cfg nativeRenderConfig) error {
+	if len(raw) == 0 {
+		return fmt.Errorf("dicom frame contained no samples")
+	}
+
+	if len(raw) < len(dst) {
+		return fmt.Errorf("dicom frame sample count %d does not match image size %d", len(raw), len(dst))
+	}
+	if len(raw) > len(dst) {
+		raw = raw[:len(dst)]
+	}
+
+	if cfg.useWindow {
+		windowScale := 255 / (cfg.windowWidth - 1)
+		windowOffset := 127.5 - (cfg.windowCenter-0.5)*windowScale
+		lower := cfg.windowCenter - 0.5 - (cfg.windowWidth-1)/2
+		upper := cfg.windowCenter - 0.5 + (cfg.windowWidth-1)/2
+
+		if cfg.invert {
+			for idx, rawValue := range raw {
+				dst[idx] = 255 - mapWindowValue(scaledStoredPixelValue(uint32(rawValue), cfg.bitsStored, cfg.pixelRepresentation, cfg.slope, cfg.intercept), lower, upper, windowScale, windowOffset)
+			}
+			return nil
+		}
+
+		for idx, rawValue := range raw {
+			dst[idx] = mapWindowValue(scaledStoredPixelValue(uint32(rawValue), cfg.bitsStored, cfg.pixelRepresentation, cfg.slope, cfg.intercept), lower, upper, windowScale, windowOffset)
+		}
+		return nil
+	}
+
+	minValue := math.Inf(1)
+	maxValue := math.Inf(-1)
+	for _, rawValue := range raw {
+		value := scaledStoredPixelValue(uint32(rawValue), cfg.bitsStored, cfg.pixelRepresentation, cfg.slope, cfg.intercept)
+		if value < minValue {
+			minValue = value
+		}
+		if value > maxValue {
+			maxValue = value
+		}
+	}
+	if maxValue <= minValue {
+		fill := uint8(0)
+		if cfg.invert {
+			fill = 255
+		}
+		for idx := range dst {
+			dst[idx] = fill
+		}
+		return nil
+	}
+
+	linearScale := 255 / (maxValue - minValue)
+	linearOffset := -minValue * linearScale
+
+	if cfg.invert {
+		for idx, rawValue := range raw {
+			dst[idx] = 255 - clampToByte(scaledStoredPixelValue(uint32(rawValue), cfg.bitsStored, cfg.pixelRepresentation, cfg.slope, cfg.intercept)*linearScale+linearOffset)
+		}
+		return nil
+	}
+
+	for idx, rawValue := range raw {
+		dst[idx] = clampToByte(scaledStoredPixelValue(uint32(rawValue), cfg.bitsStored, cfg.pixelRepresentation, cfg.slope, cfg.intercept)*linearScale + linearOffset)
 	}
 
 	return nil
@@ -799,7 +978,10 @@ func lookupInt(ds *dicom.Dataset, t tag.Tag) (int, bool) {
 	if err != nil {
 		return 0, false
 	}
+	return intValueFromElement(elem)
+}
 
+func intValueFromElement(elem *dicom.Element) (int, bool) {
 	switch elem.Value.ValueType() {
 	case dicom.Ints:
 		values := dicom.MustGetInts(elem.Value)
@@ -828,7 +1010,10 @@ func lookupFloat(ds *dicom.Dataset, t tag.Tag) (float64, bool) {
 	if err != nil {
 		return 0, false
 	}
+	return floatValueFromElement(elem)
+}
 
+func floatValueFromElement(elem *dicom.Element) (float64, bool) {
 	switch elem.Value.ValueType() {
 	case dicom.Floats:
 		values := dicom.MustGetFloats(elem.Value)
@@ -863,6 +1048,10 @@ func lookupString(ds *dicom.Dataset, t tag.Tag) (string, bool) {
 	if err != nil {
 		return "", false
 	}
+	return stringValueFromElement(elem)
+}
+
+func stringValueFromElement(elem *dicom.Element) (string, bool) {
 	if elem.Value.ValueType() != dicom.Strings {
 		return "", false
 	}
