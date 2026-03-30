@@ -32,14 +32,14 @@ go build -o /tmp/xrayview ./cmd/xrayview
 The primary desktop UI is the Tauri frontend:
 
 ```bash
-npm --prefix frontend-app install
-npm --prefix frontend-app run tauri:dev
+npm install
+npm run tauri:dev
 ```
 
 To build desktop bundles with the Go backend embedded as a sidecar:
 
 ```bash
-npm --prefix frontend-app run tauri:build
+npm run tauri:build
 ```
 
 On Linux, bundle builds also require the usual Tauri system packages such as WebKitGTK and `patchelf`.
@@ -47,7 +47,7 @@ On Linux, bundle builds also require the usual Tauri system packages such as Web
 To iterate on the UI in browser-only mock mode:
 
 ```bash
-npm --prefix frontend-app run dev
+npm run dev
 ```
 
 ## Releases
