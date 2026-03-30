@@ -419,7 +419,19 @@ func rawFrameSamples(nativeFrame frame.INativeFrame) ([]uint32, error) {
 			values[i] = uint32(value)
 		}
 		return values, nil
+	case []int8:
+		values := make([]uint32, len(raw))
+		for i, value := range raw {
+			values[i] = uint32(value)
+		}
+		return values, nil
 	case []uint16:
+		values := make([]uint32, len(raw))
+		for i, value := range raw {
+			values[i] = uint32(value)
+		}
+		return values, nil
+	case []int16:
 		values := make([]uint32, len(raw))
 		for i, value := range raw {
 			values[i] = uint32(value)
@@ -427,6 +439,12 @@ func rawFrameSamples(nativeFrame frame.INativeFrame) ([]uint32, error) {
 		return values, nil
 	case []uint32:
 		return append([]uint32(nil), raw...), nil
+	case []int32:
+		values := make([]uint32, len(raw))
+		for i, value := range raw {
+			values[i] = uint32(value)
+		}
+		return values, nil
 	case []int:
 		values := make([]uint32, len(raw))
 		for i, value := range raw {
@@ -555,10 +573,11 @@ func lookupInt(ds *dicom.Dataset, t tag.Tag) (int, bool) {
 		return values[0], true
 	case dicom.Strings:
 		values := dicom.MustGetStrings(elem.Value)
-		if len(values) == 0 {
+		firstValue, ok := firstValueString(values)
+		if !ok {
 			return 0, false
 		}
-		parsed, err := strconv.Atoi(values[0])
+		parsed, err := strconv.Atoi(firstValue)
 		if err != nil {
 			return 0, false
 		}
@@ -587,6 +606,17 @@ func lookupFloat(ds *dicom.Dataset, t tag.Tag) (float64, bool) {
 			return 0, false
 		}
 		return float64(values[0]), true
+	case dicom.Strings:
+		values := dicom.MustGetStrings(elem.Value)
+		firstValue, ok := firstValueString(values)
+		if !ok {
+			return 0, false
+		}
+		parsed, err := strconv.ParseFloat(firstValue, 64)
+		if err != nil {
+			return 0, false
+		}
+		return parsed, true
 	default:
 		return 0, false
 	}
@@ -601,10 +631,20 @@ func lookupString(ds *dicom.Dataset, t tag.Tag) (string, bool) {
 		return "", false
 	}
 	values := dicom.MustGetStrings(elem.Value)
-	if len(values) == 0 {
-		return "", false
+	return firstValueString(values)
+}
+
+func firstValueString(values []string) (string, bool) {
+	for _, value := range values {
+		for _, part := range strings.Split(value, "\\") {
+			candidate := strings.TrimSpace(part)
+			if candidate != "" {
+				return candidate, true
+			}
+		}
 	}
-	return values[0], true
+
+	return "", false
 }
 
 func generateUID() (string, error) {

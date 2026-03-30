@@ -4,12 +4,13 @@ import type { ProcessingControls, ProcessingPreset } from "../../lib/types";
 interface ProcessingLabProps {
   controls: ProcessingControls;
   presets: ProcessingPreset[];
+  busy: boolean;
   dirty: boolean;
   onPresetSelect: (preset: ProcessingPreset) => void;
   onChange: (next: ProcessingControls) => void;
 }
 
-export function ProcessingLab({ controls, presets, dirty, onPresetSelect, onChange }: ProcessingLabProps) {
+export function ProcessingLab({ controls, presets, busy, dirty, onPresetSelect, onChange }: ProcessingLabProps) {
   function update<K extends keyof ProcessingControls>(key: K, value: ProcessingControls[K]) {
     onChange({ ...controls, [key]: value });
   }
@@ -20,7 +21,13 @@ export function ProcessingLab({ controls, presets, dirty, onPresetSelect, onChan
         <div className="inspector-section__heading">PRESETS</div>
         <div className="preset-grid">
           {presets.map((preset) => (
-            <button key={preset.label} className="preset-chip" type="button" onClick={() => onPresetSelect(preset)}>
+            <button
+              key={preset.label}
+              className="preset-chip"
+              type="button"
+              onClick={() => onPresetSelect(preset)}
+              disabled={busy}
+            >
               <strong>{preset.label}</strong>
               <span>{preset.description}</span>
             </button>
@@ -43,6 +50,7 @@ export function ProcessingLab({ controls, presets, dirty, onPresetSelect, onChan
             max={100}
             step={1}
             value={controls.brightness}
+            disabled={busy}
             onChange={(event: ChangeEvent<HTMLInputElement>) => update("brightness", Number(event.target.value))}
           />
         </div>
@@ -59,6 +67,7 @@ export function ProcessingLab({ controls, presets, dirty, onPresetSelect, onChan
             max={2}
             step={0.1}
             value={controls.contrast}
+            disabled={busy}
             onChange={(event: ChangeEvent<HTMLInputElement>) => update("contrast", Number(event.target.value))}
           />
         </div>
@@ -68,7 +77,12 @@ export function ProcessingLab({ controls, presets, dirty, onPresetSelect, onChan
             <span>Palette</span>
             <strong>{controls.palette}</strong>
           </label>
-          <select id="palette-select" value={controls.palette} onChange={(event) => update("palette", event.target.value as ProcessingControls["palette"])}>
+          <select
+            id="palette-select"
+            value={controls.palette}
+            disabled={busy}
+            onChange={(event) => update("palette", event.target.value as ProcessingControls["palette"])}
+          >
             <option value="none">none</option>
             <option value="hot">hot</option>
             <option value="bone">bone</option>
@@ -80,18 +94,30 @@ export function ProcessingLab({ controls, presets, dirty, onPresetSelect, onChan
         <div className="inspector-section__heading">FLAGS</div>
 
         <label className="toggle-row">
-          <input type="checkbox" checked={controls.invert} onChange={(event) => update("invert", event.target.checked)} />
+          <input
+            type="checkbox"
+            checked={controls.invert}
+            disabled={busy}
+            onChange={(event) => update("invert", event.target.checked)}
+          />
           <span>Invert grayscale</span>
         </label>
 
         <label className="toggle-row">
-          <input type="checkbox" checked={controls.equalize} onChange={(event) => update("equalize", event.target.checked)} />
+          <input
+            type="checkbox"
+            checked={controls.equalize}
+            disabled={busy}
+            onChange={(event) => update("equalize", event.target.checked)}
+          />
           <span>Equalize histogram</span>
         </label>
       </section>
 
       <div className={`status-banner ${dirty ? "status-banner--warning" : ""}`}>
-        {dirty
+        {busy
+          ? "Controls are locked until the current task finishes so the next output stays in sync."
+          : dirty
           ? "Controls changed after the last render. Save stays locked until the next render refreshes the output."
           : "The rendered output matches the current controls."}
       </div>

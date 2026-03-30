@@ -46,6 +46,81 @@ func TestLoadDICOM(t *testing.T) {
 	}
 }
 
+func TestLoadDICOMAppliesStringWindowing(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "windowed.dcm")
+	if err := writeCustomTestDICOM(
+		path,
+		&frame.NativeFrame[uint16]{
+			InternalBitsPerSample:   16,
+			InternalRows:            1,
+			InternalCols:            4,
+			InternalSamplesPerPixel: 1,
+			RawData:                 []uint16{0, 500, 1000, 1500},
+		},
+		1,
+		4,
+		"MONOCHROME2",
+		16,
+		16,
+		15,
+		0,
+		mustNewElement(t, tag.WindowCenter, []string{"1000.0", "1100.0"}),
+		mustNewElement(t, tag.WindowWidth, []string{"1000.0", "900.0"}),
+	); err != nil {
+		t.Fatalf("write windowed dicom: %v", err)
+	}
+
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatalf("load dicom: %v", err)
+	}
+
+	gray, ok := loaded.Image.(*image.Gray)
+	if !ok {
+		t.Fatalf("image type = %T, want *image.Gray", loaded.Image)
+	}
+
+	if got := gray.GrayAt(0, 0).Y; got != 0 {
+		t.Fatalf("pixel(0,0) = %d, want 0", got)
+	}
+	if got := gray.GrayAt(1, 0).Y; got != 0 {
+		t.Fatalf("pixel(1,0) = %d, want 0", got)
+	}
+	if got := gray.GrayAt(2, 0).Y; got < 127 || got > 128 {
+		t.Fatalf("pixel(2,0) = %d, want around 128", got)
+	}
+	if got := gray.GrayAt(3, 0).Y; got != 255 {
+		t.Fatalf("pixel(3,0) = %d, want 255", got)
+	}
+}
+
+func TestRenderNativeFrameSupportsSignedNativeSamples(t *testing.T) {
+	gray, err := renderNativeFrame(&frame.NativeFrame[int16]{
+		InternalBitsPerSample:   16,
+		InternalRows:            1,
+		InternalCols:            3,
+		InternalSamplesPerPixel: 1,
+		RawData:                 []int16{-1024, 0, 1024},
+	}, &dicom.Dataset{Elements: []*dicom.Element{
+		mustNewElement(t, tag.BitsStored, []int{16}),
+		mustNewElement(t, tag.PixelRepresentation, []int{1}),
+		mustNewElement(t, tag.PhotometricInterpretation, []string{"MONOCHROME2"}),
+	}})
+	if err != nil {
+		t.Fatalf("render native frame: %v", err)
+	}
+
+	if got := gray.GrayAt(0, 0).Y; got != 0 {
+		t.Fatalf("pixel(0,0) = %d, want 0", got)
+	}
+	if got := gray.GrayAt(1, 0).Y; got < 127 || got > 128 {
+		t.Fatalf("pixel(1,0) = %d, want around 128", got)
+	}
+	if got := gray.GrayAt(2, 0).Y; got != 255 {
+		t.Fatalf("pixel(2,0) = %d, want 255", got)
+	}
+}
+
 func TestLoadMissingFile(t *testing.T) {
 	_, err := Load("does-not-exist.dcm")
 	if err == nil {
@@ -54,6 +129,33 @@ func TestLoadMissingFile(t *testing.T) {
 }
 
 func writeTestDICOM(path string, pixels []uint16, rows, cols int, photometric string) error {
+	return writeCustomTestDICOM(
+		path,
+		&frame.NativeFrame[uint16]{
+			InternalBitsPerSample:   16,
+			InternalRows:            rows,
+			InternalCols:            cols,
+			InternalSamplesPerPixel: 1,
+			RawData:                 pixels,
+		},
+		rows,
+		cols,
+		photometric,
+		16,
+		12,
+		11,
+		0,
+	)
+}
+
+func writeCustomTestDICOM(
+	path string,
+	nativeFrame frame.INativeFrame,
+	rows, cols int,
+	photometric string,
+	bitsAllocated, bitsStored, highBit, pixelRepresentation int,
+	extraElements ...*dicom.Element,
+) error {
 	dataset := dicom.Dataset{Elements: []*dicom.Element{
 		mustNewElement(nil, tag.MediaStorageSOPClassUID, []string{secondaryCaptureSOPClassUID}),
 		mustNewElement(nil, tag.MediaStorageSOPInstanceUID, []string{"1.2.3.4.5.6.7.8.1"}),
@@ -64,23 +166,20 @@ func writeTestDICOM(path string, pixels []uint16, rows, cols int, photometric st
 		mustNewElement(nil, tag.StudyInstanceUID, []string{"1.2.3.4.5.6.7.8.2"}),
 		mustNewElement(nil, tag.Rows, []int{rows}),
 		mustNewElement(nil, tag.Columns, []int{cols}),
-		mustNewElement(nil, tag.SamplesPerPixel, []int{1}),
+		mustNewElement(nil, tag.SamplesPerPixel, []int{nativeFrame.SamplesPerPixel()}),
 		mustNewElement(nil, tag.PhotometricInterpretation, []string{photometric}),
-		mustNewElement(nil, tag.BitsAllocated, []int{16}),
-		mustNewElement(nil, tag.BitsStored, []int{12}),
-		mustNewElement(nil, tag.HighBit, []int{11}),
-		mustNewElement(nil, tag.PixelRepresentation, []int{0}),
-		mustNewElement(nil, tag.PixelData, dicom.PixelDataInfo{IsEncapsulated: false, Frames: []*frame.Frame{{
-			Encapsulated: false,
-			NativeData: &frame.NativeFrame[uint16]{
-				InternalBitsPerSample:   16,
-				InternalRows:            rows,
-				InternalCols:            cols,
-				InternalSamplesPerPixel: 1,
-				RawData:                 pixels,
-			},
-		}}}),
 	}}
+	dataset.Elements = append(dataset.Elements,
+		mustNewElement(nil, tag.BitsAllocated, []int{bitsAllocated}),
+		mustNewElement(nil, tag.BitsStored, []int{bitsStored}),
+		mustNewElement(nil, tag.HighBit, []int{highBit}),
+		mustNewElement(nil, tag.PixelRepresentation, []int{pixelRepresentation}),
+	)
+	dataset.Elements = append(dataset.Elements, extraElements...)
+	dataset.Elements = append(dataset.Elements, mustNewElement(nil, tag.PixelData, dicom.PixelDataInfo{IsEncapsulated: false, Frames: []*frame.Frame{{
+		Encapsulated: false,
+		NativeData:   nativeFrame,
+	}}}))
 
 	file, err := os.Create(path)
 	if err != nil {

@@ -190,6 +190,10 @@ export function App() {
   }
 
   function updateControls(next: ProcessingControls) {
+    if (busy) {
+      return;
+    }
+
     setControls(next);
     setSession((current) => {
       if (!current.processedDicomPath) {
@@ -206,6 +210,10 @@ export function App() {
   }
 
   function applyPreset(preset: (typeof PROCESSING_PRESETS)[number]) {
+    if (busy) {
+      return;
+    }
+
     setControls(preset.controls);
     setSession((current) => ({
       ...current,
@@ -368,6 +376,7 @@ export function App() {
             <ProcessingLab
               controls={controls}
               presets={PROCESSING_PRESETS}
+              busy={busy}
               dirty={session.dirty}
               onPresetSelect={applyPreset}
               onChange={updateControls}
