@@ -6,7 +6,6 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use tauri::Manager;
 use tauri_plugin_shell::ShellExt;
 use tempfile::Builder;
 
@@ -285,15 +284,21 @@ fn configure_linux_webkit_environment() {
     }
 }
 
+#[cfg(target_os = "linux")]
+fn configure_linux_application_identity() {
+    glib::set_prgname(Some("xrayview"));
+    glib::set_application_name("XRayView");
+}
+
+#[cfg(not(target_os = "linux"))]
+fn configure_linux_application_identity() {}
+
 fn main() {
     configure_linux_webkit_environment();
+    configure_linux_application_identity();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
-        .setup(|app| {
-            let _window = app.get_webview_window("main");
-            Ok(())
-        })
         .invoke_handler(tauri::generate_handler![
             pick_dicom_file,
             pick_save_dicom_path,

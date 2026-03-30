@@ -5516,6 +5516,7 @@ dependencies = [
 name = "xrayview-frontend-app"
 version = "0.1.0"
 dependencies = [
+ "glib",
  "rfd",
  "serde",
  "tauri",
