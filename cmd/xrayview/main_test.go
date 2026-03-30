@@ -19,7 +19,7 @@ func TestDefaultOutputPath(t *testing.T) {
 func TestValidateConfigRejectsUnsupportedOutput(t *testing.T) {
 	err := validateConfig(config{
 		inputPath:  "input.dcm",
-		outputPath: "output.jpg",
+		outputPath: "output.txt",
 	})
 	if err == nil {
 		t.Fatal("expected validation error for unsupported output")
@@ -44,7 +44,7 @@ func TestValidateConfigAllowsDICOMOutput(t *testing.T) {
 
 func TestValidateConfigRejectsNonDICOMInput(t *testing.T) {
 	err := validateConfig(config{
-		inputPath:  "input.jpg",
+		inputPath:  "input.txt",
 		outputPath: "output.dcm",
 		preset:     "default",
 		palette:    "none",

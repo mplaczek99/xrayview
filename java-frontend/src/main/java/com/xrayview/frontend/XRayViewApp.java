@@ -2,6 +2,8 @@ package com.xrayview.frontend;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
 import java.util.Locale;
 
 import javafx.application.Application;
@@ -61,8 +63,8 @@ public final class XRayViewApp extends Application {
         VBox headerSection = new VBox(4, headerLabel, selectedPathLabel);
         headerSection.setFillWidth(true);
 
-        VBox originalSection = createPreviewSection("Original Image", originalImageView, originalPlaceholderLabel);
-        VBox processedSection = createPreviewSection("Processed Image", processedImageView, processedPlaceholderLabel);
+        VBox originalSection = createPreviewSection("Original DICOM", originalImageView, originalPlaceholderLabel);
+        VBox processedSection = createPreviewSection("Processed DICOM", processedImageView, processedPlaceholderLabel);
         originalSection.setMaxWidth(Double.MAX_VALUE);
         processedSection.setMaxWidth(Double.MAX_VALUE);
 
@@ -152,17 +154,17 @@ public final class XRayViewApp extends Application {
             }
         });
 
-        Button openImageButton = new Button("Open Image");
+        Button openImageButton = new Button("Open DICOM");
         openImageButton.setOnAction(event -> handleOpenImage(stage));
 
-        // Actions stay disabled until an image is loaded.
+        // Actions stay disabled until a study is loaded.
         processImageButton.setDisable(true);
         saveProcessedImageButton.setDisable(true);
         processImageButton.setOnAction(event -> handleProcessImage());
         saveProcessedImageButton.setOnAction(event -> handleSaveProcessedImage(stage));
 
         return new VBox(8,
-                new Label("Image Controls"),
+                new Label("DICOM Controls"),
                 new Label("Brightness"),
                 brightnessSlider,
                 brightnessValueLabel,
@@ -230,10 +232,13 @@ public final class XRayViewApp extends Application {
             return;
         }
 
-        File tempOutput;
+        File tempPreviewOutput;
+        File tempDicomOutput;
         try {
-            tempOutput = File.createTempFile("xrayview-processed-", ".png");
-            tempOutput.deleteOnExit();
+            tempPreviewOutput = File.createTempFile("xrayview-processed-", ".png");
+            tempPreviewOutput.deleteOnExit();
+            tempDicomOutput = File.createTempFile("xrayview-processed-", ".dcm");
+            tempDicomOutput.deleteOnExit();
         } catch (IOException e) {
             setProcessingFailedStatus();
             return;
@@ -241,7 +246,7 @@ public final class XRayViewApp extends Application {
 
         CliProcessor.ExecutionResult executionResult;
         try {
-            executionResult = cliProcessor.run(selectedImageFile, tempOutput, uiState);
+            executionResult = cliProcessor.processForUi(selectedImageFile, tempPreviewOutput, tempDicomOutput, uiState);
         } catch (IOException e) {
             setProcessingFailedStatus();
             return;
@@ -260,7 +265,7 @@ public final class XRayViewApp extends Application {
             return;
         }
 
-        Image processedImage = new Image(tempOutput.toURI().toString());
+        Image processedImage = new Image(tempPreviewOutput.toURI().toString());
         if (processedImage.isError()) {
             setProcessingFailedStatus();
             return;
@@ -268,8 +273,8 @@ public final class XRayViewApp extends Application {
 
         processedImageView.setImage(processedImage);
         processedPlaceholderLabel.setVisible(false);
-        // Keep the rendered preview so the save action stays enabled.
-        lastProcessedFile = tempOutput;
+        // Keep the generated DICOM so save stays consistent with the preview.
+        lastProcessedFile = tempDicomOutput;
         saveProcessedImageButton.setDisable(false);
         statusValueLabel.setText("DICOM processed");
     }
@@ -293,16 +298,9 @@ public final class XRayViewApp extends Application {
         }
 
         try {
-            CliProcessor.ExecutionResult executionResult = cliProcessor.run(selectedImageFile, destinationFile, uiState);
-            if (executionResult.exitCode() == 0) {
-                statusValueLabel.setText("DICOM saved");
-            } else {
-                statusValueLabel.setText(formatProcessFailureStatus(executionResult.errorOutput()));
-            }
+            Files.copy(lastProcessedFile.toPath(), destinationFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
+            statusValueLabel.setText("DICOM saved");
         } catch (IOException e) {
-            statusValueLabel.setText("Save failed");
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
             statusValueLabel.setText("Save failed");
         }
     }

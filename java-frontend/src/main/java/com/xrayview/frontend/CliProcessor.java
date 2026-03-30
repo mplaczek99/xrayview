@@ -19,7 +19,14 @@ public final class CliProcessor {
     private final File projectRoot = resolveProjectRoot();
 
     public ExecutionResult run(File inputFile, File outputFile, UiState uiState) throws IOException, InterruptedException {
-        List<String> command = buildCliCommand(inputFile, outputFile, uiState);
+        List<String> command = buildCliCommand(inputFile, outputFile, null, uiState);
+
+        return runCommand(command);
+    }
+
+    public ExecutionResult processForUi(File inputFile, File previewOutputFile, File dicomOutputFile, UiState uiState)
+            throws IOException, InterruptedException {
+        List<String> command = buildCliCommand(inputFile, dicomOutputFile, previewOutputFile, uiState);
 
         return runCommand(command);
     }
@@ -79,7 +86,8 @@ public final class CliProcessor {
         return null;
     }
 
-    private List<String> buildCliCommand(File inputFile, File outputFile, UiState uiState) throws IOException {
+    private List<String> buildCliCommand(File inputFile, File outputFile, File previewOutputFile, UiState uiState)
+            throws IOException {
         List<String> command = new ArrayList<>();
 
         File explicitBinary = resolveExplicitBackendBinary();
@@ -103,8 +111,14 @@ public final class CliProcessor {
 
         command.add("-input");
         command.add(inputFile.getAbsolutePath());
-        command.add(isPreviewOutputFile(outputFile) ? "-preview-output" : "-output");
-        command.add(outputFile.getAbsolutePath());
+        if (outputFile != null) {
+            command.add("-output");
+            command.add(outputFile.getAbsolutePath());
+        }
+        if (previewOutputFile != null) {
+            command.add("-preview-output");
+            command.add(previewOutputFile.getAbsolutePath());
+        }
         command.add("-invert=" + uiState.isInvert());
         command.add("-brightness=" + (int) Math.round(uiState.getBrightness()));
         command.add("-contrast=" + Double.toString(uiState.getContrast()));
@@ -112,10 +126,6 @@ public final class CliProcessor {
         command.add("-palette=" + uiState.getPalette());
 
         return command;
-    }
-
-    private boolean isPreviewOutputFile(File outputFile) {
-        return outputFile.getName().toLowerCase(Locale.ROOT).endsWith(".png");
     }
 
     // Check for a backend bundled next to the app image.
