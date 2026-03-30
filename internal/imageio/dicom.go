@@ -41,6 +41,64 @@ var preservedSourceTags = []tag.Tag{
 	tag.InstitutionName,
 }
 
+type elementSpec struct {
+	tag  tag.Tag
+	data any
+}
+
+type elementBuilder struct {
+	elements []*dicom.Element
+}
+
+func newElementBuilder(capacity int) *elementBuilder {
+	return &elementBuilder{elements: make([]*dicom.Element, 0, capacity)}
+}
+
+func (b *elementBuilder) Append(t tag.Tag, data any) error {
+	elem, err := dicom.NewElement(t, data)
+	if err != nil {
+		return err
+	}
+	b.elements = append(b.elements, elem)
+	return nil
+}
+
+func (b *elementBuilder) AppendExisting(elements ...*dicom.Element) {
+	b.elements = append(b.elements, elements...)
+}
+
+func (b *elementBuilder) Elements() []*dicom.Element {
+	return b.elements
+}
+
+func appendElementSpecs(appendElement func(tag.Tag, any) error, specs ...elementSpec) error {
+	for _, spec := range specs {
+		if err := appendElement(spec.tag, spec.data); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func nativePixelData(raw []uint8, width, height, samplesPerPixel int) dicom.PixelDataInfo {
+	frameData := &frame.NativeFrame[uint8]{
+		InternalBitsPerSample:   8,
+		InternalRows:            height,
+		InternalCols:            width,
+		InternalSamplesPerPixel: samplesPerPixel,
+		RawData:                 raw,
+	}
+
+	return dicom.PixelDataInfo{
+		IsEncapsulated: false,
+		Frames: []*frame.Frame{{
+			Encapsulated: false,
+			NativeData:   frameData,
+		}},
+	}
+}
+
 func loadDICOM(path string) (LoadedImage, error) {
 	ds, err := dicom.ParseFile(path, nil, dicom.AllowMissingMetaElementGroupLength(), dicom.AllowUnknownSpecificCharacterSet())
 	if err != nil {
@@ -462,83 +520,33 @@ func buildSecondaryCaptureDataset(img image.Image, source *dicom.Dataset) (dicom
 		}
 	}
 
-	elements := make([]*dicom.Element, 0, 32)
-	appendElement := func(t tag.Tag, data any) error {
-		elem, err := dicom.NewElement(t, data)
-		if err != nil {
-			return err
-		}
-		elements = append(elements, elem)
-		return nil
-	}
-
-	if err := appendElement(tag.MediaStorageSOPClassUID, []string{secondaryCaptureSOPClassUID}); err != nil {
-		return dicom.Dataset{}, err
-	}
-	if err := appendElement(tag.MediaStorageSOPInstanceUID, []string{sopInstanceUID}); err != nil {
-		return dicom.Dataset{}, err
-	}
-	if err := appendElement(tag.TransferSyntaxUID, []string{uid.ExplicitVRLittleEndian}); err != nil {
-		return dicom.Dataset{}, err
-	}
-	if err := appendElement(tag.ImplementationClassUID, []string{implementationClassUID}); err != nil {
-		return dicom.Dataset{}, err
-	}
-	if err := appendElement(tag.ImplementationVersionName, []string{implementationVersionName}); err != nil {
-		return dicom.Dataset{}, err
-	}
-	if err := appendElement(tag.SOPClassUID, []string{secondaryCaptureSOPClassUID}); err != nil {
-		return dicom.Dataset{}, err
-	}
-	if err := appendElement(tag.SOPInstanceUID, []string{sopInstanceUID}); err != nil {
-		return dicom.Dataset{}, err
-	}
-	if err := appendElement(tag.Modality, []string{"OT"}); err != nil {
-		return dicom.Dataset{}, err
-	}
-	if err := appendElement(tag.ImageType, []string{"DERIVED", "SECONDARY"}); err != nil {
-		return dicom.Dataset{}, err
-	}
-	if err := appendElement(tag.ConversionType, []string{"WSD"}); err != nil {
-		return dicom.Dataset{}, err
-	}
-	if err := appendElement(tag.InstanceCreationDate, []string{now.Format("20060102")}); err != nil {
-		return dicom.Dataset{}, err
-	}
-	if err := appendElement(tag.InstanceCreationTime, []string{now.Format("150405")}); err != nil {
-		return dicom.Dataset{}, err
-	}
-	if err := appendElement(tag.ContentDate, []string{now.Format("20060102")}); err != nil {
-		return dicom.Dataset{}, err
-	}
-	if err := appendElement(tag.ContentTime, []string{now.Format("150405")}); err != nil {
-		return dicom.Dataset{}, err
-	}
-	if err := appendElement(tag.SeriesDescription, []string{defaultProcessedSeriesDescription}); err != nil {
-		return dicom.Dataset{}, err
-	}
-	if err := appendElement(tag.DerivationDescription, []string{"Processed by XRayView"}); err != nil {
-		return dicom.Dataset{}, err
-	}
-	if err := appendElement(tag.Manufacturer, []string{"XRayView"}); err != nil {
-		return dicom.Dataset{}, err
-	}
-	if err := appendElement(tag.ManufacturerModelName, []string{"xrayview"}); err != nil {
-		return dicom.Dataset{}, err
-	}
-	if err := appendElement(tag.SoftwareVersions, []string{"xrayview"}); err != nil {
-		return dicom.Dataset{}, err
-	}
-	if err := appendElement(tag.StudyInstanceUID, []string{studyInstanceUID}); err != nil {
-		return dicom.Dataset{}, err
-	}
-	if err := appendElement(tag.SeriesInstanceUID, []string{seriesInstanceUID}); err != nil {
-		return dicom.Dataset{}, err
-	}
-	if err := appendElement(tag.SeriesNumber, []string{"999"}); err != nil {
-		return dicom.Dataset{}, err
-	}
-	if err := appendElement(tag.InstanceNumber, []string{"1"}); err != nil {
+	builder := newElementBuilder(32)
+	if err := appendElementSpecs(
+		builder.Append,
+		elementSpec{tag: tag.MediaStorageSOPClassUID, data: []string{secondaryCaptureSOPClassUID}},
+		elementSpec{tag: tag.MediaStorageSOPInstanceUID, data: []string{sopInstanceUID}},
+		elementSpec{tag: tag.TransferSyntaxUID, data: []string{uid.ExplicitVRLittleEndian}},
+		elementSpec{tag: tag.ImplementationClassUID, data: []string{implementationClassUID}},
+		elementSpec{tag: tag.ImplementationVersionName, data: []string{implementationVersionName}},
+		elementSpec{tag: tag.SOPClassUID, data: []string{secondaryCaptureSOPClassUID}},
+		elementSpec{tag: tag.SOPInstanceUID, data: []string{sopInstanceUID}},
+		elementSpec{tag: tag.Modality, data: []string{"OT"}},
+		elementSpec{tag: tag.ImageType, data: []string{"DERIVED", "SECONDARY"}},
+		elementSpec{tag: tag.ConversionType, data: []string{"WSD"}},
+		elementSpec{tag: tag.InstanceCreationDate, data: []string{now.Format("20060102")}},
+		elementSpec{tag: tag.InstanceCreationTime, data: []string{now.Format("150405")}},
+		elementSpec{tag: tag.ContentDate, data: []string{now.Format("20060102")}},
+		elementSpec{tag: tag.ContentTime, data: []string{now.Format("150405")}},
+		elementSpec{tag: tag.SeriesDescription, data: []string{defaultProcessedSeriesDescription}},
+		elementSpec{tag: tag.DerivationDescription, data: []string{"Processed by XRayView"}},
+		elementSpec{tag: tag.Manufacturer, data: []string{"XRayView"}},
+		elementSpec{tag: tag.ManufacturerModelName, data: []string{"xrayview"}},
+		elementSpec{tag: tag.SoftwareVersions, data: []string{"xrayview"}},
+		elementSpec{tag: tag.StudyInstanceUID, data: []string{studyInstanceUID}},
+		elementSpec{tag: tag.SeriesInstanceUID, data: []string{seriesInstanceUID}},
+		elementSpec{tag: tag.SeriesNumber, data: []string{"999"}},
+		elementSpec{tag: tag.InstanceNumber, data: []string{"1"}},
+	); err != nil {
 		return dicom.Dataset{}, err
 	}
 
@@ -549,7 +557,7 @@ func buildSecondaryCaptureDataset(img image.Image, source *dicom.Dataset) (dicom
 			}
 			elem, err := source.FindElementByTag(preservedTag)
 			if err == nil {
-				elements = append(elements, elem)
+				builder.AppendExisting(elem)
 			}
 		}
 	}
@@ -558,12 +566,12 @@ func buildSecondaryCaptureDataset(img image.Image, source *dicom.Dataset) (dicom
 	if err != nil {
 		return dicom.Dataset{}, err
 	}
-	elements = append(elements, imageElements...)
-	if err := appendElement(tag.PixelData, pixelData); err != nil {
+	builder.AppendExisting(imageElements...)
+	if err := builder.Append(tag.PixelData, pixelData); err != nil {
 		return dicom.Dataset{}, err
 	}
 
-	return dicom.Dataset{Elements: elements}, nil
+	return dicom.Dataset{Elements: builder.Elements()}, nil
 }
 
 func dicomPixelDataFromImage(img image.Image) (dicom.PixelDataInfo, []*dicom.Element, error) {
@@ -574,114 +582,71 @@ func dicomPixelDataFromImage(img image.Image) (dicom.PixelDataInfo, []*dicom.Ele
 		return dicom.PixelDataInfo{}, nil, fmt.Errorf("output image has invalid bounds")
 	}
 
-	elements := make([]*dicom.Element, 0, 10)
-	appendElement := func(t tag.Tag, data any) error {
-		elem, err := dicom.NewElement(t, data)
-		if err != nil {
-			return err
-		}
-		elements = append(elements, elem)
-		return nil
-	}
+	builder := newElementBuilder(10)
 
 	switch src := img.(type) {
 	case *image.Gray:
-		pixelData, err := grayscalePixelData(src, bounds, width, height, appendElement)
-		return pixelData, elements, err
+		pixelData, err := grayscalePixelData(src, bounds, width, height, builder.Append)
+		return pixelData, builder.Elements(), err
 	case *image.Gray16:
-		pixelData, err := grayscalePixelData(convertToGray(src), bounds, width, height, appendElement)
-		return pixelData, elements, err
+		pixelData, err := grayscalePixelData(convertToGray(src), bounds, width, height, builder.Append)
+		return pixelData, builder.Elements(), err
 	case *image.RGBA:
-		pixelData, err := rgbPixelData(rgbaPixels(src, bounds, width, height), width, height, appendElement)
-		return pixelData, elements, err
+		pixelData, err := rgbPixelData(rgbaPixels(src, bounds, width, height), width, height, builder.Append)
+		return pixelData, builder.Elements(), err
 	case *image.NRGBA:
-		pixelData, err := rgbPixelData(nrgbaPixels(src, bounds, width, height), width, height, appendElement)
-		return pixelData, elements, err
+		pixelData, err := rgbPixelData(nrgbaPixels(src, bounds, width, height), width, height, builder.Append)
+		return pixelData, builder.Elements(), err
 	}
 
 	if isGrayLikeImage(img) {
-		pixelData, err := grayscalePixelData(convertToGray(img), bounds, width, height, appendElement)
-		return pixelData, elements, err
+		pixelData, err := grayscalePixelData(convertToGray(img), bounds, width, height, builder.Append)
+		return pixelData, builder.Elements(), err
 	}
 
-	pixelData, err := rgbPixelData(imageRGBPixels(img, bounds, width, height), width, height, appendElement)
-	return pixelData, elements, err
+	pixelData, err := rgbPixelData(imageRGBPixels(img, bounds, width, height), width, height, builder.Append)
+	return pixelData, builder.Elements(), err
 }
 
 func grayscalePixelData(gray *image.Gray, bounds image.Rectangle, width, height int, appendElement func(tag.Tag, any) error) (dicom.PixelDataInfo, error) {
 	raw := grayPixels(gray, bounds, width, height)
-	frameData := &frame.NativeFrame[uint8]{
-		InternalBitsPerSample:   8,
-		InternalRows:            height,
-		InternalCols:            width,
-		InternalSamplesPerPixel: 1,
-		RawData:                 raw,
-	}
-	pixelData := dicom.PixelDataInfo{
-		IsEncapsulated: false,
-		Frames: []*frame.Frame{{
-			Encapsulated: false,
-			NativeData:   frameData,
-		}},
-	}
+	pixelData := nativePixelData(raw, width, height, 1)
 
-	for _, spec := range []struct {
-		tag  tag.Tag
-		data any
-	}{
-		{tag.Rows, []int{height}},
-		{tag.Columns, []int{width}},
-		{tag.SamplesPerPixel, []int{1}},
-		{tag.PhotometricInterpretation, []string{"MONOCHROME2"}},
-		{tag.BitsAllocated, []int{8}},
-		{tag.BitsStored, []int{8}},
-		{tag.HighBit, []int{7}},
-		{tag.PixelRepresentation, []int{0}},
-		{tag.WindowCenter, []string{"127.5"}},
-		{tag.WindowWidth, []string{"255"}},
-	} {
-		if err := appendElement(spec.tag, spec.data); err != nil {
-			return dicom.PixelDataInfo{}, err
-		}
+	if err := appendElementSpecs(
+		appendElement,
+		elementSpec{tag: tag.Rows, data: []int{height}},
+		elementSpec{tag: tag.Columns, data: []int{width}},
+		elementSpec{tag: tag.SamplesPerPixel, data: []int{1}},
+		elementSpec{tag: tag.PhotometricInterpretation, data: []string{"MONOCHROME2"}},
+		elementSpec{tag: tag.BitsAllocated, data: []int{8}},
+		elementSpec{tag: tag.BitsStored, data: []int{8}},
+		elementSpec{tag: tag.HighBit, data: []int{7}},
+		elementSpec{tag: tag.PixelRepresentation, data: []int{0}},
+		elementSpec{tag: tag.WindowCenter, data: []string{"127.5"}},
+		elementSpec{tag: tag.WindowWidth, data: []string{"255"}},
+	); err != nil {
+		return dicom.PixelDataInfo{}, err
 	}
 
 	return pixelData, nil
 }
 
 func rgbPixelData(raw []uint8, width, height int, appendElement func(tag.Tag, any) error) (dicom.PixelDataInfo, error) {
+	pixelData := nativePixelData(raw, width, height, 3)
 
-	frameData := &frame.NativeFrame[uint8]{
-		InternalBitsPerSample:   8,
-		InternalRows:            height,
-		InternalCols:            width,
-		InternalSamplesPerPixel: 3,
-		RawData:                 raw,
-	}
-	pixelData := dicom.PixelDataInfo{
-		IsEncapsulated: false,
-		Frames: []*frame.Frame{{
-			Encapsulated: false,
-			NativeData:   frameData,
-		}},
-	}
-
-	for _, spec := range []struct {
-		tag  tag.Tag
-		data any
-	}{
-		{tag.Rows, []int{height}},
-		{tag.Columns, []int{width}},
-		{tag.SamplesPerPixel, []int{3}},
-		{tag.PhotometricInterpretation, []string{"RGB"}},
-		{tag.PlanarConfiguration, []int{0}},
-		{tag.BitsAllocated, []int{8}},
-		{tag.BitsStored, []int{8}},
-		{tag.HighBit, []int{7}},
-		{tag.PixelRepresentation, []int{0}},
-	} {
-		if err := appendElement(spec.tag, spec.data); err != nil {
-			return dicom.PixelDataInfo{}, err
-		}
+	if err := appendElementSpecs(
+		appendElement,
+		elementSpec{tag: tag.Rows, data: []int{height}},
+		elementSpec{tag: tag.Columns, data: []int{width}},
+		elementSpec{tag: tag.SamplesPerPixel, data: []int{3}},
+		elementSpec{tag: tag.PhotometricInterpretation, data: []string{"RGB"}},
+		elementSpec{tag: tag.PlanarConfiguration, data: []int{0}},
+		elementSpec{tag: tag.BitsAllocated, data: []int{8}},
+		elementSpec{tag: tag.BitsStored, data: []int{8}},
+		elementSpec{tag: tag.HighBit, data: []int{7}},
+		elementSpec{tag: tag.PixelRepresentation, data: []int{0}},
+	); err != nil {
+		return dicom.PixelDataInfo{}, err
 	}
 
 	return pixelData, nil

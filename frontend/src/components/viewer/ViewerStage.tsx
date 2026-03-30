@@ -11,6 +11,41 @@ interface ViewerStageProps {
   dirty: boolean;
 }
 
+const VIEWER_MODE_CONTENT: Record<
+  ViewerMode,
+  {
+    editorName: string;
+    editorTitle: string;
+    editorDescription: string;
+    primaryImageAlt: string;
+    primaryImageKind: "original" | "processed";
+  }
+> = {
+  original: {
+    editorName: "source.dcm",
+    editorTitle: "Source Preview",
+    editorDescription:
+      "Keep the original DICOM pinned while you tune the processing pipeline from the inspector.",
+    primaryImageAlt: "Original DICOM preview",
+    primaryImageKind: "original",
+  },
+  processed: {
+    editorName: "processed.dcm",
+    editorTitle: "Processed Preview",
+    editorDescription: "Inspect the rendered derivative in the active editor surface.",
+    primaryImageAlt: "Processed DICOM preview",
+    primaryImageKind: "processed",
+  },
+  compare: {
+    editorName: "compare.diff",
+    editorTitle: "Compare Editor",
+    editorDescription:
+      "Review baseline and rendered output side-by-side before exporting the derived study.",
+    primaryImageAlt: "Original DICOM preview",
+    primaryImageKind: "original",
+  },
+};
+
 function StageImage({ src, alt }: { src: string | null; alt: string }) {
   if (!src) {
     return (
@@ -36,24 +71,18 @@ export function ViewerStage({
   paletteLabel,
   dirty,
 }: ViewerStageProps) {
+  const modeContent = VIEWER_MODE_CONTENT[activeMode];
   const isCompare = activeMode === "compare" && canCompare;
-  const primaryImage = activeMode === "processed" ? processedPreviewUrl : originalPreviewUrl;
-  const editorName = activeMode === "compare" ? "compare.diff" : activeMode === "processed" ? "processed.dcm" : "source.dcm";
-  const editorTitle = activeMode === "compare" ? "Compare Editor" : activeMode === "processed" ? "Processed Preview" : "Source Preview";
-  const editorDescription =
-    activeMode === "compare"
-      ? "Review baseline and rendered output side-by-side before exporting the derived study."
-      : activeMode === "processed"
-        ? "Inspect the rendered derivative in the active editor surface."
-        : "Keep the original DICOM pinned while you tune the processing pipeline from the inspector.";
+  const primaryImage =
+    modeContent.primaryImageKind === "processed" ? processedPreviewUrl : originalPreviewUrl;
 
   return (
     <section className="viewer-shell">
       <div className="viewer-shell__header">
         <div>
-          <div className="viewer-shell__eyebrow">EDITOR / {editorName}</div>
-          <h2 className="viewer-shell__title">{editorTitle}</h2>
-          <p className="viewer-shell__subtitle">{editorDescription}</p>
+          <div className="viewer-shell__eyebrow">EDITOR / {modeContent.editorName}</div>
+          <h2 className="viewer-shell__title">{modeContent.editorTitle}</h2>
+          <p className="viewer-shell__subtitle">{modeContent.editorDescription}</p>
         </div>
 
         <div className="viewer-shell__meta">
@@ -77,10 +106,7 @@ export function ViewerStage({
             </div>
           </div>
         ) : (
-          <StageImage
-            src={primaryImage}
-            alt={activeMode === "processed" ? "Processed DICOM preview" : "Original DICOM preview"}
-          />
+          <StageImage src={primaryImage} alt={modeContent.primaryImageAlt} />
         )}
       </div>
     </section>

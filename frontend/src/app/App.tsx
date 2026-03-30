@@ -34,6 +34,12 @@ const ACTIVITY_ITEMS = [
   { label: "IO", title: "Export" },
 ];
 
+interface SessionTask {
+  pendingStatus: string;
+  failureStatus: string;
+  run: () => Promise<void>;
+}
+
 function compactPath(path: string | null): string {
   if (!path) {
     return "Waiting for a file selection";
@@ -52,6 +58,10 @@ function describeOutput(session: StudySession): string {
   return session.dirty ? "Rendered output is stale after control changes." : "Temporary processed DICOM ready to save.";
 }
 
+function describeError(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback;
+}
+
 export function App() {
   const [controls, setControls] = useState<ProcessingControls>(DEFAULT_CONTROLS);
   const [session, setSession] = useState<StudySession>(INITIAL_SESSION);
@@ -64,6 +74,22 @@ export function App() {
   const canSave = Boolean(session.processedDicomPath) && !session.dirty;
   const canCompare = Boolean(session.originalPreviewUrl && session.processedPreviewUrl);
   const canViewProcessed = Boolean(session.processedPreviewUrl);
+
+  async function runSessionTask({ pendingStatus, failureStatus, run }: SessionTask) {
+    setBusy(true);
+    setSession((current) => ({ ...current, status: pendingStatus }));
+
+    try {
+      await run();
+    } catch (error) {
+      setSession((current) => ({
+        ...current,
+        status: describeError(error, failureStatus),
+      }));
+    } finally {
+      setBusy(false);
+    }
+  }
 
   const viewerTabs: Array<{
     mode: ViewerMode;
@@ -97,66 +123,56 @@ export function App() {
       return;
     }
 
-    setBusy(true);
-    setSession((current) => ({ ...current, status: "Loading source preview..." }));
-
-    try {
-      const result = await runBackendPreview(selectedPath);
-      setControls(DEFAULT_CONTROLS);
-      setSession({
-        inputPath: selectedPath,
-        inputName: selectedPath.split(/[\\/]/).pop() ?? selectedPath,
-        originalPreviewUrl: result.previewUrl,
-        processedPreviewUrl: null,
-        processedDicomPath: null,
-        savedDestination: null,
-        status: "Study loaded. Adjust the controls and render a new output when ready.",
-        dirty: false,
-        runtime: result.runtime,
-      });
-      setActiveMode("original");
-    } catch (error) {
-      setSession((current) => ({
-        ...current,
-        status: error instanceof Error ? error.message : "Preview loading failed.",
-      }));
-    } finally {
-      setBusy(false);
-    }
+    await runSessionTask({
+      pendingStatus: "Loading source preview...",
+      failureStatus: "Preview loading failed.",
+      run: async () => {
+        const result = await runBackendPreview(selectedPath);
+        setControls(DEFAULT_CONTROLS);
+        setSession({
+          inputPath: selectedPath,
+          inputName: selectedPath.split(/[\\/]/).pop() ?? selectedPath,
+          originalPreviewUrl: result.previewUrl,
+          processedPreviewUrl: null,
+          processedDicomPath: null,
+          savedDestination: null,
+          status: "Study loaded. Adjust the controls and render a new output when ready.",
+          dirty: false,
+          runtime: result.runtime,
+        });
+        setActiveMode("original");
+      },
+    });
   }
 
   async function handleRenderOutput() {
-    if (!session.inputPath) {
+    const inputPath = session.inputPath;
+    if (!inputPath) {
       return;
     }
 
-    setBusy(true);
-    setSession((current) => ({ ...current, status: "Rendering processed preview..." }));
-
-    try {
-      const result = await runBackendProcess(session.inputPath, controls);
-      setSession((current) => ({
-        ...current,
-        processedPreviewUrl: result.previewUrl,
-        processedDicomPath: result.dicomPath,
-        savedDestination: null,
-        status: "Processed output ready. Compare it or save the derived DICOM.",
-        dirty: false,
-        runtime: result.runtime,
-      }));
-      setActiveMode("processed");
-    } catch (error) {
-      setSession((current) => ({
-        ...current,
-        status: error instanceof Error ? error.message : "Processing failed.",
-      }));
-    } finally {
-      setBusy(false);
-    }
+    await runSessionTask({
+      pendingStatus: "Rendering processed preview...",
+      failureStatus: "Processing failed.",
+      run: async () => {
+        const result = await runBackendProcess(inputPath, controls);
+        setSession((current) => ({
+          ...current,
+          processedPreviewUrl: result.previewUrl,
+          processedDicomPath: result.dicomPath,
+          savedDestination: null,
+          status: "Processed output ready. Compare it or save the derived DICOM.",
+          dirty: false,
+          runtime: result.runtime,
+        }));
+        setActiveMode("processed");
+      },
+    });
   }
 
   async function handleSaveOutput() {
-    if (!session.processedDicomPath) {
+    const processedDicomPath = session.processedDicomPath;
+    if (!processedDicomPath) {
       return;
     }
 
@@ -165,28 +181,22 @@ export function App() {
       return;
     }
 
-    setBusy(true);
-    setSession((current) => ({ ...current, status: "Saving processed DICOM..." }));
+    await runSessionTask({
+      pendingStatus: "Saving processed DICOM...",
+      failureStatus: "Saving failed.",
+      run: async () => {
+        const savedPath = await copyProcessedOutput(
+          processedDicomPath,
+          ensureDicomExtension(destination),
+        );
 
-    try {
-      const savedPath = await copyProcessedOutput(
-        session.processedDicomPath,
-        ensureDicomExtension(destination),
-      );
-
-      setSession((current) => ({
-        ...current,
-        savedDestination: savedPath,
-        status: "Derived DICOM saved.",
-      }));
-    } catch (error) {
-      setSession((current) => ({
-        ...current,
-        status: error instanceof Error ? error.message : "Saving failed.",
-      }));
-    } finally {
-      setBusy(false);
-    }
+        setSession((current) => ({
+          ...current,
+          savedDestination: savedPath,
+          status: "Derived DICOM saved.",
+        }));
+      },
+    });
   }
 
   function updateControls(next: ProcessingControls) {
