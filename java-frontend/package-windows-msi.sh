@@ -81,7 +81,7 @@ fi
 BACKEND_NAME="$(resolve_bundled_backend_name "$BACKEND_BINARY")"
 
 if [ -z "$APP_VERSION" ]; then
-    printf 'Pass the numeric app version as the second argument, for example 0.1.1.\n' >&2
+    printf 'Pass the numeric app version as the second argument, for example 0.1.2.\n' >&2
     exit 1
 fi
 
