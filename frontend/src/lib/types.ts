@@ -15,6 +15,8 @@ export interface StudySession {
   inputName: string;
   originalPreviewUrl: string | null;
   processedPreviewUrl: string | null;
+  originalMeasurementScale: MeasurementScale | null;
+  processedMeasurementScale: MeasurementScale | null;
   processedDicomPath: string | null;
   savedDestination: string | null;
   status: string;
@@ -39,8 +41,15 @@ export interface ProcessingManifest {
   presets: ProcessingPresetDefinition[];
 }
 
+export interface MeasurementScale {
+  rowSpacingMm: number;
+  columnSpacingMm: number;
+  source: string;
+}
+
 export interface PreviewResult {
   previewUrl: string;
+  measurementScale: MeasurementScale | null;
   runtime: RuntimeMode;
 }
 

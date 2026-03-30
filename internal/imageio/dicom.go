@@ -39,6 +39,11 @@ var preservedSourceTags = []tag.Tag{
 	tag.StudyDescription,
 	tag.ReferringPhysicianName,
 	tag.InstitutionName,
+	tag.PixelSpacing,
+	tag.ImagerPixelSpacing,
+	tag.NominalScannedPixelSpacing,
+	tag.PixelSpacingCalibrationType,
+	tag.PixelSpacingCalibrationDescription,
 }
 
 type elementSpec struct {
@@ -111,10 +116,33 @@ func loadDICOM(path string) (LoadedImage, error) {
 	}
 
 	return LoadedImage{
-		Image:  img,
-		Format: dicomFormat,
-		DICOM:  &ds,
+		Image:            img,
+		Format:           dicomFormat,
+		DICOM:            &ds,
+		MeasurementScale: measurementScaleFromDataset(&ds),
 	}, nil
+}
+
+func measurementScaleFromDataset(ds *dicom.Dataset) *MeasurementScale {
+	for _, candidate := range []struct {
+		tag    tag.Tag
+		source string
+	}{
+		{tag: tag.PixelSpacing, source: "PixelSpacing"},
+		{tag: tag.ImagerPixelSpacing, source: "ImagerPixelSpacing"},
+		{tag: tag.NominalScannedPixelSpacing, source: "NominalScannedPixelSpacing"},
+	} {
+		rowSpacing, columnSpacing, ok := lookupFloatPair(ds, candidate.tag)
+		if ok && rowSpacing > 0 && columnSpacing > 0 {
+			return &MeasurementScale{
+				RowSpacingMM:    rowSpacing,
+				ColumnSpacingMM: columnSpacing,
+				Source:          candidate.source,
+			}
+		}
+	}
+
+	return nil
 }
 
 func renderDICOM(ds *dicom.Dataset) (image.Image, error) {
@@ -978,6 +1006,14 @@ func lookupFloat(ds *dicom.Dataset, t tag.Tag) (float64, bool) {
 	return floatValueFromElement(elem)
 }
 
+func lookupFloatPair(ds *dicom.Dataset, t tag.Tag) (float64, float64, bool) {
+	elem, err := ds.FindElementByTag(t)
+	if err != nil {
+		return 0, 0, false
+	}
+	return floatPairFromElement(elem)
+}
+
 func floatValueFromElement(elem *dicom.Element) (float64, bool) {
 	switch elem.Value.ValueType() {
 	case dicom.Floats:
@@ -1008,6 +1044,39 @@ func floatValueFromElement(elem *dicom.Element) (float64, bool) {
 	}
 }
 
+func floatPairFromElement(elem *dicom.Element) (float64, float64, bool) {
+	switch elem.Value.ValueType() {
+	case dicom.Floats:
+		values := dicom.MustGetFloats(elem.Value)
+		if len(values) < 2 {
+			return 0, 0, false
+		}
+		return values[0], values[1], true
+	case dicom.Ints:
+		values := dicom.MustGetInts(elem.Value)
+		if len(values) < 2 {
+			return 0, 0, false
+		}
+		return float64(values[0]), float64(values[1]), true
+	case dicom.Strings:
+		values := splitValueStrings(dicom.MustGetStrings(elem.Value))
+		if len(values) < 2 {
+			return 0, 0, false
+		}
+		first, err := strconv.ParseFloat(values[0], 64)
+		if err != nil {
+			return 0, 0, false
+		}
+		second, err := strconv.ParseFloat(values[1], 64)
+		if err != nil {
+			return 0, 0, false
+		}
+		return first, second, true
+	default:
+		return 0, 0, false
+	}
+}
+
 func lookupString(ds *dicom.Dataset, t tag.Tag) (string, bool) {
 	elem, err := ds.FindElementByTag(t)
 	if err != nil {
@@ -1025,6 +1094,15 @@ func stringValueFromElement(elem *dicom.Element) (string, bool) {
 }
 
 func firstValueString(values []string) (string, bool) {
+	parts := splitValueStrings(values)
+	if len(parts) == 0 {
+		return "", false
+	}
+	return parts[0], true
+}
+
+func splitValueStrings(values []string) []string {
+	parts := make([]string, 0, len(values))
 	for _, value := range values {
 		start := 0
 		for i := 0; i <= len(value); i++ {
@@ -1034,13 +1112,13 @@ func firstValueString(values []string) (string, bool) {
 
 			candidate := strings.TrimSpace(value[start:i])
 			if candidate != "" {
-				return candidate, true
+				parts = append(parts, candidate)
 			}
 			start = i + 1
 		}
 	}
 
-	return "", false
+	return parts
 }
 
 func generateUID() (string, error) {

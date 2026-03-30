@@ -31,6 +31,8 @@ const INITIAL_SESSION: StudySession = {
   inputName: "No study loaded",
   originalPreviewUrl: null,
   processedPreviewUrl: null,
+  originalMeasurementScale: null,
+  processedMeasurementScale: null,
   processedDicomPath: null,
   savedDestination: null,
   status: "Open a DICOM study to load the first preview.",
@@ -186,6 +188,8 @@ export function App() {
           inputName: selectedPath.split(/[\\/]/).pop() ?? selectedPath,
           originalPreviewUrl: result.previewUrl,
           processedPreviewUrl: null,
+          originalMeasurementScale: result.measurementScale,
+          processedMeasurementScale: null,
           processedDicomPath: null,
           savedDestination: null,
           status: "Study loaded. Adjust the controls and render a new output when ready.",
@@ -211,6 +215,7 @@ export function App() {
         setSession((current) => ({
           ...current,
           processedPreviewUrl: result.previewUrl,
+          processedMeasurementScale: result.measurementScale,
           processedDicomPath: result.dicomPath,
           savedDestination: null,
           status: "Processed output ready. Compare it or save the derived DICOM.",
@@ -384,6 +389,8 @@ export function App() {
             canCompare={canCompare}
             originalPreviewUrl={session.originalPreviewUrl}
             processedPreviewUrl={session.processedPreviewUrl}
+            originalMeasurementScale={session.originalMeasurementScale}
+            processedMeasurementScale={session.processedMeasurementScale}
             recipeName={recipeName}
             toneLabel={toneLabel}
             paletteLabel={paletteLabel(controls.palette)}

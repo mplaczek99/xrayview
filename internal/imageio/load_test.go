@@ -46,6 +46,49 @@ func TestLoadDICOM(t *testing.T) {
 	}
 }
 
+func TestLoadDICOMExtractsMeasurementScale(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "measured.dcm")
+	if err := writeCustomTestDICOM(
+		path,
+		&frame.NativeFrame[uint16]{
+			InternalBitsPerSample:   16,
+			InternalRows:            1,
+			InternalCols:            2,
+			InternalSamplesPerPixel: 1,
+			RawData:                 []uint16{0, 4095},
+		},
+		1,
+		2,
+		"MONOCHROME2",
+		16,
+		12,
+		11,
+		0,
+		mustNewElement(t, tag.ImagerPixelSpacing, []string{"0.8", "0.8"}),
+		mustNewElement(t, tag.PixelSpacing, []string{"0.4", "0.6"}),
+	); err != nil {
+		t.Fatalf("write measured dicom: %v", err)
+	}
+
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatalf("load dicom: %v", err)
+	}
+
+	if loaded.MeasurementScale == nil {
+		t.Fatal("expected measurement scale to be populated")
+	}
+	if loaded.MeasurementScale.RowSpacingMM != 0.4 {
+		t.Fatalf("row spacing = %g, want %g", loaded.MeasurementScale.RowSpacingMM, 0.4)
+	}
+	if loaded.MeasurementScale.ColumnSpacingMM != 0.6 {
+		t.Fatalf("column spacing = %g, want %g", loaded.MeasurementScale.ColumnSpacingMM, 0.6)
+	}
+	if loaded.MeasurementScale.Source != "PixelSpacing" {
+		t.Fatalf("source = %q, want %q", loaded.MeasurementScale.Source, "PixelSpacing")
+	}
+}
+
 func TestLoadDICOMAppliesStringWindowing(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "windowed.dcm")
 	if err := writeCustomTestDICOM(

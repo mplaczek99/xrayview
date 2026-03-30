@@ -34,10 +34,25 @@ struct ProcessingManifest {
     presets: Vec<ProcessingPreset>,
 }
 
+#[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct MeasurementScale {
+    row_spacing_mm: f64,
+    column_spacing_mm: f64,
+    source: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct StudyDescription {
+    measurement_scale: Option<MeasurementScale>,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PreviewResponse {
     preview_path: String,
+    measurement_scale: Option<MeasurementScale>,
 }
 
 #[derive(Debug, Serialize)]
@@ -45,6 +60,7 @@ struct PreviewResponse {
 struct ProcessResponse {
     preview_path: String,
     dicom_path: String,
+    measurement_scale: Option<MeasurementScale>,
 }
 
 #[derive(Debug)]
@@ -78,6 +94,7 @@ async fn run_backend_preview(
     input_path: String,
 ) -> Result<PreviewResponse, String> {
     let preview_path = create_temp_file(".png")?;
+    let study_description = describe_study(&app, &input_path).await?;
 
     let args = vec![
         "-input".to_string(),
@@ -90,6 +107,7 @@ async fn run_backend_preview(
 
     Ok(PreviewResponse {
         preview_path: path_to_string(preview_path),
+        measurement_scale: study_description.measurement_scale,
     })
 }
 
@@ -117,10 +135,12 @@ async fn run_backend_process(
     ];
 
     let _ = run_backend_command(&app, &args).await?;
+    let study_description = describe_study(&app, &path_to_string(dicom_path.clone())).await?;
 
     Ok(ProcessResponse {
         preview_path: path_to_string(preview_path),
         dicom_path: path_to_string(dicom_path),
+        measurement_scale: study_description.measurement_scale,
     })
 }
 
@@ -141,6 +161,24 @@ async fn get_processing_manifest(app: tauri::AppHandle) -> Result<ProcessingMani
 
     serde_json::from_str(&stdout)
         .map_err(|error| format!("failed to parse backend preset manifest: {error}"))
+}
+
+async fn describe_study(
+    app: &tauri::AppHandle,
+    input_path: &str,
+) -> Result<StudyDescription, String> {
+    let stdout = run_backend_command(
+        app,
+        &[
+            "-input".to_string(),
+            input_path.to_string(),
+            "-describe-study".to_string(),
+        ],
+    )
+    .await?;
+
+    serde_json::from_str(&stdout)
+        .map_err(|error| format!("failed to parse backend study description: {error}"))
 }
 
 fn create_temp_file(suffix: &str) -> Result<PathBuf, String> {

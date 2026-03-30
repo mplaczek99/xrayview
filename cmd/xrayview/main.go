@@ -22,6 +22,7 @@ type config struct {
 	outputPath        string
 	previewOutputPath string
 	describePresets   bool
+	describeStudy     bool
 	preset            string
 	invert            bool
 	brightness        int
@@ -48,6 +49,13 @@ func main() {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
+	}
+	if cfg.describeStudy {
+		if err := writeStudyDescription(os.Stdout, loaded); err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
+		return
 	}
 
 	// Keep the original grayscale image for comparison output.
@@ -198,6 +206,7 @@ func parseFlags() config {
 	flag.StringVar(&cfg.outputPath, "output", "", "output DICOM path (default: input_processed.dcm)")
 	flag.StringVar(&cfg.previewOutputPath, "preview-output", "", "internal preview PNG path")
 	flag.BoolVar(&cfg.describePresets, "describe-presets", false, "print processing preset metadata as JSON")
+	flag.BoolVar(&cfg.describeStudy, "describe-study", false, "print study measurement metadata as JSON")
 	flag.StringVar(&cfg.preset, "preset", defaultPresetID, "preset: "+supportedPresetList())
 	flag.BoolVar(&cfg.invert, "invert", false, "invert grayscale output")
 	flag.IntVar(&cfg.brightness, "brightness", 0, "brightness delta for grayscale output")
@@ -216,6 +225,8 @@ func parseFlags() config {
 		fmt.Fprintln(out, "        output DICOM path (default: input_processed.dcm)")
 		fmt.Fprintln(out, "  -describe-presets")
 		fmt.Fprintln(out, "        print processing preset metadata as JSON")
+		fmt.Fprintln(out, "  -describe-study")
+		fmt.Fprintln(out, "        print study measurement metadata as JSON")
 		fmt.Fprintln(out, "  -preset string")
 		fmt.Fprintln(out, "        preset: "+supportedPresetList())
 		fmt.Fprintln(out, "  -invert")
@@ -276,6 +287,9 @@ func validateConfig(cfg config) error {
 	}
 	if !hasDICOMExtension(cfg.inputPath) {
 		return fmt.Errorf("input path must end with .dcm or .dicom")
+	}
+	if cfg.describeStudy {
+		return nil
 	}
 	preset := cfg.preset
 	if preset == "" {

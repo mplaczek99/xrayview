@@ -2,6 +2,7 @@ import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { MOCK_PROCESSING_MANIFEST } from "./mockProcessingManifest";
 import { createMockPreview } from "./mockStudy";
 import type {
+  MeasurementScale,
   Palette,
   PreviewResult,
   ProcessResult,
@@ -12,6 +13,7 @@ import type {
 
 interface PreviewPayload {
   previewPath: string;
+  measurementScale: MeasurementScale | null;
 }
 
 interface ProcessPayload extends PreviewPayload {
@@ -53,16 +55,26 @@ function toPreviewUrl(previewPath: string, runtime: RuntimeMode): string {
   return runtime === "tauri" ? convertFileSrc(previewPath) : previewPath;
 }
 
-function asPreviewResult(previewPath: string, runtime: RuntimeMode): PreviewResult {
+function asPreviewResult(
+  previewPath: string,
+  runtime: RuntimeMode,
+  measurementScale: MeasurementScale | null,
+): PreviewResult {
   return {
     previewUrl: toPreviewUrl(previewPath, runtime),
+    measurementScale,
     runtime,
   };
 }
 
-function asProcessResult(previewPath: string, dicomPath: string, runtime: RuntimeMode): ProcessResult {
+function asProcessResult(
+  previewPath: string,
+  dicomPath: string,
+  runtime: RuntimeMode,
+  measurementScale: MeasurementScale | null,
+): ProcessResult {
   return {
-    ...asPreviewResult(previewPath, runtime),
+    ...asPreviewResult(previewPath, runtime, measurementScale),
     dicomPath,
   };
 }
@@ -90,10 +102,10 @@ export async function pickSaveDicomPath(defaultName: string): Promise<string | n
 
 export async function runBackendPreview(inputPath: string): Promise<PreviewResult> {
   return runInRuntime({
-    mock: () => asPreviewResult(createMockPreview(false, "none"), getRuntimeMode()),
+    mock: () => asPreviewResult(createMockPreview(false, "none"), getRuntimeMode(), null),
     tauri: async () => {
       const payload = await invoke<PreviewPayload>("run_backend_preview", { inputPath });
-      return asPreviewResult(payload.previewPath, getRuntimeMode());
+      return asPreviewResult(payload.previewPath, getRuntimeMode(), payload.measurementScale);
     },
   });
 }
@@ -108,6 +120,7 @@ export async function runBackendProcess(
         createMockPreview(true, controls.palette),
         MOCK_PROCESSED_DICOM_PATH,
         getRuntimeMode(),
+        null,
       ),
     tauri: async () => {
       const payload = await invoke<ProcessPayload>("run_backend_process", {
@@ -115,7 +128,12 @@ export async function runBackendProcess(
         options: controls,
       });
 
-      return asProcessResult(payload.previewPath, payload.dicomPath, getRuntimeMode());
+      return asProcessResult(
+        payload.previewPath,
+        payload.dicomPath,
+        getRuntimeMode(),
+        payload.measurementScale,
+      );
     },
   });
 }

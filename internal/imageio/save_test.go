@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/suyashkumar/dicom"
+	"github.com/suyashkumar/dicom/pkg/frame"
 	"github.com/suyashkumar/dicom/pkg/tag"
 )
 
@@ -38,7 +39,25 @@ func TestSavePreviewPNG(t *testing.T) {
 
 func TestSaveDICOM(t *testing.T) {
 	sourcePath := filepath.Join(t.TempDir(), "source.dcm")
-	if err := writeTestDICOM(sourcePath, []uint16{0, 1024, 2048, 4095}, 2, 2, "MONOCHROME2"); err != nil {
+	if err := writeCustomTestDICOM(
+		sourcePath,
+		&frame.NativeFrame[uint16]{
+			InternalBitsPerSample:   16,
+			InternalRows:            2,
+			InternalCols:            2,
+			InternalSamplesPerPixel: 1,
+			RawData:                 []uint16{0, 1024, 2048, 4095},
+		},
+		2,
+		2,
+		"MONOCHROME2",
+		16,
+		12,
+		11,
+		0,
+		mustNewElement(t, tag.PixelSpacing, []string{"0.2", "0.3"}),
+		mustNewElement(t, tag.PixelSpacingCalibrationType, []string{"FIDUCIAL"}),
+	); err != nil {
 		t.Fatalf("write source dicom: %v", err)
 	}
 
@@ -74,5 +93,21 @@ func TestSaveDICOM(t *testing.T) {
 	}
 	if got := dicom.MustGetStrings(photometric.Value)[0]; got != "MONOCHROME2" {
 		t.Fatalf("PhotometricInterpretation = %q, want %q", got, "MONOCHROME2")
+	}
+
+	rowSpacing, columnSpacing, ok := lookupFloatPair(&parsed, tag.PixelSpacing)
+	if !ok {
+		t.Fatal("expected PixelSpacing to be preserved")
+	}
+	if rowSpacing != 0.2 || columnSpacing != 0.3 {
+		t.Fatalf("PixelSpacing = (%g, %g), want (%g, %g)", rowSpacing, columnSpacing, 0.2, 0.3)
+	}
+
+	calibrationType, err := parsed.FindElementByTag(tag.PixelSpacingCalibrationType)
+	if err != nil {
+		t.Fatalf("find PixelSpacingCalibrationType: %v", err)
+	}
+	if got := dicom.MustGetStrings(calibrationType.Value)[0]; got != "FIDUCIAL" {
+		t.Fatalf("PixelSpacingCalibrationType = %q, want %q", got, "FIDUCIAL")
 	}
 }

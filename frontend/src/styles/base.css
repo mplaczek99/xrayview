@@ -355,6 +355,32 @@ button {
   margin: 8px 0 0;
 }
 
+.viewer-shell__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+  padding: 12px 14px;
+  border: 1px solid rgba(126, 148, 178, 0.12);
+  border-radius: 14px;
+  background: rgba(11, 16, 23, 0.76);
+}
+
+.viewer-shell__tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.viewer-shell__hint {
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .viewer-stage {
   display: flex;
   align-items: center;
@@ -370,12 +396,70 @@ button {
   overflow: hidden;
 }
 
+.viewer-image-frame {
+  position: relative;
+  width: 100%;
+}
+
+.viewer-image-frame.is-measuring {
+  cursor: crosshair;
+  touch-action: none;
+}
+
 .viewer-stage__image {
   width: 100%;
   height: auto;
   max-height: 100%;
   border-radius: 14px;
   object-fit: contain;
+  user-select: none;
+}
+
+.viewer-image-frame__overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.viewer-image-frame__svg {
+  width: 100%;
+  height: 100%;
+}
+
+.viewer-measurement__line {
+  stroke: rgba(122, 193, 255, 0.98);
+  stroke-width: 0.34;
+  stroke-linecap: round;
+  filter: drop-shadow(0 0 6px rgba(55, 148, 255, 0.4));
+}
+
+.viewer-measurement__line--draft {
+  stroke-dasharray: 1.2 1.2;
+}
+
+.viewer-measurement__point {
+  fill: #f8fbff;
+  stroke: rgba(55, 148, 255, 0.95);
+  stroke-width: 0.34;
+}
+
+.viewer-measurement__point--draft {
+  fill: rgba(185, 216, 255, 0.92);
+}
+
+.viewer-measurement__tag {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  padding: 4px 8px;
+  border: 1px solid rgba(122, 193, 255, 0.4);
+  border-radius: 999px;
+  color: #d7ebff;
+  background: rgba(7, 12, 19, 0.84);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
 }
 
 .viewer-placeholder {
@@ -616,6 +700,11 @@ input[type="range"] {
 
   .viewer-shell__header {
     flex-direction: column;
+  }
+
+  .viewer-shell__toolbar {
+    flex-direction: column;
+    align-items: stretch;
   }
 
   .topbar__actions {
