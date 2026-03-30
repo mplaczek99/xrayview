@@ -1,5 +1,4 @@
 import { useMemo, useState } from "react";
-import { PanelCard } from "../components/common/PanelCard";
 import { ProcessingLab } from "../components/controls/ProcessingLab";
 import { TopBar } from "../components/shell/TopBar";
 import { ViewerStage } from "../components/viewer/ViewerStage";
@@ -27,6 +26,13 @@ const INITIAL_SESSION: StudySession = {
   dirty: false,
   runtime: "mock",
 };
+
+const ACTIVITY_ITEMS = [
+  { label: "EX", title: "Explorer", active: true },
+  { label: "VI", title: "Viewer" },
+  { label: "FX", title: "Filters" },
+  { label: "IO", title: "Export" },
+];
 
 function compactPath(path: string | null): string {
   if (!path) {
@@ -57,6 +63,33 @@ export function App() {
   const canRender = Boolean(session.inputPath);
   const canSave = Boolean(session.processedDicomPath) && !session.dirty;
   const canCompare = Boolean(session.originalPreviewUrl && session.processedPreviewUrl);
+  const canViewProcessed = Boolean(session.processedPreviewUrl);
+
+  const viewerTabs: Array<{
+    mode: ViewerMode;
+    label: string;
+    caption: string;
+    disabled: boolean;
+  }> = [
+    {
+      mode: "original",
+      label: "source.dcm",
+      caption: session.originalPreviewUrl ? "Loaded" : "Waiting",
+      disabled: !session.originalPreviewUrl,
+    },
+    {
+      mode: "processed",
+      label: "processed.dcm",
+      caption: canViewProcessed ? "Rendered" : "Locked",
+      disabled: !canViewProcessed,
+    },
+    {
+      mode: "compare",
+      label: "compare.diff",
+      caption: canCompare ? "Ready" : "Locked",
+      disabled: !canCompare,
+    },
+  ];
 
   async function handleOpenStudy() {
     const selectedPath = await pickDicomFile();
@@ -188,6 +221,8 @@ export function App() {
     <div className="app-shell">
       <TopBar
         busy={busy}
+        workspaceName={session.inputName}
+        recipeName={recipeName}
         runtimeLabel={session.runtime === "tauri" ? "Tauri bridge live" : "Mock preview mode"}
         statusLabel={session.dirty ? "Output stale" : "Session ready"}
         onOpenStudy={handleOpenStudy}
@@ -197,47 +232,81 @@ export function App() {
         canSave={canSave}
       />
 
-      <div className="workspace-grid">
-        <aside className="sidebar-column">
-          <PanelCard
-            eyebrow="Study Deck"
-            title={session.inputName}
-            description="Keep the source study, runtime, and export path visible while iterating on the visual design."
-          >
-            <dl className="data-list">
-              <div>
-                <dt>Source path</dt>
-                <dd className="u-mono">{compactPath(session.inputPath)}</dd>
-              </div>
-              <div>
-                <dt>Backend mode</dt>
-                <dd>{session.runtime === "tauri" ? "Live CLI bridge" : "Mock desktop fallback"}</dd>
-              </div>
-              <div>
-                <dt>Processed output</dt>
-                <dd>{describeOutput(session)}</dd>
-              </div>
-            </dl>
-          </PanelCard>
-
-          <PanelCard
-            eyebrow="Migration"
-            title="Why this shell exists"
-            description="The goal is to prove the next frontend stack without changing the Go processing code or DICOM pipeline."
-          >
-            <div className="bullet-stack">
-              <p>Large center viewer for the diagnostic image area.</p>
-              <p>Right-side control density for preset, tone, and output actions.</p>
-              <p>Static report-friendly structure ready for richer cards and annotations.</p>
+      <div className="ide-layout">
+        <nav className="activity-rail" aria-label="Workbench sections">
+          {ACTIVITY_ITEMS.map((item) => (
+            <div key={item.label} className={`activity-rail__item ${item.active ? "is-active" : ""}`}>
+              <span className="activity-rail__shortcut">{item.label}</span>
+              <span className="activity-rail__label">{item.title}</span>
             </div>
-          </PanelCard>
+          ))}
+        </nav>
+
+        <aside className="explorer-sidebar">
+          <section className="sidebar-panel">
+            <div className="sidebar-panel__heading">EXPLORER</div>
+
+            <div className="sidebar-section">
+              <div className="sidebar-section__label">OPEN EDITORS</div>
+              <div className="tree-list" role="tablist" aria-label="Open editors">
+                {viewerTabs.map((tab) => (
+                  <button
+                    key={tab.mode}
+                    className={`tree-item ${activeMode === tab.mode ? "is-active" : ""}`}
+                    type="button"
+                    onClick={() => setActiveMode(tab.mode)}
+                    disabled={tab.disabled}
+                  >
+                    <span className="tree-item__name">{tab.label}</span>
+                    <span className="tree-item__meta">{tab.caption}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="sidebar-section">
+              <div className="sidebar-section__label">WORKSPACE</div>
+              <dl className="data-list data-list--compact">
+                <div>
+                  <dt>Study</dt>
+                  <dd>{session.inputName}</dd>
+                </div>
+                <div>
+                  <dt>Source path</dt>
+                  <dd className="u-mono">{compactPath(session.inputPath)}</dd>
+                </div>
+                <div>
+                  <dt>Backend</dt>
+                  <dd>{session.runtime === "tauri" ? "Live CLI bridge" : "Mock browser bridge"}</dd>
+                </div>
+              </dl>
+            </div>
+          </section>
+
+          <section className="sidebar-panel sidebar-panel--muted">
+            <div className="sidebar-panel__heading">WORKFLOW</div>
+            <div className="bullet-stack">
+              <p>Open a study, shape the tone response, then render a derived DICOM.</p>
+              <p>The center canvas stays editor-first while the right inspector carries the controls.</p>
+              <p>Compare mode unlocks once both previews exist, just like opening a diff view.</p>
+            </div>
+          </section>
         </aside>
 
-        <main className="content-column">
-          <div className="metric-grid">
-            <PanelCard eyebrow="Recipe" title={recipeName} description="Preset detection stays derived from live control values." />
-            <PanelCard eyebrow="Tone" title={toneLabel} description={`Invert ${controls.invert ? "on" : "off"}, equalize ${controls.equalize ? "on" : "off"}.`} />
-            <PanelCard eyebrow="Palette" title={paletteLabel(controls.palette)} description={session.dirty ? "Preview needs a fresh render." : "Viewer and controls are aligned."} />
+        <main className="editor-column">
+          <div className="editor-tabs" role="tablist" aria-label="Viewer tabs">
+            {viewerTabs.map((tab) => (
+              <button
+                key={tab.mode}
+                className={`editor-tab ${activeMode === tab.mode ? "is-active" : ""}`}
+                type="button"
+                onClick={() => setActiveMode(tab.mode)}
+                disabled={tab.disabled}
+              >
+                <span className="editor-tab__name">{tab.label}</span>
+                <span className="editor-tab__state">{tab.caption}</span>
+              </button>
+            ))}
           </div>
 
           <ViewerStage
@@ -249,31 +318,53 @@ export function App() {
             toneLabel={toneLabel}
             paletteLabel={paletteLabel(controls.palette)}
             dirty={session.dirty}
-            onModeChange={setActiveMode}
           />
 
-          <div className="preview-rail">
-            <button className={`preview-card ${activeMode === "original" ? "is-active" : ""}`} type="button" onClick={() => setActiveMode("original")} disabled={!session.originalPreviewUrl}>
-              <span className="preview-card__label">Original DICOM</span>
-              <span className="preview-card__caption">Direct source preview</span>
-            </button>
-            <button className={`preview-card ${activeMode === "processed" ? "is-active" : ""}`} type="button" onClick={() => setActiveMode("processed")} disabled={!session.processedPreviewUrl}>
-              <span className="preview-card__label">Processed DICOM</span>
-              <span className="preview-card__caption">Derived output for compare and export</span>
-            </button>
-            <button className={`preview-card ${activeMode === "compare" ? "is-active" : ""}`} type="button" onClick={() => setActiveMode("compare")} disabled={!canCompare}>
-              <span className="preview-card__label">Compare View</span>
-              <span className="preview-card__caption">Side-by-side baseline for future review tooling</span>
-            </button>
-          </div>
+          <section className="bottom-panel">
+            <div className="bottom-panel__tabs">
+              <span className="bottom-panel__tab is-active">OUTPUT</span>
+              <span className="bottom-panel__tab">PIPELINE</span>
+              <span className="bottom-panel__tab">EXPORT</span>
+            </div>
+
+            <div className="bottom-panel__body">
+              <div className="terminal-log">
+                <div className="terminal-log__label">{busy ? "TASK RUNNING" : "SESSION OUTPUT"}</div>
+                <p className="terminal-log__line">{session.status}</p>
+                <p className="terminal-log__line u-mono">source {compactPath(session.inputPath)}</p>
+                <p className="terminal-log__line u-mono">derived {compactPath(session.processedDicomPath)}</p>
+              </div>
+
+              <dl className="data-list data-list--inline">
+                <div>
+                  <dt>Recipe</dt>
+                  <dd>{recipeName}</dd>
+                </div>
+                <div>
+                  <dt>Tone</dt>
+                  <dd>{toneLabel}</dd>
+                </div>
+                <div>
+                  <dt>Palette</dt>
+                  <dd>{paletteLabel(controls.palette)}</dd>
+                </div>
+                <div>
+                  <dt>Output</dt>
+                  <dd>{describeOutput(session)}</dd>
+                </div>
+              </dl>
+            </div>
+          </section>
         </main>
 
-        <aside className="sidebar-column sidebar-column--wide">
-          <PanelCard
-            eyebrow="Processing Lab"
-            title="Controls"
-            description="This baseline already preserves stale-output protection and keeps render/save flow distinct."
-          >
+        <aside className="inspector-sidebar">
+          <section className="inspector-panel">
+            <div className="sidebar-panel__heading">INSPECTOR</div>
+            <h2 className="inspector-panel__title">Processing Controls</h2>
+            <p className="inspector-panel__description">
+              VSCode-style right rail for presets, tone controls, and render safety state.
+            </p>
+
             <ProcessingLab
               controls={controls}
               presets={PROCESSING_PRESETS}
@@ -281,14 +372,11 @@ export function App() {
               onPresetSelect={applyPreset}
               onChange={updateControls}
             />
-          </PanelCard>
+          </section>
 
-          <PanelCard
-            eyebrow="Render Status"
-            title={session.status}
-            description="The desktop bridge and backend integration surface here first while the rest of the UI evolves."
-          >
-            <dl className="data-list">
+          <section className="inspector-panel inspector-panel--muted">
+            <div className="sidebar-panel__heading">EXPORT STATE</div>
+            <dl className="data-list data-list--compact">
               <div>
                 <dt>Save path</dt>
                 <dd className="u-mono">{compactPath(session.savedDestination)}</dd>
@@ -297,8 +385,12 @@ export function App() {
                 <dt>Temporary output</dt>
                 <dd className="u-mono">{compactPath(session.processedDicomPath)}</dd>
               </div>
+              <div>
+                <dt>Save lock</dt>
+                <dd>{canSave ? "Ready to export" : "Render required before save"}</dd>
+              </div>
             </dl>
-          </PanelCard>
+          </section>
         </aside>
       </div>
     </div>

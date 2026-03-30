@@ -6,6 +6,7 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use tauri::Manager;
 use tauri_plugin_shell::ShellExt;
 use tempfile::Builder;
 
@@ -299,6 +300,16 @@ fn main() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .setup(|app| {
+            #[cfg(target_os = "linux")]
+            {
+                if let Some(window) = app.get_webview_window("main") {
+                    window.set_decorations(false)?;
+                }
+            }
+
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             pick_dicom_file,
             pick_save_dicom_path,

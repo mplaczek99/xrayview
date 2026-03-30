@@ -9,7 +9,6 @@ interface ViewerStageProps {
   toneLabel: string;
   paletteLabel: string;
   dirty: boolean;
-  onModeChange: (mode: ViewerMode) => void;
 }
 
 function StageImage({ src, alt }: { src: string | null; alt: string }) {
@@ -36,41 +35,33 @@ export function ViewerStage({
   toneLabel,
   paletteLabel,
   dirty,
-  onModeChange,
 }: ViewerStageProps) {
   const isCompare = activeMode === "compare" && canCompare;
   const primaryImage = activeMode === "processed" ? processedPreviewUrl : originalPreviewUrl;
+  const editorName = activeMode === "compare" ? "compare.diff" : activeMode === "processed" ? "processed.dcm" : "source.dcm";
+  const editorTitle = activeMode === "compare" ? "Compare Editor" : activeMode === "processed" ? "Processed Preview" : "Source Preview";
+  const editorDescription =
+    activeMode === "compare"
+      ? "Review baseline and rendered output side-by-side before exporting the derived study."
+      : activeMode === "processed"
+        ? "Inspect the rendered derivative in the active editor surface."
+        : "Keep the original DICOM pinned while you tune the processing pipeline from the inspector.";
 
   return (
     <section className="viewer-shell">
       <div className="viewer-shell__header">
         <div>
-          <div className="panel-card__eyebrow">Large Canvas</div>
-          <h2 className="viewer-shell__title">Viewer + Compare</h2>
-          <p className="viewer-shell__subtitle">
-            Baseline layout for a future report-heavy workstation, with the source image centered and controls kept
-            at the edge.
-          </p>
+          <div className="viewer-shell__eyebrow">EDITOR / {editorName}</div>
+          <h2 className="viewer-shell__title">{editorTitle}</h2>
+          <p className="viewer-shell__subtitle">{editorDescription}</p>
         </div>
 
         <div className="viewer-shell__meta">
-          <span className="pill">Recipe {recipeName}</span>
-          <span className="pill">{toneLabel}</span>
-          <span className="pill">Palette {paletteLabel}</span>
-          <span className={`pill ${dirty ? "pill--warning" : "pill--accent"}`}>{dirty ? "Refresh needed" : "Output synced"}</span>
+          <span className="pill">recipe:{recipeName}</span>
+          <span className="pill">tone:{toneLabel}</span>
+          <span className="pill">palette:{paletteLabel}</span>
+          <span className={`pill ${dirty ? "pill--warning" : "pill--accent"}`}>{dirty ? "refresh-needed" : "output-synced"}</span>
         </div>
-      </div>
-
-      <div className="mode-switch">
-        <button className={`mode-switch__button ${activeMode === "original" ? "is-active" : ""}`} type="button" onClick={() => onModeChange("original")}>
-          Original
-        </button>
-        <button className={`mode-switch__button ${activeMode === "processed" ? "is-active" : ""}`} type="button" onClick={() => onModeChange("processed")} disabled={!processedPreviewUrl}>
-          Processed
-        </button>
-        <button className={`mode-switch__button ${activeMode === "compare" ? "is-active" : ""}`} type="button" onClick={() => onModeChange("compare")} disabled={!canCompare}>
-          Compare
-        </button>
       </div>
 
       <div className="viewer-stage">

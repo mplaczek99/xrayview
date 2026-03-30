@@ -1,5 +1,7 @@
 interface TopBarProps {
   busy: boolean;
+  workspaceName: string;
+  recipeName: string;
   runtimeLabel: string;
   statusLabel: string;
   onOpenStudy: () => void;
@@ -11,6 +13,8 @@ interface TopBarProps {
 
 export function TopBar({
   busy,
+  workspaceName,
+  recipeName,
   runtimeLabel,
   statusLabel,
   onOpenStudy,
@@ -21,29 +25,34 @@ export function TopBar({
 }: TopBarProps) {
   return (
     <header className="topbar">
-      <div className="topbar__copy">
-        <div className="topbar__kicker">XRAYVIEW NEXT</div>
-        <h1 className="topbar__title">Tauri Workstation Baseline</h1>
-        <p className="topbar__subtitle">
-          A new desktop shell aimed at richer viewer layouts, report design, and faster iteration without
-          changing the Go image-processing backend.
-        </p>
-        <div className="pill-row">
-          <span className="pill">Go backend intact</span>
-          <span className="pill pill--accent">{runtimeLabel}</span>
-          <span className="pill">{statusLabel}</span>
+      <div className="topbar__workspace">
+        <div className="topbar__kicker">XRAYVIEW WORKBENCH</div>
+        <div className="topbar__titleline">
+          <h1 className="topbar__title">{workspaceName}</h1>
+          <span className="topbar__context">{recipeName}</span>
         </div>
+      </div>
+
+      <div className="topbar__command">
+        <div className="topbar__command-label">COMMAND CENTER</div>
+        <div className="topbar__command-bar u-mono">{`study:${workspaceName} recipe:${recipeName}`}</div>
+      </div>
+
+      <div className="topbar__status pill-row">
+        <span className="pill">Go backend intact</span>
+        <span className="pill pill--accent">{runtimeLabel}</span>
+        <span className="pill">{statusLabel}</span>
       </div>
 
       <div className="topbar__actions">
         <button className="button button--ghost" type="button" onClick={onOpenStudy} disabled={busy}>
-          Open Study
+          Open
         </button>
         <button className="button button--primary" type="button" onClick={onRenderOutput} disabled={!canRender || busy}>
-          {busy ? "Working..." : "Render Output"}
+          {busy ? "Working..." : "Render"}
         </button>
         <button className="button button--ghost" type="button" onClick={onSaveOutput} disabled={!canSave || busy}>
-          Save DICOM
+          Export
         </button>
       </div>
     </header>
