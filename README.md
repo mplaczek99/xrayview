@@ -1,8 +1,8 @@
 # xrayview
 
-`xrayview` is a DICOM-first X-ray visualization project with a Java desktop frontend and a Go processing backend.
+`xrayview` is a DICOM-first X-ray visualization project with a Tauri desktop frontend and a Go processing backend.
 
-The primary desktop UI lives in `java-frontend/`. The Go CLI in `cmd/xrayview` is the backend processing entry point used by that Java frontend, and it also remains usable directly from the command line for DICOM workflows.
+The primary desktop UI lives in `frontend-app/`. The Go CLI in `cmd/xrayview` is the backend processing entry point used by that desktop frontend, and it also remains usable directly from the command line for DICOM workflows.
 
 ## What It Does
 
@@ -13,7 +13,7 @@ The primary desktop UI lives in `java-frontend/`. The Go CLI in `cmd/xrayview` i
 - Optionally builds a side-by-side comparison image
 - Saves the result as a derived DICOM image
 
-The desktop frontend renders internal PNG previews so JavaFX can display the study, but the user-facing workflow is DICOM in and DICOM out.
+The desktop frontend renders internal PNG previews so the workstation UI can display the study, but the user-facing workflow is DICOM in and DICOM out.
 
 ## Important Notice
 
@@ -27,21 +27,35 @@ It is **not** a medical device and must **not** be used for medical diagnosis, c
 go build -o /tmp/xrayview ./cmd/xrayview
 ```
 
-## Java Frontend
+## Desktop Frontend
 
-The primary desktop UI is the JavaFX frontend:
+The primary desktop UI is the Tauri frontend:
 
 ```bash
-mvn -f java-frontend/pom.xml package
-mvn -f java-frontend/pom.xml javafx:run
+npm --prefix frontend-app install
+npm --prefix frontend-app run tauri:dev
+```
+
+To build desktop bundles with the Go backend embedded as a sidecar:
+
+```bash
+npm --prefix frontend-app run tauri:build
+```
+
+On Linux, bundle builds also require the usual Tauri system packages such as WebKitGTK and `patchelf`.
+
+To iterate on the UI in browser-only mock mode:
+
+```bash
+npm --prefix frontend-app run dev
 ```
 
 ## Releases
 
-Prebuilt desktop packages are published on GitHub Releases starting with `v0.1.0`.
+Prebuilt desktop packages are published on GitHub Releases.
 
-- Linux: download `xrayview-vX.Y.Z-linux.AppImage`, run `chmod +x xrayview-vX.Y.Z-linux.AppImage`, then run `./xrayview-vX.Y.Z-linux.AppImage`
-- Windows: download `xrayview-vX.Y.Z-windows.zip`, extract it, then run `XRayView/XRayView.exe`
+- Linux: download the `.AppImage`, run `chmod +x <asset>.AppImage`, then run it
+- Windows: download the `.msi` installer and run it
 
 ## Basic Usage
 

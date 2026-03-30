@@ -6,12 +6,13 @@ authors = ["OpenCode"]
 edition = "2021"
 
 [build-dependencies]
-tauri-build = { version = "2.0.2" }
+tauri-build = { version = "2.0.2", features = [] }
 
 [dependencies]
 rfd = "0.15.2"
 serde = { version = "1.0", features = ["derive"] }
-tauri = { version = "2.1.1" }
+tauri = { version = "2.1.1", features = [] }
+tauri-plugin-shell = "2.3.1"
 tempfile = "3.14.0"
 
 [features]

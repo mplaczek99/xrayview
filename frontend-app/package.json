@@ -6,10 +6,11 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
+    "prepare:sidecar": "node ./scripts/prepare-sidecar.mjs",
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build"
+    "tauri:build": "npm run prepare:sidecar && tauri build"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.8.0",

@@ -21,16 +21,14 @@ jobs:
         include:
           - os: ubuntu-latest
             label: Linux
-            platform: linux
-            backend_output: java-frontend/target/xrayview
+            bundle: appimage
             artifact_name: xrayview-linux-release-asset
-            asset_suffix: linux.AppImage
+            artifact_glob: frontend-app/src-tauri/target/release/bundle/appimage/*.AppImage
           - os: windows-latest
             label: Windows
-            platform: windows
-            backend_output: java-frontend/target/xrayview.exe
+            bundle: msi
             artifact_name: xrayview-windows-release-asset
-            asset_suffix: windows.zip
+            artifact_glob: frontend-app/src-tauri/target/release/bundle/msi/*.msi
 
     defaults:
       run:
@@ -40,68 +38,55 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      - name: Install Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
 
-      - name: Set up Java
-        uses: actions/setup-java@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
         with:
-          distribution: temurin
-          java-version: '21'
-          cache: maven
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: frontend-app/package-lock.json
 
-      - name: Build Go backend
-        run: go build -o "${{ matrix.backend_output }}" ./cmd/xrayview
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
 
-      - name: Build Java frontend
-        run: mvn -B -f java-frontend/pom.xml package
+      - name: Cache Rust artifacts
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: frontend-app/src-tauri -> target
 
-      - name: Download appimagetool
-        if: runner.os == 'Linux'
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: frontend-app
+
+      - name: Build release bundle
+        run: npm run tauri:build -- --bundles "${{ matrix.bundle }}"
+        working-directory: frontend-app
+
+      - name: Resolve release asset
         run: |
-          curl -fsSL -o "$RUNNER_TEMP/appimagetool-x86_64.AppImage" \
-            https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
-          chmod +x "$RUNNER_TEMP/appimagetool-x86_64.AppImage"
-
-      - name: Build Linux AppImage
-        if: runner.os == 'Linux'
-        run: |
-          asset_name="xrayview-${GITHUB_REF_NAME}-${{ matrix.asset_suffix }}"
-          bash java-frontend/package-linux-appimage.sh \
-            "${{ matrix.backend_output }}" \
-            "$asset_name" \
-            "${GITHUB_REF_NAME#v}" \
-            "$RUNNER_TEMP/appimagetool-x86_64.AppImage"
-          printf 'ASSET_NAME=%s\n' "$asset_name" >> "$GITHUB_ENV"
-
-      - name: Build Windows app-image
-        if: runner.os == 'Windows'
-        run: bash java-frontend/package-app-image.sh "${{ matrix.backend_output }}" "${GITHUB_REF_NAME#v}"
-
-      - name: Prepare Windows zip asset
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $appImagePath = Join-Path $env:GITHUB_WORKSPACE "java-frontend\target\app-image\XRayView"
-          if (-not (Test-Path $appImagePath -PathType Container)) {
-            throw "Expected a Windows app-image at $appImagePath"
-          }
-
-          $assetName = "xrayview-$env:GITHUB_REF_NAME-${{ matrix.asset_suffix }}"
-          if (Test-Path $assetName) {
-            Remove-Item $assetName -Force
-          }
-
-          Compress-Archive -Path $appImagePath -DestinationPath $assetName -CompressionLevel Optimal
-          "ASSET_NAME=$assetName" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          shopt -s nullglob
+          artifacts=( ${{ matrix.artifact_glob }} )
+          if [ "${#artifacts[@]}" -eq 0 ]; then
+            printf 'No release asset matched pattern: %s\n' "${{ matrix.artifact_glob }}" >&2
+            exit 1
+          fi
+          printf 'ASSET_PATH=%s\n' "${artifacts[0]}" >> "$GITHUB_ENV"
 
       - name: Upload release asset artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact_name }}
-          path: ${{ env.ASSET_NAME }}
+          path: ${{ env.ASSET_PATH }}
           if-no-files-found: error
 
   publish-release:

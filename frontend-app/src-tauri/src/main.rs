@@ -7,6 +7,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use tauri::Manager;
+use tauri_plugin_shell::ShellExt;
 use tempfile::Builder;
 
 #[derive(Debug, Deserialize)]
@@ -58,17 +59,20 @@ fn pick_save_dicom_path(default_name: Option<String>) -> Option<String> {
 }
 
 #[tauri::command]
-fn run_backend_preview(input_path: String) -> Result<PreviewResponse, String> {
+async fn run_backend_preview(
+    app: tauri::AppHandle,
+    input_path: String,
+) -> Result<PreviewResponse, String> {
     let preview_path = create_temp_file(".png")?;
 
-    let mut args = vec![
+    let args = vec![
         "-input".to_string(),
         input_path,
         "-preview-output".to_string(),
         path_to_string(preview_path.clone()),
     ];
 
-    run_backend_command(&mut args)?;
+    run_backend_command(&app, &args).await?;
 
     Ok(PreviewResponse {
         preview_path: path_to_string(preview_path),
@@ -76,14 +80,15 @@ fn run_backend_preview(input_path: String) -> Result<PreviewResponse, String> {
 }
 
 #[tauri::command]
-fn run_backend_process(
+async fn run_backend_process(
+    app: tauri::AppHandle,
     input_path: String,
     options: ProcessingOptions,
 ) -> Result<ProcessResponse, String> {
     let preview_path = create_temp_file(".png")?;
     let dicom_path = create_temp_file(".dcm")?;
 
-    let mut args = vec![
+    let args = vec![
         "-input".to_string(),
         input_path,
         "-output".to_string(),
@@ -97,7 +102,7 @@ fn run_backend_process(
         format!("-palette={}", options.palette),
     ];
 
-    run_backend_command(&mut args)?;
+    run_backend_command(&app, &args).await?;
 
     Ok(ProcessResponse {
         preview_path: path_to_string(preview_path),
@@ -130,7 +135,22 @@ fn create_temp_file(suffix: &str) -> Result<PathBuf, String> {
     Ok(path)
 }
 
-fn run_backend_command(args: &mut Vec<String>) -> Result<(), String> {
+async fn run_backend_command(app: &tauri::AppHandle, args: &[String]) -> Result<(), String> {
+    if let Ok(sidecar) = app.shell().sidecar("xrayview-backend") {
+        let output = sidecar
+            .args(args.iter().map(String::as_str))
+            .output()
+            .await
+            .map_err(|error| format!("failed to start bundled backend: {error}"))?;
+
+        return handle_backend_output(
+            output.status.success(),
+            format!("{:?}", output.status),
+            output.stdout,
+            output.stderr,
+        );
+    }
+
     let backend = resolve_backend_spec()?;
     let mut command = Command::new(&backend.program);
     command.current_dir(&backend.working_directory);
@@ -141,18 +161,32 @@ fn run_backend_command(args: &mut Vec<String>) -> Result<(), String> {
         .output()
         .map_err(|error| format!("failed to start backend command: {error}"))?;
 
-    if output.status.success() {
+    handle_backend_output(
+        output.status.success(),
+        format!("{}", output.status),
+        output.stdout,
+        output.stderr,
+    )
+}
+
+fn handle_backend_output(
+    succeeded: bool,
+    status_text: String,
+    stdout_bytes: Vec<u8>,
+    stderr_bytes: Vec<u8>,
+) -> Result<(), String> {
+    if succeeded {
         return Ok(());
     }
 
-    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let stderr = String::from_utf8_lossy(&stderr_bytes).trim().to_string();
+    let stdout = String::from_utf8_lossy(&stdout_bytes).trim().to_string();
     let message = if !stderr.is_empty() {
         stderr
     } else if !stdout.is_empty() {
         stdout
     } else {
-        format!("backend exited with status {}", output.status)
+        format!("backend exited with status {status_text}")
     };
 
     Err(message)
@@ -242,8 +276,20 @@ fn path_to_string(path: PathBuf) -> String {
     path.to_string_lossy().to_string()
 }
 
+fn configure_linux_webkit_environment() {
+    #[cfg(target_os = "linux")]
+    {
+        if env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
+            env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+        }
+    }
+}
+
 fn main() {
+    configure_linux_webkit_environment();
+
     tauri::Builder::default()
+        .plugin(tauri_plugin_shell::init())
         .setup(|app| {
             let _window = app.get_webview_window("main");
             Ok(())

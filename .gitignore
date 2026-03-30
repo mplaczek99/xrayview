@@ -1,16 +1,11 @@
 /xrayview
 /xrayview.exe
 
-java-frontend/bin/
-java-frontend/target/
-java-frontend/.classpath
-java-frontend/.project
-java-frontend/.settings/
-
 frontend-app/node_modules/
 frontend-app/dist/
 frontend-app/*.tsbuildinfo
 frontend-app/vite.config.js
 frontend-app/vite.config.d.ts
+frontend-app/src-tauri/binaries/
 frontend-app/src-tauri/gen/
 frontend-app/src-tauri/target/
