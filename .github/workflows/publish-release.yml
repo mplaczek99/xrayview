@@ -57,7 +57,9 @@ jobs:
       - name: Cache Rust artifacts
         uses: swatinem/rust-cache@v2
         with:
-          workspaces: frontend/src-tauri -> target
+          workspaces: |
+            frontend/src-tauri -> target
+            backend-rust -> target
 
       - name: Install frontend dependencies
         run: npm ci
