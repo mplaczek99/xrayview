@@ -451,7 +451,7 @@ mod tests {
     }
 
     #[test]
-    fn manifest_matches_go_defaults() {
+    fn manifest_has_expected_defaults() {
         let manifest = processing_manifest();
         assert_eq!(manifest.default_preset_id, DEFAULT_PRESET_ID);
         assert_eq!(manifest.presets.len(), 3);

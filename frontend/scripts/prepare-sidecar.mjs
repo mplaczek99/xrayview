@@ -27,9 +27,19 @@ for (const entry of fs.readdirSync(binariesDir)) {
 
 const outputPath = path.join(binariesDir, `xrayview-backend-${targetTriple}${extension}`);
 
-execSync(`go build -o "${outputPath}" ./cmd/xrayview`, {
+execSync(`cargo build --release --manifest-path backend-rust/Cargo.toml`, {
   cwd: workspaceRoot,
   stdio: "inherit",
 });
+
+const builtBinary = path.join(
+  workspaceRoot,
+  "backend-rust",
+  "target",
+  "release",
+  `xrayview-backend-rust${extension}`,
+);
+
+fs.copyFileSync(builtBinary, outputPath);
 
 console.log(`Prepared backend sidecar at ${outputPath}`);

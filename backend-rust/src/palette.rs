@@ -24,7 +24,7 @@ pub fn apply_named_palette(src: &PreviewImage, name: &str) -> Result<PreviewImag
 
 fn apply_palette(src: &PreviewImage, color_fn: fn(u8) -> [u8; 4]) -> Vec<u8> {
     let mut pixels = vec![0_u8; src.pixels.len() * 4];
-    // rayon: parallel pixel loop (was sequential in Go)
+    // rayon: parallel pixel loop
     pixels
         .par_chunks_mut(4)
         .zip(src.pixels.par_iter().copied())
@@ -73,7 +73,7 @@ mod tests {
     use crate::processing::{process_grayscale_pixels, GrayscaleControls};
 
     #[test]
-    fn hot_palette_matches_go_breakpoints() {
+    fn hot_palette_breakpoints() {
         assert_eq!(hot_color(0), [0, 0, 0, 255]);
         assert_eq!(hot_color(84), [252, 0, 0, 255]);
         assert_eq!(hot_color(85), [255, 0, 0, 255]);
@@ -82,7 +82,7 @@ mod tests {
     }
 
     #[test]
-    fn bone_palette_matches_go_formula() {
+    fn bone_palette_formula() {
         assert_eq!(bone_color(0), [0, 0, 0, 255]);
         assert_eq!(bone_color(128), [112, 120, 128, 255]);
         assert_eq!(bone_color(255), [255, 255, 255, 255]);

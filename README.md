@@ -1,8 +1,8 @@
 # xrayview
 
-`xrayview` is a DICOM-first X-ray visualization project with a Tauri desktop frontend and a Go processing backend.
+`xrayview` is a DICOM-first X-ray visualization project with a Tauri desktop frontend and a Rust processing backend.
 
-The primary desktop UI lives in `frontend/`. The Go CLI in `cmd/xrayview` is the backend processing entry point used by that desktop frontend, and it also remains usable directly from the command line for DICOM workflows.
+The primary desktop UI lives in `frontend/`. The Rust CLI in `backend-rust/` is the backend processing entry point used by that desktop frontend, and it also remains usable directly from the command line for DICOM workflows.
 
 ## What It Does
 
@@ -24,7 +24,8 @@ It is **not** a medical device and must **not** be used for medical diagnosis, c
 ## Build
 
 ```bash
-go build -o /tmp/xrayview ./cmd/xrayview
+cd backend-rust
+cargo build --release
 ```
 
 ## Desktop Frontend
@@ -36,7 +37,7 @@ npm install
 npm run tauri:dev
 ```
 
-To build desktop bundles with the Go backend embedded as a sidecar:
+To build desktop bundles with the Rust backend embedded as a sidecar:
 
 ```bash
 npm run tauri:build
@@ -62,10 +63,10 @@ Prebuilt desktop packages are published on GitHub Releases.
 The repository includes a public dental radiograph sample at `images/sample-dental-radiograph.dcm`. This DICOM file is derived from the Wikimedia Commons panoramic image `Dental Panorama X-ray.jpg` (CC BY 4.0). See `images/README.md` for provenance details.
 
 ```bash
-go run ./cmd/xrayview -input images/sample-dental-radiograph.dcm
+cargo run --manifest-path backend-rust/Cargo.toml -- --input images/sample-dental-radiograph.dcm
 ```
 
-If `-output` is omitted, the tool writes a file next to the input using this pattern:
+If `--output` is omitted, the tool writes a file next to the input using this pattern:
 
 - `study.dcm` -> `study_processed.dcm`
 
@@ -73,13 +74,13 @@ If `-output` is omitted, the tool writes a file next to the input using this pat
 
 ### Input
 
-- `-input`
+- `--input`
   - Path to the source DICOM study
   - Supports `.dcm` and `.dicom`
 
 ### Output
 
-- `-output`
+- `--output`
   - Output DICOM path
   - Optional
   - Must end with `.dcm` or `.dicom`
@@ -87,7 +88,7 @@ If `-output` is omitted, the tool writes a file next to the input using this pat
 
 ### Presets
 
-- `-preset`
+- `--preset`
   - Named visualization preset
   - Supported values: `default`, `xray`, `high-contrast`
   - Presets set a combination of brightness, contrast, equalization, and palette
@@ -115,33 +116,33 @@ If `-output` is omitted, the tool writes a file next to the input using this pat
 
 ### Grayscale Filter Controls
 
-- `-invert`
+- `--invert`
   - Inverts the grayscale image
 
-- `-brightness`
+- `--brightness`
   - Integer brightness delta
   - Positive values brighten the image
   - Negative values darken the image
 
-- `-contrast`
+- `--contrast`
   - Floating-point contrast factor
   - `1.0` leaves contrast unchanged
   - Values above `1.0` increase contrast
   - Values below `1.0` decrease contrast
 
-- `-equalize`
+- `--equalize`
   - Enables histogram equalization
 
 ### Comparison Output
 
-- `-compare`
+- `--compare`
   - Writes a side-by-side comparison image into the derived DICOM output
   - Left side: original grayscale image
   - Right side: processed output image
 
 ### Pipeline Ordering
 
-- `-pipeline`
+- `--pipeline`
   - Comma-separated list of grayscale processing steps
   - Lets you control the order of enabled grayscale filters
   - Enabled steps omitted from the list still run afterward in the default order
@@ -153,7 +154,7 @@ If `-output` is omitted, the tool writes a file next to the input using this pat
     - `equalize`
   - Duplicate step names are rejected
 
-If `-pipeline` is omitted, the default order is:
+If `--pipeline` is omitted, the default order is:
 
 ```text
 grayscale,invert,brightness,contrast,equalize
@@ -168,7 +169,7 @@ Notes:
 
 ### Pseudocolor
 
-- `-palette`
+- `--palette`
   - Pseudocolor palette for the final image
   - Supported values:
     - `none`
@@ -180,68 +181,69 @@ Notes:
 ### Basic processing
 
 ```bash
-go run ./cmd/xrayview -input images/sample-dental-radiograph.dcm
+cargo run --manifest-path backend-rust/Cargo.toml -- --input images/sample-dental-radiograph.dcm
 ```
 
 ### Explicit output file
 
 ```bash
-go run ./cmd/xrayview -input images/sample-dental-radiograph.dcm -output images/sample-dental-radiograph_processed.dcm
+cargo run --manifest-path backend-rust/Cargo.toml -- --input images/sample-dental-radiograph.dcm --output images/sample-dental-radiograph_processed.dcm
 ```
 
 ### Tone adjustments
 
 ```bash
-go run ./cmd/xrayview -input images/sample-dental-radiograph.dcm -invert -brightness 15
+cargo run --manifest-path backend-rust/Cargo.toml -- --input images/sample-dental-radiograph.dcm --invert --brightness 15
 ```
 
 ```bash
-go run ./cmd/xrayview -input images/sample-dental-radiograph.dcm -contrast 1.6 -equalize
+cargo run --manifest-path backend-rust/Cargo.toml -- --input images/sample-dental-radiograph.dcm --contrast 1.6 --equalize
 ```
 
 ### Presets
 
 ```bash
-go run ./cmd/xrayview -input images/sample-dental-radiograph.dcm -preset xray
+cargo run --manifest-path backend-rust/Cargo.toml -- --input images/sample-dental-radiograph.dcm --preset xray
 ```
 
 ```bash
-go run ./cmd/xrayview -input images/sample-dental-radiograph.dcm -preset xray -brightness 5
+cargo run --manifest-path backend-rust/Cargo.toml -- --input images/sample-dental-radiograph.dcm --preset xray --brightness 5
 ```
 
 ### Pipeline ordering
 
 ```bash
-go run ./cmd/xrayview -input images/sample-dental-radiograph.dcm -invert -contrast 1.5 -equalize -pipeline grayscale,contrast,invert,equalize
+cargo run --manifest-path backend-rust/Cargo.toml -- --input images/sample-dental-radiograph.dcm --invert --contrast 1.5 --equalize --pipeline grayscale,contrast,invert,equalize
 ```
 
 ### Pseudocolor
 
 ```bash
-go run ./cmd/xrayview -input images/sample-dental-radiograph.dcm -palette hot
+cargo run --manifest-path backend-rust/Cargo.toml -- --input images/sample-dental-radiograph.dcm --palette hot
 ```
 
 ### Comparison output
 
 ```bash
-go run ./cmd/xrayview -input images/sample-dental-radiograph.dcm -compare
+cargo run --manifest-path backend-rust/Cargo.toml -- --input images/sample-dental-radiograph.dcm --compare
 ```
 
 ```bash
-go run ./cmd/xrayview -input images/sample-dental-radiograph.dcm -preset xray -compare
+cargo run --manifest-path backend-rust/Cargo.toml -- --input images/sample-dental-radiograph.dcm --preset xray --compare
 ```
 
 ## Validation Rules
 
-- `-input` is required
+- `--input` is required
 - Input must be a `.dcm` or `.dicom` file
 - Output must be a `.dcm` or `.dicom` file
-- `-palette` must be `none`, `hot`, or `bone`
-- `-preset` must be `default`, `xray`, or `high-contrast`
-- `-pipeline` may only contain `grayscale`, `invert`, `brightness`, `contrast`, and `equalize`
+- `--palette` must be `none`, `hot`, or `bone`
+- `--preset` must be `default`, `xray`, or `high-contrast`
+- `--pipeline` may only contain `grayscale`, `invert`, `brightness`, `contrast`, and `equalize`
 
 ## Test
 
 ```bash
-go test ./...
+cd backend-rust
+cargo test
 ```

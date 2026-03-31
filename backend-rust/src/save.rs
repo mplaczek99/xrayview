@@ -15,7 +15,7 @@ const IMPLEMENTATION_CLASS_UID: &str = "2.25.30204379017224969252632162326675274
 const IMPLEMENTATION_VERSION_NAME: &str = "XRAYVIEW_1_0";
 const DEFAULT_PROCESSED_SERIES_DESCRIPTION: &str = "XRayView Processed";
 
-/// Tags to preserve from the source DICOM dataset, matching Go's preservedSourceTags.
+/// Tags to preserve from the source DICOM dataset.
 /// StudyInstanceUID is handled specially (not blindly copied).
 const PRESERVED_SOURCE_TAGS: &[Tag] = &[
     tags::PATIENT_NAME,
@@ -70,7 +70,7 @@ pub fn save_dicom(
 
     let mut file_obj = FileDicomObject::new_empty_with_meta(meta);
 
-    // Core identification elements — matches Go's buildSecondaryCaptureDataset.
+    // Core identification elements for the secondary capture dataset.
     put_str(&mut file_obj, tags::SOP_CLASS_UID, VR::UI, SECONDARY_CAPTURE_SOP_CLASS_UID);
     put_str(&mut file_obj, tags::SOP_INSTANCE_UID, VR::UI, &sop_instance_uid);
     put_str(&mut file_obj, tags::MODALITY, VR::CS, "OT");

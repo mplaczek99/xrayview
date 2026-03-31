@@ -39,7 +39,7 @@ export function TopBar({
       </div>
 
       <div className="topbar__status pill-row">
-        <span className="pill">Go backend intact</span>
+        <span className="pill">Rust backend</span>
         <span className="pill pill--accent">{runtimeLabel}</span>
         <span className="pill">{statusLabel}</span>
       </div>

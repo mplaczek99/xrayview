@@ -1,5 +1,4 @@
-/xrayview
-/xrayview.exe
+backend-rust/target/
 
 frontend/node_modules/
 frontend/dist/

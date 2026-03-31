@@ -298,15 +298,20 @@ fn resolve_backend_spec() -> Result<BackendSpec, String> {
             }
 
             return Ok(BackendSpec {
-                program: "go".to_string(),
-                prefix_args: vec!["run".to_string(), "./cmd/xrayview".to_string()],
+                program: "cargo".to_string(),
+                prefix_args: vec![
+                    "run".to_string(),
+                    "--manifest-path".to_string(),
+                    "backend-rust/Cargo.toml".to_string(),
+                    "--".to_string(),
+                ],
                 working_directory: project_root,
             });
         }
     }
 
     Err(
-        "could not locate the Go backend; set XRAYVIEW_BACKEND_PATH or run from the repository"
+        "could not locate the Rust backend; set XRAYVIEW_BACKEND_PATH or run from the repository"
             .to_string(),
     )
 }
@@ -319,7 +324,7 @@ fn find_project_root(start: &Path) -> Option<PathBuf> {
     };
 
     loop {
-        if current.join("cmd").join("xrayview").is_dir() {
+        if current.join("backend-rust").is_dir() {
             return Some(current);
         }
 
@@ -332,12 +337,12 @@ fn find_project_root(start: &Path) -> Option<PathBuf> {
 fn backend_binary_candidates(project_root: &Path) -> Vec<PathBuf> {
     #[cfg(target_os = "windows")]
     {
-        vec![project_root.join("xrayview.exe")]
+        vec![project_root.join("backend-rust/target/release/xrayview-backend-rust.exe")]
     }
 
     #[cfg(not(target_os = "windows"))]
     {
-        vec![project_root.join("xrayview")]
+        vec![project_root.join("backend-rust/target/release/xrayview-backend-rust")]
     }
 }
 

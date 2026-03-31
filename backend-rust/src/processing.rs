@@ -189,7 +189,7 @@ fn clamp_lookup_value(value: i32) -> u8 {
 }
 
 fn apply_lookup_in_place(pixels: &mut [u8], lookup: &[u8; 256]) {
-    // rayon: parallel pixel loop (was sequential in Go)
+    // rayon: parallel pixel loop
     pixels.par_iter_mut().for_each(|value| {
         *value = lookup[*value as usize];
     });

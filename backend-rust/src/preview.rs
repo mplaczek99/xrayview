@@ -514,7 +514,7 @@ mod tests {
     use tempfile::TempDir;
 
     #[test]
-    fn gray_from_rgb8_matches_go_formula_for_known_values() {
+    fn gray_from_rgb8_known_values() {
         assert_eq!(gray_from_rgb8(0, 0, 0), 0);
         assert_eq!(gray_from_rgb8(255, 255, 255), 255);
         assert_eq!(gray_from_rgb8(255, 0, 0), 76);
