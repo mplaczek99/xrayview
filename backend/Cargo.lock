@@ -1944,7 +1944,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "xrayview-backend-rust"
+name = "xrayview-backend"
 version = "0.1.0"
 dependencies = [
  "anyhow",

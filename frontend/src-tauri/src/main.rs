@@ -302,7 +302,7 @@ fn resolve_backend_spec() -> Result<BackendSpec, String> {
                 prefix_args: vec![
                     "run".to_string(),
                     "--manifest-path".to_string(),
-                    "backend-rust/Cargo.toml".to_string(),
+                    "backend/Cargo.toml".to_string(),
                     "--".to_string(),
                 ],
                 working_directory: project_root,
@@ -324,7 +324,7 @@ fn find_project_root(start: &Path) -> Option<PathBuf> {
     };
 
     loop {
-        if current.join("backend-rust").is_dir() {
+        if current.join("backend").is_dir() {
             return Some(current);
         }
 
@@ -337,12 +337,12 @@ fn find_project_root(start: &Path) -> Option<PathBuf> {
 fn backend_binary_candidates(project_root: &Path) -> Vec<PathBuf> {
     #[cfg(target_os = "windows")]
     {
-        vec![project_root.join("backend-rust/target/release/xrayview-backend-rust.exe")]
+        vec![project_root.join("backend/target/release/xrayview-backend.exe")]
     }
 
     #[cfg(not(target_os = "windows"))]
     {
-        vec![project_root.join("backend-rust/target/release/xrayview-backend-rust")]
+        vec![project_root.join("backend/target/release/xrayview-backend")]
     }
 }
 

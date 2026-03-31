@@ -2,7 +2,7 @@
 
 `xrayview` is a DICOM-first X-ray visualization project with a Tauri desktop frontend and a Rust processing backend.
 
-The primary desktop UI lives in `frontend/`. The Rust CLI in `backend-rust/` is the backend processing entry point used by that desktop frontend, and it also remains usable directly from the command line for DICOM workflows.
+The primary desktop UI lives in `frontend/`. The Rust CLI in `backend/` is the backend processing entry point used by that desktop frontend, and it also remains usable directly from the command line for DICOM workflows.
 
 ## What It Does
 
@@ -24,7 +24,7 @@ It is **not** a medical device and must **not** be used for medical diagnosis, c
 ## Build
 
 ```bash
-cd backend-rust
+cd backend
 cargo build --release
 ```
 
@@ -63,7 +63,7 @@ Prebuilt desktop packages are published on GitHub Releases.
 The repository includes a public dental radiograph sample at `images/sample-dental-radiograph.dcm`. This DICOM file is derived from the Wikimedia Commons panoramic image `Dental Panorama X-ray.jpg` (CC BY 4.0). See `images/README.md` for provenance details.
 
 ```bash
-cargo run --manifest-path backend-rust/Cargo.toml -- --input images/sample-dental-radiograph.dcm
+cargo run --manifest-path backend/Cargo.toml -- --input images/sample-dental-radiograph.dcm
 ```
 
 If `--output` is omitted, the tool writes a file next to the input using this pattern:
@@ -181,55 +181,55 @@ Notes:
 ### Basic processing
 
 ```bash
-cargo run --manifest-path backend-rust/Cargo.toml -- --input images/sample-dental-radiograph.dcm
+cargo run --manifest-path backend/Cargo.toml -- --input images/sample-dental-radiograph.dcm
 ```
 
 ### Explicit output file
 
 ```bash
-cargo run --manifest-path backend-rust/Cargo.toml -- --input images/sample-dental-radiograph.dcm --output images/sample-dental-radiograph_processed.dcm
+cargo run --manifest-path backend/Cargo.toml -- --input images/sample-dental-radiograph.dcm --output images/sample-dental-radiograph_processed.dcm
 ```
 
 ### Tone adjustments
 
 ```bash
-cargo run --manifest-path backend-rust/Cargo.toml -- --input images/sample-dental-radiograph.dcm --invert --brightness 15
+cargo run --manifest-path backend/Cargo.toml -- --input images/sample-dental-radiograph.dcm --invert --brightness 15
 ```
 
 ```bash
-cargo run --manifest-path backend-rust/Cargo.toml -- --input images/sample-dental-radiograph.dcm --contrast 1.6 --equalize
+cargo run --manifest-path backend/Cargo.toml -- --input images/sample-dental-radiograph.dcm --contrast 1.6 --equalize
 ```
 
 ### Presets
 
 ```bash
-cargo run --manifest-path backend-rust/Cargo.toml -- --input images/sample-dental-radiograph.dcm --preset xray
+cargo run --manifest-path backend/Cargo.toml -- --input images/sample-dental-radiograph.dcm --preset xray
 ```
 
 ```bash
-cargo run --manifest-path backend-rust/Cargo.toml -- --input images/sample-dental-radiograph.dcm --preset xray --brightness 5
+cargo run --manifest-path backend/Cargo.toml -- --input images/sample-dental-radiograph.dcm --preset xray --brightness 5
 ```
 
 ### Pipeline ordering
 
 ```bash
-cargo run --manifest-path backend-rust/Cargo.toml -- --input images/sample-dental-radiograph.dcm --invert --contrast 1.5 --equalize --pipeline grayscale,contrast,invert,equalize
+cargo run --manifest-path backend/Cargo.toml -- --input images/sample-dental-radiograph.dcm --invert --contrast 1.5 --equalize --pipeline grayscale,contrast,invert,equalize
 ```
 
 ### Pseudocolor
 
 ```bash
-cargo run --manifest-path backend-rust/Cargo.toml -- --input images/sample-dental-radiograph.dcm --palette hot
+cargo run --manifest-path backend/Cargo.toml -- --input images/sample-dental-radiograph.dcm --palette hot
 ```
 
 ### Comparison output
 
 ```bash
-cargo run --manifest-path backend-rust/Cargo.toml -- --input images/sample-dental-radiograph.dcm --compare
+cargo run --manifest-path backend/Cargo.toml -- --input images/sample-dental-radiograph.dcm --compare
 ```
 
 ```bash
-cargo run --manifest-path backend-rust/Cargo.toml -- --input images/sample-dental-radiograph.dcm --preset xray --compare
+cargo run --manifest-path backend/Cargo.toml -- --input images/sample-dental-radiograph.dcm --preset xray --compare
 ```
 
 ## Validation Rules
@@ -244,6 +244,6 @@ cargo run --manifest-path backend-rust/Cargo.toml -- --input images/sample-denta
 ## Test
 
 ```bash
-cd backend-rust
+cd backend
 cargo test
 ```

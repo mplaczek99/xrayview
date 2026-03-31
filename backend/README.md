@@ -1,4 +1,4 @@
-# backend-rust
+# backend
 
 Rust backend for `xrayview`.
 

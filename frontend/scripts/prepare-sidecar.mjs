@@ -27,17 +27,17 @@ for (const entry of fs.readdirSync(binariesDir)) {
 
 const outputPath = path.join(binariesDir, `xrayview-backend-${targetTriple}${extension}`);
 
-execSync(`cargo build --release --manifest-path backend-rust/Cargo.toml`, {
+execSync(`cargo build --release --manifest-path backend/Cargo.toml`, {
   cwd: workspaceRoot,
   stdio: "inherit",
 });
 
 const builtBinary = path.join(
   workspaceRoot,
-  "backend-rust",
+  "backend",
   "target",
   "release",
-  `xrayview-backend-rust${extension}`,
+  `xrayview-backend${extension}`,
 );
 
 fs.copyFileSync(builtBinary, outputPath);

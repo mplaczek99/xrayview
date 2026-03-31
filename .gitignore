@@ -1,4 +1,4 @@
-backend-rust/target/
+backend/target/
 
 frontend/node_modules/
 frontend/dist/
