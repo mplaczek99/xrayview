@@ -1,0 +1,10 @@
+/home/mplaczek/xrayview/backend-rust/target/debug/deps/dicom_pixeldata-a20fed8c4622b488.d: /home/mplaczek/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/dicom-pixeldata-0.9.1/src/lib.rs /home/mplaczek/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/dicom-pixeldata-0.9.1/src/attribute.rs /home/mplaczek/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/dicom-pixeldata-0.9.1/src/lut.rs /home/mplaczek/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/dicom-pixeldata-0.9.1/src/transcode.rs /home/mplaczek/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/dicom-pixeldata-0.9.1/src/encapsulation.rs /home/mplaczek/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/dicom-pixeldata-0.9.1/src/transform.rs
+
+/home/mplaczek/xrayview/backend-rust/target/debug/deps/libdicom_pixeldata-a20fed8c4622b488.rmeta: /home/mplaczek/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/dicom-pixeldata-0.9.1/src/lib.rs /home/mplaczek/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/dicom-pixeldata-0.9.1/src/attribute.rs /home/mplaczek/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/dicom-pixeldata-0.9.1/src/lut.rs /home/mplaczek/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/dicom-pixeldata-0.9.1/src/transcode.rs /home/mplaczek/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/dicom-pixeldata-0.9.1/src/encapsulation.rs /home/mplaczek/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/dicom-pixeldata-0.9.1/src/transform.rs
+
+/home/mplaczek/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/dicom-pixeldata-0.9.1/src/lib.rs:
+/home/mplaczek/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/dicom-pixeldata-0.9.1/src/attribute.rs:
+/home/mplaczek/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/dicom-pixeldata-0.9.1/src/lut.rs:
+/home/mplaczek/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/dicom-pixeldata-0.9.1/src/transcode.rs:
+/home/mplaczek/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/dicom-pixeldata-0.9.1/src/encapsulation.rs:
+/home/mplaczek/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/dicom-pixeldata-0.9.1/src/transform.rs:
