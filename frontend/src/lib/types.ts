@@ -1,6 +1,7 @@
 export type Palette = "none" | "hot" | "bone";
 export type ViewerMode = "original" | "processed" | "compare";
 export type RuntimeMode = "tauri" | "mock";
+export type ActiveTab = "view" | "processing";
 
 export interface ProcessingControls {
   brightness: number;
