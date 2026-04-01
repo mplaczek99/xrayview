@@ -5,11 +5,11 @@ const args = process.argv.slice(2);
 
 prepareTauriTarget();
 
-const tauriCommand = process.platform === "win32" ? "tauri.cmd" : "tauri";
-const result = spawnSync(tauriCommand, ["dev", ...args], {
+const result = spawnSync("tauri", ["dev", ...args], {
   cwd: frontendRoot,
   env: { ...process.env },
   stdio: "inherit",
+  shell: process.platform === "win32",
 });
 
 if (result.error) {
