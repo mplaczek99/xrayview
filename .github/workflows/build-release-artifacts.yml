@@ -77,6 +77,15 @@ jobs:
           fi
           printf 'ARTIFACT_PATH=%s\n' "${artifacts[0]}" >> "$GITHUB_ENV"
 
+      - name: Rename Linux AppImage
+        if: runner.os == 'Linux'
+        run: |
+          arch="$(uname -m)"
+          version="$(grep -oP '"version":\s*"\K[^"]+' frontend/src-tauri/tauri.conf.json)"
+          new_name="xrayview-v${version}-${arch}.AppImage"
+          mv "$ARTIFACT_PATH" "$(dirname "$ARTIFACT_PATH")/${new_name}"
+          printf 'ARTIFACT_PATH=%s\n' "$(dirname "$ARTIFACT_PATH")/${new_name}" >> "$GITHUB_ENV"
+
       - name: Upload desktop package artifact
         uses: actions/upload-artifact@v4
         with:

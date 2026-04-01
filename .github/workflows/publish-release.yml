@@ -79,6 +79,14 @@ jobs:
           fi
           printf 'ASSET_PATH=%s\n' "${artifacts[0]}" >> "$GITHUB_ENV"
 
+      - name: Rename Linux AppImage
+        if: runner.os == 'Linux'
+        run: |
+          arch="$(uname -m)"
+          new_name="xrayview-${GITHUB_REF_NAME}-${arch}.AppImage"
+          mv "$ASSET_PATH" "$(dirname "$ASSET_PATH")/${new_name}"
+          printf 'ASSET_PATH=%s\n' "$(dirname "$ASSET_PATH")/${new_name}" >> "$GITHUB_ENV"
+
       - name: Upload release asset artifact
         uses: actions/upload-artifact@v4
         with:
