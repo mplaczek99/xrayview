@@ -3,5 +3,5 @@
   "identifier": "default",
   "description": "Default desktop capability for the XRayView frontend shell.",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": ["core:default", "shell:default"]
 }

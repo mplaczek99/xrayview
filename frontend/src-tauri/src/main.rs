@@ -96,9 +96,9 @@ async fn run_backend_preview(
     let preview_path = create_temp_file(".png")?;
 
     let args = vec![
-        "-input".to_string(),
+        "--input".to_string(),
         input_path,
-        "-preview-output".to_string(),
+        "--preview-output".to_string(),
         path_to_string(preview_path.clone()),
     ];
 
@@ -119,19 +119,27 @@ async fn run_backend_process(
     let preview_path = create_temp_file(".png")?;
     let dicom_path = create_temp_file(".dcm")?;
 
-    let args = vec![
-        "-input".to_string(),
+    let mut args = vec![
+        "--input".to_string(),
         input_path,
-        "-output".to_string(),
+        "--output".to_string(),
         path_to_string(dicom_path.clone()),
-        "-preview-output".to_string(),
+        "--preview-output".to_string(),
         path_to_string(preview_path.clone()),
-        format!("-invert={}", options.invert),
-        format!("-brightness={}", options.brightness),
-        format!("-contrast={}", options.contrast),
-        format!("-equalize={}", options.equalize),
-        format!("-palette={}", options.palette),
     ];
+
+    if options.invert {
+        args.push("--invert".to_string());
+    }
+    args.push("--brightness".to_string());
+    args.push(options.brightness.to_string());
+    args.push("--contrast".to_string());
+    args.push(options.contrast.to_string());
+    if options.equalize {
+        args.push("--equalize".to_string());
+    }
+    args.push("--palette".to_string());
+    args.push(options.palette);
 
     let _ = run_backend_command(&app, &args).await?;
     let dicom_path_string = path_to_string(dicom_path.clone());
@@ -156,7 +164,7 @@ fn copy_processed_output(source_path: String, destination_path: String) -> Resul
 
 #[tauri::command]
 async fn get_processing_manifest(app: tauri::AppHandle) -> Result<ProcessingManifest, String> {
-    let stdout = run_backend_command(&app, &["-describe-presets".to_string()]).await?;
+    let stdout = run_backend_command(&app, &["--describe-presets".to_string()]).await?;
 
     serde_json::from_str(&stdout)
         .map_err(|error| format!("failed to parse backend preset manifest: {error}"))
@@ -169,9 +177,9 @@ async fn describe_study(
     let stdout = run_backend_command(
         app,
         &[
-            "-input".to_string(),
+            "--input".to_string(),
             input_path.to_string(),
-            "-describe-study".to_string(),
+            "--describe-study".to_string(),
         ],
     )
     .await?;
