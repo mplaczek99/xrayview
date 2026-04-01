@@ -16,11 +16,11 @@ if (process.platform === "linux") {
   env.NO_STRIP ??= "1";
 }
 
-const tauriCommand = process.platform === "win32" ? "tauri.cmd" : "tauri";
-const result = spawnSync(tauriCommand, ["build", ...args], {
+const result = spawnSync("tauri", ["build", ...args], {
   cwd: frontendRoot,
   env,
   stdio: "inherit",
+  shell: process.platform === "win32",
 });
 
 if (result.error) {
