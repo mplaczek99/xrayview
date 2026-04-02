@@ -1,4 +1,4 @@
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 
 use crate::preview::{PreviewFormat, PreviewImage};
 
@@ -74,7 +74,7 @@ mod tests {
 
     use crate::palette::apply_named_palette;
     use crate::preview::{load_preview, save_preview_png};
-    use crate::processing::{process_grayscale_pixels, GrayscaleControls};
+    use crate::processing::{GrayscaleControls, process_grayscale_pixels};
 
     #[test]
     fn combine_comparison_places_images_side_by_side() {
@@ -98,7 +98,9 @@ mod tests {
         assert_eq!(got.format, PreviewFormat::Rgba8);
         assert_eq!(
             got.pixels,
-            vec![10, 10, 10, 255, 20, 20, 20, 255, 100, 110, 120, 255, 200, 210, 220, 255]
+            vec![
+                10, 10, 10, 255, 20, 20, 20, 255, 100, 110, 120, 255, 200, 210, 220, 255
+            ]
         );
     }
 

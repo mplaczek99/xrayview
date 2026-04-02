@@ -4,7 +4,7 @@
 
 use std::path::Path;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use dicom_core::{DicomValue, PrimitiveValue};
 use dicom_dictionary_std::tags;
 use dicom_object::{DefaultDicomObject, DicomAttribute, DicomObject, OpenFileOptions};

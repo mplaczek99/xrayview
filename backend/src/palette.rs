@@ -1,4 +1,4 @@
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use rayon::prelude::*;
 
 use crate::preview::{PreviewFormat, PreviewImage};
@@ -78,7 +78,7 @@ mod tests {
     use tempfile::TempDir;
 
     use crate::preview::{load_preview, save_preview_png};
-    use crate::processing::{process_grayscale_pixels, GrayscaleControls};
+    use crate::processing::{GrayscaleControls, process_grayscale_pixels};
 
     #[test]
     fn hot_palette_breakpoints() {

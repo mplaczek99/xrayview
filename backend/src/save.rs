@@ -95,26 +95,76 @@ pub fn save_dicom(
     let mut file_obj = FileDicomObject::new_empty_with_meta(meta);
 
     // Core identification elements for the secondary capture dataset.
-    put_str(&mut file_obj, tags::SOP_CLASS_UID, VR::UI, SECONDARY_CAPTURE_SOP_CLASS_UID);
-    put_str(&mut file_obj, tags::SOP_INSTANCE_UID, VR::UI, &sop_instance_uid);
+    put_str(
+        &mut file_obj,
+        tags::SOP_CLASS_UID,
+        VR::UI,
+        SECONDARY_CAPTURE_SOP_CLASS_UID,
+    );
+    put_str(
+        &mut file_obj,
+        tags::SOP_INSTANCE_UID,
+        VR::UI,
+        &sop_instance_uid,
+    );
     put_str(&mut file_obj, tags::MODALITY, VR::CS, "OT");
-    put_strs(&mut file_obj, tags::IMAGE_TYPE, VR::CS, &["DERIVED", "SECONDARY"]);
+    put_strs(
+        &mut file_obj,
+        tags::IMAGE_TYPE,
+        VR::CS,
+        &["DERIVED", "SECONDARY"],
+    );
     put_str(&mut file_obj, tags::CONVERSION_TYPE, VR::CS, "WSD");
 
     let date_str = now.format("%Y%m%d").to_string();
     let time_str = now.format("%H%M%S").to_string();
-    put_str(&mut file_obj, tags::INSTANCE_CREATION_DATE, VR::DA, &date_str);
-    put_str(&mut file_obj, tags::INSTANCE_CREATION_TIME, VR::TM, &time_str);
+    put_str(
+        &mut file_obj,
+        tags::INSTANCE_CREATION_DATE,
+        VR::DA,
+        &date_str,
+    );
+    put_str(
+        &mut file_obj,
+        tags::INSTANCE_CREATION_TIME,
+        VR::TM,
+        &time_str,
+    );
     put_str(&mut file_obj, tags::CONTENT_DATE, VR::DA, &date_str);
     put_str(&mut file_obj, tags::CONTENT_TIME, VR::TM, &time_str);
 
-    put_str(&mut file_obj, tags::SERIES_DESCRIPTION, VR::LO, DEFAULT_PROCESSED_SERIES_DESCRIPTION);
-    put_str(&mut file_obj, tags::DERIVATION_DESCRIPTION, VR::ST, "Processed by XRayView");
+    put_str(
+        &mut file_obj,
+        tags::SERIES_DESCRIPTION,
+        VR::LO,
+        DEFAULT_PROCESSED_SERIES_DESCRIPTION,
+    );
+    put_str(
+        &mut file_obj,
+        tags::DERIVATION_DESCRIPTION,
+        VR::ST,
+        "Processed by XRayView",
+    );
     put_str(&mut file_obj, tags::MANUFACTURER, VR::LO, "XRayView");
-    put_str(&mut file_obj, tags::MANUFACTURER_MODEL_NAME, VR::LO, "xrayview");
+    put_str(
+        &mut file_obj,
+        tags::MANUFACTURER_MODEL_NAME,
+        VR::LO,
+        "xrayview",
+    );
     put_str(&mut file_obj, tags::SOFTWARE_VERSIONS, VR::LO, "xrayview");
-    put_str(&mut file_obj, tags::STUDY_INSTANCE_UID, VR::UI, &source_meta.study_instance_uid);
-    put_str(&mut file_obj, tags::SERIES_INSTANCE_UID, VR::UI, &series_instance_uid);
+    put_str(
+        &mut file_obj,
+        tags::STUDY_INSTANCE_UID,
+        VR::UI,
+        &source_meta.study_instance_uid,
+    );
+    put_str(
+        &mut file_obj,
+        tags::SERIES_INSTANCE_UID,
+        VR::UI,
+        &series_instance_uid,
+    );
     put_str(&mut file_obj, tags::SERIES_NUMBER, VR::IS, "999");
     put_str(&mut file_obj, tags::INSTANCE_NUMBER, VR::IS, "1");
 
@@ -225,7 +275,7 @@ fn rgba_to_rgb(rgba: &[u8]) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dicom_object::{DicomAttribute, DicomObject, OpenFileOptions, DefaultDicomObject};
+    use dicom_object::{DefaultDicomObject, DicomAttribute, DicomObject, OpenFileOptions};
     use image::{DynamicImage, GrayImage, Luma};
     use tempfile::TempDir;
 
@@ -264,10 +314,7 @@ mod tests {
             .expect("reopen saved DICOM");
 
         assert_eq!(reopened.attr(tags::ROWS).unwrap().to_u16().unwrap(), 64);
-        assert_eq!(
-            reopened.attr(tags::COLUMNS).unwrap().to_u16().unwrap(),
-            64
-        );
+        assert_eq!(reopened.attr(tags::COLUMNS).unwrap().to_u16().unwrap(), 64);
         assert_eq!(
             reopened
                 .attr(tags::PHOTOMETRIC_INTERPRETATION)
