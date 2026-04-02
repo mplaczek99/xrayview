@@ -5531,6 +5531,7 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-shell",
  "tempfile",
+ "tokio",
 ]
 
 [[package]]

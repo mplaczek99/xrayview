@@ -10,6 +10,7 @@ use std::sync::Mutex;
 use tauri::Manager;
 use tauri_plugin_shell::ShellExt;
 use tempfile::Builder;
+use tokio::sync::Semaphore;
 
 /// Tracks temp files so they can be cleaned up when replaced or at exit.
 struct TempFileState {
@@ -34,6 +35,21 @@ impl TempFileState {
             for path in paths.drain(..) {
                 let _ = fs::remove_file(&path);
             }
+        }
+    }
+}
+
+/// Single-user desktop app — serial execution is intentional. This also
+/// closes the TempFileState race where cleanup_all() could delete files
+/// still in use by an overlapping request.
+struct BackendGate {
+    semaphore: Semaphore,
+}
+
+impl BackendGate {
+    fn new() -> Self {
+        Self {
+            semaphore: Semaphore::new(1),
         }
     }
 }
@@ -121,6 +137,13 @@ async fn run_backend_preview(
     app: tauri::AppHandle,
     input_path: String,
 ) -> Result<PreviewResponse, String> {
+    let gate = app.state::<BackendGate>();
+    let _permit = gate
+        .semaphore
+        .acquire()
+        .await
+        .map_err(|e| format!("backend gate closed: {e}"))?;
+
     let temp_state = app.state::<TempFileState>();
     temp_state.cleanup_all();
 
@@ -148,6 +171,13 @@ async fn run_backend_process(
     input_path: String,
     options: ProcessingOptions,
 ) -> Result<ProcessResponse, String> {
+    let gate = app.state::<BackendGate>();
+    let _permit = gate
+        .semaphore
+        .acquire()
+        .await
+        .map_err(|e| format!("backend gate closed: {e}"))?;
+
     let temp_state = app.state::<TempFileState>();
     temp_state.cleanup_all();
 
@@ -420,6 +450,7 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .manage(TempFileState::new())
+        .manage(BackendGate::new())
         .setup(|app| {
             #[cfg(target_os = "linux")]
             {
