@@ -12,6 +12,9 @@ The primary desktop UI lives in `frontend/`. The Rust CLI in `backend/` is the b
 - Optionally applies a pseudocolor palette
 - Optionally builds a side-by-side comparison image
 - Saves the result as a derived DICOM image
+- Exposes the same processing flow in the desktop UI, including preset
+  selection, compare mode, pipeline ordering, and a native save dialog for the
+  output path
 
 The desktop frontend renders internal PNG previews so the workstation UI can display the study, but the user-facing workflow is DICOM in and DICOM out.
 
@@ -36,6 +39,17 @@ The primary desktop UI is the Tauri frontend:
 npm install
 npm run tauri:dev
 ```
+
+In the current desktop Processing tab, these controls execute end to end:
+
+- backend-defined presets
+- invert, brightness, contrast, equalize, and palette controls
+- compare output
+- grayscale pipeline ordering
+- save destination via the native "save as" picker
+
+If you do not choose a save destination, the app keeps the processed DICOM in a
+managed temporary path and shows that path after processing completes.
 
 To build desktop bundles with the Rust backend embedded as a sidecar:
 

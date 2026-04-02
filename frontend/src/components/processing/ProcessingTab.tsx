@@ -1,10 +1,30 @@
-import { useState } from "react";
-import { copyProcessedOutput, runBackendProcess } from "../../lib/backend";
-import type { Palette, ProcessingControls } from "../../lib/types";
+import { useEffect, useMemo, useState } from "react";
+import {
+  FALLBACK_PROCESSING_MANIFEST,
+  buildOutputName,
+  buildProcessingArgs,
+  ensureDicomExtension,
+  loadProcessingManifest,
+  pickSaveDicomPath,
+  runBackendProcess,
+} from "../../lib/backend";
+import type {
+  Palette,
+  ProcessingControls,
+  ProcessingPipelineStep,
+  ProcessingRequest,
+} from "../../lib/types";
+import { buildProcessingUiState } from "../../features/processing/presets";
 import { DicomViewer } from "../viewer/DicomViewer";
 
-type PresetId = "default" | "xray" | "high-contrast";
-type PipelineStep = "grayscale" | "invert" | "brightness" | "contrast" | "equalize";
+const DEFAULT_PIPELINE: ProcessingPipelineStep[] = [
+  "grayscale",
+  "invert",
+  "brightness",
+  "contrast",
+  "equalize",
+];
+const CUSTOM_PRESET_ID = "__custom";
 
 interface ProcessingTabProps {
   inputPath: string | null;
@@ -12,15 +32,10 @@ interface ProcessingTabProps {
 }
 
 interface ProcessingForm {
-  outputPath: string;
-  preset: PresetId;
-  invert: boolean;
-  brightness: number;
-  contrast: number;
-  equalize: boolean;
-  palette: Palette;
+  controls: ProcessingControls;
+  outputPath: string | null;
   compare: boolean;
-  pipelineOrder: PipelineStep[];
+  pipeline: ProcessingPipelineStep[];
 }
 
 type RunStatus =
@@ -29,72 +44,13 @@ type RunStatus =
   | { state: "success"; outputPath: string }
   | { state: "error"; message: string };
 
-const DEFAULT_PIPELINE: PipelineStep[] = [
-  "grayscale",
-  "invert",
-  "brightness",
-  "contrast",
-  "equalize",
-];
-
-const PRESET_HINTS: Record<
-  PresetId,
-  { brightness: number; contrast: number; equalize: boolean; palette: Palette }
-> = {
-  default: { brightness: 0, contrast: 1.0, equalize: false, palette: "none" },
-  xray: { brightness: 10, contrast: 1.4, equalize: true, palette: "bone" },
-  "high-contrast": {
-    brightness: 0,
-    contrast: 1.8,
-    equalize: true,
-    palette: "none",
-  },
-};
-
-const INITIAL_FORM: ProcessingForm = {
-  outputPath: "",
-  preset: "default",
-  invert: false,
-  brightness: 0,
-  contrast: 1.0,
-  equalize: false,
-  palette: "none",
-  compare: false,
-  pipelineOrder: [...DEFAULT_PIPELINE],
-};
-
-function isValidOutputPath(path: string): boolean {
-  return /\.(dcm|dicom)$/i.test(path);
-}
-
-function pipelinesEqual(a: PipelineStep[], b: PipelineStep[]): boolean {
-  return a.length === b.length && a.every((step, i) => step === b[i]);
-}
-
-function buildArgs(inputPath: string, form: ProcessingForm): string[] {
-  // Keep the command preview derived from live form state so it stays aligned
-  // with the backend invocation users would run manually.
-  const args: string[] = ["--input", inputPath];
-
-  if (form.outputPath && isValidOutputPath(form.outputPath)) {
-    args.push("--output", form.outputPath);
-  }
-
-  args.push("--preset", form.preset);
-
-  if (form.invert) args.push("--invert");
-  if (form.brightness !== 0)
-    args.push("--brightness", String(form.brightness));
-  if (form.contrast !== 1.0) args.push("--contrast", String(form.contrast));
-  if (form.equalize) args.push("--equalize");
-  if (form.palette !== "none") args.push("--palette", form.palette);
-  if (form.compare) args.push("--compare");
-
-  if (!pipelinesEqual(form.pipelineOrder, DEFAULT_PIPELINE)) {
-    args.push("--pipeline", form.pipelineOrder.join(","));
-  }
-
-  return args;
+function createInitialForm(defaultControls: ProcessingControls): ProcessingForm {
+  return {
+    controls: { ...defaultControls },
+    outputPath: null,
+    compare: false,
+    pipeline: [...DEFAULT_PIPELINE],
+  };
 }
 
 function describeError(error: unknown): string {
@@ -107,36 +63,127 @@ function describeError(error: unknown): string {
   return "Processing failed.";
 }
 
+function controlsExactlyEqual(
+  left: ProcessingControls,
+  right: ProcessingControls,
+): boolean {
+  return (
+    left.brightness === right.brightness &&
+    left.contrast === right.contrast &&
+    left.invert === right.invert &&
+    left.equalize === right.equalize &&
+    left.palette === right.palette
+  );
+}
+
+function formatArgPreview(args: readonly string[]): string {
+  return args
+    .map((arg) => (/[\s"'\\]/.test(arg) ? JSON.stringify(arg) : arg))
+    .join(" ");
+}
+
 export function ProcessingTab({ inputPath, previewUrl }: ProcessingTabProps) {
-  const [form, setForm] = useState<ProcessingForm>(INITIAL_FORM);
+  const [manifest, setManifest] = useState(FALLBACK_PROCESSING_MANIFEST);
+  const initialUiState = useMemo(
+    () => buildProcessingUiState(FALLBACK_PROCESSING_MANIFEST),
+    [],
+  );
+  const [form, setForm] = useState<ProcessingForm>(() =>
+    createInitialForm(initialUiState.defaultControls),
+  );
   const [runStatus, setRunStatus] = useState<RunStatus>({ state: "idle" });
   const [processedPreviewUrl, setProcessedPreviewUrl] = useState<string | null>(
     null,
   );
   const [pipelineOpen, setPipelineOpen] = useState(false);
 
-  const outputPathError =
-    form.outputPath.length > 0 && !isValidOutputPath(form.outputPath)
-      ? "Output path must end with .dcm or .dicom"
-      : null;
-
-  const hint = PRESET_HINTS[form.preset];
+  const processingUi = useMemo(() => buildProcessingUiState(manifest), [manifest]);
+  const defaultPreset =
+    manifest.presets.find((preset) => preset.id === manifest.defaultPresetId) ??
+    manifest.presets[0] ??
+    FALLBACK_PROCESSING_MANIFEST.presets[0];
+  const activePreset =
+    processingUi.presets.find((preset) =>
+      controlsExactlyEqual(preset.controls, form.controls),
+    ) ?? null;
+  const commandPreset = activePreset
+    ? {
+        id: activePreset.id,
+        controls: activePreset.controls,
+      }
+    : defaultPreset;
+  const request: ProcessingRequest = {
+    controls: form.controls,
+    compare: form.compare,
+    outputPath: form.outputPath,
+    pipeline: form.pipeline,
+    preset: commandPreset,
+  };
   const isRunning = runStatus.state === "running";
-  const canRun = Boolean(inputPath) && !isRunning && !outputPathError;
+  const canRun = Boolean(inputPath) && !isRunning;
 
-  function updateForm<K extends keyof ProcessingForm>(
+  useEffect(() => {
+    let cancelled = false;
+
+    void loadProcessingManifest()
+      .then((nextManifest) => {
+        if (!cancelled) {
+          setManifest(nextManifest);
+        }
+      })
+      .catch(() => {
+        // Keep the fallback manifest active so the processing UI stays usable
+        // even if the desktop bridge cannot describe the backend presets.
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    setForm(createInitialForm(defaultPreset.controls));
+    setRunStatus({ state: "idle" });
+    setProcessedPreviewUrl(null);
+    setPipelineOpen(false);
+  }, [inputPath]);
+
+  function updateControl<K extends keyof ProcessingControls>(
     key: K,
-    value: ProcessingForm[K],
+    value: ProcessingControls[K],
   ) {
-    setForm((prev) => ({ ...prev, [key]: value }));
+    setForm((current) => ({
+      ...current,
+      controls: {
+        ...current.controls,
+        [key]: value,
+      },
+    }));
   }
 
   function movePipelineStep(index: number, direction: -1 | 1) {
     const target = index + direction;
-    if (target < 0 || target >= form.pipelineOrder.length) return;
-    const next = [...form.pipelineOrder];
+    if (target < 0 || target >= form.pipeline.length) return;
+
+    const next = [...form.pipeline];
     [next[index], next[target]] = [next[target], next[index]];
-    updateForm("pipelineOrder", next);
+
+    setForm((current) => ({
+      ...current,
+      pipeline: next,
+    }));
+  }
+
+  async function handlePickOutputPath() {
+    if (!inputPath || isRunning) return;
+
+    const selectedPath = await pickSaveDicomPath(buildOutputName(inputPath));
+    if (!selectedPath) return;
+
+    setForm((current) => ({
+      ...current,
+      outputPath: ensureDicomExtension(selectedPath),
+    }));
   }
 
   async function handleRun() {
@@ -145,34 +192,15 @@ export function ProcessingTab({ inputPath, previewUrl }: ProcessingTabProps) {
     setRunStatus({ state: "running" });
 
     try {
-      const controls: ProcessingControls = {
-        brightness: form.brightness,
-        contrast: form.contrast,
-        invert: form.invert,
-        equalize: form.equalize,
-        palette: form.palette,
-      };
-
-      const result = await runBackendProcess(inputPath, controls);
-      let finalOutputPath = result.dicomPath;
-
-      if (form.outputPath && isValidOutputPath(form.outputPath)) {
-        // The backend always renders to its managed temp path first; only copy
-        // to a user-chosen destination when the form requested one explicitly.
-        finalOutputPath = await copyProcessedOutput(
-          result.dicomPath,
-          form.outputPath,
-        );
-      }
-
+      const result = await runBackendProcess(inputPath, request);
       setProcessedPreviewUrl(result.previewUrl);
-      setRunStatus({ state: "success", outputPath: finalOutputPath });
+      setRunStatus({ state: "success", outputPath: result.dicomPath });
     } catch (error) {
       setRunStatus({ state: "error", message: describeError(error) });
     }
   }
 
-  const args = inputPath ? buildArgs(inputPath, form) : [];
+  const args = inputPath ? buildProcessingArgs(inputPath, request) : [];
 
   return (
     <div className="processing-tab">
@@ -185,24 +213,36 @@ export function ProcessingTab({ inputPath, previewUrl }: ProcessingTabProps) {
       </div>
 
       <div className="processing-tab__form">
-        {/* Output Path */}
         <section className="form-section">
-          <label className="form-label" htmlFor="proc-output">
-            Output Path
-          </label>
-          <input
-            id="proc-output"
-            className={`form-input${outputPathError ? " form-input--error" : ""}`}
-            type="text"
-            value={form.outputPath}
-            placeholder="Leave blank to auto-generate (input_processed.dcm)"
-            onChange={(e) => updateForm("outputPath", e.target.value)}
-            disabled={isRunning}
-          />
-          {outputPathError && <p className="form-error">{outputPathError}</p>}
+          <label className="form-label">Save Destination</label>
+          <p className="form-hint u-mono">
+            {form.outputPath ??
+              "No save destination selected. Processing will keep the DICOM in an app-managed temp path until you choose one."}
+          </p>
+          <div className="form-field">
+            <button
+              className="button button--ghost"
+              type="button"
+              onClick={handlePickOutputPath}
+              disabled={!inputPath || isRunning}
+            >
+              {form.outputPath ? "Change Save Location" : "Choose Save Location"}
+            </button>
+            {form.outputPath && (
+              <button
+                className="button button--ghost"
+                type="button"
+                onClick={() =>
+                  setForm((current) => ({ ...current, outputPath: null }))
+                }
+                disabled={isRunning}
+              >
+                Clear
+              </button>
+            )}
+          </div>
         </section>
 
-        {/* Preset Selector */}
         <section className="form-section">
           <label className="form-label" htmlFor="proc-preset">
             Preset
@@ -210,29 +250,44 @@ export function ProcessingTab({ inputPath, previewUrl }: ProcessingTabProps) {
           <select
             id="proc-preset"
             className="form-select"
-            value={form.preset}
-            onChange={(e) => updateForm("preset", e.target.value as PresetId)}
+            value={activePreset?.id ?? CUSTOM_PRESET_ID}
+            onChange={(event) => {
+              const preset = processingUi.presets.find(
+                (candidate) => candidate.id === event.target.value,
+              );
+              if (!preset) return;
+
+              setForm((current) => ({
+                ...current,
+                controls: { ...preset.controls },
+              }));
+            }}
             disabled={isRunning}
           >
-            <option value="default">default</option>
-            <option value="xray">xray</option>
-            <option value="high-contrast">high-contrast</option>
+            {processingUi.presets.map((preset) => (
+              <option key={preset.id} value={preset.id}>
+                {preset.label}
+              </option>
+            ))}
+            {!activePreset && (
+              <option value={CUSTOM_PRESET_ID}>Custom</option>
+            )}
           </select>
           <p className="form-hint">
-            B {hint.brightness}, C {hint.contrast}, equalize{" "}
-            {hint.equalize ? "on" : "off"}, palette {hint.palette}
+            {activePreset
+              ? activePreset.description
+              : "Custom controls. The backend will use the default preset plus the explicit overrides shown below."}
           </p>
         </section>
 
-        {/* Grayscale Controls */}
         <section className="form-section">
           <div className="form-label">Grayscale Controls</div>
 
           <label className="form-toggle">
             <input
               type="checkbox"
-              checked={form.invert}
-              onChange={(e) => updateForm("invert", e.target.checked)}
+              checked={form.controls.invert}
+              onChange={(event) => updateControl("invert", event.target.checked)}
               disabled={isRunning}
             />
             <span>Invert</span>
@@ -246,14 +301,16 @@ export function ProcessingTab({ inputPath, previewUrl }: ProcessingTabProps) {
               id="proc-brightness"
               className="form-input form-input--number"
               type="number"
-              value={form.brightness}
+              value={form.controls.brightness}
               step={1}
-              onChange={(e) =>
-                updateForm("brightness", parseInt(e.target.value, 10) || 0)
+              onChange={(event) =>
+                updateControl(
+                  "brightness",
+                  parseInt(event.target.value, 10) || 0,
+                )
               }
               disabled={isRunning}
             />
-            <span className="form-preset-hint">preset: {hint.brightness}</span>
           </div>
 
           <div className="form-field">
@@ -264,42 +321,43 @@ export function ProcessingTab({ inputPath, previewUrl }: ProcessingTabProps) {
               id="proc-contrast"
               className="form-input form-input--number"
               type="number"
-              value={form.contrast}
+              value={form.controls.contrast}
               step={0.1}
               min={0}
-              onChange={(e) =>
-                updateForm("contrast", parseFloat(e.target.value) || 0)
+              onChange={(event) =>
+                updateControl(
+                  "contrast",
+                  parseFloat(event.target.value) || 0,
+                )
               }
               disabled={isRunning}
             />
-            <span className="form-preset-hint">preset: {hint.contrast}</span>
           </div>
 
           <label className="form-toggle">
             <input
               type="checkbox"
-              checked={form.equalize}
-              onChange={(e) => updateForm("equalize", e.target.checked)}
+              checked={form.controls.equalize}
+              onChange={(event) =>
+                updateControl("equalize", event.target.checked)
+              }
               disabled={isRunning}
             />
             <span>Equalize</span>
-            <span className="form-preset-hint">
-              preset: {hint.equalize ? "on" : "off"}
-            </span>
           </label>
         </section>
 
-        {/* Palette */}
         <section className="form-section">
           <label className="form-label" htmlFor="proc-palette">
             Palette
-            <span className="form-preset-hint"> preset: {hint.palette}</span>
           </label>
           <select
             id="proc-palette"
             className="form-select"
-            value={form.palette}
-            onChange={(e) => updateForm("palette", e.target.value as Palette)}
+            value={form.controls.palette}
+            onChange={(event) =>
+              updateControl("palette", event.target.value as Palette)
+            }
             disabled={isRunning}
           >
             <option value="none">none</option>
@@ -308,28 +366,31 @@ export function ProcessingTab({ inputPath, previewUrl }: ProcessingTabProps) {
           </select>
         </section>
 
-        {/* Comparison Output */}
         <section className="form-section">
           <label className="form-toggle">
             <input
               type="checkbox"
               checked={form.compare}
-              onChange={(e) => updateForm("compare", e.target.checked)}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  compare: event.target.checked,
+                }))
+              }
               disabled={isRunning}
             />
             <span>Compare</span>
           </label>
           <p className="form-hint">
-            Write side-by-side comparison into output DICOM
+            Write side-by-side comparison output into the processed DICOM.
           </p>
         </section>
 
-        {/* Pipeline Order (Advanced) */}
         <section className="form-section">
           <button
             className="form-collapse-toggle"
             type="button"
-            onClick={() => setPipelineOpen((prev) => !prev)}
+            onClick={() => setPipelineOpen((current) => !current)}
           >
             <span
               className={`form-collapse-arrow${pipelineOpen ? " form-collapse-arrow--open" : ""}`}
@@ -342,7 +403,7 @@ export function ProcessingTab({ inputPath, previewUrl }: ProcessingTabProps) {
           {pipelineOpen && (
             <div className="pipeline-editor">
               <ul className="pipeline-list">
-                {form.pipelineOrder.map((step, index) => (
+                {form.pipeline.map((step, index) => (
                   <li key={step} className="pipeline-item">
                     <span className="pipeline-item__name">{step}</span>
                     <div className="pipeline-item__actions">
@@ -359,9 +420,7 @@ export function ProcessingTab({ inputPath, previewUrl }: ProcessingTabProps) {
                         className="pipeline-btn"
                         type="button"
                         onClick={() => movePipelineStep(index, 1)}
-                        disabled={
-                          index === form.pipelineOrder.length - 1 || isRunning
-                        }
+                        disabled={index === form.pipeline.length - 1 || isRunning}
                         aria-label={`Move ${step} down`}
                       >
                         &#9660;
@@ -371,15 +430,18 @@ export function ProcessingTab({ inputPath, previewUrl }: ProcessingTabProps) {
                 ))}
               </ul>
               <p className="form-hint">
-                grayscale is always the starting point. Pseudocolor is applied
-                after the pipeline.
+                `grayscale` is always the starting point. Pseudocolor runs after
+                the grayscale pipeline.
               </p>
-              {!pipelinesEqual(form.pipelineOrder, DEFAULT_PIPELINE) && (
+              {form.pipeline.some((step, index) => step !== DEFAULT_PIPELINE[index]) && (
                 <button
                   className="button button--ghost pipeline-reset"
                   type="button"
                   onClick={() =>
-                    updateForm("pipelineOrder", [...DEFAULT_PIPELINE])
+                    setForm((current) => ({
+                      ...current,
+                      pipeline: [...DEFAULT_PIPELINE],
+                    }))
                   }
                   disabled={isRunning}
                 >
@@ -390,17 +452,15 @@ export function ProcessingTab({ inputPath, previewUrl }: ProcessingTabProps) {
           )}
         </section>
 
-        {/* Command Preview */}
         {inputPath && args.length > 0 && (
           <section className="form-section">
             <div className="form-label">Command Preview</div>
             <pre className="args-preview u-mono">
-              xrayview {args.join(" ")}
+              xrayview {formatArgPreview(args)}
             </pre>
           </section>
         )}
 
-        {/* Run Button & Status */}
         <div className="processing-tab__actions">
           <button
             className="button button--primary processing-run-btn"
@@ -430,7 +490,6 @@ export function ProcessingTab({ inputPath, previewUrl }: ProcessingTabProps) {
           )}
         </div>
 
-        {/* Processed Output */}
         {processedPreviewUrl && (
           <div className="processing-tab__output">
             <DicomViewer previewUrl={processedPreviewUrl} />

@@ -6,8 +6,9 @@ import type {
   Palette,
   PreviewResult,
   ProcessResult,
-  ProcessingControls,
   ProcessingManifest,
+  ProcessingPipelineStep,
+  ProcessingRequest,
   RuntimeMode,
   ToothAnalysis,
   ToothAnalysisResult,
@@ -31,6 +32,13 @@ const MOCK_STUDY_DIRECTORY = "mock-data";
 const MOCK_EXPORT_DIRECTORY = "mock-exports";
 const MOCK_DICOM_PATH = `${MOCK_STUDY_DIRECTORY}/mock-dental-study.dcm`;
 const MOCK_PROCESSED_DICOM_PATH = `${MOCK_STUDY_DIRECTORY}/mock-dental-study_processed.dcm`;
+const DEFAULT_PIPELINE: ProcessingPipelineStep[] = [
+  "grayscale",
+  "invert",
+  "brightness",
+  "contrast",
+  "equalize",
+];
 const PALETTE_LABELS: Record<Palette, string> = {
   none: "Neutral",
   hot: "Hot",
@@ -49,6 +57,13 @@ function getRuntimeMode(): RuntimeMode {
 
 function buildMockPath(directory: string, fileName: string): string {
   return `${directory}/${fileName}`;
+}
+
+function pipelinesEqual(
+  left: readonly ProcessingPipelineStep[],
+  right: readonly ProcessingPipelineStep[],
+): boolean {
+  return left.length === right.length && left.every((step, index) => step === right[index]);
 }
 
 async function runInRuntime<T>(options: {
@@ -119,23 +134,57 @@ export async function runBackendPreview(inputPath: string): Promise<PreviewResul
   });
 }
 
+export function buildProcessingArgs(
+  inputPath: string,
+  request: ProcessingRequest,
+): string[] {
+  const args = ["--input", inputPath, "--preset", request.preset.id];
+
+  if (request.outputPath) {
+    args.push("--output", request.outputPath);
+  }
+
+  if (request.controls.invert && !request.preset.controls.invert) {
+    args.push("--invert");
+  }
+  if (request.controls.brightness !== request.preset.controls.brightness) {
+    args.push("--brightness", String(request.controls.brightness));
+  }
+  if (request.controls.contrast !== request.preset.controls.contrast) {
+    args.push("--contrast", String(request.controls.contrast));
+  }
+  if (request.controls.equalize && !request.preset.controls.equalize) {
+    args.push("--equalize");
+  }
+  if (request.controls.palette !== request.preset.controls.palette) {
+    args.push("--palette", request.controls.palette);
+  }
+  if (request.compare) {
+    args.push("--compare");
+  }
+  if (!pipelinesEqual(request.pipeline, DEFAULT_PIPELINE)) {
+    args.push("--pipeline", request.pipeline.join(","));
+  }
+
+  return args;
+}
+
 export async function runBackendProcess(
   inputPath: string,
-  controls: ProcessingControls,
+  request: ProcessingRequest,
 ): Promise<ProcessResult> {
+  const args = buildProcessingArgs(inputPath, request);
+
   return runInRuntime({
     mock: () =>
       asProcessResult(
-        createMockPreview(true, controls.palette),
-        MOCK_PROCESSED_DICOM_PATH,
+        createMockPreview(true, request.controls.palette),
+        request.outputPath ?? MOCK_PROCESSED_DICOM_PATH,
         getRuntimeMode(),
         null,
       ),
     tauri: async () => {
-      const payload = await invoke<ProcessPayload>("run_backend_process", {
-        inputPath,
-        options: controls,
-      });
+      const payload = await invoke<ProcessPayload>("run_backend_process", { args });
 
       return asProcessResult(
         payload.previewPath,
@@ -168,16 +217,6 @@ export async function runBackendToothMeasurement(
         runtime: getRuntimeMode(),
       };
     },
-  });
-}
-
-export async function copyProcessedOutput(
-  sourcePath: string,
-  destinationPath: string,
-): Promise<string> {
-  return runInRuntime({
-    mock: () => destinationPath,
-    tauri: () => invoke<string>("copy_processed_output", { sourcePath, destinationPath }),
   });
 }
 

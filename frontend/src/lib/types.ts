@@ -2,6 +2,12 @@ export type Palette = "none" | "hot" | "bone";
 export type ViewerMode = "original" | "processed" | "compare";
 export type RuntimeMode = "tauri" | "mock";
 export type ActiveTab = "view" | "processing";
+export type ProcessingPipelineStep =
+  | "grayscale"
+  | "invert"
+  | "brightness"
+  | "contrast"
+  | "equalize";
 
 export interface ProcessingControls {
   brightness: number;
@@ -43,6 +49,17 @@ export interface ProcessingPresetDefinition {
 export interface ProcessingManifest {
   defaultPresetId: string;
   presets: ProcessingPresetDefinition[];
+}
+
+export interface ProcessingRequest {
+  controls: ProcessingControls;
+  compare: boolean;
+  outputPath: string | null;
+  pipeline: ProcessingPipelineStep[];
+  // This is the preset baseline passed to the backend. When the current
+  // controls no longer match any named preset, callers should fall back to the
+  // backend default preset and send the remaining values as explicit flags.
+  preset: ProcessingPresetDefinition;
 }
 
 export interface MeasurementScale {

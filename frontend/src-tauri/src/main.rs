@@ -256,8 +256,7 @@ async fn run_backend_preview(
 #[tauri::command]
 async fn run_backend_process(
     app: tauri::AppHandle,
-    input_path: String,
-    options: ProcessingOptions,
+    args: Vec<String>,
 ) -> Result<ProcessResponse, String> {
     let gate = app.state::<BackendGate>();
     let _permit = gate
@@ -270,33 +269,22 @@ async fn run_backend_process(
     temp_state.cleanup_all();
 
     let preview_path = create_temp_file(".png")?;
-    let dicom_path = create_temp_file(".dcm")?;
     temp_state.track(preview_path.clone());
-    temp_state.track(dicom_path.clone());
+    let mut command_args = args;
+    let dicom_path = match find_flag_value(&command_args, "--output") {
+        Some(path) => PathBuf::from(path),
+        None => {
+            let temp_dicom_path = create_temp_file(".dcm")?;
+            temp_state.track(temp_dicom_path.clone());
+            command_args.push("--output".to_string());
+            command_args.push(path_to_string(temp_dicom_path.clone()));
+            temp_dicom_path
+        }
+    };
+    command_args.push("--preview-output".to_string());
+    command_args.push(path_to_string(preview_path.clone()));
 
-    let mut args = vec![
-        "--input".to_string(),
-        input_path,
-        "--output".to_string(),
-        path_to_string(dicom_path.clone()),
-        "--preview-output".to_string(),
-        path_to_string(preview_path.clone()),
-    ];
-
-    if options.invert {
-        args.push("--invert".to_string());
-    }
-    args.push("--brightness".to_string());
-    args.push(options.brightness.to_string());
-    args.push("--contrast".to_string());
-    args.push(options.contrast.to_string());
-    if options.equalize {
-        args.push("--equalize".to_string());
-    }
-    args.push("--palette".to_string());
-    args.push(options.palette);
-
-    let _ = run_backend_command(&app, &args).await?;
+    let _ = run_backend_command(&app, &command_args).await?;
     let dicom_path_string = path_to_string(dicom_path.clone());
 
     Ok(ProcessResponse {
@@ -347,17 +335,6 @@ async fn run_backend_tooth_measurement(
 }
 
 #[tauri::command]
-fn copy_processed_output(source_path: String, destination_path: String) -> Result<String, String> {
-    let source = PathBuf::from(&source_path);
-    let destination = PathBuf::from(&destination_path);
-
-    fs::copy(&source, &destination)
-        .map_err(|error| format!("failed to copy processed DICOM: {error}"))?;
-
-    Ok(path_to_string(destination))
-}
-
-#[tauri::command]
 async fn get_processing_manifest(app: tauri::AppHandle) -> Result<ProcessingManifest, String> {
     let stdout = run_backend_command(&app, &["--describe-presets".to_string()]).await?;
 
@@ -405,6 +382,11 @@ fn create_temp_file(suffix: &str) -> Result<PathBuf, String> {
         .map_err(|error| format!("failed to persist temporary file: {error}"))?;
 
     Ok(path)
+}
+
+fn find_flag_value<'a>(args: &'a [String], flag: &str) -> Option<&'a str> {
+    args.windows(2)
+        .find_map(|window| (window[0] == flag).then_some(window[1].as_str()))
 }
 
 async fn run_backend_command(app: &tauri::AppHandle, args: &[String]) -> Result<String, String> {
@@ -619,7 +601,6 @@ fn main() {
             run_backend_preview,
             run_backend_process,
             run_backend_tooth_measurement,
-            copy_processed_output,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

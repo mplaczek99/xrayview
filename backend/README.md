@@ -4,11 +4,14 @@ Rust backend for `xrayview`.
 
 Current scope:
 
-- accepts both single-dash and double-dash CLI flags
-- implements `--describe-presets`
-- implements `--describe-study` using a metadata-only DICOM read path
-- implements grayscale, pseudocolor, and compare `--input <dicom> --preview-output <png>` preview rendering, including invert/brightness/contrast/equalize/pipeline ordering
+- accepts CLI DICOM workflows for preview rendering, derived DICOM output, and
+  automatic tooth analysis
+- implements `--describe-presets` and `--describe-study` JSON metadata modes
+- supports presets, invert, brightness, contrast, equalize, compare output,
+  palette selection, and grayscale pipeline ordering
+- serves as the processing engine used by the Tauri desktop frontend
 
-Next steps:
+Current architecture note:
 
-- implement DICOM writeback
+- the frontend still shells out to this backend binary today; later phases in
+  `IMPLEMENTATION_PLAN.md` move that boundary to a library-first Rust API
