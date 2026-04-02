@@ -1,5 +1,7 @@
-mod compare;
+pub mod analysis;
+pub mod annotations;
 pub mod cache;
+mod compare;
 mod export;
 pub mod jobs;
 mod palette;

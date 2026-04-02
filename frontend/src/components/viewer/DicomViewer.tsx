@@ -10,8 +10,9 @@ interface DicomViewerProps {
   emptyDescription?: string;
 }
 
-// Presentation-only viewer: callers decide where the preview URL came from
-// and provide the empty-state copy that matches their workflow.
+// Deprecated as the primary study viewer in Phase 6. Processing still uses
+// this lightweight image stage while the interactive View tab moves to
+// `features/viewer/ViewerCanvas.tsx`.
 export function DicomViewer({
   previewUrl,
   imageSize = null,

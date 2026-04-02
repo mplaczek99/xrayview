@@ -60,7 +60,9 @@ impl JobRegistry {
             result: None,
             error: None,
         };
-        inner.active_fingerprints.insert(fingerprint.clone(), job_id.clone());
+        inner
+            .active_fingerprints
+            .insert(fingerprint.clone(), job_id.clone());
         inner.jobs.insert(
             job_id,
             JobEntry {

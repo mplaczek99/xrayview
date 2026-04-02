@@ -2,10 +2,13 @@ import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import type {
   AnalyzeStudyCommand,
   AnalyzeStudyCommandResult,
+  LineAnnotation,
   BackendError,
   JobCommand,
   JobSnapshot as ContractJobSnapshot,
   JobState,
+  MeasureLineAnnotationCommand,
+  MeasureLineAnnotationCommandResult,
   MeasurementScale,
   OpenStudyCommand,
   OpenStudyCommandResult,
@@ -19,7 +22,12 @@ import type {
   StartedJob,
 } from "./generated/contracts";
 import { MOCK_PROCESSING_MANIFEST } from "./mockProcessingManifest";
-import { createMockPreview, createMockToothAnalysis } from "./mockStudy";
+import {
+  createMockPreview,
+  createMockSuggestedAnnotations,
+  createMockToothAnalysis,
+  measureMockLineAnnotation,
+} from "./mockStudy";
 import type {
   JobResultPayload,
   JobSnapshot,
@@ -124,11 +132,13 @@ function asPreviewResult(
   studyId: string,
   previewPath: string,
   runtime: RuntimeMode,
+  imageSize: { width: number; height: number },
   measurementScale: MeasurementScale | null | undefined,
 ): PreviewResult {
   return {
     studyId,
     previewUrl: toPreviewUrl(previewPath, runtime),
+    imageSize,
     measurementScale: measurementScale ?? null,
     runtime,
   };
@@ -139,11 +149,12 @@ function asProcessResult(
   previewPath: string,
   dicomPath: string,
   runtime: RuntimeMode,
+  imageSize: { width: number; height: number },
   measurementScale: MeasurementScale | null | undefined,
   mode: string,
 ): ProcessResult {
   return {
-    ...asPreviewResult(studyId, previewPath, runtime, measurementScale),
+    ...asPreviewResult(studyId, previewPath, runtime, imageSize, measurementScale),
     dicomPath,
     mode,
   };
@@ -154,11 +165,13 @@ function asToothAnalysisResult(
   previewPath: string,
   runtime: RuntimeMode,
   analysis: AnalyzeStudyCommandResult["analysis"],
+  suggestedAnnotations: AnalyzeStudyCommandResult["suggestedAnnotations"],
 ): ToothAnalysisResult {
   return {
     studyId,
     previewUrl: toPreviewUrl(previewPath, runtime),
     analysis,
+    suggestedAnnotations,
     runtime,
   };
 }
@@ -252,6 +265,10 @@ function normalizeJobResultPayload(
           result.payload.studyId,
           result.payload.previewPath,
           runtime,
+          {
+            width: result.payload.loadedWidth,
+            height: result.payload.loadedHeight,
+          },
           result.payload.measurementScale,
         ),
       };
@@ -263,6 +280,10 @@ function normalizeJobResultPayload(
           result.payload.previewPath,
           result.payload.dicomPath,
           runtime,
+          {
+            width: result.payload.loadedWidth,
+            height: result.payload.loadedHeight,
+          },
           result.payload.measurementScale,
           result.payload.mode,
         ),
@@ -275,6 +296,7 @@ function normalizeJobResultPayload(
           result.payload.previewPath,
           runtime,
           result.payload.analysis,
+          result.payload.suggestedAnnotations,
         ),
       };
   }
@@ -467,6 +489,10 @@ export async function startRenderStudyJob(studyId: string): Promise<StartedJob> 
           studyId,
           createMockPreview(false, "none"),
           getRuntimeMode(),
+          {
+            width: 1200,
+            height: 820,
+          },
           null,
         ),
       })),
@@ -527,6 +553,10 @@ export async function startProcessStudyJob(
           createMockPreview(true, request.controls.palette),
           request.outputPath ?? MOCK_PROCESSED_DICOM_PATH,
           getRuntimeMode(),
+          {
+            width: 1200,
+            height: 820,
+          },
           null,
           request.compare ? "comparison output" : "processed preview",
         ),
@@ -545,6 +575,7 @@ export async function startAnalyzeStudyJob(studyId: string): Promise<StartedJob>
           studyId,
           previewUrl: createMockPreview(false, "none"),
           analysis: createMockToothAnalysis(),
+          suggestedAnnotations: createMockSuggestedAnnotations(),
           runtime: getRuntimeMode(),
         },
       })),
@@ -634,6 +665,26 @@ export async function cancelJob(jobId: string): Promise<JobSnapshot> {
         request,
       });
       return normalizeJobSnapshot(snapshot);
+    },
+  });
+}
+
+export async function measureLineAnnotation(
+  studyId: string,
+  annotation: LineAnnotation,
+): Promise<LineAnnotation> {
+  return runInRuntime({
+    mock: () => measureMockLineAnnotation(annotation),
+    tauri: async () => {
+      const request: MeasureLineAnnotationCommand = {
+        studyId,
+        annotation,
+      };
+      const payload = await invokeWithBackendError<MeasureLineAnnotationCommandResult>(
+        "measure_line_annotation",
+        { request },
+      );
+      return payload.annotation;
     },
   });
 }

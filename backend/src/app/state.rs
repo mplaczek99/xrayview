@@ -6,9 +6,12 @@ use std::sync::{Arc, Mutex};
 use anyhow::{Context, anyhow};
 use serde::Serialize;
 
+use crate::analysis::auto_tooth::suggested_annotations;
+use crate::analysis::measurement_service::measure_line_annotation;
 use crate::api::{
     AnalyzeStudyCommand, AnalyzeStudyCommandResult, AnalyzeStudyRequest, JobCommand, JobKind,
-    JobResult, JobSnapshot, JobState, OpenStudyCommandResult, ProcessStudyCommand,
+    JobResult, JobSnapshot, JobState, MeasureLineAnnotationCommand,
+    MeasureLineAnnotationCommandResult, OpenStudyCommandResult, ProcessStudyCommand,
     ProcessStudyCommandResult, ProcessStudyRequest, RenderPreviewRequest, RenderStudyCommand,
     RenderStudyCommandResult, StartedJob, StudyRecord,
 };
@@ -24,8 +27,7 @@ use crate::study::source_image::load_source_study;
 use crate::tooth_measurement::analyze_grayscale_pixels;
 
 use super::{
-    analyze_study, describe_study, export_study, process_study, render_preview,
-    validate_input_file,
+    analyze_study, describe_study, export_study, process_study, render_preview, validate_input_file,
 };
 
 type JobPublisher = Arc<dyn Fn(JobSnapshot) + Send + Sync + 'static>;
@@ -66,10 +68,7 @@ impl AppState {
         Ok(study)
     }
 
-    pub fn open_study_command(
-        &self,
-        input_path: PathBuf,
-    ) -> BackendResult<OpenStudyCommandResult> {
+    pub fn open_study_command(&self, input_path: PathBuf) -> BackendResult<OpenStudyCommandResult> {
         self.open_study(input_path)
             .map(|study| OpenStudyCommandResult { study })
     }
@@ -88,6 +87,8 @@ impl AppState {
         Ok(RenderStudyCommandResult {
             study_id: study.study_id,
             preview_path: result.preview_output,
+            loaded_width: result.loaded_width,
+            loaded_height: result.loaded_height,
             measurement_scale: result.measurement_scale,
         })
     }
@@ -136,11 +137,27 @@ impl AppState {
             input_path: study.input_path,
             preview_output: Some(preview_output.clone()),
         })?;
+        let suggested = suggested_annotations(&result.analysis);
 
         Ok(AnalyzeStudyCommandResult {
             study_id,
             preview_path: preview_output,
             analysis: result.analysis,
+            suggested_annotations: suggested.into(),
+        })
+    }
+
+    pub fn measure_line_annotation(
+        &self,
+        request: MeasureLineAnnotationCommand,
+    ) -> BackendResult<MeasureLineAnnotationCommandResult> {
+        let study = self.require_study(&request.study_id)?;
+        let annotation =
+            measure_line_annotation(request.annotation.into(), study.measurement_scale);
+
+        Ok(MeasureLineAnnotationCommandResult {
+            study_id: study.study_id,
+            annotation: annotation.into(),
         })
     }
 
@@ -158,9 +175,11 @@ impl AppState {
         )?;
 
         if let Some(result) = self.cache.get(&fingerprint)? {
-            let snapshot =
-                self.jobs
-                    .create_cached_job(JobKind::RenderStudy, Some(study.study_id.clone()), result)?;
+            let snapshot = self.jobs.create_cached_job(
+                JobKind::RenderStudy,
+                Some(study.study_id.clone()),
+                result,
+            )?;
             publish_job(&publish, snapshot.clone());
             return Ok(StartedJob {
                 job_id: snapshot.job_id,
@@ -188,13 +207,7 @@ impl AppState {
         let state = self.clone();
         let job_id = snapshot.job_id.clone();
         std::thread::spawn(move || {
-            state.execute_render_job(
-                job_id,
-                study,
-                preview_output,
-                fingerprint,
-                publish,
-            );
+            state.execute_render_job(job_id, study, preview_output, fingerprint, publish);
         });
 
         Ok(StartedJob {
@@ -236,9 +249,9 @@ impl AppState {
             });
         }
 
-        let preview_output = self
-            .disk_cache
-            .artifact_path("process", &preview_fingerprint, "png")?;
+        let preview_output =
+            self.disk_cache
+                .artifact_path("process", &preview_fingerprint, "png")?;
         let dicom_path = match request.output_path.clone() {
             Some(path) => path,
             None => self
@@ -397,6 +410,8 @@ impl AppState {
             Ok(RenderStudyCommandResult {
                 study_id: study.study_id,
                 preview_path: preview_output,
+                loaded_width: source.image.width,
+                loaded_height: source.image.height,
                 measurement_scale: source.measurement_scale,
             })
         })();
@@ -574,11 +589,13 @@ impl AppState {
                 &preview.pixels,
                 source.measurement_scale,
             )?;
+            let suggested = suggested_annotations(&analysis);
 
             Ok(AnalyzeStudyCommandResult {
                 study_id: study.study_id,
                 preview_path: preview_output,
                 analysis,
+                suggested_annotations: suggested.into(),
             })
         })();
 

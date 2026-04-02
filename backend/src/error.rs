@@ -99,7 +99,8 @@ impl From<AnyhowError> for BackendError {
             || lower.contains("choose only one")
         {
             BackendErrorCode::InvalidInput
-        } else if lower.contains("cache") && (lower.contains("corrupt") || lower.contains("invalid"))
+        } else if lower.contains("cache")
+            && (lower.contains("corrupt") || lower.contains("invalid"))
         {
             BackendErrorCode::CacheCorrupted
         } else {

@@ -1,4 +1,5 @@
 import type {
+  AnnotationBundle,
   MeasurementScale,
   PaletteName,
   ProcessingControls,
@@ -38,6 +39,7 @@ export interface ProcessingRequest {
 export interface PreviewResult {
   studyId: string;
   previewUrl: string;
+  imageSize: { width: number; height: number };
   measurementScale: MeasurementScale | null;
   runtime: RuntimeMode;
 }
@@ -51,5 +53,6 @@ export interface ToothAnalysisResult {
   studyId: string;
   previewUrl: string;
   analysis: ToothAnalysis;
+  suggestedAnnotations: AnnotationBundle;
   runtime: RuntimeMode;
 }

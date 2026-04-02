@@ -69,6 +69,8 @@ mod tests {
                 JobResult::RenderStudy(RenderStudyCommandResult {
                     study_id: String::from("study-1"),
                     preview_path: preview_path.clone(),
+                    loaded_width: 1,
+                    loaded_height: 1,
                     measurement_scale: None,
                 }),
             )
@@ -78,6 +80,11 @@ mod tests {
 
         fs::remove_file(&preview_path).expect("remove preview");
 
-        assert!(cache.get("render:1").expect("invalidate cache entry").is_none());
+        assert!(
+            cache
+                .get("render:1")
+                .expect("invalidate cache entry")
+                .is_none()
+        );
     }
 }

@@ -34,6 +34,46 @@ export interface MeasurementScale {
   source: string;
 }
 
+export type AnnotationSource = "manual" | "autoTooth";
+
+export interface AnnotationPoint {
+  x: number;
+  y: number;
+}
+
+export interface LineMeasurement {
+  pixelLength: number;
+  calibratedLengthMm?: number | null;
+}
+
+export interface LineAnnotation {
+  id: string;
+  label: string;
+  source: AnnotationSource;
+  start: AnnotationPoint;
+  end: AnnotationPoint;
+  editable: boolean;
+  confidence?: number | null;
+  measurement?: LineMeasurement | null;
+}
+
+export interface RectangleAnnotation {
+  id: string;
+  label: string;
+  source: AnnotationSource;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  editable: boolean;
+  confidence?: number | null;
+}
+
+export interface AnnotationBundle {
+  lines: LineAnnotation[];
+  rectangles: RectangleAnnotation[];
+}
+
 export type BackendErrorCode =
   | "invalidInput"
   | "notFound"
@@ -95,6 +135,8 @@ export interface RenderStudyCommand {
 export interface RenderStudyCommandResult {
   studyId: string;
   previewPath: string;
+  loadedWidth: number;
+  loadedHeight: number;
   measurementScale?: MeasurementScale | null;
 }
 
@@ -123,6 +165,11 @@ export interface ProcessStudyCommandResult {
 
 export interface AnalyzeStudyCommand {
   studyId: string;
+}
+
+export interface MeasureLineAnnotationCommand {
+  studyId: string;
+  annotation: LineAnnotation;
 }
 
 export interface ToothAnalysis {
@@ -190,6 +237,12 @@ export interface AnalyzeStudyCommandResult {
   studyId: string;
   previewPath: string;
   analysis: ToothAnalysis;
+  suggestedAnnotations: AnnotationBundle;
+}
+
+export interface MeasureLineAnnotationCommandResult {
+  studyId: string;
+  annotation: LineAnnotation;
 }
 
 export type JobResult =

@@ -4,7 +4,12 @@ import type {
 } from "../../lib/generated/contracts";
 import { workbenchActions, useWorkbenchStore } from "../../app/store/workbenchStore";
 import { formatBackendError } from "../../lib/backend";
-import { DicomViewer } from "./DicomViewer";
+import {
+  annotationSourceLabel,
+  formatLineMeasurement,
+  formatSecondaryMeasurement,
+} from "../../features/annotations/tools";
+import { ViewerCanvas } from "../../features/viewer/ViewerCanvas";
 
 interface MeasurementSectionProps {
   title: string;
@@ -76,6 +81,20 @@ export function ViewTab() {
     analysisJob?.state === "running" ||
     analysisJob?.state === "cancelling";
   const previewUrl = study?.originalPreview?.previewUrl ?? null;
+  const imageSize =
+    study?.originalPreview?.imageSize ??
+    (study?.analysis
+      ? {
+          width: study.analysis.image.width,
+          height: study.analysis.image.height,
+        }
+      : null);
+  const annotations = study?.annotations ?? { lines: [], rectangles: [] };
+  const selectedAnnotationId = study?.viewer.selectedAnnotationId ?? null;
+  const selectedLine =
+    annotations.lines.find((annotation) => annotation.id === selectedAnnotationId) ??
+    null;
+  const viewerTool = study?.viewer.tool ?? "pan";
   const status = study?.status ?? workbenchStatus;
   const inputName = study?.inputName ?? "No study loaded";
 
@@ -104,6 +123,30 @@ export function ViewTab() {
               ? "Re-run measurement"
               : "Measure tooth"}
         </button>
+        <button
+          className={`button button--ghost${viewerTool === "pan" ? " viewer-tool--active" : ""}`}
+          type="button"
+          onClick={() => workbenchActions.setViewerTool("pan")}
+          disabled={!study}
+        >
+          Pan
+        </button>
+        <button
+          className={`button button--ghost${viewerTool === "measureLine" ? " viewer-tool--active" : ""}`}
+          type="button"
+          onClick={() => workbenchActions.setViewerTool("measureLine")}
+          disabled={!study}
+        >
+          Measure line
+        </button>
+        <button
+          className="button button--ghost"
+          type="button"
+          onClick={() => workbenchActions.deleteSelectedAnnotation()}
+          disabled={!selectedAnnotationId}
+        >
+          Remove selected
+        </button>
         {previewUrl && (
           <span className="view-panel__filename u-mono">{inputName}</span>
         )}
@@ -113,16 +156,87 @@ export function ViewTab() {
 
       <div className="study-analysis">
         <div className="study-analysis__viewer">
-          <DicomViewer
+          <ViewerCanvas
             previewUrl={previewUrl}
-            imageSize={study?.analysis?.image ?? null}
-            overlay={tooth?.geometry ?? null}
+            imageSize={imageSize}
+            annotations={annotations}
+            selectedAnnotationId={selectedAnnotationId}
+            tool={viewerTool}
             emptyTitle="No study loaded"
-            emptyDescription="Open a DICOM study to run backend tooth detection and measurement."
+            emptyDescription="Open a DICOM study to inspect it, pan and zoom, or draw a manual line measurement."
+            onSelectAnnotation={(annotationId) =>
+              workbenchActions.selectAnnotation(annotationId)
+            }
+            onCreateLine={(annotation) =>
+              workbenchActions.createLineAnnotation(annotation)
+            }
+            onUpdateLine={(annotation) =>
+              workbenchActions.updateLineAnnotation(annotation)
+            }
           />
         </div>
 
         <aside className="study-analysis__sidebar">
+          <section className="measurement-card">
+            <div className="measurement-card__eyebrow">Viewer Tools</div>
+            <p className="measurement-card__copy">
+              Drag to pan, use the mouse wheel to zoom, then switch to Measure
+              line to place calibrated annotations in source pixel space.
+            </p>
+            {selectedLine ? (
+              <div className="measurement-card__hero">
+                <span className="measurement-card__hero-label">
+                  Selected line
+                </span>
+                <span className="measurement-card__hero-value">
+                  {formatLineMeasurement(selectedLine.measurement)}
+                </span>
+              </div>
+            ) : null}
+          </section>
+
+          <section className="measurement-card">
+            <div className="measurement-card__eyebrow">Line Annotations</div>
+            {annotations.lines.length ? (
+              <div className="annotation-list">
+                {annotations.lines.map((annotation) => (
+                  <button
+                    key={annotation.id}
+                    className={`annotation-list__item${
+                      annotation.id === selectedAnnotationId
+                        ? " annotation-list__item--selected"
+                        : ""
+                    }`}
+                    type="button"
+                    onClick={() =>
+                      workbenchActions.selectAnnotation(annotation.id)
+                    }
+                  >
+                    <span className="annotation-list__title">
+                      {annotation.label}
+                    </span>
+                    <span className="annotation-list__meta">
+                      {annotationSourceLabel(annotation.source)}
+                    </span>
+                    <span className="annotation-list__value">
+                      {formatLineMeasurement(annotation.measurement)}
+                    </span>
+                    {formatSecondaryMeasurement(annotation.measurement) ? (
+                      <span className="annotation-list__subvalue">
+                        {formatSecondaryMeasurement(annotation.measurement)}
+                      </span>
+                    ) : null}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <p className="measurement-card__copy">
+                No line annotations yet. Draw one to store a manual
+                measurement, or run Measure tooth to load editable suggestions.
+              </p>
+            )}
+          </section>
+
           <section className="measurement-card">
             <div className="measurement-card__eyebrow">
               Automatic Measurement
@@ -137,8 +251,8 @@ export function ViewTab() {
                 </div>
                 <p className="measurement-card__copy">
                   Mask area {tooth.maskAreaPixels.toLocaleString()} px. Overlay
-                  lines are returned by the backend from the selected candidate
-                  geometry.
+                  guides are returned as editable annotation suggestions from
+                  the backend candidate geometry.
                 </p>
               </>
             ) : (

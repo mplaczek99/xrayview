@@ -7,6 +7,7 @@ import {
   formatBackendError,
   getJob,
   loadProcessingManifest,
+  measureLineAnnotation,
   openStudy as openBackendStudy,
   pickDicomFile,
   pickSaveDicomPath,
@@ -14,9 +15,19 @@ import {
   startProcessStudyJob,
   startRenderStudyJob,
 } from "../../lib/backend";
-import type { ProcessingControls, ProcessingPipelineStep } from "../../lib/generated/contracts";
+import type {
+  LineAnnotation,
+  ProcessingControls,
+  ProcessingPipelineStep,
+} from "../../lib/generated/contracts";
 import type { ProcessingRequest } from "../../lib/types";
 import type { JobSnapshot, ProcessingRunState } from "../../features/jobs/model";
+import {
+  removeAnnotation,
+  replaceSuggestedAnnotations,
+  upsertLineAnnotation,
+  type ViewerTool,
+} from "../../features/annotations/tools";
 import {
   createWorkbenchStudy,
   defaultControlsForManifest,
@@ -76,7 +87,7 @@ function applyRenderJob(study: WorkbenchStudy, job: JobSnapshot): WorkbenchStudy
         measurementScale: job.result.payload.measurementScale ?? study.measurementScale,
         status: job.fromCache
           ? "Preview ready from cache."
-          : "Study loaded. Click Measure tooth to run backend analysis.",
+          : "Study loaded. Drag to pan, scroll to zoom, or draw a line measurement.",
       };
     case "failed":
       return {
@@ -113,19 +124,29 @@ function applyAnalyzeJob(study: WorkbenchStudy, job: JobSnapshot): WorkbenchStud
         ...study,
         analysisJobId: job.jobId,
         originalPreview: {
-          ...job.result.payload,
+          studyId: job.result.payload.studyId,
+          previewUrl: job.result.payload.previewUrl,
+          imageSize: {
+            width: job.result.payload.analysis.image.width,
+            height: job.result.payload.analysis.image.height,
+          },
           measurementScale:
             job.result.payload.analysis.calibration.measurementScale ??
             study.originalPreview?.measurementScale ??
             study.measurementScale,
+          runtime: job.result.payload.runtime,
         },
         measurementScale:
           job.result.payload.analysis.calibration.measurementScale ?? study.measurementScale,
         analysis: job.result.payload.analysis,
+        annotations: replaceSuggestedAnnotations(
+          study.annotations,
+          job.result.payload.suggestedAnnotations,
+        ),
         status: toothFound
           ? job.fromCache
-            ? "Tooth measurement loaded from cache."
-            : "Tooth measurement complete."
+            ? "Tooth suggestions loaded from cache."
+            : "Tooth measurement complete. Suggestions are ready to edit."
           : "Measurement completed, but the backend could not isolate a tooth candidate.",
       };
     }
@@ -361,6 +382,64 @@ class WorkbenchStore {
     }
   }
 
+  setViewerTool(tool: ViewerTool) {
+    const study = this.activeStudy();
+    if (!study) {
+      return;
+    }
+
+    this.setStudyState(study.studyId, (current) => ({
+      ...current,
+      viewer: {
+        ...current.viewer,
+        tool,
+      },
+    }));
+  }
+
+  selectAnnotation(annotationId: string | null) {
+    const study = this.activeStudy();
+    if (!study) {
+      return;
+    }
+
+    this.setStudyState(study.studyId, (current) => ({
+      ...current,
+      viewer: {
+        ...current.viewer,
+        selectedAnnotationId: annotationId,
+      },
+    }));
+  }
+
+  async createLineAnnotation(annotation: LineAnnotation) {
+    await this.measureAndStoreLineAnnotation(annotation, "Saved manual measurement.");
+  }
+
+  async updateLineAnnotation(annotation: LineAnnotation) {
+    await this.measureAndStoreLineAnnotation(annotation, "Updated line measurement.");
+  }
+
+  deleteSelectedAnnotation() {
+    const study = this.activeStudy();
+    if (!study || !study.viewer.selectedAnnotationId) {
+      return;
+    }
+
+    this.setStudyState(study.studyId, (current) => ({
+      ...current,
+      annotations: removeAnnotation(
+        current.annotations,
+        current.viewer.selectedAnnotationId ?? "",
+      ),
+      viewer: {
+        ...current.viewer,
+        selectedAnnotationId: null,
+      },
+      status: "Annotation removed.",
+    }));
+  }
+
   setProcessingControls(controls: ProcessingControls) {
     const study = this.activeStudy();
     if (!study) {
@@ -549,6 +628,34 @@ class WorkbenchStore {
       this.receiveJobUpdate(snapshot);
     } catch {
       // Event listeners will still reconcile later if the job already emitted.
+    }
+  }
+
+  private async measureAndStoreLineAnnotation(
+    annotation: LineAnnotation,
+    successStatus: string,
+  ) {
+    const study = this.activeStudy();
+    if (!study) {
+      return;
+    }
+
+    try {
+      const measured = await measureLineAnnotation(study.studyId, annotation);
+      this.setStudyState(study.studyId, (current) => ({
+        ...current,
+        annotations: upsertLineAnnotation(current.annotations, measured),
+        viewer: {
+          ...current.viewer,
+          selectedAnnotationId: measured.id,
+        },
+        status: successStatus,
+      }));
+    } catch (error) {
+      this.setStudyState(study.studyId, (current) => ({
+        ...current,
+        status: formatBackendError(error, "Line measurement failed."),
+      }));
     }
   }
 

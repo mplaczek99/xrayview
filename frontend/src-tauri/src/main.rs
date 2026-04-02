@@ -6,9 +6,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager};
 use xrayview_backend::api::{
-    AnalyzeStudyCommand, JobCommand, JobSnapshot, JobState, OpenStudyCommand,
-    OpenStudyCommandResult, ProcessStudyCommand, ProcessingManifest, RenderStudyCommand,
-    StartedJob,
+    AnalyzeStudyCommand, JobCommand, JobSnapshot, JobState, MeasureLineAnnotationCommand,
+    MeasureLineAnnotationCommandResult, OpenStudyCommand, OpenStudyCommandResult,
+    ProcessStudyCommand, ProcessingManifest, RenderStudyCommand, StartedJob,
 };
 use xrayview_backend::app::processing_manifest;
 use xrayview_backend::app::state::AppState as BackendAppState;
@@ -96,6 +96,14 @@ fn cancel_job(
     Ok(snapshot)
 }
 
+#[tauri::command]
+fn measure_line_annotation(
+    backend_state: tauri::State<'_, BackendAppState>,
+    request: MeasureLineAnnotationCommand,
+) -> Result<MeasureLineAnnotationCommandResult, BackendError> {
+    backend_state.inner().clone().measure_line_annotation(request)
+}
+
 async fn run_blocking<T, F>(work: F) -> Result<T, BackendError>
 where
     T: Send + 'static,
@@ -168,6 +176,7 @@ fn main() {
             start_analyze_job,
             get_job,
             cancel_job,
+            measure_line_annotation,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

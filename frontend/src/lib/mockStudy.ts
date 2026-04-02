@@ -1,5 +1,9 @@
 import type { Palette } from "./types";
-import type { ToothAnalysis } from "./generated/contracts";
+import type {
+  AnnotationBundle,
+  LineAnnotation,
+  ToothAnalysis,
+} from "./generated/contracts";
 
 // Mock previews are deterministic SVG data URLs, so cache by variant instead
 // of re-encoding the same image every time controls rerender the UI.
@@ -136,5 +140,65 @@ export function createMockToothAnalysis(): ToothAnalysis {
     warnings: [
       "Calibration metadata unavailable; returning pixel measurements only.",
     ],
+  };
+}
+
+export function createMockSuggestedAnnotations(): AnnotationBundle {
+  return {
+    lines: [
+      {
+        id: "auto-tooth-width",
+        label: "Tooth width",
+        source: "autoTooth",
+        start: { x: 428, y: 454 },
+        end: { x: 560, y: 454 },
+        editable: true,
+        confidence: 0.74,
+        measurement: {
+          pixelLength: 132,
+          calibratedLengthMm: null,
+        },
+      },
+      {
+        id: "auto-tooth-height",
+        label: "Tooth height",
+        source: "autoTooth",
+        start: { x: 492, y: 420 },
+        end: { x: 492, y: 620 },
+        editable: true,
+        confidence: 0.74,
+        measurement: {
+          pixelLength: 200,
+          calibratedLengthMm: null,
+        },
+      },
+    ],
+    rectangles: [
+      {
+        id: "auto-tooth-bounding-box",
+        label: "Tooth bounding box",
+        source: "autoTooth",
+        x: 422,
+        y: 414,
+        width: 140,
+        height: 220,
+        editable: false,
+        confidence: 0.74,
+      },
+    ],
+  };
+}
+
+export function measureMockLineAnnotation(annotation: LineAnnotation): LineAnnotation {
+  const dx = annotation.end.x - annotation.start.x;
+  const dy = annotation.end.y - annotation.start.y;
+  const pixelLength = Math.round(Math.hypot(dx, dy) * 10) / 10;
+
+  return {
+    ...annotation,
+    measurement: {
+      pixelLength,
+      calibratedLengthMm: null,
+    },
   };
 }

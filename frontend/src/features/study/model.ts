@@ -1,4 +1,5 @@
 import type {
+  AnnotationBundle,
   MeasurementScale,
   ProcessingControls,
   ProcessingManifest,
@@ -12,6 +13,10 @@ import type {
   RuntimeMode,
 } from "../../lib/types";
 import type { JobSnapshot, ProcessingRunState } from "../jobs/model";
+import {
+  emptyAnnotationBundle,
+  type ViewerTool,
+} from "../annotations/tools";
 
 export const DEFAULT_PIPELINE: ProcessingPipelineStep[] = [
   "grayscale",
@@ -34,6 +39,11 @@ export interface ProcessingSession {
   runStatus: ProcessingRunState;
 }
 
+export interface ViewerSession {
+  tool: ViewerTool;
+  selectedAnnotationId: string | null;
+}
+
 export interface WorkbenchStudy {
   studyId: string;
   inputPath: string;
@@ -41,6 +51,8 @@ export interface WorkbenchStudy {
   measurementScale: MeasurementScale | null;
   originalPreview: PreviewResult | null;
   analysis: ToothAnalysis | null;
+  annotations: AnnotationBundle;
+  viewer: ViewerSession;
   processing: ProcessingSession;
   runtime: RuntimeMode;
   status: string;
@@ -100,6 +112,11 @@ export function createWorkbenchStudy(
     measurementScale: study.measurementScale,
     originalPreview: null,
     analysis: null,
+    annotations: emptyAnnotationBundle(),
+    viewer: {
+      tool: "pan",
+      selectedAnnotationId: null,
+    },
     processing: {
       form: createProcessingForm(defaultControls),
       output: null,
