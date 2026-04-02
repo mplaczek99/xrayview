@@ -1,4 +1,4 @@
-import type { Palette } from "./types";
+import type { Palette, ToothAnalysis } from "./types";
 
 // Mock previews are deterministic SVG data URLs, so cache by variant instead
 // of re-encoding the same image every time controls rerender the UI.
@@ -89,4 +89,51 @@ export function createMockPreview(processed: boolean, palette: Palette): string 
 
   previewCache.set(cacheKey, preview);
   return preview;
+}
+
+export function createMockToothAnalysis(): ToothAnalysis {
+  return {
+    image: {
+      width: 1200,
+      height: 820,
+    },
+    calibration: {
+      pixelUnits: "px",
+      measurementScale: null,
+      realWorldMeasurementsAvailable: false,
+    },
+    tooth: {
+      confidence: 0.74,
+      maskAreaPixels: 18492,
+      measurements: {
+        pixel: {
+          toothWidth: 133,
+          toothHeight: 201,
+          boundingBoxWidth: 140,
+          boundingBoxHeight: 220,
+          units: "px",
+        },
+        calibrated: null,
+      },
+      geometry: {
+        boundingBox: {
+          x: 422,
+          y: 414,
+          width: 140,
+          height: 220,
+        },
+        widthLine: {
+          start: { x: 428, y: 454 },
+          end: { x: 560, y: 454 },
+        },
+        heightLine: {
+          start: { x: 492, y: 420 },
+          end: { x: 492, y: 620 },
+        },
+      },
+    },
+    warnings: [
+      "Calibration metadata unavailable; returning pixel measurements only.",
+    ],
+  };
 }

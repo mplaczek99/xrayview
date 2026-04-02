@@ -1,6 +1,6 @@
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { MOCK_PROCESSING_MANIFEST } from "./mockProcessingManifest";
-import { createMockPreview } from "./mockStudy";
+import { createMockPreview, createMockToothAnalysis } from "./mockStudy";
 import type {
   MeasurementScale,
   Palette,
@@ -9,6 +9,8 @@ import type {
   ProcessingControls,
   ProcessingManifest,
   RuntimeMode,
+  ToothAnalysis,
+  ToothAnalysisResult,
 } from "./types";
 
 interface PreviewPayload {
@@ -18,6 +20,11 @@ interface PreviewPayload {
 
 interface ProcessPayload extends PreviewPayload {
   dicomPath: string;
+}
+
+interface ToothMeasurementPayload {
+  previewPath: string;
+  analysis: ToothAnalysis;
 }
 
 const MOCK_STUDY_DIRECTORY = "mock-data";
@@ -136,6 +143,30 @@ export async function runBackendProcess(
         getRuntimeMode(),
         payload.measurementScale,
       );
+    },
+  });
+}
+
+export async function runBackendToothMeasurement(
+  inputPath: string,
+): Promise<ToothAnalysisResult> {
+  return runInRuntime({
+    mock: () => ({
+      previewUrl: createMockPreview(false, "none"),
+      analysis: createMockToothAnalysis(),
+      runtime: getRuntimeMode(),
+    }),
+    tauri: async () => {
+      const payload = await invoke<ToothMeasurementPayload>(
+        "run_backend_tooth_measurement",
+        { inputPath },
+      );
+
+      return {
+        previewUrl: toPreviewUrl(payload.previewPath, getRuntimeMode()),
+        analysis: payload.analysis,
+        runtime: getRuntimeMode(),
+      };
     },
   });
 }

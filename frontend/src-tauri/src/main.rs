@@ -92,6 +92,87 @@ struct StudyDescription {
     measurement_scale: Option<MeasurementScale>,
 }
 
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ToothImageMetadata {
+    width: u32,
+    height: u32,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ToothCalibration {
+    pixel_units: String,
+    measurement_scale: Option<MeasurementScale>,
+    real_world_measurements_available: bool,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ToothMeasurementValues {
+    tooth_width: f64,
+    tooth_height: f64,
+    bounding_box_width: f64,
+    bounding_box_height: f64,
+    units: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ToothMeasurementBundle {
+    pixel: ToothMeasurementValues,
+    calibrated: Option<ToothMeasurementValues>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Point {
+    x: u32,
+    y: u32,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LineSegment {
+    start: Point,
+    end: Point,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BoundingBox {
+    x: u32,
+    y: u32,
+    width: u32,
+    height: u32,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ToothGeometry {
+    bounding_box: BoundingBox,
+    width_line: LineSegment,
+    height_line: LineSegment,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ToothCandidate {
+    confidence: f64,
+    mask_area_pixels: u32,
+    measurements: ToothMeasurementBundle,
+    geometry: ToothGeometry,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ToothAnalysis {
+    image: ToothImageMetadata,
+    calibration: ToothCalibration,
+    tooth: Option<ToothCandidate>,
+    warnings: Vec<String>,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PreviewResponse {
@@ -105,6 +186,13 @@ struct ProcessResponse {
     preview_path: String,
     dicom_path: String,
     measurement_scale: Option<MeasurementScale>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ToothMeasurementResponse {
+    preview_path: String,
+    analysis: ToothAnalysis,
 }
 
 #[derive(Debug)]
@@ -219,6 +307,46 @@ async fn run_backend_process(
 }
 
 #[tauri::command]
+async fn run_backend_tooth_measurement(
+    app: tauri::AppHandle,
+    input_path: String,
+) -> Result<ToothMeasurementResponse, String> {
+    let gate = app.state::<BackendGate>();
+    let _permit = gate
+        .semaphore
+        .acquire()
+        .await
+        .map_err(|e| format!("backend gate closed: {e}"))?;
+
+    let temp_state = app.state::<TempFileState>();
+    temp_state.cleanup_all();
+
+    let preview_path = create_temp_file(".png")?;
+    temp_state.track(preview_path.clone());
+    let preview_path_string = path_to_string(preview_path.clone());
+
+    let stdout = run_backend_command(
+        &app,
+        &[
+            "--input".to_string(),
+            input_path,
+            "--preview-output".to_string(),
+            preview_path_string.clone(),
+            "--analyze-tooth".to_string(),
+        ],
+    )
+    .await?;
+
+    let analysis = serde_json::from_str(&stdout)
+        .map_err(|error| format!("failed to parse backend tooth analysis: {error}"))?;
+
+    Ok(ToothMeasurementResponse {
+        preview_path: preview_path_string,
+        analysis,
+    })
+}
+
+#[tauri::command]
 fn copy_processed_output(source_path: String, destination_path: String) -> Result<String, String> {
     let source = PathBuf::from(&source_path);
     let destination = PathBuf::from(&destination_path);
@@ -280,21 +408,23 @@ fn create_temp_file(suffix: &str) -> Result<PathBuf, String> {
 }
 
 async fn run_backend_command(app: &tauri::AppHandle, args: &[String]) -> Result<String, String> {
-    // Packaged builds use the bundled sidecar, while local development can
-    // still run against an already-built binary or `cargo run`.
-    if let Ok(sidecar) = app.shell().sidecar("xrayview-backend") {
-        let output = sidecar
-            .args(args.iter().map(String::as_str))
-            .output()
-            .await
-            .map_err(|error| format!("failed to start bundled backend: {error}"))?;
+    // Development should use the current backend source rather than any stale
+    // sidecar or release binary left on disk from a previous build.
+    if !cfg!(debug_assertions) {
+        if let Ok(sidecar) = app.shell().sidecar("xrayview-backend") {
+            let output = sidecar
+                .args(args.iter().map(String::as_str))
+                .output()
+                .await
+                .map_err(|error| format!("failed to start bundled backend: {error}"))?;
 
-        return handle_backend_output(
-            output.status.success(),
-            format!("{:?}", output.status),
-            output.stdout,
-            output.stderr,
-        );
+            return handle_backend_output(
+                output.status.success(),
+                format!("{:?}", output.status),
+                output.stdout,
+                output.stderr,
+            );
+        }
     }
 
     let backend = resolve_backend_spec()?;
@@ -350,6 +480,23 @@ fn resolve_backend_spec() -> Result<BackendSpec, String> {
                 program: path_to_string(binary),
                 prefix_args: Vec::new(),
                 working_directory,
+            });
+        }
+    }
+
+    if cfg!(debug_assertions) {
+        if let Some(project_root) =
+            find_project_root(&env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
+        {
+            return Ok(BackendSpec {
+                program: "cargo".to_string(),
+                prefix_args: vec![
+                    "run".to_string(),
+                    "--manifest-path".to_string(),
+                    "backend/Cargo.toml".to_string(),
+                    "--".to_string(),
+                ],
+                working_directory: project_root,
             });
         }
     }
@@ -471,6 +618,7 @@ fn main() {
             get_processing_manifest,
             run_backend_preview,
             run_backend_process,
+            run_backend_tooth_measurement,
             copy_processed_output,
         ])
         .run(tauri::generate_context!())

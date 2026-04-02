@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { ProcessingTab } from "../components/processing/ProcessingTab";
-import { DicomViewer } from "../components/viewer/DicomViewer";
-import { pickDicomFile, runBackendPreview } from "../lib/backend";
+import { ViewTab } from "../components/viewer/ViewTab";
+import { pickDicomFile, runBackendToothMeasurement } from "../lib/backend";
 import type { ActiveTab, StudySession } from "../lib/types";
 
 const INITIAL_SESSION: StudySession = {
@@ -11,6 +11,7 @@ const INITIAL_SESSION: StudySession = {
   processedPreviewUrl: null,
   originalMeasurementScale: null,
   processedMeasurementScale: null,
+  toothAnalysis: null,
   processedDicomPath: null,
   savedDestination: null,
   status: "Open a DICOM study to begin.",
@@ -44,10 +45,14 @@ export function App() {
     if (!selectedPath) return;
 
     setBusy(true);
-    setSession((current) => ({ ...current, status: "Loading source preview..." }));
+    setSession((current) => ({
+      ...current,
+      status: "Loading preview and running backend tooth analysis...",
+    }));
 
     try {
-      const result = await runBackendPreview(selectedPath);
+      const result = await runBackendToothMeasurement(selectedPath);
+      const toothFound = Boolean(result.analysis.tooth);
       // Opening a new study clears any derived output so the processing tab
       // cannot accidentally show results from the previous file.
       setSession({
@@ -55,17 +60,21 @@ export function App() {
         inputName: selectedPath.split(/[\\/]/).pop() ?? selectedPath,
         originalPreviewUrl: result.previewUrl,
         processedPreviewUrl: null,
-        originalMeasurementScale: result.measurementScale,
+        originalMeasurementScale: result.analysis.calibration.measurementScale,
         processedMeasurementScale: null,
+        toothAnalysis: result.analysis,
         processedDicomPath: null,
         savedDestination: null,
-        status: "Study loaded.",
+        status: toothFound
+          ? "Study analyzed. Automatic tooth measurement is ready."
+          : "Study loaded, but the backend could not isolate a tooth candidate.",
         dirty: false,
         runtime: result.runtime,
       });
     } catch (error) {
       setSession((current) => ({
         ...current,
+        toothAnalysis: null,
         status: describeError(error, "Preview loading failed."),
       }));
     } finally {
@@ -98,22 +107,14 @@ export function App() {
 
       <main className="tab-content" role="tabpanel">
         {activeTab === "view" ? (
-          <div className="view-panel">
-            <div className="view-panel__toolbar">
-              <button
-                className="button button--primary"
-                type="button"
-                onClick={handleOpenStudy}
-                disabled={busy}
-              >
-                {busy ? "Loading..." : "Open DICOM"}
-              </button>
-              {session.inputPath && (
-                <span className="view-panel__filename u-mono">{session.inputName}</span>
-              )}
-            </div>
-            <DicomViewer previewUrl={session.originalPreviewUrl} />
-          </div>
+          <ViewTab
+            previewUrl={session.originalPreviewUrl}
+            analysis={session.toothAnalysis}
+            busy={busy}
+            status={session.status}
+            inputName={session.inputName}
+            onOpenStudy={handleOpenStudy}
+          />
         ) : (
           <ProcessingTab
             inputPath={session.inputPath}

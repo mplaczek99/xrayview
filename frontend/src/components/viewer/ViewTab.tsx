@@ -1,41 +1,175 @@
+import type {
+  ToothAnalysis,
+  ToothMeasurementValues,
+} from "../../lib/types";
+import { DicomViewer } from "./DicomViewer";
+
 interface ViewTabProps {
   previewUrl: string | null;
+  analysis: ToothAnalysis | null;
   busy: boolean;
+  status: string;
+  inputName: string;
   onOpenStudy: () => void;
 }
 
-// This tab owns only the open action and preview shell; higher-level study
-// session state stays in the parent app.
-export function ViewTab({ previewUrl, busy, onOpenStudy }: ViewTabProps) {
+interface MeasurementSectionProps {
+  title: string;
+  measurements: ToothMeasurementValues;
+}
+
+function formatMeasurement(value: number, units: string): string {
+  return units === "mm" ? `${value.toFixed(1)} ${units}` : `${Math.round(value)} ${units}`;
+}
+
+function MeasurementSection({
+  title,
+  measurements,
+}: MeasurementSectionProps) {
+  return (
+    <section className="measurement-card">
+      <div className="measurement-card__eyebrow">{title}</div>
+      <div className="measurement-grid">
+        <div className="measurement-grid__item">
+          <span className="measurement-grid__label">Tooth width</span>
+          <span className="measurement-grid__value">
+            {formatMeasurement(measurements.toothWidth, measurements.units)}
+          </span>
+        </div>
+        <div className="measurement-grid__item">
+          <span className="measurement-grid__label">Tooth height</span>
+          <span className="measurement-grid__value">
+            {formatMeasurement(measurements.toothHeight, measurements.units)}
+          </span>
+        </div>
+        <div className="measurement-grid__item">
+          <span className="measurement-grid__label">BBox width</span>
+          <span className="measurement-grid__value">
+            {formatMeasurement(measurements.boundingBoxWidth, measurements.units)}
+          </span>
+        </div>
+        <div className="measurement-grid__item">
+          <span className="measurement-grid__label">BBox height</span>
+          <span className="measurement-grid__value">
+            {formatMeasurement(measurements.boundingBoxHeight, measurements.units)}
+          </span>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+export function ViewTab({
+  previewUrl,
+  analysis,
+  busy,
+  status,
+  inputName,
+  onOpenStudy,
+}: ViewTabProps) {
+  const tooth = analysis?.tooth ?? null;
+  const measurementScale = analysis?.calibration.measurementScale ?? null;
+
   return (
     <div className="view-tab">
-      <div className="view-tab__toolbar">
+      <div className="view-panel__toolbar">
         <button
           className="button button--primary"
           type="button"
           onClick={onOpenStudy}
           disabled={busy}
         >
-          {busy ? "Loading..." : "Open DICOM"}
+          {busy ? "Analyzing..." : "Open DICOM"}
         </button>
+        {previewUrl && (
+          <span className="view-panel__filename u-mono">{inputName}</span>
+        )}
       </div>
 
-      <div className="viewer-stage">
-        {previewUrl ? (
-          <img
-            className="viewer-stage__image"
-            src={previewUrl}
-            alt="DICOM preview"
-            draggable={false}
+      <p className="view-panel__status">{status}</p>
+
+      <div className="study-analysis">
+        <div className="study-analysis__viewer">
+          <DicomViewer
+            previewUrl={previewUrl}
+            imageSize={analysis?.image ?? null}
+            overlay={tooth?.geometry ?? null}
+            emptyTitle="No study loaded"
+            emptyDescription="Open a DICOM study to run backend tooth detection and measurement."
           />
-        ) : (
-          <div className="viewer-placeholder">
-            <div className="viewer-placeholder__title">No study loaded</div>
-            <p className="viewer-placeholder__copy">
-              Open a DICOM file to view it here.
-            </p>
-          </div>
-        )}
+        </div>
+
+        <aside className="study-analysis__sidebar">
+          <section className="measurement-card">
+            <div className="measurement-card__eyebrow">
+              Automatic Measurement
+            </div>
+            {tooth ? (
+              <>
+                <div className="measurement-card__hero">
+                  <span className="measurement-card__hero-label">Confidence</span>
+                  <span className="measurement-card__hero-value">
+                    {Math.round(tooth.confidence * 100)}%
+                  </span>
+                </div>
+                <p className="measurement-card__copy">
+                  Mask area {tooth.maskAreaPixels.toLocaleString()} px. Overlay
+                  lines are returned by the backend from the selected candidate
+                  geometry.
+                </p>
+              </>
+            ) : (
+              <p className="measurement-card__copy">
+                The backend will populate measurements here after a study is
+                analyzed.
+              </p>
+            )}
+          </section>
+
+          {tooth && <MeasurementSection title="Pixel measurements" measurements={tooth.measurements.pixel} />}
+          {tooth?.measurements.calibrated && (
+            <MeasurementSection
+              title="Calibrated measurements"
+              measurements={tooth.measurements.calibrated}
+            />
+          )}
+
+          <section className="measurement-card">
+            <div className="measurement-card__eyebrow">Calibration</div>
+            {measurementScale ? (
+              <>
+                <div className="measurement-card__hero">
+                  <span className="measurement-card__hero-label">Source</span>
+                  <span className="measurement-card__hero-value">
+                    {measurementScale.source}
+                  </span>
+                </div>
+                <p className="measurement-card__copy">
+                  Row {measurementScale.rowSpacingMm.toFixed(3)} mm, column{" "}
+                  {measurementScale.columnSpacingMm.toFixed(3)} mm.
+                </p>
+              </>
+            ) : (
+              <p className="measurement-card__copy">
+                No calibration metadata was available in the study, so the
+                backend returned pixel units only.
+              </p>
+            )}
+          </section>
+
+          {analysis?.warnings.length ? (
+            <section className="measurement-card">
+              <div className="measurement-card__eyebrow">Backend notes</div>
+              <div className="measurement-note-list">
+                {analysis.warnings.map((warning) => (
+                  <p key={warning} className="measurement-card__copy">
+                    {warning}
+                  </p>
+                ))}
+              </div>
+            </section>
+          ) : null}
+        </aside>
       </div>
     </div>
   );

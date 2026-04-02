@@ -20,6 +20,7 @@ export interface StudySession {
   processedPreviewUrl: string | null;
   originalMeasurementScale: MeasurementScale | null;
   processedMeasurementScale: MeasurementScale | null;
+  toothAnalysis: ToothAnalysis | null;
   processedDicomPath: string | null;
   savedDestination: string | null;
   status: string;
@@ -58,4 +59,69 @@ export interface PreviewResult {
 
 export interface ProcessResult extends PreviewResult {
   dicomPath: string;
+}
+
+export interface Point {
+  x: number;
+  y: number;
+}
+
+export interface LineSegment {
+  start: Point;
+  end: Point;
+}
+
+export interface BoundingBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface ToothGeometry {
+  boundingBox: BoundingBox;
+  widthLine: LineSegment;
+  heightLine: LineSegment;
+}
+
+export interface ToothMeasurementValues {
+  toothWidth: number;
+  toothHeight: number;
+  boundingBoxWidth: number;
+  boundingBoxHeight: number;
+  units: string;
+}
+
+export interface ToothMeasurementBundle {
+  pixel: ToothMeasurementValues;
+  calibrated: ToothMeasurementValues | null;
+}
+
+export interface ToothCandidate {
+  confidence: number;
+  maskAreaPixels: number;
+  measurements: ToothMeasurementBundle;
+  geometry: ToothGeometry;
+}
+
+export interface ToothCalibration {
+  pixelUnits: string;
+  measurementScale: MeasurementScale | null;
+  realWorldMeasurementsAvailable: boolean;
+}
+
+export interface ToothAnalysis {
+  image: {
+    width: number;
+    height: number;
+  };
+  calibration: ToothCalibration;
+  tooth: ToothCandidate | null;
+  warnings: string[];
+}
+
+export interface ToothAnalysisResult {
+  previewUrl: string;
+  analysis: ToothAnalysis;
+  runtime: RuntimeMode;
 }

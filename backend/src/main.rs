@@ -3,11 +3,12 @@ mod palette;
 mod preview;
 mod processing;
 mod save;
+mod tooth_measurement;
 
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use clap::Parser;
 use dicom_dictionary_std::tags;
 use dicom_object::{DicomAttribute, OpenFileOptions};
@@ -16,8 +17,9 @@ use serde::Serialize;
 use crate::compare::combine_comparison;
 use crate::palette::apply_named_palette;
 use crate::preview::{load_dicom, save_preview_png};
-use crate::processing::{process_grayscale_pixels, validate_pipeline, GrayscaleControls};
+use crate::processing::{GrayscaleControls, process_grayscale_pixels, validate_pipeline};
 use crate::save::{SourceMetadata, save_dicom};
+use crate::tooth_measurement::analyze_preview;
 
 #[derive(Parser, Debug)]
 #[command(name = "xrayview")]
@@ -41,6 +43,10 @@ struct Cli {
     /// Print study measurement metadata as JSON
     #[arg(long = "describe-study")]
     describe_study: bool,
+
+    /// Analyze the study and return automatic tooth measurements as JSON
+    #[arg(long = "analyze-tooth")]
+    analyze_tooth: bool,
 
     /// Processing preset
     #[arg(long, default_value = "default")]
@@ -97,12 +103,12 @@ struct ProcessingManifest {
     presets: Vec<ProcessingPreset>,
 }
 
-#[derive(Debug, Serialize, PartialEq)]
+#[derive(Debug, Clone, Copy, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-struct MeasurementScale {
-    row_spacing_mm: f64,
-    column_spacing_mm: f64,
-    source: &'static str,
+pub(crate) struct MeasurementScale {
+    pub row_spacing_mm: f64,
+    pub column_spacing_mm: f64,
+    pub source: &'static str,
 }
 
 #[derive(Debug, Serialize)]
@@ -156,6 +162,7 @@ fn main() {
 
 fn run() -> Result<()> {
     let mut cli = Cli::parse();
+    validate_mode_selection(&cli)?;
 
     if cli.describe_presets {
         serde_json::to_writer(io::stdout(), &processing_manifest())?;
@@ -172,10 +179,25 @@ fn run() -> Result<()> {
         return Ok(());
     }
 
+    if cli.analyze_tooth {
+        let input_path = cli.input.as_ref().context("--input is required")?;
+        validate_input_file(input_path)?;
+        let (preview, source_dataset) = load_dicom(input_path)?;
+
+        if let Some(ref preview_path) = cli.preview_output {
+            save_preview_png(preview_path, &preview)?;
+        }
+
+        let analysis = analyze_preview(&preview, measurement_scale_from_obj(&source_dataset))?;
+        serde_json::to_writer(io::stdout(), &analysis)?;
+        writeln!(io::stdout())?;
+        return Ok(());
+    }
+
     let input_path = cli.input.as_ref().context("--input is required")?;
     validate_input_file(input_path)?;
 
-    if cli.output.is_none() {
+    if cli.output.is_none() && cli.preview_output.is_none() {
         cli.output = Some(default_output_path(input_path));
     }
 
@@ -234,13 +256,24 @@ fn run() -> Result<()> {
     Ok(())
 }
 
+fn validate_mode_selection(cli: &Cli) -> Result<()> {
+    let mode_count = [cli.describe_presets, cli.describe_study, cli.analyze_tooth]
+        .into_iter()
+        .filter(|enabled| *enabled)
+        .count();
+
+    if mode_count > 1 {
+        bail!(
+            "choose only one backend mode: --describe-presets, --describe-study, or --analyze-tooth"
+        );
+    }
+
+    Ok(())
+}
+
 fn validate_input_file(path: &Path) -> Result<()> {
     if !path.exists() {
         bail!("input file does not exist: {}", path.display());
-    }
-    match path.extension().and_then(|e| e.to_str()) {
-        Some(ext) if ext.eq_ignore_ascii_case("dcm") => {}
-        _ => bail!("input file must have a .dcm extension: {}", path.display()),
     }
     Ok(())
 }
@@ -398,6 +431,8 @@ fn supported_preset_list() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use tempfile::TempDir;
 
     #[test]
     fn parse_float_pair_accepts_dicom_pair() {
@@ -421,9 +456,27 @@ mod tests {
     }
 
     #[test]
+    fn clap_parses_tooth_analysis_flag() {
+        let cli = Cli::try_parse_from([
+            "xrayview",
+            "--input",
+            "study.dcm",
+            "--preview-output",
+            "/tmp/study.png",
+            "--analyze-tooth",
+        ])
+        .expect("parse args");
+
+        assert_eq!(cli.input, Some(PathBuf::from("study.dcm")));
+        assert_eq!(cli.preview_output, Some(PathBuf::from("/tmp/study.png")));
+        assert!(cli.analyze_tooth);
+    }
+
+    #[test]
     fn clap_parses_tauri_sidecar_invocations() {
         // xrayview --describe-presets
-        let cli = Cli::try_parse_from(["xrayview", "--describe-presets"]).expect("describe-presets");
+        let cli =
+            Cli::try_parse_from(["xrayview", "--describe-presets"]).expect("describe-presets");
         assert!(cli.describe_presets);
 
         // xrayview --input foo.dcm --preview-output /tmp/out.png
@@ -471,5 +524,18 @@ mod tests {
         assert_eq!(manifest.presets.len(), 3);
         assert_eq!(manifest.presets[1].id, "xray");
         assert_eq!(manifest.presets[1].controls.palette, "bone");
+    }
+
+    #[test]
+    fn validate_input_file_accepts_non_dcm_extensions() {
+        let temp_dir = TempDir::new().expect("create temp dir");
+        let dicom_path = temp_dir.path().join("study.dicom");
+        let no_extension_path = temp_dir.path().join("study");
+
+        fs::write(&dicom_path, b"placeholder").expect("write .dicom file");
+        fs::write(&no_extension_path, b"placeholder").expect("write extensionless file");
+
+        assert!(validate_input_file(&dicom_path).is_ok());
+        assert!(validate_input_file(&no_extension_path).is_ok());
     }
 }
