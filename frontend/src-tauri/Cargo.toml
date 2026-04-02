@@ -1,4 +1,6 @@
 [package]
+# This crate is the desktop windowing/process shell; the heavy imaging work
+# stays in the sibling Rust backend so the UI layer stays thin.
 name = "xrayview-frontend"
 version = "0.2.0"
 description = "Tauri frontend shell for XRayView"
@@ -21,5 +23,6 @@ tokio = { version = "1", features = ["sync"] }
 glib = "0.18.5"
 
 [features]
+# Packaged builds serve frontend assets through Tauri's custom protocol.
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]

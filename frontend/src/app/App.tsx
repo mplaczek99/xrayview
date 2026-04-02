@@ -48,6 +48,8 @@ export function App() {
 
     try {
       const result = await runBackendPreview(selectedPath);
+      // Opening a new study clears any derived output so the processing tab
+      // cannot accidentally show results from the previous file.
       setSession({
         inputPath: selectedPath,
         inputName: selectedPath.split(/[\\/]/).pop() ?? selectedPath,

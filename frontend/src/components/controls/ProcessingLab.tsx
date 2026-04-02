@@ -12,6 +12,8 @@ interface ProcessingLabProps {
 
 export function ProcessingLab({ controls, presets, busy, dirty, onPresetSelect, onChange }: ProcessingLabProps) {
   function update<K extends keyof ProcessingControls>(key: K, value: ProcessingControls[K]) {
+    // Bubble up a full controls object so the parent can derive dirty/preset
+    // state from one immutable snapshot.
     onChange({ ...controls, [key]: value });
   }
 

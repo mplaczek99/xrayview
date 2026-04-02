@@ -11,6 +11,8 @@ export interface ProcessingControls {
   palette: Palette;
 }
 
+// Session state keeps both source and derived assets so the viewer and
+// processing tabs can switch without re-fetching files.
 export interface StudySession {
   inputPath: string | null;
   inputName: string;

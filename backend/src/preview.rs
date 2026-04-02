@@ -83,6 +83,8 @@ pub fn save_preview_png(path: &Path, preview: &PreviewImage) -> Result<()> {
 }
 
 fn render_first_frame(obj: &DefaultDicomObject) -> Result<PreviewImage> {
+    // The UI only needs a single still preview, so multi-frame studies render
+    // frame 0 and leave cine/stack behavior to future work.
     let height = usize::from(required_u16_attr(obj, tags::ROWS, "Rows")?);
     let width = usize::from(required_u16_attr(obj, tags::COLUMNS, "Columns")?);
     let samples_per_pixel =
@@ -283,6 +285,8 @@ fn resolve_native_render_config(
     obj: &DefaultDicomObject,
     default_bits_stored: u16,
 ) -> NativeRenderConfig {
+    // Many studies omit some presentation tags, so preview rendering falls
+    // back to a sensible linear mapping when explicit windowing is unavailable.
     let bits_stored = optional_u16_attr(obj, tags::BITS_STORED)
         .filter(|value| *value > 0)
         .unwrap_or(default_bits_stored);

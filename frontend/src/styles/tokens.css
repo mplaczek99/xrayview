@@ -1,3 +1,4 @@
+/* Visual tokens keep the browser mock and desktop shell on the same scale. */
 :root {
   color-scheme: dark;
   --bg: #0c1117;

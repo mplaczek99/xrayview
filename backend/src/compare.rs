@@ -3,6 +3,8 @@ use anyhow::{bail, Result};
 use crate::preview::{PreviewFormat, PreviewImage};
 
 pub fn combine_comparison(left: &PreviewImage, right: &PreviewImage) -> Result<PreviewImage> {
+    // Emit a single RGBA image so the compare view can be saved and displayed
+    // by the same preview/export code paths as any other processed result.
     if left.format != PreviewFormat::Gray8 {
         bail!("compare preview requires grayscale source on the left side")
     }
@@ -22,6 +24,8 @@ pub fn combine_comparison(left: &PreviewImage, right: &PreviewImage) -> Result<P
         let dst_row_start = y * combined_width as usize * 4;
         let dst_row = &mut pixels[dst_row_start..dst_row_start + combined_width as usize * 4];
 
+        // The source preview is always grayscale, so expand it to opaque RGBA
+        // before appending the processed half.
         let left_row = &left.pixels[y * width..(y + 1) * width];
         for (index, value) in left_row.iter().copied().enumerate() {
             let dst = &mut dst_row[index * 4..index * 4 + 4];
@@ -33,6 +37,7 @@ pub fn combine_comparison(left: &PreviewImage, right: &PreviewImage) -> Result<P
 
         match right.format {
             PreviewFormat::Gray8 => {
+                // Processed output can still be grayscale when no palette was applied.
                 let right_row = &right.pixels[y * width..(y + 1) * width];
                 let base = width * 4;
                 for (index, value) in right_row.iter().copied().enumerate() {

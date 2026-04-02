@@ -53,6 +53,8 @@ pub fn process_grayscale_pixels(pixels: &mut [u8], controls: &GrayscaleControls)
             Step::Grayscale => {}
             Step::Invert => {
                 if controls.invert {
+                    // Invert, brightness, and contrast are all point operations, so we
+                    // compose them into one lookup table and touch the pixel buffer once.
                     compose_invert_lookup(&mut lookup);
                     pending_lookup = true;
                     mode = mode.replacen("grayscale", "inverted grayscale", 1);
@@ -74,6 +76,8 @@ pub fn process_grayscale_pixels(pixels: &mut [u8], controls: &GrayscaleControls)
             }
             Step::Equalize => {
                 if controls.equalize {
+                    // Equalization depends on the current histogram, so any queued point
+                    // operations must be applied before we recalculate the distribution.
                     flush_lookup(pixels, &mut lookup, &mut pending_lookup);
                     equalize_histogram_in_place(pixels);
                     mode = format!("{mode} with histogram equalization");
@@ -124,6 +128,8 @@ fn effective_pipeline_steps(requested: &[Step], controls: &GrayscaleControls) ->
         return DEFAULT_PIPELINE_ORDER.to_vec();
     }
 
+    // A custom pipeline primarily reorders enabled filters. Any enabled step the user
+    // omitted is appended later so presets can override order without disabling work.
     let mut steps = vec![Step::Grayscale];
     for step in requested {
         if *step == Step::Grayscale || !step_enabled(*step, controls) || steps.contains(step) {
@@ -218,6 +224,7 @@ fn equalize_histogram_in_place(pixels: &mut [u8]) {
     }
 
     if cdf_min == total {
+        // A flat image has no contrast to redistribute.
         return;
     }
 

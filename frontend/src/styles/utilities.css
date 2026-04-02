@@ -1,3 +1,4 @@
+/* Small shared utilities live here instead of repeating inline style tweaks. */
 .u-mono {
   font-family: var(--font-mono);
   font-size: 12px;

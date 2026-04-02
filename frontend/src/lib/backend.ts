@@ -48,10 +48,12 @@ async function runInRuntime<T>(options: {
   mock: () => T | Promise<T>;
   tauri: () => Promise<T>;
 }): Promise<T> {
+  // Keep the app code path identical in the browser mock and the packaged Tauri app.
   return isTauriRuntime() ? options.tauri() : options.mock();
 }
 
 function toPreviewUrl(previewPath: string, runtime: RuntimeMode): string {
+  // Tauri returns a filesystem path; the browser mock already returns a web-safe URL.
   return runtime === "tauri" ? convertFileSrc(previewPath) : previewPath;
 }
 
@@ -153,6 +155,8 @@ export function ensureDicomExtension(path: string): string {
 }
 
 export function buildOutputName(inputPath: string): string {
+  // Mirror the backend naming convention so suggested save paths line up with
+  // the file the native process would auto-generate on its own.
   const fileName = inputPath.split(/[\\/]/).pop() ?? "study.dcm";
   const baseName = fileName.replace(/\.(dcm|dicom)$/i, "");
   return `${baseName}_processed.dcm`;

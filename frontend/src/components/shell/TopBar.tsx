@@ -3,6 +3,8 @@ interface TopBarProps {
   runtimeLabel: string;
 }
 
+// The runtime pill makes it obvious whether the UI is talking to the browser
+// mock layer or the native Tauri bridge while developing.
 export function TopBar({ workspaceName, runtimeLabel }: TopBarProps) {
   return (
     <header className="topbar">

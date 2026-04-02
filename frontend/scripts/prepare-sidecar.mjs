@@ -19,6 +19,8 @@ if (!targetTriple) {
 
 fs.mkdirSync(binariesDir, { recursive: true });
 
+// Tauri sidecars are selected by target-triple suffix, so remove stale copies
+// before placing the freshly built backend binary.
 for (const entry of fs.readdirSync(binariesDir)) {
   if (entry.startsWith("xrayview-backend-")) {
     fs.rmSync(path.join(binariesDir, entry), { force: true });

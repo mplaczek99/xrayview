@@ -6,7 +6,8 @@ export function ColorizeTab({ previewUrl }: ColorizeTabProps) {
   return (
     <div className="colorize-tab">
       <div className="colorize-tab__controls">
-        {/* Colorization controls will go here */}
+        {/* Keep the future controls column in place so preview sizing stays
+            stable while this tab is still a placeholder. */}
         <div className="colorize-tab__placeholder">
           <p className="colorize-tab__placeholder-text">
             Colorization controls will go here

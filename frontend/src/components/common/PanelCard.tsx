@@ -8,6 +8,8 @@ interface PanelCardProps extends PropsWithChildren {
   className?: string;
 }
 
+// Shared card chrome keeps headings, actions, and body spacing consistent
+// across inspector-style panels without forcing each caller to rebuild it.
 export function PanelCard({
   eyebrow,
   title,

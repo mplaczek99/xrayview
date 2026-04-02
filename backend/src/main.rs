@@ -283,6 +283,8 @@ fn resolve_processing(cli: &Cli) -> Result<ResolvedProcessing> {
     let preset = lookup_preset(&preset_name)
         .with_context(|| format!("preset must be one of: {}", supported_preset_list()))?;
 
+    // Presets provide the baseline, and explicit flags only override the
+    // fields the caller specified instead of replacing the preset wholesale.
     let invert = cli.invert || preset.controls.invert;
     let brightness = cli.brightness.unwrap_or(preset.controls.brightness);
     let contrast = cli.contrast.unwrap_or(preset.controls.contrast);
@@ -337,6 +339,8 @@ fn measurement_scale_from_obj<O>(obj: &O) -> Option<MeasurementScale>
 where
     O: dicom_object::DicomObject,
 {
+    // Prefer the most directly meaningful spacing tags first, then fall back
+    // to scanner-derived alternatives when the study omits PixelSpacing.
     [
         (tags::PIXEL_SPACING, "PixelSpacing"),
         (tags::IMAGER_PIXEL_SPACING, "ImagerPixelSpacing"),

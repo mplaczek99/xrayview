@@ -1,5 +1,7 @@
 import type { Palette } from "./types";
 
+// Mock previews are deterministic SVG data URLs, so cache by variant instead
+// of re-encoding the same image every time controls rerender the UI.
 const previewCache = new Map<string, string>();
 
 function encodeSvg(svg: string): string {
@@ -11,6 +13,8 @@ function overlayMarkup(palette: Palette, processed: boolean): string {
     return "";
   }
 
+  // The overlay exaggerates "findings" only on processed output so the mock
+  // app demonstrates before/after behavior without a real backend.
   const tint =
     palette === "hot"
       ? "rgba(255,132,92,0.36)"

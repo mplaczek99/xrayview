@@ -4,6 +4,8 @@ interface ViewTabProps {
   onOpenStudy: () => void;
 }
 
+// This tab owns only the open action and preview shell; higher-level study
+// session state stays in the parent app.
 export function ViewTab({ previewUrl, busy, onOpenStudy }: ViewTabProps) {
   return (
     <div className="view-tab">

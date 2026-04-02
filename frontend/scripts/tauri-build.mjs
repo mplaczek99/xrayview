@@ -7,11 +7,13 @@ const env = { ...process.env };
 
 prepareTauriTarget();
 
+// Clear previous bundles so packaging only picks up artifacts from this build.
 if (fs.existsSync(bundleDir)) {
   fs.rmSync(bundleDir, { force: true, recursive: true });
 }
 
 if (process.platform === "linux") {
+  // These flags make local and CI AppImage packaging more predictable on Linux.
   env.APPIMAGE_EXTRACT_AND_RUN ??= "1";
   env.NO_STRIP ??= "1";
 }

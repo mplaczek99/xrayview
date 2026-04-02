@@ -37,6 +37,8 @@ const PRESERVED_SOURCE_TAGS: &[Tag] = &[
 ];
 
 fn generate_uid() -> String {
+    // 2.25.<uuid-as-u128> is a valid DICOM UID form and avoids maintaining a
+    // private implementation root just for generated instances.
     let uuid = Uuid::new_v4();
     let value = u128::from_be_bytes(*uuid.as_bytes());
     format!("2.25.{value}")
@@ -210,6 +212,8 @@ fn put_rgb_image_elements(obj: &mut FileDicomObject<InMemDicomObject>, width: u1
 fn rgba_to_rgb(rgba: &[u8]) -> Vec<u8> {
     let pixel_count = rgba.len() / 4;
     let mut rgb = Vec::with_capacity(pixel_count * 3);
+    // Secondary Capture stores packed RGB triples; alpha only matters to the
+    // UI preview path and is intentionally dropped when writing DICOM.
     for chunk in rgba.chunks_exact(4) {
         rgb.push(chunk[0]);
         rgb.push(chunk[1]);

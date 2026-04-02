@@ -47,6 +47,8 @@ export function processingControlsEqual(
   left: ProcessingControls,
   right: ProcessingControls,
 ): boolean {
+  // Sliders round contrast values in the UI, so allow a small tolerance before
+  // deciding the current controls no longer match a preset exactly.
   return (
     left.brightness === right.brightness &&
     Math.abs(left.contrast - right.contrast) < 0.05 &&

@@ -280,6 +280,8 @@ fn create_temp_file(suffix: &str) -> Result<PathBuf, String> {
 }
 
 async fn run_backend_command(app: &tauri::AppHandle, args: &[String]) -> Result<String, String> {
+    // Packaged builds use the bundled sidecar, while local development can
+    // still run against an already-built binary or `cargo run`.
     if let Ok(sidecar) = app.shell().sidecar("xrayview-backend") {
         let output = sidecar
             .args(args.iter().map(String::as_str))
@@ -399,6 +401,8 @@ fn find_project_root(start: &Path) -> Option<PathBuf> {
     };
 
     loop {
+        // The frontend can be launched from several directories during dev, so
+        // walk upward until we find the workspace that owns `backend/`.
         if current.join("backend").is_dir() {
             return Some(current);
         }

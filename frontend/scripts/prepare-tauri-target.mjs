@@ -61,6 +61,8 @@ function rootOutputFiles(dir) {
 }
 
 function targetHasForeignWorkspaceArtifacts() {
+  // Cargo leaves root-output breadcrumbs when a shared target dir is being
+  // redirected; if those point elsewhere, reset to a clean app-local target.
   for (const rootOutputPath of rootOutputFiles(targetDir)) {
     const outputPath = fs.readFileSync(rootOutputPath, "utf8").trim();
     if (outputPath === "") {

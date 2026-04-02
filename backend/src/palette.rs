@@ -8,6 +8,8 @@ pub fn apply_named_palette(src: &PreviewImage, name: &str) -> Result<PreviewImag
         bail!("pseudocolor palettes require grayscale preview input")
     }
 
+    // Palette application is the last stage in the preview pipeline, so the
+    // grayscale image is promoted to RGBA exactly once here.
     let pixels = match name {
         "hot" => apply_palette(src, hot_color),
         "bone" => apply_palette(src, bone_color),
@@ -49,6 +51,8 @@ fn hot_color(value: u8) -> [u8; 4] {
 fn bone_color(value: u8) -> [u8; 4] {
     let value = i32::from(value);
     let white_boost = (value - 128).max(0);
+    // "bone" stays close to neutral in the shadows, then adds a cool highlight
+    // lift so bright anatomy reads more like clinical film.
     let red = clamp8((value * 7) / 8 + white_boost);
     let green = clamp8((value * 7) / 8 + white_boost + value / 16);
     let blue = clamp8(value + white_boost / 2);

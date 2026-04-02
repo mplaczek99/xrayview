@@ -1,4 +1,6 @@
 [package]
+# This crate owns DICOM decoding, preview generation, and processed output
+# writing for both the CLI and the Tauri desktop shell.
 name = "xrayview-backend"
 version = "0.2.0"
 edition = "2024"
@@ -11,6 +13,7 @@ dicom-core = "0.9"
 dicom-dictionary-std = "0.9"
 dicom-object = "0.9"
 dicom-pixeldata = { version = "0.9", features = ["image"] }
+# Preview export only needs PNG support, so keep the image feature set narrow.
 image = { version = "0.25", default-features = false, features = ["png"] }
 rayon = "1.10"
 serde = { version = "1.0", features = ["derive"] }

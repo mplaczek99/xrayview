@@ -4,6 +4,8 @@ interface DicomViewerProps {
   emptyDescription?: string;
 }
 
+// Presentation-only viewer: callers decide where the preview URL came from
+// and provide the empty-state copy that matches their workflow.
 export function DicomViewer({
   previewUrl,
   emptyTitle = "No image loaded",

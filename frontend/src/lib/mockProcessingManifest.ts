@@ -1,5 +1,7 @@
 import type { ProcessingManifest } from "./types";
 
+// Keep mock preset ids and defaults aligned with the Rust backend manifest so
+// browser-only development exercises the same UI branches.
 export const MOCK_PROCESSING_MANIFEST: ProcessingManifest = {
   defaultPresetId: "default",
   presets: [

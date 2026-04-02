@@ -72,6 +72,8 @@ function pipelinesEqual(a: PipelineStep[], b: PipelineStep[]): boolean {
 }
 
 function buildArgs(inputPath: string, form: ProcessingForm): string[] {
+  // Keep the command preview derived from live form state so it stays aligned
+  // with the backend invocation users would run manually.
   const args: string[] = ["--input", inputPath];
 
   if (form.outputPath && isValidOutputPath(form.outputPath)) {
@@ -155,6 +157,8 @@ export function ProcessingTab({ inputPath, previewUrl }: ProcessingTabProps) {
       let finalOutputPath = result.dicomPath;
 
       if (form.outputPath && isValidOutputPath(form.outputPath)) {
+        // The backend always renders to its managed temp path first; only copy
+        // to a user-chosen destination when the form requested one explicitly.
         finalOutputPath = await copyProcessedOutput(
           result.dicomPath,
           form.outputPath,
