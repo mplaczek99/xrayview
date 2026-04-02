@@ -34,25 +34,33 @@ export interface MeasurementScale {
   source: string;
 }
 
-export interface StudyDescription {
+export interface OpenStudyCommand {
+  inputPath: string;
+}
+
+export interface StudyRecord {
+  studyId: string;
+  inputPath: string;
+  inputName: string;
   measurementScale?: MeasurementScale | null;
 }
 
-export interface DescribeStudyCommand {
-  inputPath: string;
+export interface OpenStudyCommandResult {
+  study: StudyRecord;
 }
 
-export interface RenderPreviewCommand {
-  inputPath: string;
+export interface RenderStudyCommand {
+  studyId: string;
 }
 
-export interface PreviewCommandResult {
+export interface RenderStudyCommandResult {
+  studyId: string;
   previewPath: string;
   measurementScale?: MeasurementScale | null;
 }
 
 export interface ProcessStudyCommand {
-  inputPath: string;
+  studyId: string;
   outputPath?: string | null;
   presetId: string;
   invert: boolean;
@@ -65,6 +73,7 @@ export interface ProcessStudyCommand {
 }
 
 export interface ProcessStudyCommandResult {
+  studyId: string;
   previewPath: string;
   dicomPath: string;
   loadedWidth: number;
@@ -74,7 +83,7 @@ export interface ProcessStudyCommandResult {
 }
 
 export interface AnalyzeStudyCommand {
-  inputPath: string;
+  studyId: string;
 }
 
 export interface ToothAnalysis {
@@ -139,6 +148,7 @@ export interface Point {
 }
 
 export interface AnalyzeStudyCommandResult {
+  studyId: string;
   previewPath: string;
   analysis: ToothAnalysis;
 }

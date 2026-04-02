@@ -1,3 +1,5 @@
+pub mod state;
+
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, bail};

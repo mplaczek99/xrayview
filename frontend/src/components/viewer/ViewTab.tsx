@@ -1,21 +1,9 @@
 import type {
   MeasurementScale,
-  ToothAnalysis,
   ToothMeasurementValues,
 } from "../../lib/generated/contracts";
+import { workbenchActions, useWorkbenchStore } from "../../app/store/workbenchStore";
 import { DicomViewer } from "./DicomViewer";
-
-interface ViewTabProps {
-  inputPath: string | null;
-  previewUrl: string | null;
-  analysis: ToothAnalysis | null;
-  measurementScale: MeasurementScale | null;
-  busyAction: "opening" | "measuring" | null;
-  status: string;
-  inputName: string;
-  onOpenStudy: () => void;
-  onMeasureTooth: () => void;
-}
 
 interface MeasurementSectionProps {
   title: string;
@@ -63,23 +51,29 @@ function MeasurementSection({
   );
 }
 
-export function ViewTab({
-  inputPath,
-  previewUrl,
-  analysis,
-  measurementScale: previewMeasurementScale,
-  busyAction,
-  status,
-  inputName,
-  onOpenStudy,
-  onMeasureTooth,
-}: ViewTabProps) {
-  const tooth = analysis?.tooth ?? null;
-  const measurementScale =
-    analysis?.calibration.measurementScale ?? previewMeasurementScale ?? null;
+function useActiveStudy() {
+  return useWorkbenchStore((state) =>
+    state.activeStudyId ? state.studies[state.activeStudyId] ?? null : null,
+  );
+}
+
+export function ViewTab() {
+  const study = useActiveStudy();
+  const busyAction = useWorkbenchStore((state) => state.busyAction);
+  const workbenchStatus = useWorkbenchStore((state) => state.workbenchStatus);
+  const tooth = study?.analysis?.tooth ?? null;
+  const warnings = study?.analysis?.warnings ?? [];
+  const measurementScale: MeasurementScale | null =
+    study?.analysis?.calibration.measurementScale ??
+    study?.measurementScale ??
+    study?.originalPreview?.measurementScale ??
+    null;
   const busy = busyAction !== null;
   const isOpening = busyAction === "opening";
   const isMeasuring = busyAction === "measuring";
+  const previewUrl = study?.originalPreview?.previewUrl ?? null;
+  const status = study?.status ?? workbenchStatus;
+  const inputName = study?.inputName ?? "No study loaded";
 
   return (
     <div className="view-tab">
@@ -87,7 +81,7 @@ export function ViewTab({
         <button
           className="button button--primary"
           type="button"
-          onClick={onOpenStudy}
+          onClick={() => void workbenchActions.openStudy()}
           disabled={busy}
         >
           {isOpening ? "Loading..." : "Open DICOM"}
@@ -95,8 +89,8 @@ export function ViewTab({
         <button
           className="button button--ghost"
           type="button"
-          onClick={onMeasureTooth}
-          disabled={!inputPath || busy}
+          onClick={() => void workbenchActions.measureActiveStudy()}
+          disabled={!study || busy}
         >
           {isMeasuring
             ? "Measuring..."
@@ -115,7 +109,7 @@ export function ViewTab({
         <div className="study-analysis__viewer">
           <DicomViewer
             previewUrl={previewUrl}
-            imageSize={analysis?.image ?? null}
+            imageSize={study?.analysis?.image ?? null}
             overlay={tooth?.geometry ?? null}
             emptyTitle="No study loaded"
             emptyDescription="Open a DICOM study to run backend tooth detection and measurement."
@@ -180,11 +174,11 @@ export function ViewTab({
             )}
           </section>
 
-          {analysis?.warnings.length ? (
+          {warnings.length ? (
             <section className="measurement-card">
               <div className="measurement-card__eyebrow">Backend notes</div>
               <div className="measurement-note-list">
-                {analysis.warnings.map((warning) => (
+                {warnings.map((warning) => (
                   <p key={warning} className="measurement-card__copy">
                     {warning}
                   </p>

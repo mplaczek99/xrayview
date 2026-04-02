@@ -5,16 +5,18 @@ import type {
   AnalyzeStudyCommand,
   AnalyzeStudyCommandResult,
   MeasurementScale,
+  OpenStudyCommand,
+  OpenStudyCommandResult,
   PaletteName,
-  PreviewCommandResult,
   ProcessStudyCommand,
   ProcessStudyCommandResult,
   ProcessingManifest,
   ProcessingPipelineStep,
-  RenderPreviewCommand,
-  ToothAnalysis,
+  RenderStudyCommand,
+  RenderStudyCommandResult,
 } from "./generated/contracts";
 import type {
+  OpenedStudy,
   Palette,
   PreviewResult,
   ProcessResult,
@@ -40,6 +42,8 @@ const PALETTE_LABELS: Record<Palette, string> = {
   bone: "Bone",
 };
 
+let mockStudySequence = 0;
+
 export const FALLBACK_PROCESSING_MANIFEST = MOCK_PROCESSING_MANIFEST;
 
 function isTauriRuntime(): boolean {
@@ -52,6 +56,15 @@ function getRuntimeMode(): RuntimeMode {
 
 function buildMockPath(directory: string, fileName: string): string {
   return `${directory}/${fileName}`;
+}
+
+function fileNameFromPath(inputPath: string): string {
+  return inputPath.split(/[\\/]/).pop() ?? inputPath;
+}
+
+function nextMockStudyId(): string {
+  mockStudySequence += 1;
+  return `mock-study-${mockStudySequence}`;
 }
 
 function pipelinesEqual(
@@ -72,12 +85,30 @@ function toPreviewUrl(previewPath: string, runtime: RuntimeMode): string {
   return runtime === "tauri" ? convertFileSrc(previewPath) : previewPath;
 }
 
+function asOpenedStudy(
+  studyId: string,
+  inputPath: string,
+  inputName: string,
+  runtime: RuntimeMode,
+  measurementScale: MeasurementScale | null | undefined,
+): OpenedStudy {
+  return {
+    studyId,
+    inputPath,
+    inputName,
+    measurementScale: measurementScale ?? null,
+    runtime,
+  };
+}
+
 function asPreviewResult(
+  studyId: string,
   previewPath: string,
   runtime: RuntimeMode,
   measurementScale: MeasurementScale | null | undefined,
 ): PreviewResult {
   return {
+    studyId,
     previewUrl: toPreviewUrl(previewPath, runtime),
     measurementScale: measurementScale ?? null,
     runtime,
@@ -85,23 +116,26 @@ function asPreviewResult(
 }
 
 function asProcessResult(
+  studyId: string,
   previewPath: string,
   dicomPath: string,
   runtime: RuntimeMode,
   measurementScale: MeasurementScale | null | undefined,
+  mode: string,
 ): ProcessResult {
   return {
-    ...asPreviewResult(previewPath, runtime, measurementScale),
+    ...asPreviewResult(studyId, previewPath, runtime, measurementScale),
     dicomPath,
+    mode,
   };
 }
 
 function buildProcessStudyCommand(
-  inputPath: string,
+  studyId: string,
   request: ProcessingRequest,
 ): ProcessStudyCommand {
   return {
-    inputPath,
+    studyId,
     outputPath: request.outputPath,
     presetId: request.preset.id,
     invert: request.controls.invert && !request.preset.controls.invert,
@@ -144,13 +178,45 @@ export async function pickSaveDicomPath(defaultName: string): Promise<string | n
   });
 }
 
-export async function runBackendPreview(inputPath: string): Promise<PreviewResult> {
+export async function openStudy(inputPath: string): Promise<OpenedStudy> {
   return runInRuntime({
-    mock: () => asPreviewResult(createMockPreview(false, "none"), getRuntimeMode(), null),
+    mock: () =>
+      asOpenedStudy(
+        nextMockStudyId(),
+        inputPath,
+        fileNameFromPath(inputPath),
+        getRuntimeMode(),
+        null,
+      ),
     tauri: async () => {
-      const request: RenderPreviewCommand = { inputPath };
-      const payload = await invoke<PreviewCommandResult>("render_preview", { request });
-      return asPreviewResult(payload.previewPath, getRuntimeMode(), payload.measurementScale);
+      const request: OpenStudyCommand = { inputPath };
+      const payload = await invoke<OpenStudyCommandResult>("open_study", { request });
+      return asOpenedStudy(
+        payload.study.studyId,
+        payload.study.inputPath,
+        payload.study.inputName,
+        getRuntimeMode(),
+        payload.study.measurementScale,
+      );
+    },
+  });
+}
+
+export async function renderStudy(studyId: string): Promise<PreviewResult> {
+  return runInRuntime({
+    mock: () =>
+      asPreviewResult(studyId, createMockPreview(false, "none"), getRuntimeMode(), null),
+    tauri: async () => {
+      const request: RenderStudyCommand = { studyId };
+      const payload = await invoke<RenderStudyCommandResult>("render_study", {
+        request,
+      });
+      return asPreviewResult(
+        payload.studyId,
+        payload.previewPath,
+        getRuntimeMode(),
+        payload.measurementScale,
+      );
     },
   });
 }
@@ -190,19 +256,21 @@ export function buildProcessingArgs(
   return args;
 }
 
-export async function runBackendProcess(
-  inputPath: string,
+export async function processStudy(
+  studyId: string,
   request: ProcessingRequest,
 ): Promise<ProcessResult> {
-  const command = buildProcessStudyCommand(inputPath, request);
+  const command = buildProcessStudyCommand(studyId, request);
 
   return runInRuntime({
     mock: () =>
       asProcessResult(
+        studyId,
         createMockPreview(true, request.controls.palette),
         request.outputPath ?? MOCK_PROCESSED_DICOM_PATH,
         getRuntimeMode(),
         null,
+        request.compare ? "comparison output" : "processed preview",
       ),
     tauri: async () => {
       const payload = await invoke<ProcessStudyCommandResult>("process_study", {
@@ -210,31 +278,33 @@ export async function runBackendProcess(
       });
 
       return asProcessResult(
+        payload.studyId,
         payload.previewPath,
         payload.dicomPath,
         getRuntimeMode(),
         payload.measurementScale,
+        payload.mode,
       );
     },
   });
 }
 
-export async function runBackendToothMeasurement(
-  inputPath: string,
-): Promise<ToothAnalysisResult> {
+export async function analyzeStudy(studyId: string): Promise<ToothAnalysisResult> {
   return runInRuntime({
     mock: () => ({
+      studyId,
       previewUrl: createMockPreview(false, "none"),
       analysis: createMockToothAnalysis(),
       runtime: getRuntimeMode(),
     }),
     tauri: async () => {
-      const request: AnalyzeStudyCommand = { inputPath };
+      const request: AnalyzeStudyCommand = { studyId };
       const payload = await invoke<AnalyzeStudyCommandResult>("analyze_study", {
         request,
       });
 
       return {
+        studyId: payload.studyId,
         previewUrl: toPreviewUrl(payload.previewPath, getRuntimeMode()),
         analysis: payload.analysis,
         runtime: getRuntimeMode(),
@@ -248,7 +318,7 @@ export function ensureDicomExtension(path: string): string {
 }
 
 export function buildOutputName(inputPath: string): string {
-  const fileName = inputPath.split(/[\\/]/).pop() ?? "study.dcm";
+  const fileName = fileNameFromPath(inputPath) || "study.dcm";
   const baseName = fileName.replace(/\.(dcm|dicom)$/i, "");
   return `${baseName}_processed.dcm`;
 }
@@ -256,5 +326,3 @@ export function buildOutputName(inputPath: string): string {
 export function paletteLabel(palette: PaletteName): string {
   return PALETTE_LABELS[palette];
 }
-
-export type { ToothAnalysis };

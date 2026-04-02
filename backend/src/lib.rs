@@ -8,6 +8,7 @@ mod tooth_measurement;
 pub mod api;
 pub mod app;
 pub mod error;
+pub mod study;
 
 pub use api::MeasurementScale;
 pub use tooth_measurement::ToothAnalysis;

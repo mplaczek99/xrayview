@@ -84,6 +84,16 @@ pub struct StudyDescription {
     pub measurement_scale: Option<MeasurementScale>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StudyRecord {
+    pub study_id: String,
+    pub input_path: PathBuf,
+    pub input_name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub measurement_scale: Option<MeasurementScale>,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DescribeStudyCommand {
@@ -92,13 +102,26 @@ pub struct DescribeStudyCommand {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct RenderPreviewCommand {
+pub struct OpenStudyCommand {
     pub input_path: PathBuf,
 }
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PreviewCommandResult {
+pub struct OpenStudyCommandResult {
+    pub study: StudyRecord,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RenderStudyCommand {
+    pub study_id: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RenderStudyCommandResult {
+    pub study_id: String,
     pub preview_path: PathBuf,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub measurement_scale: Option<MeasurementScale>,
@@ -107,7 +130,7 @@ pub struct PreviewCommandResult {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProcessStudyCommand {
-    pub input_path: PathBuf,
+    pub study_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub output_path: Option<PathBuf>,
     pub preset_id: String,
@@ -127,6 +150,7 @@ pub struct ProcessStudyCommand {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProcessStudyCommandResult {
+    pub study_id: String,
     pub preview_path: PathBuf,
     pub dicom_path: PathBuf,
     pub loaded_width: u32,
@@ -139,12 +163,13 @@ pub struct ProcessStudyCommandResult {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AnalyzeStudyCommand {
-    pub input_path: PathBuf,
+    pub study_id: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AnalyzeStudyCommandResult {
+    pub study_id: String,
     pub preview_path: PathBuf,
     pub analysis: ToothAnalysis,
 }
@@ -187,25 +212,33 @@ export interface MeasurementScale {
   source: string;
 }
 
-export interface StudyDescription {
+export interface OpenStudyCommand {
+  inputPath: string;
+}
+
+export interface StudyRecord {
+  studyId: string;
+  inputPath: string;
+  inputName: string;
   measurementScale?: MeasurementScale | null;
 }
 
-export interface DescribeStudyCommand {
-  inputPath: string;
+export interface OpenStudyCommandResult {
+  study: StudyRecord;
 }
 
-export interface RenderPreviewCommand {
-  inputPath: string;
+export interface RenderStudyCommand {
+  studyId: string;
 }
 
-export interface PreviewCommandResult {
+export interface RenderStudyCommandResult {
+  studyId: string;
   previewPath: string;
   measurementScale?: MeasurementScale | null;
 }
 
 export interface ProcessStudyCommand {
-  inputPath: string;
+  studyId: string;
   outputPath?: string | null;
   presetId: string;
   invert: boolean;
@@ -218,6 +251,7 @@ export interface ProcessStudyCommand {
 }
 
 export interface ProcessStudyCommandResult {
+  studyId: string;
   previewPath: string;
   dicomPath: string;
   loadedWidth: number;
@@ -227,7 +261,7 @@ export interface ProcessStudyCommandResult {
 }
 
 export interface AnalyzeStudyCommand {
-  inputPath: string;
+  studyId: string;
 }
 
 export interface ToothAnalysis {
@@ -292,6 +326,7 @@ export interface Point {
 }
 
 export interface AnalyzeStudyCommandResult {
+  studyId: string;
   previewPath: string;
   analysis: ToothAnalysis;
 }
@@ -320,8 +355,10 @@ mod tests {
     fn generated_contracts_include_process_command() {
         let contracts = generated_typescript_contracts();
 
+        assert!(contracts.contains("export interface OpenStudyCommand {"));
         assert!(contracts.contains("export interface ProcessStudyCommand {"));
         assert!(contracts.contains("export interface AnalyzeStudyCommandResult {"));
+        assert!(contracts.contains("studyId: string;"));
         assert!(contracts.contains("export type ProcessingPipelineStep ="));
     }
 }

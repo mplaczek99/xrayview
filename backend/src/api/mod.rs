@@ -8,10 +8,10 @@ use crate::ToothAnalysis;
 
 pub use contracts::{
     AnalyzeStudyCommand, AnalyzeStudyCommandResult, DescribeStudyCommand, MeasurementScale,
-    PaletteName, PreviewCommandResult, ProcessStudyCommand, ProcessStudyCommandResult,
-    ProcessingControls, ProcessingManifest, ProcessingPipelineStep, ProcessingPreset,
-    RenderPreviewCommand, StudyDescription, generated_typescript_contracts,
-    write_typescript_contracts,
+    OpenStudyCommand, OpenStudyCommandResult, PaletteName, ProcessStudyCommand,
+    ProcessStudyCommandResult, ProcessingControls, ProcessingManifest, ProcessingPipelineStep,
+    ProcessingPreset, RenderStudyCommand, RenderStudyCommandResult, StudyDescription, StudyRecord,
+    generated_typescript_contracts, write_typescript_contracts,
 };
 
 #[derive(Debug, Clone)]

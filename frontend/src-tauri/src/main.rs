@@ -8,16 +8,12 @@ use std::sync::Mutex;
 use tauri::Manager;
 use tempfile::Builder;
 use xrayview_backend::api::{
-    AnalyzeStudyCommand, AnalyzeStudyCommandResult, DescribeStudyCommand, PreviewCommandResult,
-    ProcessStudyCommand, ProcessStudyCommandResult, ProcessingManifest, RenderPreviewCommand,
-    StudyDescription,
+    AnalyzeStudyCommand, AnalyzeStudyCommandResult, OpenStudyCommand, OpenStudyCommandResult,
+    ProcessStudyCommand, ProcessStudyCommandResult, ProcessingManifest, RenderStudyCommand,
+    RenderStudyCommandResult,
 };
-use xrayview_backend::api::{AnalyzeStudyRequest, ProcessStudyRequest, RenderPreviewRequest};
-use xrayview_backend::app::{
-    analyze_study as backend_analyze_study, describe_study as backend_describe_study,
-    process_study as backend_process_study, processing_manifest,
-    render_preview as backend_render_preview,
-};
+use xrayview_backend::app::processing_manifest;
+use xrayview_backend::app::state::AppState as BackendAppState;
 use xrayview_backend::error::BackendResult;
 
 /// Temp preview and export files stay available for the lifetime of the app so
@@ -67,35 +63,37 @@ fn get_processing_manifest() -> ProcessingManifest {
 }
 
 #[tauri::command]
-async fn describe_study(request: DescribeStudyCommand) -> Result<StudyDescription, String> {
-    run_blocking(move || backend_describe_study(&request.input_path)).await
+async fn open_study(
+    backend_state: tauri::State<'_, BackendAppState>,
+    request: OpenStudyCommand,
+) -> Result<OpenStudyCommandResult, String> {
+    let backend_state = backend_state.inner().clone();
+
+    run_blocking(move || {
+        backend_state
+            .open_study(request.input_path)
+            .map(|study| OpenStudyCommandResult { study })
+    })
+    .await
 }
 
 #[tauri::command]
-async fn render_preview(
+async fn render_study(
     app: tauri::AppHandle,
-    request: RenderPreviewCommand,
-) -> Result<PreviewCommandResult, String> {
+    backend_state: tauri::State<'_, BackendAppState>,
+    request: RenderStudyCommand,
+) -> Result<RenderStudyCommandResult, String> {
     let preview_path = create_temp_file(".png")?;
     track_temp_file(&app, &preview_path);
+    let backend_state = backend_state.inner().clone();
 
-    let result = run_blocking(move || {
-        backend_render_preview(RenderPreviewRequest {
-            input_path: request.input_path,
-            preview_output: preview_path.clone(),
-        })
-    })
-    .await?;
-
-    Ok(PreviewCommandResult {
-        preview_path: result.preview_output,
-        measurement_scale: result.measurement_scale,
-    })
+    run_blocking(move || backend_state.render_study(request, preview_path)).await
 }
 
 #[tauri::command]
 async fn process_study(
     app: tauri::AppHandle,
+    backend_state: tauri::State<'_, BackendAppState>,
     request: ProcessStudyCommand,
 ) -> Result<ProcessStudyCommandResult, String> {
     let preview_path = create_temp_file(".png")?;
@@ -109,54 +107,22 @@ async fn process_study(
             temp_output
         }
     };
+    let backend_state = backend_state.inner().clone();
 
-    let backend_request = ProcessStudyRequest {
-        input_path: request.input_path,
-        output_path: Some(dicom_path.clone()),
-        preview_output: Some(preview_path.clone()),
-        preset: request.preset_id,
-        invert: request.invert,
-        brightness: request.brightness,
-        contrast: request.contrast,
-        equalize: request.equalize,
-        compare: request.compare,
-        pipeline: request.pipeline.map(join_pipeline_steps),
-        palette: request.palette.map(|palette| palette.as_str().to_string()),
-    };
-
-    let result = run_blocking(move || backend_process_study(backend_request)).await?;
-
-    Ok(ProcessStudyCommandResult {
-        preview_path,
-        dicom_path,
-        loaded_width: result.loaded_width,
-        loaded_height: result.loaded_height,
-        mode: result.mode,
-        measurement_scale: result.measurement_scale,
-    })
+    run_blocking(move || backend_state.process_study(request, preview_path, dicom_path)).await
 }
 
 #[tauri::command]
 async fn analyze_study(
     app: tauri::AppHandle,
+    backend_state: tauri::State<'_, BackendAppState>,
     request: AnalyzeStudyCommand,
 ) -> Result<AnalyzeStudyCommandResult, String> {
     let preview_path = create_temp_file(".png")?;
     track_temp_file(&app, &preview_path);
-    let preview_output = preview_path.clone();
+    let backend_state = backend_state.inner().clone();
 
-    let result = run_blocking(move || {
-        backend_analyze_study(AnalyzeStudyRequest {
-            input_path: request.input_path,
-            preview_output: Some(preview_output),
-        })
-    })
-    .await?;
-
-    Ok(AnalyzeStudyCommandResult {
-        preview_path,
-        analysis: result.analysis,
-    })
+    run_blocking(move || backend_state.analyze_study(request, preview_path)).await
 }
 
 async fn run_blocking<T, F>(work: F) -> Result<T, String>
@@ -188,14 +154,6 @@ fn track_temp_file(app: &tauri::AppHandle, path: &PathBuf) {
     app.state::<TempFileState>().track(path.clone());
 }
 
-fn join_pipeline_steps(steps: Vec<xrayview_backend::api::ProcessingPipelineStep>) -> String {
-    steps
-        .into_iter()
-        .map(|step| step.as_str())
-        .collect::<Vec<_>>()
-        .join(",")
-}
-
 fn path_to_string(path: PathBuf) -> String {
     path.to_string_lossy().to_string()
 }
@@ -223,6 +181,7 @@ fn main() {
     configure_linux_application_identity();
 
     let app = tauri::Builder::default()
+        .manage(BackendAppState::default())
         .manage(TempFileState::default())
         .setup(|app| {
             #[cfg(target_os = "linux")]
@@ -238,8 +197,8 @@ fn main() {
             pick_dicom_file,
             pick_save_dicom_path,
             get_processing_manifest,
-            describe_study,
-            render_preview,
+            open_study,
+            render_study,
             process_study,
             analyze_study,
         ])

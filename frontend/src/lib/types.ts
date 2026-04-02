@@ -12,26 +12,19 @@ export type ViewerMode = "original" | "processed" | "compare";
 export type RuntimeMode = "tauri" | "mock";
 export type ActiveTab = "view" | "processing";
 
-export interface StudySession {
-  inputPath: string | null;
-  inputName: string;
-  originalPreviewUrl: string | null;
-  processedPreviewUrl: string | null;
-  originalMeasurementScale: MeasurementScale | null;
-  processedMeasurementScale: MeasurementScale | null;
-  toothAnalysis: ToothAnalysis | null;
-  processedDicomPath: string | null;
-  savedDestination: string | null;
-  status: string;
-  dirty: boolean;
-  runtime: RuntimeMode;
-}
-
 export interface ProcessingPresetOption {
   id: string;
   label: string;
   description: string;
   controls: ProcessingControls;
+}
+
+export interface OpenedStudy {
+  studyId: string;
+  inputPath: string;
+  inputName: string;
+  measurementScale: MeasurementScale | null;
+  runtime: RuntimeMode;
 }
 
 export interface ProcessingRequest {
@@ -43,6 +36,7 @@ export interface ProcessingRequest {
 }
 
 export interface PreviewResult {
+  studyId: string;
   previewUrl: string;
   measurementScale: MeasurementScale | null;
   runtime: RuntimeMode;
@@ -50,9 +44,11 @@ export interface PreviewResult {
 
 export interface ProcessResult extends PreviewResult {
   dicomPath: string;
+  mode: string;
 }
 
 export interface ToothAnalysisResult {
+  studyId: string;
   previewUrl: string;
   analysis: ToothAnalysis;
   runtime: RuntimeMode;

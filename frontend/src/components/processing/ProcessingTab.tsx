@@ -1,82 +1,25 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
+import { workbenchActions, useWorkbenchStore } from "../../app/store/workbenchStore";
 import {
-  FALLBACK_PROCESSING_MANIFEST,
-  buildOutputName,
   buildProcessingArgs,
-  ensureDicomExtension,
-  loadProcessingManifest,
-  pickSaveDicomPath,
-  runBackendProcess,
+  FALLBACK_PROCESSING_MANIFEST,
 } from "../../lib/backend";
 import type {
   PaletteName as Palette,
   ProcessingControls,
-  ProcessingPipelineStep,
 } from "../../lib/generated/contracts";
-import type {
-  ProcessingRequest,
-} from "../../lib/types";
-import { buildProcessingUiState } from "../../features/processing/presets";
+import type { ProcessingRequest } from "../../lib/types";
+import {
+  buildProcessingUiState,
+  processingControlsEqual,
+} from "../../features/processing/presets";
+import {
+  createProcessingForm,
+  DEFAULT_PIPELINE,
+} from "../../features/study/model";
 import { DicomViewer } from "../viewer/DicomViewer";
 
-const DEFAULT_PIPELINE: ProcessingPipelineStep[] = [
-  "grayscale",
-  "invert",
-  "brightness",
-  "contrast",
-  "equalize",
-];
 const CUSTOM_PRESET_ID = "__custom";
-
-interface ProcessingTabProps {
-  inputPath: string | null;
-  previewUrl: string | null;
-}
-
-interface ProcessingForm {
-  controls: ProcessingControls;
-  outputPath: string | null;
-  compare: boolean;
-  pipeline: ProcessingPipelineStep[];
-}
-
-type RunStatus =
-  | { state: "idle" }
-  | { state: "running" }
-  | { state: "success"; outputPath: string }
-  | { state: "error"; message: string };
-
-function createInitialForm(defaultControls: ProcessingControls): ProcessingForm {
-  return {
-    controls: { ...defaultControls },
-    outputPath: null,
-    compare: false,
-    pipeline: [...DEFAULT_PIPELINE],
-  };
-}
-
-function describeError(error: unknown): string {
-  if (error instanceof Error && error.message.trim()) return error.message;
-  if (typeof error === "string" && error.trim()) return error;
-  if (error && typeof error === "object" && "message" in error) {
-    const message = error.message;
-    if (typeof message === "string" && message.trim()) return message;
-  }
-  return "Processing failed.";
-}
-
-function controlsExactlyEqual(
-  left: ProcessingControls,
-  right: ProcessingControls,
-): boolean {
-  return (
-    left.brightness === right.brightness &&
-    left.contrast === right.contrast &&
-    left.invert === right.invert &&
-    left.equalize === right.equalize &&
-    left.palette === right.palette
-  );
-}
 
 function formatArgPreview(args: readonly string[]): string {
   return args
@@ -84,29 +27,27 @@ function formatArgPreview(args: readonly string[]): string {
     .join(" ");
 }
 
-export function ProcessingTab({ inputPath, previewUrl }: ProcessingTabProps) {
-  const [manifest, setManifest] = useState(FALLBACK_PROCESSING_MANIFEST);
-  const initialUiState = useMemo(
-    () => buildProcessingUiState(FALLBACK_PROCESSING_MANIFEST),
-    [],
+function useActiveStudy() {
+  return useWorkbenchStore((state) =>
+    state.activeStudyId ? state.studies[state.activeStudyId] ?? null : null,
   );
-  const [form, setForm] = useState<ProcessingForm>(() =>
-    createInitialForm(initialUiState.defaultControls),
-  );
-  const [runStatus, setRunStatus] = useState<RunStatus>({ state: "idle" });
-  const [processedPreviewUrl, setProcessedPreviewUrl] = useState<string | null>(
-    null,
-  );
-  const [pipelineOpen, setPipelineOpen] = useState(false);
+}
 
+export function ProcessingTab() {
+  const study = useActiveStudy();
+  const manifest = useWorkbenchStore((state) => state.manifest);
+  const busyAction = useWorkbenchStore((state) => state.busyAction);
   const processingUi = useMemo(() => buildProcessingUiState(manifest), [manifest]);
+  const [pipelineOpen, setPipelineOpen] = useState(false);
   const defaultPreset =
     manifest.presets.find((preset) => preset.id === manifest.defaultPresetId) ??
     manifest.presets[0] ??
     FALLBACK_PROCESSING_MANIFEST.presets[0];
+  const form = study?.processing.form ?? createProcessingForm(processingUi.defaultControls);
+  const runStatus = study?.processing.runStatus ?? { state: "idle" as const };
   const activePreset =
     processingUi.presets.find((preset) =>
-      controlsExactlyEqual(preset.controls, form.controls),
+      processingControlsEqual(preset.controls, form.controls),
     ) ?? null;
   const commandPreset = activePreset
     ? {
@@ -121,88 +62,37 @@ export function ProcessingTab({ inputPath, previewUrl }: ProcessingTabProps) {
     pipeline: form.pipeline,
     preset: commandPreset,
   };
+  const previewUrl = study?.originalPreview?.previewUrl ?? null;
+  const processedPreviewUrl = study?.processing.output?.previewUrl ?? null;
+  const busy = busyAction !== null;
   const isRunning = runStatus.state === "running";
-  const canRun = Boolean(inputPath) && !isRunning;
+  const canRun = Boolean(study) && !busy;
+  const args = study ? buildProcessingArgs(study.inputPath, request) : [];
 
-  useEffect(() => {
-    let cancelled = false;
-
-    void loadProcessingManifest()
-      .then((nextManifest) => {
-        if (!cancelled) {
-          setManifest(nextManifest);
-        }
-      })
-      .catch(() => {
-        // Keep the fallback manifest active so the processing UI stays usable
-        // even if the desktop bridge cannot describe the backend presets.
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    setForm(createInitialForm(defaultPreset.controls));
-    setRunStatus({ state: "idle" });
-    setProcessedPreviewUrl(null);
-    setPipelineOpen(false);
-  }, [inputPath]);
+  function updateControls(nextControls: ProcessingControls) {
+    workbenchActions.setProcessingControls(nextControls);
+  }
 
   function updateControl<K extends keyof ProcessingControls>(
     key: K,
     value: ProcessingControls[K],
   ) {
-    setForm((current) => ({
-      ...current,
-      controls: {
-        ...current.controls,
-        [key]: value,
-      },
-    }));
+    updateControls({
+      ...form.controls,
+      [key]: value,
+    });
   }
 
   function movePipelineStep(index: number, direction: -1 | 1) {
     const target = index + direction;
-    if (target < 0 || target >= form.pipeline.length) return;
+    if (target < 0 || target >= form.pipeline.length) {
+      return;
+    }
 
     const next = [...form.pipeline];
     [next[index], next[target]] = [next[target], next[index]];
-
-    setForm((current) => ({
-      ...current,
-      pipeline: next,
-    }));
+    workbenchActions.setProcessingPipeline(next);
   }
-
-  async function handlePickOutputPath() {
-    if (!inputPath || isRunning) return;
-
-    const selectedPath = await pickSaveDicomPath(buildOutputName(inputPath));
-    if (!selectedPath) return;
-
-    setForm((current) => ({
-      ...current,
-      outputPath: ensureDicomExtension(selectedPath),
-    }));
-  }
-
-  async function handleRun() {
-    if (!inputPath || !canRun) return;
-
-    setRunStatus({ state: "running" });
-
-    try {
-      const result = await runBackendProcess(inputPath, request);
-      setProcessedPreviewUrl(result.previewUrl);
-      setRunStatus({ state: "success", outputPath: result.dicomPath });
-    } catch (error) {
-      setRunStatus({ state: "error", message: describeError(error) });
-    }
-  }
-
-  const args = inputPath ? buildProcessingArgs(inputPath, request) : [];
 
   return (
     <div className="processing-tab">
@@ -225,8 +115,8 @@ export function ProcessingTab({ inputPath, previewUrl }: ProcessingTabProps) {
             <button
               className="button button--ghost"
               type="button"
-              onClick={handlePickOutputPath}
-              disabled={!inputPath || isRunning}
+              onClick={() => void workbenchActions.pickProcessingOutputPath()}
+              disabled={!study || busy}
             >
               {form.outputPath ? "Change Save Location" : "Choose Save Location"}
             </button>
@@ -234,10 +124,8 @@ export function ProcessingTab({ inputPath, previewUrl }: ProcessingTabProps) {
               <button
                 className="button button--ghost"
                 type="button"
-                onClick={() =>
-                  setForm((current) => ({ ...current, outputPath: null }))
-                }
-                disabled={isRunning}
+                onClick={() => workbenchActions.setProcessingOutputPath(null)}
+                disabled={busy}
               >
                 Clear
               </button>
@@ -257,14 +145,13 @@ export function ProcessingTab({ inputPath, previewUrl }: ProcessingTabProps) {
               const preset = processingUi.presets.find(
                 (candidate) => candidate.id === event.target.value,
               );
-              if (!preset) return;
+              if (!preset) {
+                return;
+              }
 
-              setForm((current) => ({
-                ...current,
-                controls: { ...preset.controls },
-              }));
+              updateControls({ ...preset.controls });
             }}
-            disabled={isRunning}
+            disabled={busy}
           >
             {processingUi.presets.map((preset) => (
               <option key={preset.id} value={preset.id}>
@@ -290,7 +177,7 @@ export function ProcessingTab({ inputPath, previewUrl }: ProcessingTabProps) {
               type="checkbox"
               checked={form.controls.invert}
               onChange={(event) => updateControl("invert", event.target.checked)}
-              disabled={isRunning}
+              disabled={busy}
             />
             <span>Invert</span>
           </label>
@@ -311,7 +198,7 @@ export function ProcessingTab({ inputPath, previewUrl }: ProcessingTabProps) {
                   parseInt(event.target.value, 10) || 0,
                 )
               }
-              disabled={isRunning}
+              disabled={busy}
             />
           </div>
 
@@ -332,7 +219,7 @@ export function ProcessingTab({ inputPath, previewUrl }: ProcessingTabProps) {
                   parseFloat(event.target.value) || 0,
                 )
               }
-              disabled={isRunning}
+              disabled={busy}
             />
           </div>
 
@@ -343,7 +230,7 @@ export function ProcessingTab({ inputPath, previewUrl }: ProcessingTabProps) {
               onChange={(event) =>
                 updateControl("equalize", event.target.checked)
               }
-              disabled={isRunning}
+              disabled={busy}
             />
             <span>Equalize</span>
           </label>
@@ -360,7 +247,7 @@ export function ProcessingTab({ inputPath, previewUrl }: ProcessingTabProps) {
             onChange={(event) =>
               updateControl("palette", event.target.value as Palette)
             }
-            disabled={isRunning}
+            disabled={busy}
           >
             <option value="none">none</option>
             <option value="hot">hot</option>
@@ -374,12 +261,9 @@ export function ProcessingTab({ inputPath, previewUrl }: ProcessingTabProps) {
               type="checkbox"
               checked={form.compare}
               onChange={(event) =>
-                setForm((current) => ({
-                  ...current,
-                  compare: event.target.checked,
-                }))
+                workbenchActions.setProcessingCompare(event.target.checked)
               }
-              disabled={isRunning}
+              disabled={busy}
             />
             <span>Compare</span>
           </label>
@@ -413,7 +297,7 @@ export function ProcessingTab({ inputPath, previewUrl }: ProcessingTabProps) {
                         className="pipeline-btn"
                         type="button"
                         onClick={() => movePipelineStep(index, -1)}
-                        disabled={index === 0 || isRunning}
+                        disabled={index === 0 || busy}
                         aria-label={`Move ${step} up`}
                       >
                         &#9650;
@@ -422,7 +306,7 @@ export function ProcessingTab({ inputPath, previewUrl }: ProcessingTabProps) {
                         className="pipeline-btn"
                         type="button"
                         onClick={() => movePipelineStep(index, 1)}
-                        disabled={index === form.pipeline.length - 1 || isRunning}
+                        disabled={index === form.pipeline.length - 1 || busy}
                         aria-label={`Move ${step} down`}
                       >
                         &#9660;
@@ -440,12 +324,9 @@ export function ProcessingTab({ inputPath, previewUrl }: ProcessingTabProps) {
                   className="button button--ghost pipeline-reset"
                   type="button"
                   onClick={() =>
-                    setForm((current) => ({
-                      ...current,
-                      pipeline: [...DEFAULT_PIPELINE],
-                    }))
+                    workbenchActions.setProcessingPipeline([...DEFAULT_PIPELINE])
                   }
-                  disabled={isRunning}
+                  disabled={busy}
                 >
                   Reset to default order
                 </button>
@@ -454,7 +335,7 @@ export function ProcessingTab({ inputPath, previewUrl }: ProcessingTabProps) {
           )}
         </section>
 
-        {inputPath && args.length > 0 && (
+        {study && args.length > 0 && (
           <section className="form-section">
             <div className="form-label">Command Preview</div>
             <pre className="args-preview u-mono">
@@ -467,7 +348,7 @@ export function ProcessingTab({ inputPath, previewUrl }: ProcessingTabProps) {
           <button
             className="button button--primary processing-run-btn"
             type="button"
-            onClick={handleRun}
+            onClick={() => void workbenchActions.runActiveStudyProcessing(request)}
             disabled={!canRun}
           >
             {isRunning ? (
