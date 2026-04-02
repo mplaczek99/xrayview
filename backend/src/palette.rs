@@ -23,13 +23,17 @@ pub fn apply_named_palette(src: &PreviewImage, name: &str) -> Result<PreviewImag
 }
 
 fn apply_palette(src: &PreviewImage, color_fn: fn(u8) -> [u8; 4]) -> Vec<u8> {
+    // Pre-compute LUT: only 256 possible Gray8 input values, eliminates
+    // per-pixel function calls (~4M calls → 256 for a 2048x2048 image).
+    let lut: [[u8; 4]; 256] = std::array::from_fn(|i| color_fn(i as u8));
+
     let mut pixels = vec![0_u8; src.pixels.len() * 4];
     // rayon: parallel pixel loop
     pixels
         .par_chunks_mut(4)
         .zip(src.pixels.par_iter().copied())
         .for_each(|(dst, value)| {
-            dst.copy_from_slice(&color_fn(value));
+            dst.copy_from_slice(&lut[value as usize]);
         });
     pixels
 }

@@ -5,7 +5,7 @@ use chrono::Utc;
 use dicom_core::{DataElement, DicomValue, PrimitiveValue, Tag, VR};
 use dicom_dictionary_std::tags;
 use dicom_object::mem::InMemDicomObject;
-use dicom_object::{FileDicomObject, meta::FileMetaTableBuilder};
+use dicom_object::{DefaultDicomObject, FileDicomObject, meta::FileMetaTableBuilder};
 use image::DynamicImage;
 use uuid::Uuid;
 
@@ -42,22 +42,44 @@ fn generate_uid() -> String {
     format!("2.25.{value}")
 }
 
+/// Lightweight snapshot of the metadata tags needed by save_dicom.
+/// Extracting this early lets the caller drop the heavy DefaultDicomObject
+/// (which holds the full pixel buffer) before pixel processing begins.
+pub struct SourceMetadata {
+    study_instance_uid: String,
+    preserved_elements: Vec<DataElement<InMemDicomObject>>,
+}
+
+impl SourceMetadata {
+    pub fn extract(source: &DefaultDicomObject) -> Self {
+        let study_instance_uid = source
+            .element(tags::STUDY_INSTANCE_UID)
+            .ok()
+            .and_then(|e| e.to_str().ok())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(generate_uid);
+
+        let preserved_elements = PRESERVED_SOURCE_TAGS
+            .iter()
+            .filter_map(|&tag| source.element(tag).ok().map(|e| e.clone()))
+            .collect();
+
+        Self {
+            study_instance_uid,
+            preserved_elements,
+        }
+    }
+}
+
 pub fn save_dicom(
     img: &DynamicImage,
-    source_dataset: &FileDicomObject<InMemDicomObject>,
+    source_meta: &SourceMetadata,
     output_path: &Path,
 ) -> Result<()> {
     let now = Utc::now();
     let sop_instance_uid = generate_uid();
     let series_instance_uid = generate_uid();
-
-    let study_instance_uid = source_dataset
-        .element(tags::STUDY_INSTANCE_UID)
-        .ok()
-        .and_then(|e| e.to_str().ok())
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(generate_uid);
 
     let meta = FileMetaTableBuilder::new()
         .media_storage_sop_class_uid(SECONDARY_CAPTURE_SOP_CLASS_UID)
@@ -89,16 +111,13 @@ pub fn save_dicom(
     put_str(&mut file_obj, tags::MANUFACTURER, VR::LO, "XRayView");
     put_str(&mut file_obj, tags::MANUFACTURER_MODEL_NAME, VR::LO, "xrayview");
     put_str(&mut file_obj, tags::SOFTWARE_VERSIONS, VR::LO, "xrayview");
-    put_str(&mut file_obj, tags::STUDY_INSTANCE_UID, VR::UI, &study_instance_uid);
+    put_str(&mut file_obj, tags::STUDY_INSTANCE_UID, VR::UI, &source_meta.study_instance_uid);
     put_str(&mut file_obj, tags::SERIES_INSTANCE_UID, VR::UI, &series_instance_uid);
     put_str(&mut file_obj, tags::SERIES_NUMBER, VR::IS, "999");
     put_str(&mut file_obj, tags::INSTANCE_NUMBER, VR::IS, "1");
 
-    // Preserve tags from source, skipping StudyInstanceUID (already set above).
-    for &tag in PRESERVED_SOURCE_TAGS {
-        if let Ok(elem) = source_dataset.element(tag) {
-            file_obj.put(elem.clone());
-        }
+    for elem in &source_meta.preserved_elements {
+        file_obj.put(elem.clone());
     }
 
     // Encode pixel data.
@@ -232,7 +251,8 @@ mod tests {
             DicomValue::Primitive(PrimitiveValue::Str("1.2.3.4.5.6.7.8.9".to_string())),
         ));
 
-        save_dicom(&img, &source, &output_path).expect("save_dicom should succeed");
+        let source_meta = SourceMetadata::extract(&source);
+        save_dicom(&img, &source_meta, &output_path).expect("save_dicom should succeed");
 
         // Reopen and verify.
         let reopened = OpenFileOptions::new()

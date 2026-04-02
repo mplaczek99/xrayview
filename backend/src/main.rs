@@ -17,7 +17,7 @@ use crate::compare::combine_comparison;
 use crate::palette::apply_named_palette;
 use crate::preview::{load_dicom, save_preview_png};
 use crate::processing::{process_grayscale_pixels, validate_pipeline, GrayscaleControls};
-use crate::save::save_dicom;
+use crate::save::{SourceMetadata, save_dicom};
 
 #[derive(Parser, Debug)]
 #[command(name = "xrayview")]
@@ -189,6 +189,16 @@ fn run() -> Result<()> {
     let loaded_width = preview.width;
     let loaded_height = preview.height;
 
+    // Extract the lightweight metadata we need for save_dicom, then drop the
+    // heavy DefaultDicomObject (which holds the full pixel buffer) to free
+    // 8-16 MB before pixel processing begins.
+    let source_meta = if cli.output.is_some() {
+        Some(SourceMetadata::extract(&source_dataset))
+    } else {
+        None
+    };
+    drop(source_dataset);
+
     let original_preview = if resolved.compare {
         Some(preview.clone())
     } else {
@@ -209,8 +219,8 @@ fn run() -> Result<()> {
     }
 
     if let Some(ref output_path) = cli.output {
-        let dynamic_img = preview.to_dynamic_image();
-        save_dicom(&dynamic_img, &source_dataset, output_path)?;
+        let dynamic_img = preview.into_dynamic_image();
+        save_dicom(&dynamic_img, source_meta.as_ref().unwrap(), output_path)?;
     }
 
     println!("loaded dicom image: {loaded_width}x{loaded_height}");

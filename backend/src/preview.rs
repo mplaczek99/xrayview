@@ -5,7 +5,7 @@
 use std::path::Path;
 
 use anyhow::{bail, Context, Result};
-use dicom_core::DicomValue;
+use dicom_core::{DicomValue, PrimitiveValue};
 use dicom_dictionary_std::tags;
 use dicom_object::{DefaultDicomObject, DicomAttribute, DicomObject, OpenFileOptions};
 use dicom_pixeldata::PixelDecoder;
@@ -51,14 +51,14 @@ pub fn load_preview(path: &Path) -> Result<PreviewImage> {
 }
 
 impl PreviewImage {
-    pub fn to_dynamic_image(&self) -> image::DynamicImage {
+    pub fn into_dynamic_image(self) -> image::DynamicImage {
         match self.format {
             PreviewFormat::Gray8 => image::DynamicImage::ImageLuma8(
-                image::GrayImage::from_raw(self.width, self.height, self.pixels.clone())
+                image::GrayImage::from_raw(self.width, self.height, self.pixels)
                     .expect("valid gray image dimensions"),
             ),
             PreviewFormat::Rgba8 => image::DynamicImage::ImageRgba8(
-                image::RgbaImage::from_raw(self.width, self.height, self.pixels.clone())
+                image::RgbaImage::from_raw(self.width, self.height, self.pixels)
                     .expect("valid rgba image dimensions"),
             ),
         }
@@ -98,17 +98,14 @@ fn render_first_frame(obj: &DefaultDicomObject) -> Result<PreviewImage> {
     let pixel_data = obj.element(tags::PIXEL_DATA).context("find PixelData")?;
 
     let pixels = match pixel_data.value() {
-        DicomValue::Primitive(_) => {
-            let raw = pixel_data.to_bytes().context("read PixelData bytes")?;
-            render_native_bytes(
-                obj,
-                raw.as_ref(),
-                bits_allocated,
-                frame_pixels,
-                frame_sample_count,
-                samples_per_pixel,
-            )?
-        }
+        DicomValue::Primitive(prim) => render_native_primitive(
+            obj,
+            prim,
+            bits_allocated,
+            frame_pixels,
+            frame_sample_count,
+            samples_per_pixel,
+        )?,
         DicomValue::PixelSequence(_) => {
             return decode_encapsulated_frame(obj);
         }
@@ -141,9 +138,12 @@ fn decode_encapsulated_frame(obj: &DefaultDicomObject) -> Result<PreviewImage> {
     })
 }
 
-fn render_native_bytes(
+/// Render pixel data from a PrimitiveValue, borrowing typed slices directly
+/// when the parser already decoded them (U16, U32). This avoids the
+/// to_bytes → read_u16_samples round-trip that would copy the entire buffer.
+fn render_native_primitive(
     obj: &DefaultDicomObject,
-    raw: &[u8],
+    prim: &PrimitiveValue,
     bits_allocated: u16,
     frame_pixels: usize,
     frame_sample_count: usize,
@@ -151,6 +151,7 @@ fn render_native_bytes(
 ) -> Result<Vec<u8>> {
     match bits_allocated {
         8 => {
+            let raw = prim.to_bytes();
             ensure_frame_len(raw.len(), frame_sample_count)?;
             let samples = &raw[..frame_sample_count];
             if samples_per_pixel == 1 {
@@ -161,24 +162,46 @@ fn render_native_bytes(
             }
         }
         16 => {
-            ensure_frame_len(raw.len(), frame_sample_count * 2)?;
             if samples_per_pixel != 1 {
                 bail!("16-bit color DICOM preview is not supported yet")
             }
-            let samples = read_u16_samples(&raw[..frame_sample_count * 2]);
             let cfg = resolve_native_render_config(obj, 16);
-            Ok(render_generic_monochrome(&samples, cfg, |value| {
-                u32::from(*value)
-            }))
+            // Borrow the u16 slice directly when the parser stored it as U16
+            // (VR::OW), avoiding an 8 MB copy for a 2048x2048 image.
+            match prim {
+                PrimitiveValue::U16(values) => {
+                    ensure_frame_len(values.len(), frame_sample_count)?;
+                    Ok(render_u16_monochrome(&values[..frame_sample_count], cfg))
+                }
+                _ => {
+                    let raw = prim.to_bytes();
+                    ensure_frame_len(raw.len(), frame_sample_count * 2)?;
+                    let samples = read_u16_samples(&raw[..frame_sample_count * 2]);
+                    Ok(render_u16_monochrome(&samples, cfg))
+                }
+            }
         }
         32 => {
-            ensure_frame_len(raw.len(), frame_sample_count * 4)?;
             if samples_per_pixel != 1 {
                 bail!("32-bit color DICOM preview is not supported yet")
             }
-            let samples = read_u32_samples(&raw[..frame_sample_count * 4]);
             let cfg = resolve_native_render_config(obj, 32);
-            Ok(render_generic_monochrome(&samples, cfg, |value| *value))
+            match prim {
+                PrimitiveValue::U32(values) => {
+                    ensure_frame_len(values.len(), frame_sample_count)?;
+                    Ok(render_generic_monochrome(
+                        &values[..frame_sample_count],
+                        cfg,
+                        |value| *value,
+                    ))
+                }
+                _ => {
+                    let raw = prim.to_bytes();
+                    ensure_frame_len(raw.len(), frame_sample_count * 4)?;
+                    let samples = read_u32_samples(&raw[..frame_sample_count * 4]);
+                    Ok(render_generic_monochrome(&samples, cfg, |value| *value))
+                }
+            }
         }
         other => bail!("unsupported BitsAllocated for preview: {other}"),
     }
@@ -266,7 +289,8 @@ fn resolve_native_render_config(
     let pixel_representation = optional_u16_attr(obj, tags::PIXEL_REPRESENTATION).unwrap_or(0);
     let slope = optional_f64_attr(obj, tags::RESCALE_SLOPE).unwrap_or(1.0);
     let intercept = optional_f64_attr(obj, tags::RESCALE_INTERCEPT).unwrap_or(0.0);
-    let window_center = optional_f64_attr(obj, tags::WINDOW_CENTER).unwrap_or(0.0);
+    let window_center_opt = optional_f64_attr(obj, tags::WINDOW_CENTER);
+    let window_center = window_center_opt.unwrap_or(0.0);
     let window_width = optional_f64_attr(obj, tags::WINDOW_WIDTH).unwrap_or(0.0);
     let invert = optional_str_attr(obj, tags::PHOTOMETRIC_INTERPRETATION)
         .map(|value| value.eq_ignore_ascii_case("MONOCHROME1"))
@@ -279,7 +303,7 @@ fn resolve_native_render_config(
         intercept,
         window_center,
         window_width,
-        use_window: window_width > 1.0 && optional_f64_attr(obj, tags::WINDOW_CENTER).is_some(),
+        use_window: window_width > 1.0 && window_center_opt.is_some(),
         invert,
     }
 }
@@ -341,6 +365,56 @@ fn render_u8_monochrome(samples: &[u8], cfg: NativeRenderConfig) -> Vec<u8> {
     pixels
 }
 
+/// Specialized 16-bit renderer using a 65536-entry LUT. Since u16 has only
+/// 65536 possible values, we pre-compute the final output byte for each one.
+/// This eliminates ALL per-pixel float operations (~8M ops → 0 for 2048x2048).
+fn render_u16_monochrome(samples: &[u16], cfg: NativeRenderConfig) -> Vec<u8> {
+    let mut transformed = vec![0.0_f64; 65536];
+    for (value, t) in transformed.iter_mut().enumerate() {
+        *t = scaled_stored_pixel_value(value as u32, cfg);
+    }
+
+    let mut lut = vec![0_u8; 65536];
+
+    if cfg.use_window {
+        let (lower, upper, scale, offset) = native_window_parameters(cfg);
+        for (v, t) in transformed.iter().enumerate() {
+            let mapped = map_window_value(*t, lower, upper, scale, offset);
+            lut[v] = if cfg.invert { 255 - mapped } else { mapped };
+        }
+    } else {
+        let mut min_value = f64::INFINITY;
+        let mut max_value = f64::NEG_INFINITY;
+        for sample in samples {
+            let v = transformed[*sample as usize];
+            if v < min_value {
+                min_value = v;
+            }
+            if v > max_value {
+                max_value = v;
+            }
+        }
+
+        if max_value <= min_value {
+            let fill = if cfg.invert { 255 } else { 0 };
+            return vec![fill; samples.len()];
+        }
+
+        let linear_scale = 255.0 / (max_value - min_value);
+        let linear_offset = -min_value * linear_scale;
+        for (v, t) in transformed.iter().enumerate() {
+            let byte = clamp_to_byte(*t * linear_scale + linear_offset);
+            lut[v] = if cfg.invert { 255 - byte } else { byte };
+        }
+    }
+
+    let mut pixels = vec![0_u8; samples.len()];
+    for (p, s) in pixels.iter_mut().zip(samples.iter()) {
+        *p = lut[*s as usize];
+    }
+    pixels
+}
+
 fn render_generic_monochrome<T, F>(samples: &[T], cfg: NativeRenderConfig, raw_bits: F) -> Vec<u8>
 where
     T: Copy,
@@ -376,15 +450,21 @@ where
         return pixels;
     }
 
+    // Pre-compute all scaled values in one pass to avoid calling
+    // scaled_stored_pixel_value twice per pixel (halves float ops).
+    let scaled: Vec<f64> = samples
+        .iter()
+        .map(|s| scaled_stored_pixel_value(raw_bits(s), cfg))
+        .collect();
+
     let mut min_value = f64::INFINITY;
     let mut max_value = f64::NEG_INFINITY;
-    for sample in samples {
-        let value = scaled_stored_pixel_value(raw_bits(sample), cfg);
-        if value < min_value {
-            min_value = value;
+    for &v in &scaled {
+        if v < min_value {
+            min_value = v;
         }
-        if value > max_value {
-            max_value = value;
+        if v > max_value {
+            max_value = v;
         }
     }
 
@@ -397,17 +477,12 @@ where
     let linear_scale = 255.0 / (max_value - min_value);
     let linear_offset = -min_value * linear_scale;
     if cfg.invert {
-        for (index, sample) in samples.iter().enumerate() {
-            pixels[index] = 255
-                - clamp_to_byte(
-                    scaled_stored_pixel_value(raw_bits(sample), cfg) * linear_scale + linear_offset,
-                );
+        for (index, &v) in scaled.iter().enumerate() {
+            pixels[index] = 255 - clamp_to_byte(v * linear_scale + linear_offset);
         }
     } else {
-        for (index, sample) in samples.iter().enumerate() {
-            pixels[index] = clamp_to_byte(
-                scaled_stored_pixel_value(raw_bits(sample), cfg) * linear_scale + linear_offset,
-            );
+        for (index, &v) in scaled.iter().enumerate() {
+            pixels[index] = clamp_to_byte(v * linear_scale + linear_offset);
         }
     }
 

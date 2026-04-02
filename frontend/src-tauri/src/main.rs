@@ -6,9 +6,37 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Mutex;
 use tauri::Manager;
 use tauri_plugin_shell::ShellExt;
 use tempfile::Builder;
+
+/// Tracks temp files so they can be cleaned up when replaced or at exit.
+struct TempFileState {
+    paths: Mutex<Vec<PathBuf>>,
+}
+
+impl TempFileState {
+    fn new() -> Self {
+        Self {
+            paths: Mutex::new(Vec::new()),
+        }
+    }
+
+    fn track(&self, path: PathBuf) {
+        if let Ok(mut paths) = self.paths.lock() {
+            paths.push(path);
+        }
+    }
+
+    fn cleanup_all(&self) {
+        if let Ok(mut paths) = self.paths.lock() {
+            for path in paths.drain(..) {
+                let _ = fs::remove_file(&path);
+            }
+        }
+    }
+}
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -93,7 +121,11 @@ async fn run_backend_preview(
     app: tauri::AppHandle,
     input_path: String,
 ) -> Result<PreviewResponse, String> {
+    let temp_state = app.state::<TempFileState>();
+    temp_state.cleanup_all();
+
     let preview_path = create_temp_file(".png")?;
+    temp_state.track(preview_path.clone());
 
     let args = vec![
         "--input".to_string(),
@@ -116,8 +148,13 @@ async fn run_backend_process(
     input_path: String,
     options: ProcessingOptions,
 ) -> Result<ProcessResponse, String> {
+    let temp_state = app.state::<TempFileState>();
+    temp_state.cleanup_all();
+
     let preview_path = create_temp_file(".png")?;
     let dicom_path = create_temp_file(".dcm")?;
+    temp_state.track(preview_path.clone());
+    temp_state.track(dicom_path.clone());
 
     let mut args = vec![
         "--input".to_string(),
@@ -382,6 +419,7 @@ fn main() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .manage(TempFileState::new())
         .setup(|app| {
             #[cfg(target_os = "linux")]
             {
