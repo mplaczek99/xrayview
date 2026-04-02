@@ -9,9 +9,11 @@ import {
   runBackendProcess,
 } from "../../lib/backend";
 import type {
-  Palette,
+  PaletteName as Palette,
   ProcessingControls,
   ProcessingPipelineStep,
+} from "../../lib/generated/contracts";
+import type {
   ProcessingRequest,
 } from "../../lib/types";
 import { buildProcessingUiState } from "../../features/processing/presets";

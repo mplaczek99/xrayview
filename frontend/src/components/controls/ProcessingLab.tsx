@@ -1,15 +1,16 @@
 import type { ChangeEvent } from "react";
-import type { ProcessingControls, ProcessingPreset } from "../../lib/types";
+import type { ProcessingControls } from "../../lib/generated/contracts";
+import type { ProcessingPresetOption } from "../../lib/types";
 
 // Deprecated: this experimental inspector is disconnected from the current app
 // shell and should not be expanded while the Phase 0-2 processing rewrite is
 // underway.
 interface ProcessingLabProps {
   controls: ProcessingControls;
-  presets: ProcessingPreset[];
+  presets: ProcessingPresetOption[];
   busy: boolean;
   dirty: boolean;
-  onPresetSelect: (preset: ProcessingPreset) => void;
+  onPresetSelect: (preset: ProcessingPresetOption) => void;
   onChange: (next: ProcessingControls) => void;
 }
 

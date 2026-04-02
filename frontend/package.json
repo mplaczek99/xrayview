@@ -4,8 +4,9 @@
   "version": "0.2.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "generate:contracts": "node ./scripts/generate-contracts.mjs",
+    "dev": "npm run generate:contracts && vite",
+    "build": "npm run generate:contracts && tsc --noEmit && vite build",
     "prepare:sidecar": "node ./scripts/prepare-sidecar.mjs",
     "preview": "vite preview",
     "tauri": "tauri",

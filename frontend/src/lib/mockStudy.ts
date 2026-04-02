@@ -1,4 +1,5 @@
-import type { Palette, ToothAnalysis } from "./types";
+import type { Palette } from "./types";
+import type { ToothAnalysis } from "./generated/contracts";
 
 // Mock previews are deterministic SVG data URLs, so cache by variant instead
 // of re-encoding the same image every time controls rerender the UI.

@@ -6,7 +6,7 @@ use dicom_object::{DicomAttribute, DicomObject, OpenFileOptions};
 use image::DynamicImage;
 
 use crate::api::{
-    AnalyzeStudyRequest, AnalyzeStudyResult, MeasurementScale, ProcessStudyRequest,
+    AnalyzeStudyRequest, AnalyzeStudyResult, MeasurementScale, PaletteName, ProcessStudyRequest,
     ProcessStudyResult, ProcessingControls, ProcessingManifest, ProcessingPreset,
     RenderPreviewRequest, RenderPreviewResult, StudyDescription,
 };
@@ -28,7 +28,7 @@ const PROCESSING_PRESETS: [ProcessingPreset; 3] = [
             contrast: 1.0,
             invert: false,
             equalize: false,
-            palette: "none",
+            palette: PaletteName::None,
         },
     },
     ProcessingPreset {
@@ -38,7 +38,7 @@ const PROCESSING_PRESETS: [ProcessingPreset; 3] = [
             contrast: 1.4,
             invert: false,
             equalize: true,
-            palette: "bone",
+            palette: PaletteName::Bone,
         },
     },
     ProcessingPreset {
@@ -48,7 +48,7 @@ const PROCESSING_PRESETS: [ProcessingPreset; 3] = [
             contrast: 1.8,
             invert: false,
             equalize: true,
-            palette: "none",
+            palette: PaletteName::None,
         },
     },
 ];
@@ -235,7 +235,7 @@ fn resolve_processing(request: &ProcessStudyRequest) -> BackendResult<ResolvedPr
     let palette = request
         .palette
         .as_deref()
-        .unwrap_or(preset.controls.palette)
+        .unwrap_or(preset.controls.palette.as_str())
         .to_ascii_lowercase();
 
     if !contrast.is_finite() || contrast < 0.0 {
@@ -339,7 +339,7 @@ mod tests {
         assert_eq!(manifest.default_preset_id, DEFAULT_PRESET_ID);
         assert_eq!(manifest.presets.len(), 3);
         assert_eq!(manifest.presets[1].id, "xray");
-        assert_eq!(manifest.presets[1].controls.palette, "bone");
+        assert_eq!(manifest.presets[1].controls.palette, PaletteName::Bone);
     }
 
     #[test]

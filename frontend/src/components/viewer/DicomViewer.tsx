@@ -1,4 +1,4 @@
-import type { ToothGeometry } from "../../lib/types";
+import type { ToothGeometry } from "../../lib/generated/contracts";
 
 interface DicomViewerProps {
   previewUrl: string | null;

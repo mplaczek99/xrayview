@@ -2,7 +2,7 @@ import type {
   MeasurementScale,
   ToothAnalysis,
   ToothMeasurementValues,
-} from "../../lib/types";
+} from "../../lib/generated/contracts";
 import { DicomViewer } from "./DicomViewer";
 
 interface ViewTabProps {

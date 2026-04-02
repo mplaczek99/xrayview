@@ -1,4 +1,4 @@
-import type { ProcessingManifest } from "./types";
+import type { ProcessingManifest } from "./generated/contracts";
 
 // Keep mock preset ids and defaults aligned with the Rust backend manifest so
 // browser-only development exercises the same UI branches.

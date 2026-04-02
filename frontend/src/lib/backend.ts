@@ -2,31 +2,26 @@ import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { MOCK_PROCESSING_MANIFEST } from "./mockProcessingManifest";
 import { createMockPreview, createMockToothAnalysis } from "./mockStudy";
 import type {
+  AnalyzeStudyCommand,
+  AnalyzeStudyCommandResult,
   MeasurementScale,
+  PaletteName,
+  PreviewCommandResult,
+  ProcessStudyCommand,
+  ProcessStudyCommandResult,
+  ProcessingManifest,
+  ProcessingPipelineStep,
+  RenderPreviewCommand,
+  ToothAnalysis,
+} from "./generated/contracts";
+import type {
   Palette,
   PreviewResult,
   ProcessResult,
-  ProcessingManifest,
-  ProcessingPipelineStep,
   ProcessingRequest,
   RuntimeMode,
-  ToothAnalysis,
   ToothAnalysisResult,
 } from "./types";
-
-interface PreviewPayload {
-  previewPath: string;
-  measurementScale: MeasurementScale | null;
-}
-
-interface ProcessPayload extends PreviewPayload {
-  dicomPath: string;
-}
-
-interface ToothMeasurementPayload {
-  previewPath: string;
-  analysis: ToothAnalysis;
-}
 
 const MOCK_STUDY_DIRECTORY = "mock-data";
 const MOCK_EXPORT_DIRECTORY = "mock-exports";
@@ -70,23 +65,21 @@ async function runInRuntime<T>(options: {
   mock: () => T | Promise<T>;
   tauri: () => Promise<T>;
 }): Promise<T> {
-  // Keep the app code path identical in the browser mock and the packaged Tauri app.
   return isTauriRuntime() ? options.tauri() : options.mock();
 }
 
 function toPreviewUrl(previewPath: string, runtime: RuntimeMode): string {
-  // Tauri returns a filesystem path; the browser mock already returns a web-safe URL.
   return runtime === "tauri" ? convertFileSrc(previewPath) : previewPath;
 }
 
 function asPreviewResult(
   previewPath: string,
   runtime: RuntimeMode,
-  measurementScale: MeasurementScale | null,
+  measurementScale: MeasurementScale | null | undefined,
 ): PreviewResult {
   return {
     previewUrl: toPreviewUrl(previewPath, runtime),
-    measurementScale,
+    measurementScale: measurementScale ?? null,
     runtime,
   };
 }
@@ -95,11 +88,38 @@ function asProcessResult(
   previewPath: string,
   dicomPath: string,
   runtime: RuntimeMode,
-  measurementScale: MeasurementScale | null,
+  measurementScale: MeasurementScale | null | undefined,
 ): ProcessResult {
   return {
     ...asPreviewResult(previewPath, runtime, measurementScale),
     dicomPath,
+  };
+}
+
+function buildProcessStudyCommand(
+  inputPath: string,
+  request: ProcessingRequest,
+): ProcessStudyCommand {
+  return {
+    inputPath,
+    outputPath: request.outputPath,
+    presetId: request.preset.id,
+    invert: request.controls.invert && !request.preset.controls.invert,
+    brightness:
+      request.controls.brightness !== request.preset.controls.brightness
+        ? request.controls.brightness
+        : null,
+    contrast:
+      request.controls.contrast !== request.preset.controls.contrast
+        ? request.controls.contrast
+        : null,
+    equalize: request.controls.equalize && !request.preset.controls.equalize,
+    compare: request.compare,
+    pipeline: pipelinesEqual(request.pipeline, DEFAULT_PIPELINE) ? null : request.pipeline,
+    palette:
+      request.controls.palette !== request.preset.controls.palette
+        ? request.controls.palette
+        : null,
   };
 }
 
@@ -128,7 +148,8 @@ export async function runBackendPreview(inputPath: string): Promise<PreviewResul
   return runInRuntime({
     mock: () => asPreviewResult(createMockPreview(false, "none"), getRuntimeMode(), null),
     tauri: async () => {
-      const payload = await invoke<PreviewPayload>("run_backend_preview", { inputPath });
+      const request: RenderPreviewCommand = { inputPath };
+      const payload = await invoke<PreviewCommandResult>("render_preview", { request });
       return asPreviewResult(payload.previewPath, getRuntimeMode(), payload.measurementScale);
     },
   });
@@ -173,7 +194,7 @@ export async function runBackendProcess(
   inputPath: string,
   request: ProcessingRequest,
 ): Promise<ProcessResult> {
-  const args = buildProcessingArgs(inputPath, request);
+  const command = buildProcessStudyCommand(inputPath, request);
 
   return runInRuntime({
     mock: () =>
@@ -184,7 +205,9 @@ export async function runBackendProcess(
         null,
       ),
     tauri: async () => {
-      const payload = await invoke<ProcessPayload>("run_backend_process", { args });
+      const payload = await invoke<ProcessStudyCommandResult>("process_study", {
+        request: command,
+      });
 
       return asProcessResult(
         payload.previewPath,
@@ -206,10 +229,10 @@ export async function runBackendToothMeasurement(
       runtime: getRuntimeMode(),
     }),
     tauri: async () => {
-      const payload = await invoke<ToothMeasurementPayload>(
-        "run_backend_tooth_measurement",
-        { inputPath },
-      );
+      const request: AnalyzeStudyCommand = { inputPath };
+      const payload = await invoke<AnalyzeStudyCommandResult>("analyze_study", {
+        request,
+      });
 
       return {
         previewUrl: toPreviewUrl(payload.previewPath, getRuntimeMode()),
@@ -225,13 +248,13 @@ export function ensureDicomExtension(path: string): string {
 }
 
 export function buildOutputName(inputPath: string): string {
-  // Mirror the backend naming convention so suggested save paths line up with
-  // the file the native process would auto-generate on its own.
   const fileName = inputPath.split(/[\\/]/).pop() ?? "study.dcm";
   const baseName = fileName.replace(/\.(dcm|dicom)$/i, "");
   return `${baseName}_processed.dcm`;
 }
 
-export function paletteLabel(palette: Palette): string {
+export function paletteLabel(palette: PaletteName): string {
   return PALETTE_LABELS[palette];
 }
+
+export type { ToothAnalysis };

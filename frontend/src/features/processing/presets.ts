@@ -1,12 +1,12 @@
 import type {
   ProcessingControls,
   ProcessingManifest,
-  ProcessingPreset,
-} from "../../lib/types";
+} from "../../lib/generated/contracts";
+import type { ProcessingPresetOption } from "../../lib/types";
 
 interface ProcessingUiState {
   defaultControls: ProcessingControls;
-  presets: ProcessingPreset[];
+  presets: ProcessingPresetOption[];
 }
 
 const CUSTOM_PRESET_LABEL = "Custom";
@@ -87,7 +87,7 @@ export function buildProcessingUiState(
 
 export function matchPreset(
   controls: ProcessingControls,
-  presets: readonly ProcessingPreset[],
+  presets: readonly ProcessingPresetOption[],
 ): string {
   const matched = presets.find((preset) =>
     processingControlsEqual(preset.controls, controls),

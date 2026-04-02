@@ -1,29 +1,33 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use rfd::FileDialog;
-use serde::{Deserialize, Serialize};
 use std::env;
 use std::fs;
-use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::Manager;
-use tauri_plugin_shell::ShellExt;
 use tempfile::Builder;
-use tokio::sync::Semaphore;
+use xrayview_backend::api::{
+    AnalyzeStudyCommand, AnalyzeStudyCommandResult, DescribeStudyCommand, PreviewCommandResult,
+    ProcessStudyCommand, ProcessStudyCommandResult, ProcessingManifest, RenderPreviewCommand,
+    StudyDescription,
+};
+use xrayview_backend::api::{AnalyzeStudyRequest, ProcessStudyRequest, RenderPreviewRequest};
+use xrayview_backend::app::{
+    analyze_study as backend_analyze_study, describe_study as backend_describe_study,
+    process_study as backend_process_study, processing_manifest,
+    render_preview as backend_render_preview,
+};
+use xrayview_backend::error::BackendResult;
 
-/// Tracks temp files so they can be cleaned up when replaced or at exit.
+/// Temp preview and export files stay available for the lifetime of the app so
+/// the frontend can keep rendering them through Tauri's asset protocol.
+#[derive(Default)]
 struct TempFileState {
     paths: Mutex<Vec<PathBuf>>,
 }
 
 impl TempFileState {
-    fn new() -> Self {
-        Self {
-            paths: Mutex::new(Vec::new()),
-        }
-    }
-
     fn track(&self, path: PathBuf) {
         if let Ok(mut paths) = self.paths.lock() {
             paths.push(path);
@@ -37,169 +41,6 @@ impl TempFileState {
             }
         }
     }
-}
-
-/// Single-user desktop app — serial execution is intentional. This also
-/// closes the TempFileState race where cleanup_all() could delete files
-/// still in use by an overlapping request.
-struct BackendGate {
-    semaphore: Semaphore,
-}
-
-impl BackendGate {
-    fn new() -> Self {
-        Self {
-            semaphore: Semaphore::new(1),
-        }
-    }
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ProcessingOptions {
-    brightness: i32,
-    contrast: f64,
-    invert: bool,
-    equalize: bool,
-    palette: String,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ProcessingPreset {
-    id: String,
-    controls: ProcessingOptions,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ProcessingManifest {
-    default_preset_id: String,
-    presets: Vec<ProcessingPreset>,
-}
-
-#[derive(Debug, Deserialize, Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
-struct MeasurementScale {
-    row_spacing_mm: f64,
-    column_spacing_mm: f64,
-    source: String,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct StudyDescription {
-    measurement_scale: Option<MeasurementScale>,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ToothImageMetadata {
-    width: u32,
-    height: u32,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ToothCalibration {
-    pixel_units: String,
-    measurement_scale: Option<MeasurementScale>,
-    real_world_measurements_available: bool,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ToothMeasurementValues {
-    tooth_width: f64,
-    tooth_height: f64,
-    bounding_box_width: f64,
-    bounding_box_height: f64,
-    units: String,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ToothMeasurementBundle {
-    pixel: ToothMeasurementValues,
-    calibrated: Option<ToothMeasurementValues>,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct Point {
-    x: u32,
-    y: u32,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct LineSegment {
-    start: Point,
-    end: Point,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct BoundingBox {
-    x: u32,
-    y: u32,
-    width: u32,
-    height: u32,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ToothGeometry {
-    bounding_box: BoundingBox,
-    width_line: LineSegment,
-    height_line: LineSegment,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ToothCandidate {
-    confidence: f64,
-    mask_area_pixels: u32,
-    measurements: ToothMeasurementBundle,
-    geometry: ToothGeometry,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ToothAnalysis {
-    image: ToothImageMetadata,
-    calibration: ToothCalibration,
-    tooth: Option<ToothCandidate>,
-    warnings: Vec<String>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct PreviewResponse {
-    preview_path: String,
-    measurement_scale: Option<MeasurementScale>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ProcessResponse {
-    preview_path: String,
-    dicom_path: String,
-    measurement_scale: Option<MeasurementScale>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ToothMeasurementResponse {
-    preview_path: String,
-    analysis: ToothAnalysis,
-}
-
-#[derive(Debug)]
-struct BackendSpec {
-    program: String,
-    prefix_args: Vec<String>,
-    working_directory: PathBuf,
 }
 
 #[tauri::command]
@@ -221,153 +62,112 @@ fn pick_save_dicom_path(default_name: Option<String>) -> Option<String> {
 }
 
 #[tauri::command]
-async fn run_backend_preview(
+fn get_processing_manifest() -> ProcessingManifest {
+    processing_manifest()
+}
+
+#[tauri::command]
+async fn describe_study(request: DescribeStudyCommand) -> Result<StudyDescription, String> {
+    run_blocking(move || backend_describe_study(&request.input_path)).await
+}
+
+#[tauri::command]
+async fn render_preview(
     app: tauri::AppHandle,
-    input_path: String,
-) -> Result<PreviewResponse, String> {
-    let gate = app.state::<BackendGate>();
-    let _permit = gate
-        .semaphore
-        .acquire()
-        .await
-        .map_err(|e| format!("backend gate closed: {e}"))?;
-
-    let temp_state = app.state::<TempFileState>();
-    temp_state.cleanup_all();
-
+    request: RenderPreviewCommand,
+) -> Result<PreviewCommandResult, String> {
     let preview_path = create_temp_file(".png")?;
-    temp_state.track(preview_path.clone());
+    track_temp_file(&app, &preview_path);
 
-    let args = vec![
-        "--input".to_string(),
-        input_path,
-        "--preview-output".to_string(),
-        path_to_string(preview_path.clone()),
-    ];
+    let result = run_blocking(move || {
+        backend_render_preview(RenderPreviewRequest {
+            input_path: request.input_path,
+            preview_output: preview_path.clone(),
+        })
+    })
+    .await?;
 
-    let _ = run_backend_command(&app, &args).await?;
-
-    Ok(PreviewResponse {
-        preview_path: path_to_string(preview_path),
-        measurement_scale: describe_study_if_available(&app, &args[1]).await,
+    Ok(PreviewCommandResult {
+        preview_path: result.preview_output,
+        measurement_scale: result.measurement_scale,
     })
 }
 
 #[tauri::command]
-async fn run_backend_process(
+async fn process_study(
     app: tauri::AppHandle,
-    args: Vec<String>,
-) -> Result<ProcessResponse, String> {
-    let gate = app.state::<BackendGate>();
-    let _permit = gate
-        .semaphore
-        .acquire()
-        .await
-        .map_err(|e| format!("backend gate closed: {e}"))?;
-
-    let temp_state = app.state::<TempFileState>();
-    temp_state.cleanup_all();
-
+    request: ProcessStudyCommand,
+) -> Result<ProcessStudyCommandResult, String> {
     let preview_path = create_temp_file(".png")?;
-    temp_state.track(preview_path.clone());
-    let mut command_args = args;
-    let dicom_path = match find_flag_value(&command_args, "--output") {
-        Some(path) => PathBuf::from(path),
+    track_temp_file(&app, &preview_path);
+
+    let dicom_path = match request.output_path.clone() {
+        Some(path) => path,
         None => {
-            let temp_dicom_path = create_temp_file(".dcm")?;
-            temp_state.track(temp_dicom_path.clone());
-            command_args.push("--output".to_string());
-            command_args.push(path_to_string(temp_dicom_path.clone()));
-            temp_dicom_path
+            let temp_output = create_temp_file(".dcm")?;
+            track_temp_file(&app, &temp_output);
+            temp_output
         }
     };
-    command_args.push("--preview-output".to_string());
-    command_args.push(path_to_string(preview_path.clone()));
 
-    let _ = run_backend_command(&app, &command_args).await?;
-    let dicom_path_string = path_to_string(dicom_path.clone());
+    let backend_request = ProcessStudyRequest {
+        input_path: request.input_path,
+        output_path: Some(dicom_path.clone()),
+        preview_output: Some(preview_path.clone()),
+        preset: request.preset_id,
+        invert: request.invert,
+        brightness: request.brightness,
+        contrast: request.contrast,
+        equalize: request.equalize,
+        compare: request.compare,
+        pipeline: request.pipeline.map(join_pipeline_steps),
+        palette: request.palette.map(|palette| palette.as_str().to_string()),
+    };
 
-    Ok(ProcessResponse {
-        preview_path: path_to_string(preview_path),
-        dicom_path: path_to_string(dicom_path),
-        measurement_scale: describe_study_if_available(&app, &dicom_path_string).await,
+    let result = run_blocking(move || backend_process_study(backend_request)).await?;
+
+    Ok(ProcessStudyCommandResult {
+        preview_path,
+        dicom_path,
+        loaded_width: result.loaded_width,
+        loaded_height: result.loaded_height,
+        mode: result.mode,
+        measurement_scale: result.measurement_scale,
     })
 }
 
 #[tauri::command]
-async fn run_backend_tooth_measurement(
+async fn analyze_study(
     app: tauri::AppHandle,
-    input_path: String,
-) -> Result<ToothMeasurementResponse, String> {
-    let gate = app.state::<BackendGate>();
-    let _permit = gate
-        .semaphore
-        .acquire()
-        .await
-        .map_err(|e| format!("backend gate closed: {e}"))?;
-
-    let temp_state = app.state::<TempFileState>();
-    temp_state.cleanup_all();
-
+    request: AnalyzeStudyCommand,
+) -> Result<AnalyzeStudyCommandResult, String> {
     let preview_path = create_temp_file(".png")?;
-    temp_state.track(preview_path.clone());
-    let preview_path_string = path_to_string(preview_path.clone());
+    track_temp_file(&app, &preview_path);
+    let preview_output = preview_path.clone();
 
-    let stdout = run_backend_command(
-        &app,
-        &[
-            "--input".to_string(),
-            input_path,
-            "--preview-output".to_string(),
-            preview_path_string.clone(),
-            "--analyze-tooth".to_string(),
-        ],
-    )
+    let result = run_blocking(move || {
+        backend_analyze_study(AnalyzeStudyRequest {
+            input_path: request.input_path,
+            preview_output: Some(preview_output),
+        })
+    })
     .await?;
 
-    let analysis = serde_json::from_str(&stdout)
-        .map_err(|error| format!("failed to parse backend tooth analysis: {error}"))?;
-
-    Ok(ToothMeasurementResponse {
-        preview_path: preview_path_string,
-        analysis,
+    Ok(AnalyzeStudyCommandResult {
+        preview_path,
+        analysis: result.analysis,
     })
 }
 
-#[tauri::command]
-async fn get_processing_manifest(app: tauri::AppHandle) -> Result<ProcessingManifest, String> {
-    let stdout = run_backend_command(&app, &["--describe-presets".to_string()]).await?;
-
-    serde_json::from_str(&stdout)
-        .map_err(|error| format!("failed to parse backend preset manifest: {error}"))
-}
-
-async fn describe_study(
-    app: &tauri::AppHandle,
-    input_path: &str,
-) -> Result<StudyDescription, String> {
-    let stdout = run_backend_command(
-        app,
-        &[
-            "--input".to_string(),
-            input_path.to_string(),
-            "--describe-study".to_string(),
-        ],
-    )
-    .await?;
-
-    serde_json::from_str(&stdout)
-        .map_err(|error| format!("failed to parse backend study description: {error}"))
-}
-
-async fn describe_study_if_available(
-    app: &tauri::AppHandle,
-    input_path: &str,
-) -> Option<MeasurementScale> {
-    describe_study(app, input_path)
+async fn run_blocking<T, F>(work: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce() -> BackendResult<T> + Send + 'static,
+{
+    tauri::async_runtime::spawn_blocking(work)
         .await
-        .ok()
-        .and_then(|description| description.measurement_scale)
+        .map_err(|error| format!("desktop worker failed: {error}"))?
+        .map_err(|error| error.to_string())
 }
 
 fn create_temp_file(suffix: &str) -> Result<PathBuf, String> {
@@ -384,174 +184,16 @@ fn create_temp_file(suffix: &str) -> Result<PathBuf, String> {
     Ok(path)
 }
 
-fn find_flag_value<'a>(args: &'a [String], flag: &str) -> Option<&'a str> {
-    args.windows(2)
-        .find_map(|window| (window[0] == flag).then_some(window[1].as_str()))
+fn track_temp_file(app: &tauri::AppHandle, path: &PathBuf) {
+    app.state::<TempFileState>().track(path.clone());
 }
 
-async fn run_backend_command(app: &tauri::AppHandle, args: &[String]) -> Result<String, String> {
-    // Development should use the current backend source rather than any stale
-    // sidecar or release binary left on disk from a previous build.
-    if !cfg!(debug_assertions) {
-        if let Ok(sidecar) = app.shell().sidecar("xrayview-backend") {
-            let output = sidecar
-                .args(args.iter().map(String::as_str))
-                .output()
-                .await
-                .map_err(|error| format!("failed to start bundled backend: {error}"))?;
-
-            return handle_backend_output(
-                output.status.success(),
-                format!("{:?}", output.status),
-                output.stdout,
-                output.stderr,
-            );
-        }
-    }
-
-    let backend = resolve_backend_spec()?;
-    let mut command = Command::new(&backend.program);
-    command.current_dir(&backend.working_directory);
-    command.args(&backend.prefix_args);
-    command.args(args);
-
-    let output = command
-        .output()
-        .map_err(|error| format!("failed to start backend command: {error}"))?;
-
-    handle_backend_output(
-        output.status.success(),
-        format!("{}", output.status),
-        output.stdout,
-        output.stderr,
-    )
-}
-
-fn handle_backend_output(
-    succeeded: bool,
-    status_text: String,
-    stdout_bytes: Vec<u8>,
-    stderr_bytes: Vec<u8>,
-) -> Result<String, String> {
-    let stdout = String::from_utf8_lossy(&stdout_bytes).trim().to_string();
-    if succeeded {
-        return Ok(stdout);
-    }
-
-    let stderr = String::from_utf8_lossy(&stderr_bytes).trim().to_string();
-    let message = if !stderr.is_empty() {
-        stderr
-    } else if !stdout.is_empty() {
-        stdout
-    } else {
-        format!("backend exited with status {status_text}")
-    };
-
-    Err(message)
-}
-
-fn resolve_backend_spec() -> Result<BackendSpec, String> {
-    if let Ok(configured_path) = env::var("XRAYVIEW_BACKEND_PATH") {
-        let binary = PathBuf::from(configured_path);
-        if binary.is_file() {
-            let working_directory =
-                find_project_root(&env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
-                    .unwrap_or_else(|| env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-
-            return Ok(BackendSpec {
-                program: path_to_string(binary),
-                prefix_args: Vec::new(),
-                working_directory,
-            });
-        }
-    }
-
-    if cfg!(debug_assertions) {
-        if let Some(project_root) =
-            find_project_root(&env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
-        {
-            return Ok(BackendSpec {
-                program: "cargo".to_string(),
-                prefix_args: vec![
-                    "run".to_string(),
-                    "--manifest-path".to_string(),
-                    "backend/Cargo.toml".to_string(),
-                    "--".to_string(),
-                ],
-                working_directory: project_root,
-            });
-        }
-    }
-
-    let search_roots = vec![
-        env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
-        env::current_exe()
-            .ok()
-            .and_then(|path| path.parent().map(Path::to_path_buf))
-            .unwrap_or_else(|| PathBuf::from(".")),
-    ];
-
-    for root in search_roots {
-        if let Some(project_root) = find_project_root(&root) {
-            for candidate in backend_binary_candidates(&project_root) {
-                if candidate.is_file() {
-                    return Ok(BackendSpec {
-                        program: path_to_string(candidate),
-                        prefix_args: Vec::new(),
-                        working_directory: project_root,
-                    });
-                }
-            }
-
-            return Ok(BackendSpec {
-                program: "cargo".to_string(),
-                prefix_args: vec![
-                    "run".to_string(),
-                    "--manifest-path".to_string(),
-                    "backend/Cargo.toml".to_string(),
-                    "--".to_string(),
-                ],
-                working_directory: project_root,
-            });
-        }
-    }
-
-    Err(
-        "could not locate the Rust backend; set XRAYVIEW_BACKEND_PATH or run from the repository"
-            .to_string(),
-    )
-}
-
-fn find_project_root(start: &Path) -> Option<PathBuf> {
-    let mut current = if start.is_file() {
-        start.parent().map(Path::to_path_buf)?
-    } else {
-        start.to_path_buf()
-    };
-
-    loop {
-        // The frontend can be launched from several directories during dev, so
-        // walk upward until we find the workspace that owns `backend/`.
-        if current.join("backend").is_dir() {
-            return Some(current);
-        }
-
-        if !current.pop() {
-            return None;
-        }
-    }
-}
-
-fn backend_binary_candidates(project_root: &Path) -> Vec<PathBuf> {
-    #[cfg(target_os = "windows")]
-    {
-        vec![project_root.join("backend/target/release/xrayview-backend.exe")]
-    }
-
-    #[cfg(not(target_os = "windows"))]
-    {
-        vec![project_root.join("backend/target/release/xrayview-backend")]
-    }
+fn join_pipeline_steps(steps: Vec<xrayview_backend::api::ProcessingPipelineStep>) -> String {
+    steps
+        .into_iter()
+        .map(|step| step.as_str())
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 fn path_to_string(path: PathBuf) -> String {
@@ -580,10 +222,8 @@ fn main() {
     configure_linux_webkit_environment();
     configure_linux_application_identity();
 
-    tauri::Builder::default()
-        .plugin(tauri_plugin_shell::init())
-        .manage(TempFileState::new())
-        .manage(BackendGate::new())
+    let app = tauri::Builder::default()
+        .manage(TempFileState::default())
         .setup(|app| {
             #[cfg(target_os = "linux")]
             {
@@ -598,10 +238,20 @@ fn main() {
             pick_dicom_file,
             pick_save_dicom_path,
             get_processing_manifest,
-            run_backend_preview,
-            run_backend_process,
-            run_backend_tooth_measurement,
+            describe_study,
+            render_preview,
+            process_study,
+            analyze_study,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+
+    app.run(|app_handle, event| {
+        if matches!(
+            event,
+            tauri::RunEvent::Exit | tauri::RunEvent::ExitRequested { .. }
+        ) {
+            app_handle.state::<TempFileState>().cleanup_all();
+        }
+    });
 }

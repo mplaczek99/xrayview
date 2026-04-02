@@ -1,45 +1,18 @@
+pub mod contracts;
+
 use std::path::PathBuf;
 
 use serde::Serialize;
 
 use crate::ToothAnalysis;
 
-#[derive(Debug, Clone, Copy, Serialize)]
-pub struct ProcessingControls {
-    pub brightness: i32,
-    pub contrast: f64,
-    pub invert: bool,
-    pub equalize: bool,
-    pub palette: &'static str,
-}
-
-#[derive(Debug, Clone, Copy, Serialize)]
-pub struct ProcessingPreset {
-    pub id: &'static str,
-    pub controls: ProcessingControls,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ProcessingManifest {
-    pub default_preset_id: &'static str,
-    pub presets: Vec<ProcessingPreset>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MeasurementScale {
-    pub row_spacing_mm: f64,
-    pub column_spacing_mm: f64,
-    pub source: &'static str,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct StudyDescription {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub measurement_scale: Option<MeasurementScale>,
-}
+pub use contracts::{
+    AnalyzeStudyCommand, AnalyzeStudyCommandResult, DescribeStudyCommand, MeasurementScale,
+    PaletteName, PreviewCommandResult, ProcessStudyCommand, ProcessStudyCommandResult,
+    ProcessingControls, ProcessingManifest, ProcessingPipelineStep, ProcessingPreset,
+    RenderPreviewCommand, StudyDescription, generated_typescript_contracts,
+    write_typescript_contracts,
+};
 
 #[derive(Debug, Clone)]
 pub struct RenderPreviewRequest {
