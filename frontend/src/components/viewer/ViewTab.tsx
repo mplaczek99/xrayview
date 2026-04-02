@@ -1,16 +1,20 @@
 import type {
+  MeasurementScale,
   ToothAnalysis,
   ToothMeasurementValues,
 } from "../../lib/types";
 import { DicomViewer } from "./DicomViewer";
 
 interface ViewTabProps {
+  inputPath: string | null;
   previewUrl: string | null;
   analysis: ToothAnalysis | null;
-  busy: boolean;
+  measurementScale: MeasurementScale | null;
+  busyAction: "opening" | "measuring" | null;
   status: string;
   inputName: string;
   onOpenStudy: () => void;
+  onMeasureTooth: () => void;
 }
 
 interface MeasurementSectionProps {
@@ -60,15 +64,22 @@ function MeasurementSection({
 }
 
 export function ViewTab({
+  inputPath,
   previewUrl,
   analysis,
-  busy,
+  measurementScale: previewMeasurementScale,
+  busyAction,
   status,
   inputName,
   onOpenStudy,
+  onMeasureTooth,
 }: ViewTabProps) {
   const tooth = analysis?.tooth ?? null;
-  const measurementScale = analysis?.calibration.measurementScale ?? null;
+  const measurementScale =
+    analysis?.calibration.measurementScale ?? previewMeasurementScale ?? null;
+  const busy = busyAction !== null;
+  const isOpening = busyAction === "opening";
+  const isMeasuring = busyAction === "measuring";
 
   return (
     <div className="view-tab">
@@ -79,7 +90,19 @@ export function ViewTab({
           onClick={onOpenStudy}
           disabled={busy}
         >
-          {busy ? "Analyzing..." : "Open DICOM"}
+          {isOpening ? "Loading..." : "Open DICOM"}
+        </button>
+        <button
+          className="button button--ghost"
+          type="button"
+          onClick={onMeasureTooth}
+          disabled={!inputPath || busy}
+        >
+          {isMeasuring
+            ? "Measuring..."
+            : tooth
+              ? "Re-run measurement"
+              : "Measure tooth"}
         </button>
         {previewUrl && (
           <span className="view-panel__filename u-mono">{inputName}</span>
@@ -120,8 +143,8 @@ export function ViewTab({
               </>
             ) : (
               <p className="measurement-card__copy">
-                The backend will populate measurements here after a study is
-                analyzed.
+                Load a study, then click Measure tooth to run the backend
+                analysis and populate the returned measurements here.
               </p>
             )}
           </section>
