@@ -1,6 +1,9 @@
 mod compare;
+pub mod cache;
 mod export;
+pub mod jobs;
 mod palette;
+pub mod persistence;
 mod preview;
 mod processing;
 mod render;

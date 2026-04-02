@@ -3,6 +3,7 @@ import { workbenchActions, useWorkbenchStore } from "../../app/store/workbenchSt
 import {
   buildProcessingArgs,
   FALLBACK_PROCESSING_MANIFEST,
+  formatBackendError,
 } from "../../lib/backend";
 import type {
   PaletteName as Palette,
@@ -36,7 +37,6 @@ function useActiveStudy() {
 export function ProcessingTab() {
   const study = useActiveStudy();
   const manifest = useWorkbenchStore((state) => state.manifest);
-  const busyAction = useWorkbenchStore((state) => state.busyAction);
   const processingUi = useMemo(() => buildProcessingUiState(manifest), [manifest]);
   const [pipelineOpen, setPipelineOpen] = useState(false);
   const defaultPreset =
@@ -64,8 +64,9 @@ export function ProcessingTab() {
   };
   const previewUrl = study?.originalPreview?.previewUrl ?? null;
   const processedPreviewUrl = study?.processing.output?.previewUrl ?? null;
-  const busy = busyAction !== null;
+  const busy = runStatus.state === "running" || runStatus.state === "cancelling";
   const isRunning = runStatus.state === "running";
+  const isCancelling = runStatus.state === "cancelling";
   const canRun = Boolean(study) && !busy;
   const args = study ? buildProcessingArgs(study.inputPath, request) : [];
 
@@ -351,24 +352,46 @@ export function ProcessingTab() {
             onClick={() => void workbenchActions.runActiveStudyProcessing(request)}
             disabled={!canRun}
           >
-            {isRunning ? (
+            {busy ? (
               <>
                 <span className="spinner" aria-hidden="true" />
-                Processing...
+                {isCancelling ? "Cancelling..." : "Processing..."}
               </>
             ) : (
               "Run Processing"
             )}
           </button>
 
+          {runStatus.state === "running" && (
+            <button
+              className="button button--ghost"
+              type="button"
+              onClick={() => void workbenchActions.cancelJob(runStatus.jobId)}
+            >
+              Cancel Job
+            </button>
+          )}
+
           {runStatus.state === "success" && (
             <div className="run-status run-status--success">
-              Processing complete.
+              {runStatus.fromCache
+                ? "Processing loaded from cache."
+                : "Processing complete."}
             </div>
           )}
           {runStatus.state === "error" && (
             <div className="run-status run-status--error">
-              {runStatus.message}
+              {formatBackendError(runStatus.error, "Processing failed.")}
+            </div>
+          )}
+          {runStatus.state === "cancelled" && (
+            <div className="run-status run-status--error">
+              Processing cancelled.
+            </div>
+          )}
+          {busy && (
+            <div className="run-status">
+              {runStatus.progress.message} ({runStatus.progress.percent}%)
             </div>
           )}
         </div>

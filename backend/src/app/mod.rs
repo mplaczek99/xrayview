@@ -2,7 +2,7 @@ pub mod state;
 
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, bail};
+use anyhow::Context;
 use dicom_dictionary_std::tags;
 use dicom_object::OpenFileOptions;
 
@@ -11,7 +11,7 @@ use crate::api::{
     ProcessingControls, ProcessingManifest, ProcessingPreset, RenderPreviewRequest,
     RenderPreviewResult, StudyDescription,
 };
-use crate::error::BackendResult;
+use crate::error::{BackendError, BackendResult};
 use crate::export::secondary_capture::export_secondary_capture;
 use crate::preview::{PreviewImage, save_preview_png};
 use crate::processing::pipeline::process_source_image;
@@ -104,7 +104,9 @@ pub fn process_study(mut request: ProcessStudyRequest) -> BackendResult<ProcessS
     }
 
     if request.output_path.is_none() && request.preview_output.is_none() {
-        bail!("either --output or --preview-output must be set");
+        return Err(BackendError::invalid_input(
+            "either --output or --preview-output must be set",
+        ));
     }
 
     validate_processing_request(&request)?;
@@ -166,12 +168,15 @@ pub(crate) fn export_study(
     source_meta: &crate::study::source_image::SourceMetadata,
     output_path: &Path,
 ) -> BackendResult<()> {
-    export_secondary_capture(preview, source_meta, output_path)
+    Ok(export_secondary_capture(preview, source_meta, output_path)?)
 }
 
 pub fn validate_input_file(path: &Path) -> BackendResult<()> {
     if !path.exists() {
-        bail!("input file does not exist: {}", path.display());
+        return Err(BackendError::not_found(format!(
+            "input file does not exist: {}",
+            path.display()
+        )));
     }
     Ok(())
 }
@@ -187,17 +192,25 @@ fn validate_processing_request(request: &ProcessStudyRequest) -> BackendResult<(
     if let Some(brightness) = request.brightness
         && !(-256..=256).contains(&brightness)
     {
-        bail!("brightness must be between -256 and 256, got {brightness}");
+        return Err(BackendError::invalid_input(format!(
+            "brightness must be between -256 and 256, got {brightness}"
+        )));
     }
     if let Some(contrast) = request.contrast
         && contrast < 0.0
     {
-        bail!("contrast must be >= 0.0, got {contrast}");
+        return Err(BackendError::invalid_input(format!(
+            "contrast must be >= 0.0, got {contrast}"
+        )));
     }
     if let Some(ref palette) = request.palette {
         match palette.to_ascii_lowercase().as_str() {
             "none" | "hot" | "bone" => {}
-            _ => bail!("palette must be one of: none, hot, bone"),
+            _ => {
+                return Err(BackendError::invalid_input(
+                    "palette must be one of: none, hot, bone",
+                ));
+            }
         }
     }
     Ok(())
@@ -221,11 +234,17 @@ fn resolve_processing(request: &ProcessStudyRequest) -> BackendResult<ResolvedPr
         .to_ascii_lowercase();
 
     if !contrast.is_finite() || contrast < 0.0 {
-        bail!("contrast must be a finite value greater than or equal to 0");
+        return Err(BackendError::invalid_input(
+            "contrast must be a finite value greater than or equal to 0",
+        ));
     }
     match palette.as_str() {
         "none" | "hot" | "bone" => {}
-        _ => bail!("palette must be one of: none, hot, bone"),
+        _ => {
+            return Err(BackendError::invalid_input(
+                "palette must be one of: none, hot, bone",
+            ));
+        }
     }
     validate_pipeline(request.pipeline.as_deref())?;
 

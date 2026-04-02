@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::ToothAnalysis;
+use crate::error::BackendError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -94,6 +95,45 @@ pub struct StudyRecord {
     pub measurement_scale: Option<MeasurementScale>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum JobKind {
+    RenderStudy,
+    ProcessStudy,
+    AnalyzeStudy,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum JobState {
+    Queued,
+    Running,
+    Cancelling,
+    Completed,
+    Failed,
+    Cancelled,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JobProgress {
+    pub percent: u8,
+    pub stage: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StartedJob {
+    pub job_id: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JobCommand {
+    pub job_id: String,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DescribeStudyCommand {
@@ -174,6 +214,30 @@ pub struct AnalyzeStudyCommandResult {
     pub analysis: ToothAnalysis,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "kind", content = "payload", rename_all = "camelCase")]
+pub enum JobResult {
+    RenderStudy(RenderStudyCommandResult),
+    ProcessStudy(ProcessStudyCommandResult),
+    AnalyzeStudy(AnalyzeStudyCommandResult),
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JobSnapshot {
+    pub job_id: String,
+    pub job_kind: JobKind,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub study_id: Option<String>,
+    pub state: JobState,
+    pub progress: JobProgress,
+    pub from_cache: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result: Option<JobResult>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<BackendError>,
+}
+
 pub fn generated_typescript_contracts() -> String {
     String::from(
         r#"// This file is generated from `backend/src/api/contracts.rs`.
@@ -210,6 +274,45 @@ export interface MeasurementScale {
   rowSpacingMm: number;
   columnSpacingMm: number;
   source: string;
+}
+
+export type BackendErrorCode =
+  | "invalidInput"
+  | "notFound"
+  | "cancelled"
+  | "conflict"
+  | "cacheCorrupted"
+  | "internal";
+
+export interface BackendError {
+  code: BackendErrorCode;
+  message: string;
+  details: string[];
+  recoverable: boolean;
+}
+
+export type JobKind = "renderStudy" | "processStudy" | "analyzeStudy";
+
+export type JobState =
+  | "queued"
+  | "running"
+  | "cancelling"
+  | "completed"
+  | "failed"
+  | "cancelled";
+
+export interface JobProgress {
+  percent: number;
+  stage: string;
+  message: string;
+}
+
+export interface StartedJob {
+  jobId: string;
+}
+
+export interface JobCommand {
+  jobId: string;
 }
 
 export interface OpenStudyCommand {
@@ -330,6 +433,22 @@ export interface AnalyzeStudyCommandResult {
   previewPath: string;
   analysis: ToothAnalysis;
 }
+
+export type JobResult =
+  | { kind: "renderStudy"; payload: RenderStudyCommandResult }
+  | { kind: "processStudy"; payload: ProcessStudyCommandResult }
+  | { kind: "analyzeStudy"; payload: AnalyzeStudyCommandResult };
+
+export interface JobSnapshot {
+  jobId: string;
+  jobKind: JobKind;
+  studyId?: string | null;
+  state: JobState;
+  progress: JobProgress;
+  fromCache: boolean;
+  result?: JobResult | null;
+  error?: BackendError | null;
+}
 "#,
     )
 }
@@ -352,13 +471,13 @@ mod tests {
     use super::generated_typescript_contracts;
 
     #[test]
-    fn generated_contracts_include_process_command() {
+    fn generated_contracts_include_job_types() {
         let contracts = generated_typescript_contracts();
 
-        assert!(contracts.contains("export interface OpenStudyCommand {"));
         assert!(contracts.contains("export interface ProcessStudyCommand {"));
         assert!(contracts.contains("export interface AnalyzeStudyCommandResult {"));
-        assert!(contracts.contains("studyId: string;"));
-        assert!(contracts.contains("export type ProcessingPipelineStep ="));
+        assert!(contracts.contains("export interface JobSnapshot {"));
+        assert!(contracts.contains("export type JobState ="));
+        assert!(contracts.contains("export interface BackendError {"));
     }
 }

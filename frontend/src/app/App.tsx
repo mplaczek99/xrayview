@@ -1,11 +1,14 @@
 import { useEffect, useState } from "react";
 import { ProcessingTab } from "../components/processing/ProcessingTab";
 import { ViewTab } from "../components/viewer/ViewTab";
+import { JobCenter } from "../features/jobs/JobCenter";
+import { useJobs } from "../features/jobs/useJobs";
 import { workbenchActions } from "./store/workbenchStore";
 import type { ActiveTab } from "../lib/types";
 
 export function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>("view");
+  useJobs();
 
   useEffect(() => {
     void workbenchActions.ensureManifest();
@@ -37,6 +40,8 @@ export function App() {
       <main className="tab-content" role="tabpanel">
         {activeTab === "view" ? <ViewTab /> : <ProcessingTab />}
       </main>
+
+      <JobCenter />
     </div>
   );
 }

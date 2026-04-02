@@ -82,6 +82,113 @@ button {
   overflow-y: auto;
 }
 
+/* ── Job Center ─────────────────────────────────── */
+
+.job-center {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-5) var(--space-4);
+  border-top: 1px solid rgba(126, 148, 178, 0.12);
+  background: rgba(7, 11, 16, 0.92);
+  backdrop-filter: blur(10px);
+}
+
+.job-center__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.job-center__eyebrow {
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.job-center__title {
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.job-center__list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--space-3);
+}
+
+.job-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid rgba(126, 148, 178, 0.12);
+  border-radius: var(--radius-md);
+  background: rgba(15, 21, 29, 0.88);
+}
+
+.job-card__row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.job-card__title {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.job-card__meta {
+  color: var(--text-dim);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.job-card__cancel {
+  padding: 6px 10px;
+  font-size: 11px;
+}
+
+.job-card__progress {
+  width: 100%;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(52, 64, 79, 0.56);
+}
+
+.job-card__progress-bar {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, rgba(0, 122, 204, 0.95), rgba(65, 201, 226, 0.92));
+  transition: width 180ms ease;
+}
+
+.job-card__progress-bar--completed {
+  background: linear-gradient(90deg, rgba(78, 201, 176, 0.94), rgba(121, 229, 160, 0.92));
+}
+
+.job-card__progress-bar--failed,
+.job-card__progress-bar--cancelled {
+  background: linear-gradient(90deg, rgba(244, 135, 113, 0.96), rgba(231, 84, 128, 0.92));
+}
+
+.job-card__progress-bar--cancelling {
+  background: linear-gradient(90deg, rgba(248, 198, 78, 0.95), rgba(255, 160, 80, 0.92));
+}
+
+.job-card__message {
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 /* ── View Panel ──────────────────────────────────── */
 
 .view-panel {
@@ -474,6 +581,9 @@ button {
 .run-status {
   padding: 10px 14px;
   border-radius: var(--radius-sm);
+  border: 1px solid rgba(126, 148, 178, 0.16);
+  background: rgba(17, 24, 33, 0.72);
+  color: var(--text-soft);
   font-size: 12px;
   word-break: break-word;
 }
@@ -624,6 +734,10 @@ button {
 
 @media (max-width: 768px) {
   .tab-content {
+    padding: var(--space-3);
+  }
+
+  .job-center {
     padding: var(--space-3);
   }
 

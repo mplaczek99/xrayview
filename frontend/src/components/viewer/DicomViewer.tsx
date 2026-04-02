@@ -1,3 +1,5 @@
+import { useEffect, useState } from "react";
+
 import type { ToothGeometry } from "../../lib/generated/contracts";
 
 interface DicomViewerProps {
@@ -17,15 +19,22 @@ export function DicomViewer({
   emptyTitle = "No image loaded",
   emptyDescription = "Open a DICOM file to view it here.",
 }: DicomViewerProps) {
+  const [loadFailed, setLoadFailed] = useState(false);
+
+  useEffect(() => {
+    setLoadFailed(false);
+  }, [previewUrl]);
+
   return (
     <div className="viewer-stage">
-      {previewUrl ? (
+      {previewUrl && !loadFailed ? (
         <div className="viewer-stage__media">
           <img
             className="viewer-stage__image"
             src={previewUrl}
             alt="DICOM preview"
             draggable={false}
+            onError={() => setLoadFailed(true)}
           />
           {overlay && imageSize && (
             <svg
@@ -60,8 +69,14 @@ export function DicomViewer({
         </div>
       ) : (
         <div className="viewer-placeholder">
-          <div className="viewer-placeholder__title">{emptyTitle}</div>
-          <p className="viewer-placeholder__copy">{emptyDescription}</p>
+          <div className="viewer-placeholder__title">
+            {loadFailed ? "Preview Unavailable" : emptyTitle}
+          </div>
+          <p className="viewer-placeholder__copy">
+            {loadFailed
+              ? "The rendered preview file could not be loaded by the desktop webview."
+              : emptyDescription}
+          </p>
         </div>
       )}
     </div>

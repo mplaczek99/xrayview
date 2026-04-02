@@ -11,7 +11,7 @@ import type {
   ProcessResult,
   RuntimeMode,
 } from "../../lib/types";
-import type { BusyAction, ProcessingRunState } from "../jobs/model";
+import type { JobSnapshot, ProcessingRunState } from "../jobs/model";
 
 export const DEFAULT_PIPELINE: ProcessingPipelineStep[] = [
   "grayscale",
@@ -44,6 +44,8 @@ export interface WorkbenchStudy {
   processing: ProcessingSession;
   runtime: RuntimeMode;
   status: string;
+  renderJobId: string | null;
+  analysisJobId: string | null;
 }
 
 export interface WorkbenchState {
@@ -52,7 +54,9 @@ export interface WorkbenchState {
   activeStudyId: string | null;
   studies: Record<string, WorkbenchStudy>;
   studyOrder: string[];
-  busyAction: BusyAction;
+  jobs: Record<string, JobSnapshot>;
+  jobOrder: string[];
+  isOpeningStudy: boolean;
   workbenchStatus: string;
 }
 
@@ -87,22 +91,23 @@ export function defaultControlsForManifest(
 
 export function createWorkbenchStudy(
   study: OpenedStudy,
-  preview: PreviewResult,
   defaultControls: ProcessingControls,
 ): WorkbenchStudy {
   return {
     studyId: study.studyId,
     inputPath: study.inputPath,
     inputName: study.inputName,
-    measurementScale: preview.measurementScale ?? study.measurementScale,
-    originalPreview: preview,
+    measurementScale: study.measurementScale,
+    originalPreview: null,
     analysis: null,
     processing: {
       form: createProcessingForm(defaultControls),
       output: null,
       runStatus: { state: "idle" },
     },
-    runtime: preview.runtime,
-    status: "Study loaded. Click Measure tooth to run backend analysis.",
+    runtime: study.runtime,
+    status: "Study opened. Rendering source preview...",
+    renderJobId: null,
+    analysisJobId: null,
   };
 }

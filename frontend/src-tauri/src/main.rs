@@ -2,42 +2,17 @@
 
 use rfd::FileDialog;
 use std::env;
-use std::fs;
 use std::path::PathBuf;
-use std::sync::Mutex;
-use tauri::Manager;
-use tempfile::Builder;
+use std::sync::Arc;
+use tauri::{AppHandle, Emitter, Manager};
 use xrayview_backend::api::{
-    AnalyzeStudyCommand, AnalyzeStudyCommandResult, OpenStudyCommand, OpenStudyCommandResult,
-    ProcessStudyCommand, ProcessStudyCommandResult, ProcessingManifest, RenderStudyCommand,
-    RenderStudyCommandResult,
+    AnalyzeStudyCommand, JobCommand, JobSnapshot, JobState, OpenStudyCommand,
+    OpenStudyCommandResult, ProcessStudyCommand, ProcessingManifest, RenderStudyCommand,
+    StartedJob,
 };
 use xrayview_backend::app::processing_manifest;
 use xrayview_backend::app::state::AppState as BackendAppState;
-use xrayview_backend::error::BackendResult;
-
-/// Temp preview and export files stay available for the lifetime of the app so
-/// the frontend can keep rendering them through Tauri's asset protocol.
-#[derive(Default)]
-struct TempFileState {
-    paths: Mutex<Vec<PathBuf>>,
-}
-
-impl TempFileState {
-    fn track(&self, path: PathBuf) {
-        if let Ok(mut paths) = self.paths.lock() {
-            paths.push(path);
-        }
-    }
-
-    fn cleanup_all(&self) {
-        if let Ok(mut paths) = self.paths.lock() {
-            for path in paths.drain(..) {
-                let _ = fs::remove_file(&path);
-            }
-        }
-    }
-}
+use xrayview_backend::error::{BackendError, BackendResult};
 
 #[tauri::command]
 fn pick_dicom_file() -> Option<String> {
@@ -66,92 +41,83 @@ fn get_processing_manifest() -> ProcessingManifest {
 async fn open_study(
     backend_state: tauri::State<'_, BackendAppState>,
     request: OpenStudyCommand,
-) -> Result<OpenStudyCommandResult, String> {
+) -> Result<OpenStudyCommandResult, BackendError> {
     let backend_state = backend_state.inner().clone();
 
-    run_blocking(move || {
-        backend_state
-            .open_study(request.input_path)
-            .map(|study| OpenStudyCommandResult { study })
-    })
-    .await
+    run_blocking(move || backend_state.open_study_command(request.input_path)).await
 }
 
 #[tauri::command]
-async fn render_study(
+fn start_render_job(
     app: tauri::AppHandle,
     backend_state: tauri::State<'_, BackendAppState>,
     request: RenderStudyCommand,
-) -> Result<RenderStudyCommandResult, String> {
-    let preview_path = create_temp_file(".png")?;
-    track_temp_file(&app, &preview_path);
-    let backend_state = backend_state.inner().clone();
-
-    run_blocking(move || backend_state.render_study(request, preview_path)).await
+) -> Result<StartedJob, BackendError> {
+    let publish = job_publisher(app);
+    backend_state.inner().clone().start_render_job(request, publish)
 }
 
 #[tauri::command]
-async fn process_study(
+fn start_process_job(
     app: tauri::AppHandle,
     backend_state: tauri::State<'_, BackendAppState>,
     request: ProcessStudyCommand,
-) -> Result<ProcessStudyCommandResult, String> {
-    let preview_path = create_temp_file(".png")?;
-    track_temp_file(&app, &preview_path);
-
-    let dicom_path = match request.output_path.clone() {
-        Some(path) => path,
-        None => {
-            let temp_output = create_temp_file(".dcm")?;
-            track_temp_file(&app, &temp_output);
-            temp_output
-        }
-    };
-    let backend_state = backend_state.inner().clone();
-
-    run_blocking(move || backend_state.process_study(request, preview_path, dicom_path)).await
+) -> Result<StartedJob, BackendError> {
+    let publish = job_publisher(app);
+    backend_state.inner().clone().start_process_job(request, publish)
 }
 
 #[tauri::command]
-async fn analyze_study(
+fn start_analyze_job(
     app: tauri::AppHandle,
     backend_state: tauri::State<'_, BackendAppState>,
     request: AnalyzeStudyCommand,
-) -> Result<AnalyzeStudyCommandResult, String> {
-    let preview_path = create_temp_file(".png")?;
-    track_temp_file(&app, &preview_path);
-    let backend_state = backend_state.inner().clone();
-
-    run_blocking(move || backend_state.analyze_study(request, preview_path)).await
+) -> Result<StartedJob, BackendError> {
+    let publish = job_publisher(app);
+    backend_state.inner().clone().start_analyze_job(request, publish)
 }
 
-async fn run_blocking<T, F>(work: F) -> Result<T, String>
+#[tauri::command]
+fn get_job(
+    backend_state: tauri::State<'_, BackendAppState>,
+    request: JobCommand,
+) -> Result<JobSnapshot, BackendError> {
+    backend_state.inner().clone().get_job(request)
+}
+
+#[tauri::command]
+fn cancel_job(
+    app: tauri::AppHandle,
+    backend_state: tauri::State<'_, BackendAppState>,
+    request: JobCommand,
+) -> Result<JobSnapshot, BackendError> {
+    let snapshot = backend_state.inner().clone().cancel_job(request)?;
+    emit_job_snapshot(&app, &snapshot);
+    Ok(snapshot)
+}
+
+async fn run_blocking<T, F>(work: F) -> Result<T, BackendError>
 where
     T: Send + 'static,
     F: FnOnce() -> BackendResult<T> + Send + 'static,
 {
     tauri::async_runtime::spawn_blocking(work)
         .await
-        .map_err(|error| format!("desktop worker failed: {error}"))?
-        .map_err(|error| error.to_string())
+        .map_err(|error| BackendError::internal(format!("desktop worker failed: {error}")))?
 }
 
-fn create_temp_file(suffix: &str) -> Result<PathBuf, String> {
-    let temp_file = Builder::new()
-        .prefix("xrayview-frontend-")
-        .suffix(suffix)
-        .tempfile()
-        .map_err(|error| format!("failed to create temporary file: {error}"))?;
-
-    let (_file, path) = temp_file
-        .keep()
-        .map_err(|error| format!("failed to persist temporary file: {error}"))?;
-
-    Ok(path)
+fn job_publisher(app: AppHandle) -> Arc<dyn Fn(JobSnapshot) + Send + Sync + 'static> {
+    Arc::new(move |snapshot| emit_job_snapshot(&app, &snapshot))
 }
 
-fn track_temp_file(app: &tauri::AppHandle, path: &PathBuf) {
-    app.state::<TempFileState>().track(path.clone());
+fn emit_job_snapshot(app: &AppHandle, snapshot: &JobSnapshot) {
+    let event = match snapshot.state {
+        JobState::Completed => "job:completed",
+        JobState::Failed => "job:failed",
+        JobState::Cancelled => "job:cancelled",
+        JobState::Queued | JobState::Running | JobState::Cancelling => "job:progress",
+    };
+    let _ = app.emit(event, snapshot);
 }
 
 fn path_to_string(path: PathBuf) -> String {
@@ -180,9 +146,8 @@ fn main() {
     configure_linux_webkit_environment();
     configure_linux_application_identity();
 
-    let app = tauri::Builder::default()
+    tauri::Builder::default()
         .manage(BackendAppState::default())
-        .manage(TempFileState::default())
         .setup(|app| {
             #[cfg(target_os = "linux")]
             {
@@ -198,19 +163,13 @@ fn main() {
             pick_save_dicom_path,
             get_processing_manifest,
             open_study,
-            render_study,
-            process_study,
-            analyze_study,
+            start_render_job,
+            start_process_job,
+            start_analyze_job,
+            get_job,
+            cancel_job,
         ])
         .build(tauri::generate_context!())
-        .expect("error while building tauri application");
-
-    app.run(|app_handle, event| {
-        if matches!(
-            event,
-            tauri::RunEvent::Exit | tauri::RunEvent::ExitRequested { .. }
-        ) {
-            app_handle.state::<TempFileState>().cleanup_all();
-        }
-    });
+        .expect("error while building tauri application")
+        .run(|_, _| {});
 }

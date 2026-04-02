@@ -34,6 +34,45 @@ export interface MeasurementScale {
   source: string;
 }
 
+export type BackendErrorCode =
+  | "invalidInput"
+  | "notFound"
+  | "cancelled"
+  | "conflict"
+  | "cacheCorrupted"
+  | "internal";
+
+export interface BackendError {
+  code: BackendErrorCode;
+  message: string;
+  details: string[];
+  recoverable: boolean;
+}
+
+export type JobKind = "renderStudy" | "processStudy" | "analyzeStudy";
+
+export type JobState =
+  | "queued"
+  | "running"
+  | "cancelling"
+  | "completed"
+  | "failed"
+  | "cancelled";
+
+export interface JobProgress {
+  percent: number;
+  stage: string;
+  message: string;
+}
+
+export interface StartedJob {
+  jobId: string;
+}
+
+export interface JobCommand {
+  jobId: string;
+}
+
 export interface OpenStudyCommand {
   inputPath: string;
 }
@@ -151,4 +190,20 @@ export interface AnalyzeStudyCommandResult {
   studyId: string;
   previewPath: string;
   analysis: ToothAnalysis;
+}
+
+export type JobResult =
+  | { kind: "renderStudy"; payload: RenderStudyCommandResult }
+  | { kind: "processStudy"; payload: ProcessStudyCommandResult }
+  | { kind: "analyzeStudy"; payload: AnalyzeStudyCommandResult };
+
+export interface JobSnapshot {
+  jobId: string;
+  jobKind: JobKind;
+  studyId?: string | null;
+  state: JobState;
+  progress: JobProgress;
+  fromCache: boolean;
+  result?: JobResult | null;
+  error?: BackendError | null;
 }

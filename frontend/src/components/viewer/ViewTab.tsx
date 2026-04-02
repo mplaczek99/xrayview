@@ -3,6 +3,7 @@ import type {
   ToothMeasurementValues,
 } from "../../lib/generated/contracts";
 import { workbenchActions, useWorkbenchStore } from "../../app/store/workbenchStore";
+import { formatBackendError } from "../../lib/backend";
 import { DicomViewer } from "./DicomViewer";
 
 interface MeasurementSectionProps {
@@ -59,18 +60,21 @@ function useActiveStudy() {
 
 export function ViewTab() {
   const study = useActiveStudy();
-  const busyAction = useWorkbenchStore((state) => state.busyAction);
+  const isOpeningStudy = useWorkbenchStore((state) => state.isOpeningStudy);
+  const jobs = useWorkbenchStore((state) => state.jobs);
   const workbenchStatus = useWorkbenchStore((state) => state.workbenchStatus);
   const tooth = study?.analysis?.tooth ?? null;
   const warnings = study?.analysis?.warnings ?? [];
+  const analysisJob = study?.analysisJobId ? jobs[study.analysisJobId] ?? null : null;
   const measurementScale: MeasurementScale | null =
     study?.analysis?.calibration.measurementScale ??
     study?.measurementScale ??
     study?.originalPreview?.measurementScale ??
     null;
-  const busy = busyAction !== null;
-  const isOpening = busyAction === "opening";
-  const isMeasuring = busyAction === "measuring";
+  const isMeasuring =
+    analysisJob?.state === "queued" ||
+    analysisJob?.state === "running" ||
+    analysisJob?.state === "cancelling";
   const previewUrl = study?.originalPreview?.previewUrl ?? null;
   const status = study?.status ?? workbenchStatus;
   const inputName = study?.inputName ?? "No study loaded";
@@ -82,18 +86,20 @@ export function ViewTab() {
           className="button button--primary"
           type="button"
           onClick={() => void workbenchActions.openStudy()}
-          disabled={busy}
+          disabled={isOpeningStudy}
         >
-          {isOpening ? "Loading..." : "Open DICOM"}
+          {isOpeningStudy ? "Opening..." : "Open DICOM"}
         </button>
         <button
           className="button button--ghost"
           type="button"
           onClick={() => void workbenchActions.measureActiveStudy()}
-          disabled={!study || busy}
+          disabled={!study || isMeasuring}
         >
           {isMeasuring
-            ? "Measuring..."
+            ? analysisJob?.state === "cancelling"
+              ? "Cancelling..."
+              : "Measuring..."
             : tooth
               ? "Re-run measurement"
               : "Measure tooth"}
@@ -186,6 +192,15 @@ export function ViewTab() {
               </div>
             </section>
           ) : null}
+
+          {analysisJob?.state === "failed" && (
+            <section className="measurement-card">
+              <div className="measurement-card__eyebrow">Job Error</div>
+              <p className="measurement-card__copy">
+                {formatBackendError(analysisJob.error, "Measurement failed.")}
+              </p>
+            </section>
+          )}
         </aside>
       </div>
     </div>

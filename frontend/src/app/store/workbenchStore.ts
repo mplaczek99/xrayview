@@ -1,22 +1,22 @@
 import { useSyncExternalStore } from "react";
 import {
   FALLBACK_PROCESSING_MANIFEST,
-  analyzeStudy as runBackendAnalyzeStudy,
   buildOutputName,
+  cancelJob as cancelBackendJob,
   ensureDicomExtension,
+  formatBackendError,
+  getJob,
   loadProcessingManifest,
   openStudy as openBackendStudy,
   pickDicomFile,
   pickSaveDicomPath,
-  processStudy as runBackendProcessStudy,
-  renderStudy as runBackendRenderStudy,
+  startAnalyzeStudyJob,
+  startProcessStudyJob,
+  startRenderStudyJob,
 } from "../../lib/backend";
-import type {
-  ProcessingControls,
-  ProcessingPipelineStep,
-} from "../../lib/generated/contracts";
+import type { ProcessingControls, ProcessingPipelineStep } from "../../lib/generated/contracts";
 import type { ProcessingRequest } from "../../lib/types";
-import type { ProcessingRunState } from "../../features/jobs/model";
+import type { JobSnapshot, ProcessingRunState } from "../../features/jobs/model";
 import {
   createWorkbenchStudy,
   defaultControlsForManifest,
@@ -30,26 +30,212 @@ const INITIAL_STATE: WorkbenchState = {
   activeStudyId: null,
   studies: {},
   studyOrder: [],
-  busyAction: null,
+  jobs: {},
+  jobOrder: [],
+  isOpeningStudy: false,
   workbenchStatus: "Open a DICOM study to begin.",
 };
 
 type Listener = () => void;
 
-function describeError(error: unknown, fallback: string): string {
-  if (error instanceof Error && error.message.trim()) {
-    return error.message;
+function nextJobOrder(currentOrder: readonly string[], jobId: string): string[] {
+  return [jobId, ...currentOrder.filter((entry) => entry !== jobId)];
+}
+
+function activeJob(jobId: string | null, jobs: WorkbenchState["jobs"]): JobSnapshot | null {
+  if (!jobId) {
+    return null;
   }
-  if (typeof error === "string" && error.trim()) {
-    return error;
+
+  return jobs[jobId] ?? null;
+}
+
+function isPendingJob(job: JobSnapshot | null): boolean {
+  return job !== null && ["queued", "running", "cancelling"].includes(job.state);
+}
+
+function applyRenderJob(study: WorkbenchStudy, job: JobSnapshot): WorkbenchStudy {
+  switch (job.state) {
+    case "queued":
+    case "running":
+    case "cancelling":
+      return {
+        ...study,
+        renderJobId: job.jobId,
+        status: job.progress.message,
+      };
+    case "completed":
+      if (job.result?.kind !== "renderStudy") {
+        return study;
+      }
+
+      return {
+        ...study,
+        renderJobId: job.jobId,
+        originalPreview: job.result.payload,
+        measurementScale: job.result.payload.measurementScale ?? study.measurementScale,
+        status: job.fromCache
+          ? "Preview ready from cache."
+          : "Study loaded. Click Measure tooth to run backend analysis.",
+      };
+    case "failed":
+      return {
+        ...study,
+        renderJobId: job.jobId,
+        status: formatBackendError(job.error, "Preview loading failed."),
+      };
+    case "cancelled":
+      return {
+        ...study,
+        renderJobId: job.jobId,
+        status: "Preview rendering cancelled.",
+      };
   }
-  if (error && typeof error === "object" && "message" in error) {
-    const message = error.message;
-    if (typeof message === "string" && message.trim()) {
-      return message;
+}
+
+function applyAnalyzeJob(study: WorkbenchStudy, job: JobSnapshot): WorkbenchStudy {
+  switch (job.state) {
+    case "queued":
+    case "running":
+    case "cancelling":
+      return {
+        ...study,
+        analysisJobId: job.jobId,
+        status: job.progress.message,
+      };
+    case "completed": {
+      if (job.result?.kind !== "analyzeStudy") {
+        return study;
+      }
+
+      const toothFound = Boolean(job.result.payload.analysis.tooth);
+      return {
+        ...study,
+        analysisJobId: job.jobId,
+        originalPreview: {
+          ...job.result.payload,
+          measurementScale:
+            job.result.payload.analysis.calibration.measurementScale ??
+            study.originalPreview?.measurementScale ??
+            study.measurementScale,
+        },
+        measurementScale:
+          job.result.payload.analysis.calibration.measurementScale ?? study.measurementScale,
+        analysis: job.result.payload.analysis,
+        status: toothFound
+          ? job.fromCache
+            ? "Tooth measurement loaded from cache."
+            : "Tooth measurement complete."
+          : "Measurement completed, but the backend could not isolate a tooth candidate.",
+      };
     }
+    case "failed":
+      return {
+        ...study,
+        analysisJobId: job.jobId,
+        status: formatBackendError(job.error, "Tooth measurement failed."),
+      };
+    case "cancelled":
+      return {
+        ...study,
+        analysisJobId: job.jobId,
+        status: "Tooth measurement cancelled.",
+      };
   }
-  return fallback;
+}
+
+function applyProcessJob(study: WorkbenchStudy, job: JobSnapshot): WorkbenchStudy {
+  switch (job.state) {
+    case "queued":
+    case "running":
+      return {
+        ...study,
+        status: job.progress.message,
+        processing: {
+          ...study.processing,
+          runStatus: {
+            state: "running",
+            jobId: job.jobId,
+            progress: job.progress,
+          },
+        },
+      };
+    case "cancelling":
+      return {
+        ...study,
+        status: job.progress.message,
+        processing: {
+          ...study.processing,
+          runStatus: {
+            state: "cancelling",
+            jobId: job.jobId,
+            progress: job.progress,
+          },
+        },
+      };
+    case "completed":
+      if (job.result?.kind !== "processStudy") {
+        return study;
+      }
+
+      return {
+        ...study,
+        measurementScale: job.result.payload.measurementScale ?? study.measurementScale,
+        status: job.fromCache ? "Processing loaded from cache." : "Processing complete.",
+        processing: {
+          ...study.processing,
+          output: job.result.payload,
+          runStatus: {
+            state: "success",
+            jobId: job.jobId,
+            outputPath: job.result.payload.dicomPath,
+            fromCache: job.fromCache,
+          },
+        },
+      };
+    case "failed":
+      return {
+        ...study,
+        status: formatBackendError(job.error, "Processing failed."),
+        processing: {
+          ...study.processing,
+          runStatus: {
+            state: "error",
+            jobId: job.jobId,
+            error:
+              job.error ?? {
+                code: "internal",
+                message: "Processing failed.",
+                details: [],
+                recoverable: false,
+              },
+          },
+        },
+      };
+    case "cancelled":
+      return {
+        ...study,
+        status: "Processing cancelled.",
+        processing: {
+          ...study.processing,
+          runStatus: {
+            state: "cancelled",
+            jobId: job.jobId,
+          },
+        },
+      };
+  }
+}
+
+function applyJobToStudy(study: WorkbenchStudy, job: JobSnapshot): WorkbenchStudy {
+  switch (job.jobKind) {
+    case "renderStudy":
+      return applyRenderJob(study, job);
+    case "analyzeStudy":
+      return applyAnalyzeJob(study, job);
+    case "processStudy":
+      return applyProcessJob(study, job);
+  }
 }
 
 class WorkbenchStore {
@@ -96,7 +282,7 @@ class WorkbenchStore {
   }
 
   async openStudy() {
-    if (this.state.busyAction !== null) {
+    if (this.state.isOpeningStudy) {
       return;
     }
 
@@ -107,22 +293,21 @@ class WorkbenchStore {
 
     this.setState((current) => ({
       ...current,
-      busyAction: "opening",
-      workbenchStatus: "Loading source preview...",
+      isOpeningStudy: true,
+      workbenchStatus: "Opening study...",
     }));
 
     try {
       const study = await openBackendStudy(selectedPath);
-      const preview = await runBackendRenderStudy(study.studyId);
       const workbenchStudy = createWorkbenchStudy(
         study,
-        preview,
         defaultControlsForManifest(this.state.manifest),
       );
 
       this.setState((current) => ({
         ...current,
         activeStudyId: study.studyId,
+        isOpeningStudy: false,
         studies: {
           ...current.studies,
           [study.studyId]: workbenchStudy,
@@ -131,65 +316,47 @@ class WorkbenchStore {
           study.studyId,
           ...current.studyOrder.filter((entry) => entry !== study.studyId),
         ],
-        busyAction: null,
         workbenchStatus: workbenchStudy.status,
       }));
+
+      const started = await startRenderStudyJob(study.studyId);
+      this.setStudyState(study.studyId, (current) => ({
+        ...current,
+        renderJobId: started.jobId,
+        status: "Queued source preview render...",
+      }));
+      await this.syncJob(started.jobId);
     } catch (error) {
       this.setState((current) => ({
         ...current,
-        busyAction: null,
-        workbenchStatus: describeError(error, "Preview loading failed."),
+        isOpeningStudy: false,
+        workbenchStatus: formatBackendError(error, "Opening the study failed."),
       }));
     }
   }
 
   async measureActiveStudy() {
     const study = this.activeStudy();
-    if (!study || this.state.busyAction !== null) {
+    if (!study) {
       return;
     }
 
-    this.setStudyState(study.studyId, (current) => ({
-      ...current,
-      status: "Running backend tooth measurement...",
-    }));
-    this.setState((current) => ({
-      ...current,
-      busyAction: "measuring",
-    }));
+    if (isPendingJob(activeJob(study.analysisJobId, this.state.jobs))) {
+      return;
+    }
 
     try {
-      const result = await runBackendAnalyzeStudy(study.studyId);
-      const toothFound = Boolean(result.analysis.tooth);
-
-      this.setStudyState(result.studyId, (current) => ({
+      const started = await startAnalyzeStudyJob(study.studyId);
+      this.setStudyState(study.studyId, (current) => ({
         ...current,
-        originalPreview: {
-          studyId: result.studyId,
-          previewUrl: result.previewUrl,
-          measurementScale:
-            result.analysis.calibration.measurementScale ??
-            current.originalPreview?.measurementScale ??
-            current.measurementScale,
-          runtime: result.runtime,
-        },
-        measurementScale:
-          result.analysis.calibration.measurementScale ?? current.measurementScale,
-        analysis: result.analysis,
-        runtime: result.runtime,
-        status: toothFound
-          ? "Tooth measurement complete."
-          : "Measurement completed, but the backend could not isolate a tooth candidate.",
+        analysisJobId: started.jobId,
+        status: "Queued tooth measurement...",
       }));
+      await this.syncJob(started.jobId);
     } catch (error) {
       this.setStudyState(study.studyId, (current) => ({
         ...current,
-        status: describeError(error, "Tooth measurement failed."),
-      }));
-    } finally {
-      this.setState((current) => ({
-        ...current,
-        busyAction: null,
+        status: formatBackendError(error, "Tooth measurement failed."),
       }));
     }
   }
@@ -268,7 +435,7 @@ class WorkbenchStore {
 
   async pickProcessingOutputPath() {
     const study = this.activeStudy();
-    if (!study || this.state.busyAction !== null) {
+    if (!study) {
       return;
     }
 
@@ -282,57 +449,90 @@ class WorkbenchStore {
 
   async runActiveStudyProcessing(request: ProcessingRequest) {
     const study = this.activeStudy();
-    if (!study || this.state.busyAction !== null) {
+    if (!study) {
       return;
     }
 
-    this.setState((current) => ({
-      ...current,
-      busyAction: "processing",
-    }));
-    this.setStudyState(study.studyId, (current) => ({
-      ...current,
-      status: "Running backend processing...",
-      processing: {
-        ...current.processing,
-        runStatus: { state: "running" },
-      },
-    }));
+    if (
+      study.processing.runStatus.state === "running" ||
+      study.processing.runStatus.state === "cancelling"
+    ) {
+      return;
+    }
 
     try {
-      const result = await runBackendProcessStudy(study.studyId, request);
-      this.setStudyState(result.studyId, (current) => ({
+      const started = await startProcessStudyJob(study.studyId, request);
+      this.setStudyState(study.studyId, (current) => ({
         ...current,
-        measurementScale: result.measurementScale ?? current.measurementScale,
-        runtime: result.runtime,
-        status: "Processing complete.",
+        status: "Queued processing job...",
         processing: {
           ...current.processing,
-          output: result,
           runStatus: {
-            state: "success",
-            outputPath: result.dicomPath,
+            state: "running",
+            jobId: started.jobId,
+            progress: {
+              percent: 0,
+              stage: "queued",
+              message: "Queued processing job...",
+            },
           },
         },
       }));
+      await this.syncJob(started.jobId);
     } catch (error) {
       this.setStudyState(study.studyId, (current) => ({
         ...current,
-        status: describeError(error, "Processing failed."),
+        status: formatBackendError(error, "Processing failed."),
         processing: {
           ...current.processing,
           runStatus: {
             state: "error",
-            message: describeError(error, "Processing failed."),
+            jobId: "local-error",
+            error: {
+              code: "internal",
+              message: formatBackendError(error, "Processing failed."),
+              details: [],
+              recoverable: false,
+            },
           },
         },
       }));
-    } finally {
+    }
+  }
+
+  async cancelJob(jobId: string) {
+    try {
+      const snapshot = await cancelBackendJob(jobId);
+      this.receiveJobUpdate(snapshot);
+    } catch (error) {
       this.setState((current) => ({
         ...current,
-        busyAction: null,
+        workbenchStatus: formatBackendError(error, "Cancelling the job failed."),
       }));
     }
+  }
+
+  receiveJobUpdate(job: JobSnapshot) {
+    this.setState((current) => {
+      const jobs = {
+        ...current.jobs,
+        [job.jobId]: job,
+      };
+      const studies = { ...current.studies };
+      if (job.studyId && studies[job.studyId]) {
+        studies[job.studyId] = applyJobToStudy(studies[job.studyId], job);
+      }
+
+      const activeStudy = current.activeStudyId ? studies[current.activeStudyId] : null;
+
+      return {
+        ...current,
+        jobs,
+        studies,
+        jobOrder: nextJobOrder(current.jobOrder, job.jobId),
+        workbenchStatus: activeStudy?.status ?? current.workbenchStatus,
+      };
+    });
   }
 
   private activeStudy(): WorkbenchStudy | null {
@@ -341,6 +541,15 @@ class WorkbenchStore {
     }
 
     return this.state.studies[this.state.activeStudyId] ?? null;
+  }
+
+  private async syncJob(jobId: string) {
+    try {
+      const snapshot = await getJob(jobId);
+      this.receiveJobUpdate(snapshot);
+    } catch {
+      // Event listeners will still reconcile later if the job already emitted.
+    }
   }
 
   private setStudyState(
@@ -353,12 +562,18 @@ class WorkbenchStore {
         return current;
       }
 
+      const studies = {
+        ...current.studies,
+        [studyId]: updater(study),
+      };
+
       return {
         ...current,
-        studies: {
-          ...current.studies,
-          [studyId]: updater(study),
-        },
+        studies,
+        workbenchStatus:
+          current.activeStudyId === studyId
+            ? studies[studyId]?.status ?? current.workbenchStatus
+            : current.workbenchStatus,
       };
     });
   }
