@@ -117,6 +117,7 @@ struct ComponentCandidate {
     strict: bool,
 }
 
+#[allow(dead_code)] // Compatibility wrapper for preview-based tests during the pipeline transition.
 pub fn analyze_preview(
     preview: &PreviewImage,
     measurement_scale: Option<MeasurementScale>,
@@ -125,10 +126,33 @@ pub fn analyze_preview(
         bail!("tooth analysis currently requires an 8-bit grayscale preview");
     }
 
-    let width = preview.width;
-    let height = preview.height;
+    analyze_grayscale_pixels(
+        preview.width,
+        preview.height,
+        &preview.pixels,
+        measurement_scale,
+    )
+}
+
+pub fn analyze_grayscale_pixels(
+    width: u32,
+    height: u32,
+    pixels: &[u8],
+    measurement_scale: Option<MeasurementScale>,
+) -> Result<ToothAnalysis> {
+    let expected_len = width as usize * height as usize;
+    if pixels.len() != expected_len {
+        bail!(
+            "grayscale analysis expects {} pixels for dimensions {}x{}, got {}",
+            expected_len,
+            width,
+            height,
+            pixels.len()
+        );
+    }
+
     let search = default_search_region(width, height);
-    let normalized = normalize_pixels(&preview.pixels);
+    let normalized = normalize_pixels(pixels);
     let normalized_image = GrayImage::from_raw(width, height, normalized.clone())
         .context("construct normalized grayscale preview")?;
     let small_blur = image::imageops::blur(&normalized_image, 1.4);

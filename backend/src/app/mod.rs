@@ -4,21 +4,21 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, bail};
 use dicom_dictionary_std::tags;
-use dicom_object::{DicomAttribute, DicomObject, OpenFileOptions};
-use image::DynamicImage;
+use dicom_object::OpenFileOptions;
 
 use crate::api::{
-    AnalyzeStudyRequest, AnalyzeStudyResult, MeasurementScale, PaletteName, ProcessStudyRequest,
-    ProcessStudyResult, ProcessingControls, ProcessingManifest, ProcessingPreset,
-    RenderPreviewRequest, RenderPreviewResult, StudyDescription,
+    AnalyzeStudyRequest, AnalyzeStudyResult, PaletteName, ProcessStudyRequest, ProcessStudyResult,
+    ProcessingControls, ProcessingManifest, ProcessingPreset, RenderPreviewRequest,
+    RenderPreviewResult, StudyDescription,
 };
-use crate::compare::combine_comparison;
 use crate::error::BackendResult;
-use crate::palette::apply_named_palette;
-use crate::preview::{load_dicom, save_preview_png};
-use crate::processing::{GrayscaleControls, process_grayscale_pixels, validate_pipeline};
-use crate::save::{SourceMetadata, save_dicom};
-use crate::tooth_measurement::analyze_preview;
+use crate::export::secondary_capture::export_secondary_capture;
+use crate::preview::{PreviewImage, save_preview_png};
+use crate::processing::pipeline::process_source_image;
+use crate::processing::{GrayscaleControls, validate_pipeline};
+use crate::render::render_plan::{RenderPlan, render_source_image};
+use crate::study::source_image::{load_source_study, measurement_scale_from_obj};
+use crate::tooth_measurement::analyze_grayscale_pixels;
 
 const DEFAULT_PRESET_ID: &str = "default";
 
@@ -84,14 +84,15 @@ pub fn describe_study(path: &Path) -> BackendResult<StudyDescription> {
 pub fn render_preview(request: RenderPreviewRequest) -> BackendResult<RenderPreviewResult> {
     validate_input_file(&request.input_path)?;
 
-    let (preview, source_dataset) = load_dicom(&request.input_path)?;
+    let source = load_source_study(&request.input_path)?;
+    let preview = render_source_image(&source.image, &RenderPlan::default());
     save_preview_png(&request.preview_output, &preview)?;
 
     Ok(RenderPreviewResult {
-        loaded_width: preview.width,
-        loaded_height: preview.height,
+        loaded_width: source.image.width,
+        loaded_height: source.image.height,
         preview_output: request.preview_output,
-        measurement_scale: measurement_scale_from_obj(&source_dataset),
+        measurement_scale: source.measurement_scale,
     })
 }
 
@@ -108,56 +109,29 @@ pub fn process_study(mut request: ProcessStudyRequest) -> BackendResult<ProcessS
 
     validate_processing_request(&request)?;
     let resolved = resolve_processing(&request)?;
-    let (mut preview, source_dataset) = load_dicom(&request.input_path)?;
-    let loaded_width = preview.width;
-    let loaded_height = preview.height;
-    let measurement_scale = measurement_scale_from_obj(&source_dataset);
-
-    // Extract the lightweight metadata we need for save_dicom, then drop the
-    // heavy DefaultDicomObject (which holds the full pixel buffer) to free
-    // 8-16 MB before pixel processing begins.
-    let source_meta = if request.output_path.is_some() {
-        Some(SourceMetadata::extract(&source_dataset))
-    } else {
-        None
-    };
-    drop(source_dataset);
-
-    let original_preview = if resolved.compare {
-        Some(preview.clone())
-    } else {
-        None
-    };
-
-    let mut mode = process_grayscale_pixels(&mut preview.pixels, &resolved.controls)?;
-    if resolved.palette != "none" {
-        preview = apply_named_palette(&preview, &resolved.palette)?;
-        mode = format!("{mode} with {} palette", resolved.palette);
-    }
-    if let Some(ref original) = original_preview {
-        preview = combine_comparison(original, &preview)?;
-        mode = format!("comparison of grayscale and {mode}");
-    }
+    let source = load_source_study(&request.input_path)?;
+    let loaded_width = source.image.width;
+    let loaded_height = source.image.height;
+    let measurement_scale = source.measurement_scale;
+    let output = process_source_image(
+        &source.image,
+        &resolved.controls,
+        &resolved.palette,
+        resolved.compare,
+    )?;
 
     if let Some(ref preview_path) = request.preview_output {
-        save_preview_png(preview_path, &preview)?;
+        save_preview_png(preview_path, &output.preview)?;
     }
 
     if let Some(ref output_path) = request.output_path {
-        let dynamic_img = preview.into_dynamic_image();
-        export_study(
-            &dynamic_img,
-            source_meta
-                .as_ref()
-                .expect("source metadata is required when exporting a DICOM"),
-            output_path,
-        )?;
+        export_study(&output.preview, &source.metadata, output_path)?;
     }
 
     Ok(ProcessStudyResult {
         loaded_width,
         loaded_height,
-        mode,
+        mode: output.mode,
         preview_output: request.preview_output,
         output_path: request.output_path,
         measurement_scale,
@@ -167,13 +141,19 @@ pub fn process_study(mut request: ProcessStudyRequest) -> BackendResult<ProcessS
 pub fn analyze_study(request: AnalyzeStudyRequest) -> BackendResult<AnalyzeStudyResult> {
     validate_input_file(&request.input_path)?;
 
-    let (preview, source_dataset) = load_dicom(&request.input_path)?;
+    let source = load_source_study(&request.input_path)?;
+    let preview = render_source_image(&source.image, &RenderPlan::default());
 
     if let Some(ref preview_output) = request.preview_output {
         save_preview_png(preview_output, &preview)?;
     }
 
-    let analysis = analyze_preview(&preview, measurement_scale_from_obj(&source_dataset))?;
+    let analysis = analyze_grayscale_pixels(
+        preview.width,
+        preview.height,
+        &preview.pixels,
+        source.measurement_scale,
+    )?;
 
     Ok(AnalyzeStudyResult {
         preview_output: request.preview_output,
@@ -182,11 +162,11 @@ pub fn analyze_study(request: AnalyzeStudyRequest) -> BackendResult<AnalyzeStudy
 }
 
 pub(crate) fn export_study(
-    img: &DynamicImage,
-    source_meta: &SourceMetadata,
+    preview: &PreviewImage,
+    source_meta: &crate::study::source_image::SourceMetadata,
     output_path: &Path,
 ) -> BackendResult<()> {
-    save_dicom(img, source_meta, output_path)
+    export_secondary_capture(preview, source_meta, output_path)
 }
 
 pub fn validate_input_file(path: &Path) -> BackendResult<()> {
@@ -277,51 +257,6 @@ fn supported_preset_list() -> String {
         .join(", ")
 }
 
-pub fn measurement_scale_from_obj<O>(obj: &O) -> Option<MeasurementScale>
-where
-    O: DicomObject,
-{
-    // Prefer the most directly meaningful spacing tags first, then fall back
-    // to scanner-derived alternatives when the study omits PixelSpacing.
-    [
-        (tags::PIXEL_SPACING, "PixelSpacing"),
-        (tags::IMAGER_PIXEL_SPACING, "ImagerPixelSpacing"),
-        (
-            tags::NOMINAL_SCANNED_PIXEL_SPACING,
-            "NominalScannedPixelSpacing",
-        ),
-    ]
-    .into_iter()
-    .find_map(|(tag, source)| {
-        lookup_float_pair(obj, tag).and_then(|(row_spacing_mm, column_spacing_mm)| {
-            (row_spacing_mm > 0.0 && column_spacing_mm > 0.0).then_some(MeasurementScale {
-                row_spacing_mm,
-                column_spacing_mm,
-                source,
-            })
-        })
-    })
-}
-
-fn lookup_float_pair<O>(obj: &O, tag: dicom_object::Tag) -> Option<(f64, f64)>
-where
-    O: DicomObject,
-{
-    let attr = obj.attr(tag).ok()?;
-    let raw = attr.to_str().ok()?;
-    parse_float_pair(raw.as_ref())
-}
-
-fn parse_float_pair(raw: &str) -> Option<(f64, f64)> {
-    let mut parts = raw
-        .split('\\')
-        .map(str::trim)
-        .filter(|part| !part.is_empty());
-    let first = parts.next()?.parse().ok()?;
-    let second = parts.next()?.parse().ok()?;
-    Some((first, second))
-}
-
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -329,11 +264,6 @@ mod tests {
     use tempfile::TempDir;
 
     use super::*;
-
-    #[test]
-    fn parse_float_pair_accepts_dicom_pair() {
-        assert_eq!(parse_float_pair("0.4\\0.6"), Some((0.4, 0.6)));
-    }
 
     #[test]
     fn manifest_has_expected_defaults() {

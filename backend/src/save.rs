@@ -5,36 +5,17 @@ use chrono::Utc;
 use dicom_core::{DataElement, DicomValue, PrimitiveValue, Tag, VR};
 use dicom_dictionary_std::tags;
 use dicom_object::mem::InMemDicomObject;
-use dicom_object::{DefaultDicomObject, FileDicomObject, meta::FileMetaTableBuilder};
+use dicom_object::{FileDicomObject, meta::FileMetaTableBuilder};
 use image::DynamicImage;
 use uuid::Uuid;
+
+use crate::study::source_image::SourceMetadata;
 
 const SECONDARY_CAPTURE_SOP_CLASS_UID: &str = "1.2.840.10008.5.1.4.1.1.7";
 const EXPLICIT_VR_LITTLE_ENDIAN: &str = "1.2.840.10008.1.2.1";
 const IMPLEMENTATION_CLASS_UID: &str = "2.25.302043790172249692526321623266752743501";
 const IMPLEMENTATION_VERSION_NAME: &str = "XRAYVIEW_1_0";
 const DEFAULT_PROCESSED_SERIES_DESCRIPTION: &str = "XRayView Processed";
-
-/// Tags to preserve from the source DICOM dataset.
-/// StudyInstanceUID is handled specially (not blindly copied).
-const PRESERVED_SOURCE_TAGS: &[Tag] = &[
-    tags::PATIENT_NAME,
-    tags::PATIENT_ID,
-    tags::PATIENT_BIRTH_DATE,
-    tags::PATIENT_SEX,
-    tags::STUDY_ID,
-    tags::STUDY_DATE,
-    tags::STUDY_TIME,
-    tags::ACCESSION_NUMBER,
-    tags::STUDY_DESCRIPTION,
-    tags::REFERRING_PHYSICIAN_NAME,
-    tags::INSTITUTION_NAME,
-    tags::PIXEL_SPACING,
-    tags::IMAGER_PIXEL_SPACING,
-    tags::NOMINAL_SCANNED_PIXEL_SPACING,
-    Tag(0x0028, 0x0A04), // PixelSpacingCalibrationType
-    Tag(0x0028, 0x0A02), // PixelSpacingCalibrationDescription
-];
 
 fn generate_uid() -> String {
     // 2.25.<uuid-as-u128> is a valid DICOM UID form and avoids maintaining a
@@ -44,37 +25,7 @@ fn generate_uid() -> String {
     format!("2.25.{value}")
 }
 
-/// Lightweight snapshot of the metadata tags needed by save_dicom.
-/// Extracting this early lets the caller drop the heavy DefaultDicomObject
-/// (which holds the full pixel buffer) before pixel processing begins.
-pub struct SourceMetadata {
-    study_instance_uid: String,
-    preserved_elements: Vec<DataElement<InMemDicomObject>>,
-}
-
-impl SourceMetadata {
-    pub fn extract(source: &DefaultDicomObject) -> Self {
-        let study_instance_uid = source
-            .element(tags::STUDY_INSTANCE_UID)
-            .ok()
-            .and_then(|e| e.to_str().ok())
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .unwrap_or_else(generate_uid);
-
-        let preserved_elements = PRESERVED_SOURCE_TAGS
-            .iter()
-            .filter_map(|&tag| source.element(tag).ok().map(|e| e.clone()))
-            .collect();
-
-        Self {
-            study_instance_uid,
-            preserved_elements,
-        }
-    }
-}
-
-pub fn save_dicom(
+pub(crate) fn save_dicom(
     img: &DynamicImage,
     source_meta: &SourceMetadata,
     output_path: &Path,
@@ -157,7 +108,7 @@ pub fn save_dicom(
         &mut file_obj,
         tags::STUDY_INSTANCE_UID,
         VR::UI,
-        &source_meta.study_instance_uid,
+        source_meta.study_instance_uid(),
     );
     put_str(
         &mut file_obj,
@@ -168,7 +119,7 @@ pub fn save_dicom(
     put_str(&mut file_obj, tags::SERIES_NUMBER, VR::IS, "999");
     put_str(&mut file_obj, tags::INSTANCE_NUMBER, VR::IS, "1");
 
-    for elem in &source_meta.preserved_elements {
+    for elem in source_meta.preserved_elements() {
         file_obj.put(elem.clone());
     }
 

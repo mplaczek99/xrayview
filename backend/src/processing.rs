@@ -1,3 +1,5 @@
+pub mod pipeline;
+
 use anyhow::{Result, bail};
 use rayon::prelude::*;
 

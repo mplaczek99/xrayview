@@ -1,7 +1,9 @@
 mod compare;
+mod export;
 mod palette;
 mod preview;
 mod processing;
+mod render;
 mod save;
 mod tooth_measurement;
 

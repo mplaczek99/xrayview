@@ -56,12 +56,7 @@ pub fn combine_comparison(left: &PreviewImage, right: &PreviewImage) -> Result<P
         }
     }
 
-    Ok(PreviewImage {
-        width: combined_width,
-        height: left.height,
-        pixels,
-        format: PreviewFormat::Rgba8,
-    })
+    Ok(PreviewImage::rgba(combined_width, left.height, pixels))
 }
 
 #[cfg(test)]

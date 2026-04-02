@@ -16,12 +16,7 @@ pub fn apply_named_palette(src: &PreviewImage, name: &str) -> Result<PreviewImag
         _ => bail!("palette must be one of: none, hot, bone"),
     };
 
-    Ok(PreviewImage {
-        width: src.width,
-        height: src.height,
-        pixels,
-        format: PreviewFormat::Rgba8,
-    })
+    Ok(PreviewImage::rgba(src.width, src.height, pixels))
 }
 
 fn apply_palette(src: &PreviewImage, color_fn: fn(u8) -> [u8; 4]) -> Vec<u8> {
