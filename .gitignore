@@ -18,5 +18,7 @@ frontend/src-tauri/target/
 # Local agent/editor/system files
 .codex
 .claude/
+AGENTS.md
+CLAUDE.md
 .DS_Store
 *.log
