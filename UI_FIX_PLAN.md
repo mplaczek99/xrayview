@@ -307,3 +307,144 @@ These are larger efforts but have the most visible impact on how the app feels.
 4. **Hide empty sidebar cards** (D3) -- Conditional rendering in `ViewTab.tsx`. Small code change, immediately declutters the sidebar.
 
 5. **Range sliders for brightness/contrast** (D8) -- Add `<input type="range">` next to the existing number inputs. Standard pattern, makes the form feel like an image editor instead of a data entry form.
+
+---
+
+## Optimal Implementation Order
+
+Organized into phases so that each phase builds a foundation for the next. Within each phase, items are independent and can be done in any order (or in parallel). The rationale: CSS-only changes first (zero risk of breaking JS logic, immediate visual payoff), then accessibility attributes (small HTML changes), then behavioral JS fixes, then component restructuring, and finally the larger design overhauls which benefit from all prior cleanup being in place.
+
+---
+
+### Phase 1 — CSS-only quick wins
+*No JavaScript changes. Lowest risk, highest density of visible improvement. Tackle in a single session.*
+
+| #  | Item | Effort   | Why now |
+|----|------|----------|---------|
+| 1  | H5   | ~1 min   | One-line delete; removes the single most expensive compositing operation |
+| 2  | H6   | ~10 min  | Replace `filter: drop-shadow` with stroke glow; eliminates per-frame SVG filter |
+| 3  | M3   | ~2 min   | Single `:focus-visible` rule; prerequisite for all keyboard-nav work in Phase 3 |
+| 4  | M12  | ~2 min   | Change two color values so the spinner is visible on primary buttons |
+| 5  | M7   | ~1 min   | Replace hardcoded `#007ACC` with `var(--accent)` |
+| 6  | M5   | ~1 min   | Add `cursor: not-allowed` to disabled selects/inputs |
+| 7  | M6   | ~2 min   | Add `transition: opacity 150ms` to viewer image for smooth appearance |
+| 8  | M4   | ~5 min   | Simplify body background to one gradient or a fixed pseudo-element |
+| 9  | L12  | ~2 min   | Lighten `--text-dim` to meet WCAG AA contrast |
+| 10 | L8   | ~1 min   | `minmax(min(220px, 100%), 1fr)` to prevent grid overflow |
+| 11 | L6   | ~15 min  | Replace hardcoded pixel spacing with nearest `--space-*` tokens |
+
+**Checkpoint:** Type-check (`npm --prefix frontend run build`), visual spot-check in `npm run dev`.
+
+---
+
+### Phase 2 — Accessibility attributes
+*Small, targeted HTML attribute additions. No behavioral changes yet — just wiring up ARIA semantics so Phase 3 keyboard work has a correct foundation.*
+
+| #  | Item | Effort  | Why now |
+|----|------|---------|---------|
+| 12 | H1   | ~5 min  | Add `id`/`aria-controls`/`aria-labelledby` to tab bar + panel; prerequisite for H2 |
+| 13 | H3   | ~2 min  | Add `aria-hidden="true"` to annotation SVG layer |
+| 14 | M10  | ~5 min  | Add `aria-label` and `aria-pressed` to annotation list buttons |
+| 15 | L11  | ~1 min  | Add `aria-live="polite"` to status paragraph |
+| 16 | L7   | ~10 min | Add `<h1>`–`<h3>` heading hierarchy (visually hidden where needed) |
+
+**Checkpoint:** Screen reader walkthrough (or axe DevTools audit).
+
+---
+
+### Phase 3 — Keyboard & event behavior
+*JavaScript changes to event handling. Each is self-contained.*
+
+| #  | Item | Effort  | Why now |
+|----|------|---------|---------|
+| 17 | H2   | ~20 min | Implement WAI-ARIA arrow-key tab navigation (depends on H1 ids from Phase 2) |
+| 18 | H4   | ~15 min | Replace JSX `onWheel` with `useEffect` non-passive listener (fixes zoom) |
+| 19 | L13  | ~5 min  | Remove redundant `window.resize` listener (ResizeObserver covers it) |
+
+**Checkpoint:** Manual test pan/zoom/keyboard-tab in `npm run dev` and `npm run tauri:dev`.
+
+---
+
+### Phase 4 — React performance fixes
+*Reduces unnecessary re-renders and GC pressure. Best done together since they touch related patterns.*
+
+| #  | Item | Effort  | Why now |
+|----|------|---------|---------|
+| 20 | M1   | ~20 min | Extract stable selector functions for `useWorkbenchStore` |
+| 21 | M11  | ~15 min | Use `useRef` for `draftLine` or `setPointerCapture` to avoid listener churn |
+| 22 | M2   | ~15 min | Increase polling to 1–2s or switch to Tauri `listen()` events |
+
+**Checkpoint:** React DevTools profiler; confirm re-render counts drop.
+
+---
+
+### Phase 5 — Layout & scroll fixes
+*CSS + minor JSX restructuring. Fixing these before the design overhauls means D1–D8 start from a clean layout.*
+
+| #  | Item | Effort  | Why now |
+|----|------|---------|---------|
+| 23 | M8   | ~10 min | Remove nested scroll on `.processing-tab__form`; let parent handle overflow |
+| 24 | M9   | ~10 min | Use `minmax(280px, 380px)` or add 1024px breakpoint for sidebar |
+| 25 | L10  | ~2 min  | Fix `<pre>` leading whitespace in args preview |
+
+**Checkpoint:** Resize window to various widths; confirm no double scrollbar.
+
+---
+
+### Phase 6 — Component extraction & cleanup
+*Refactoring that makes the design overhauls in Phase 7 easier to implement. No user-visible changes.*
+
+| #  | Item | Effort  | Why now |
+|----|------|---------|---------|
+| 26 | L1   | ~30 min | Extract `ViewSidebar` from `ViewTab`; memoize derived values |
+| 27 | L2   | ~30 min | Extract `GrayscaleControls`, `PipelineEditor` from `ProcessingTab` |
+| 28 | L9   | ~5 min  | Add "Reload" button to `RootErrorBoundary` |
+
+**Checkpoint:** Type-check + visual regression (nothing should change visually).
+
+---
+
+### Phase 7 — Design & UX overhauls
+*The large-impact design changes. Ordered so earlier items reduce scope for later ones (e.g., the empty state simplifies sidebar work).*
+
+| #  | Item | Effort     | Why this order |
+|----|------|------------|----------------|
+| 29 | D2   | ~half day  | Empty state overhaul; must land before D3 since it changes the no-study layout |
+| 30 | D3   | ~2 hrs     | Hide empty sidebar cards; simpler now that D2 handles the no-study case |
+| 31 | D1   | ~half day  | Toolbar grouping + icons; benefits from extracted `ViewSidebar` (Phase 6) |
+| 32 | D5   | ~3 hrs     | Status bar at bottom of app shell |
+| 33 | D6   | ~half day  | Collapsible job center / toast pattern (benefits from H5 blur removal in Phase 1) |
+| 34 | D4   | ~1 day     | Side-by-side processing comparison; benefits from extracted ProcessingTab (Phase 6) |
+| 35 | D8   | ~3 hrs     | Range sliders for brightness/contrast |
+| 36 | D7   | ~3 hrs     | Viewer HUD coordinate readout |
+
+**Checkpoint:** Full manual walkthrough of both tabs, empty and loaded states.
+
+---
+
+### Phase 8 — Polish & optional
+*Nice-to-haves that can be deferred or skipped without consequence.*
+
+| #  | Item | Effort  | Notes |
+|----|------|---------|-------|
+| 37 | L3   | ~2 hrs  | Loading skeleton when opening a study |
+| 38 | L4   | ~1 hr   | Tab switch transition (or deliberately skip — snappy is fine for a pro tool) |
+| 39 | L5   | ~30 min | Add `@font-face` for IBM Plex or remove from stack |
+| 40 | L14  | ~1 min  | Document `touch-action: none` rationale; no code change unless mobile is targeted |
+
+---
+
+### Phase dependency graph
+
+```
+Phase 1 (CSS)
+  └─► Phase 2 (ARIA attributes)
+        └─► Phase 3 (Keyboard/events)  ── H2 depends on H1
+              └─► Phase 4 (React perf)
+Phase 5 (Layout) ◄── can run in parallel with Phases 3–4
+Phase 6 (Refactor) ◄── after Phase 5
+  └─► Phase 7 (Design overhauls)
+        └─► Phase 8 (Polish)
+```
+
+Phases 1–2 are the critical path. Phases 3–5 can overlap. Phase 6 should complete before Phase 7 begins. Phase 8 is independent.
