@@ -1,22 +1,41 @@
 # xrayview
 
-`xrayview` is a DICOM-first X-ray visualization project with a Tauri desktop frontend and a Rust processing backend.
+`xrayview` is a DICOM X-ray visualization and analysis workstation built with Tauri (React/TypeScript frontend, Rust backend).
 
-The primary desktop UI lives in `frontend/`. The Rust CLI in `backend/` is the backend processing entry point used by that desktop frontend, and it also remains usable directly from the command line for DICOM workflows.
+The desktop UI lives in `frontend/`. The Rust backend in `backend/` powers all DICOM decoding, image processing, rendering, measurement, and export. The backend is library-first — Tauri calls Rust directly in-process (no subprocess). The CLI binary remains available for headless DICOM workflows.
 
 ## What It Does
 
-- Loads a DICOM study from disk (`.dcm`, `.dicom`)
-- Renders the study into a grayscale working image
-- Optionally applies invert, brightness, contrast, and histogram equalization
-- Optionally applies a pseudocolor palette
-- Optionally builds a side-by-side comparison image
-- Saves the result as a derived DICOM image
-- Exposes the same processing flow in the desktop UI, including preset
-  selection, compare mode, pipeline ordering, and a native save dialog for the
-  output path
+### Desktop Workstation
 
-The desktop frontend renders internal PNG previews so the workstation UI can display the study, but the user-facing workflow is DICOM in and DICOM out.
+- **View tab** — Canvas 2D viewer with pan/zoom, annotation overlay, and measurement tools
+  - Manual line measurements: draw calibrated lines on the image
+  - Auto-tooth detection: one-click tooth identification with confidence scores, bounding boxes, and width/height measurements
+  - Calibration-aware measurements in physical units (mm) when DICOM pixel spacing is available
+  - Editable annotations: adjust line endpoints, delete, and manage annotation lists
+- **Processing tab** — Full image processing controls
+  - Preset selector (default, xray, high-contrast)
+  - Grayscale controls: invert, brightness, contrast, histogram equalization
+  - Pseudocolor palettes: none, hot, bone
+  - Compare mode: side-by-side original vs processed output
+  - Pipeline ordering: drag steps to control grayscale filter order
+  - Save destination via native file picker, or managed temp path
+  - Live CLI command preview
+- **Job Center** — Background job queue with progress bars, cancellation, and cache hit indicators
+- **Study persistence** — Recent studies catalog (last 10 opened)
+
+### DICOM Pipeline
+
+- Loads DICOM studies from disk (`.dcm`, `.dicom`)
+- Extracts metadata and pixel spacing calibration from multiple DICOM tags
+- Renders previews with DICOM window-level/center support
+- Applies composable grayscale filter pipeline (invert, brightness, contrast, equalize)
+- Applies pseudocolor palettes (hot, bone)
+- Builds side-by-side comparison images
+- Exports results as derived DICOM Secondary Capture files
+- Caches rendered artifacts (memory + disk) with job deduplication
+
+The desktop frontend renders internal PNG previews for display, but the user-facing workflow is DICOM in and DICOM out.
 
 ## Important Notice
 
@@ -24,51 +43,44 @@ This tool is for image visualization only.
 
 It is **not** a medical device and must **not** be used for medical diagnosis, clinical decisions, or treatment planning.
 
-## Build
+## Build & Development
+
+### Backend only
 
 ```bash
 cd backend
 cargo build --release
 ```
 
-## Desktop Frontend
-
-The primary desktop UI is the Tauri frontend:
+### Desktop app
 
 ```bash
+# Install dependencies (root postinstall handles frontend/)
 npm install
+
+# Run the desktop app with hot-reload
 npm run tauri:dev
+
+# Build desktop bundles (Linux needs WebKitGTK, patchelf)
+npm run tauri:build
 ```
-
-In the current desktop Processing tab, these controls execute end to end:
-
-- backend-defined presets
-- invert, brightness, contrast, equalize, and palette controls
-- compare output
-- grayscale pipeline ordering
-- save destination via the native "save as" picker
 
 If you do not choose a save destination, the app keeps the processed DICOM in a
 managed temporary path and shows that path after processing completes.
 
-To build desktop bundles with the Rust backend linked in-process through the
-desktop shell:
+### Release validation
 
 ```bash
-npm run tauri:build
-```
-
-On Linux, bundle builds also require the usual Tauri system packages such as WebKitGTK and `patchelf`.
-
-To run the release smoke validation without generating installers:
-
-```bash
+# Smoke test without generating installers
 npm run release:smoke
+
+# With installer/AppImage verification
+npm run release:smoke -- --bundle
 ```
 
-Add `-- --bundle` if you also want to verify installer/AppImage output.
+### Browser-only mock mode
 
-To iterate on the UI in browser-only mock mode:
+Iterate on the UI without the Rust backend:
 
 ```bash
 npm run dev
@@ -96,180 +108,125 @@ If `--output` is omitted, the tool writes a file next to the input using this pa
 
 - `study.dcm` -> `study_processed.dcm`
 
-## Flags
+## CLI Flags
 
-### Input
+### Input / Output
 
-- `--input`
-  - Path to the source DICOM study
-  - Supports `.dcm` and `.dicom`
-
-### Output
-
-- `--output`
-  - Output DICOM path
-  - Optional
-  - Must end with `.dcm` or `.dicom`
-  - If omitted, `xrayview` generates `input_processed.dcm` in the same directory as the input
+- `--input` — Path to the source DICOM study (`.dcm` or `.dicom`, required)
+- `--output` — Output DICOM path (optional; defaults to `input_processed.dcm`)
+- `--preview-output` — PNG preview output path (optional)
 
 ### Presets
 
-- `--preset`
-  - Named visualization preset
-  - Supported values: `default`, `xray`, `high-contrast`
-  - Presets set a combination of brightness, contrast, equalization, and palette
+- `--preset` — Named visualization preset (`default`, `xray`, `high-contrast`)
   - Explicit CLI flags override preset values
 
-#### Preset summary
-
-- `default`
-  - brightness `0`
-  - contrast `1.0`
-  - equalize `false`
-  - palette `none`
-
-- `xray`
-  - brightness `10`
-  - contrast `1.4`
-  - equalize `true`
-  - palette `bone`
-
-- `high-contrast`
-  - brightness `0`
-  - contrast `1.8`
-  - equalize `true`
-  - palette `none`
+| Preset | Brightness | Contrast | Equalize | Palette |
+|---|---|---|---|---|
+| `default` | 0 | 1.0 | false | none |
+| `xray` | 10 | 1.4 | true | bone |
+| `high-contrast` | 0 | 1.8 | true | none |
 
 ### Grayscale Filter Controls
 
-- `--invert`
-  - Inverts the grayscale image
-
-- `--brightness`
-  - Integer brightness delta
-  - Positive values brighten the image
-  - Negative values darken the image
-
-- `--contrast`
-  - Floating-point contrast factor
-  - `1.0` leaves contrast unchanged
-  - Values above `1.0` increase contrast
-  - Values below `1.0` decrease contrast
-
-- `--equalize`
-  - Enables histogram equalization
+- `--invert` — Inverts the grayscale image
+- `--brightness` — Integer brightness delta (positive brightens, negative darkens)
+- `--contrast` — Floating-point contrast factor (`1.0` = unchanged, `>1.0` = more contrast)
+- `--equalize` — Enables histogram equalization
 
 ### Comparison Output
 
-- `--compare`
-  - Writes a side-by-side comparison image into the derived DICOM output
-  - Left side: original grayscale image
-  - Right side: processed output image
+- `--compare` — Writes a side-by-side comparison (original left, processed right) into the derived DICOM output
 
 ### Pipeline Ordering
 
-- `--pipeline`
-  - Comma-separated list of grayscale processing steps
-  - Lets you control the order of enabled grayscale filters
+- `--pipeline` — Comma-separated list of grayscale processing steps to control filter order
+  - Supported steps: `grayscale`, `invert`, `brightness`, `contrast`, `equalize`
   - Enabled steps omitted from the list still run afterward in the default order
-  - Supported step names:
-    - `grayscale`
-    - `invert`
-    - `brightness`
-    - `contrast`
-    - `equalize`
   - Duplicate step names are rejected
 
-If `--pipeline` is omitted, the default order is:
+Default order (when `--pipeline` is omitted):
 
 ```text
 grayscale,invert,brightness,contrast,equalize
 ```
 
-Notes:
-
-- `grayscale` is always the starting point
-- The pipeline only affects grayscale filter ordering
-- Pseudocolor is applied after the grayscale pipeline
-- Comparison output is applied after all processing
+`grayscale` is always the starting point. Pseudocolor is applied after the grayscale pipeline. Comparison output is applied after all processing.
 
 ### Pseudocolor
 
-- `--palette`
-  - Pseudocolor palette for the final image
-  - Supported values:
-    - `none`
-    - `hot`
-    - `bone`
+- `--palette` — Pseudocolor palette (`none`, `hot`, `bone`)
 
-## Examples
+### Study Inspection & Analysis
 
-### Basic processing
+- `--describe-presets` — Outputs a JSON manifest of all processing presets
+- `--describe-study` — Outputs JSON study metadata (dimensions, measurement scale, calibration info)
+- `--analyze-tooth` — Runs auto-tooth detection and outputs results as JSON (requires `--preview-output`)
+
+## CLI Examples
 
 ```bash
+# Basic processing (output auto-named input_processed.dcm)
 cargo run --manifest-path backend/Cargo.toml -- --input images/sample-dental-radiograph.dcm
-```
 
-### Explicit output file
+# Explicit output path
+cargo run --manifest-path backend/Cargo.toml -- --input images/sample-dental-radiograph.dcm --output images/output.dcm
 
-```bash
-cargo run --manifest-path backend/Cargo.toml -- --input images/sample-dental-radiograph.dcm --output images/sample-dental-radiograph_processed.dcm
-```
-
-### Tone adjustments
-
-```bash
+# Tone adjustments
 cargo run --manifest-path backend/Cargo.toml -- --input images/sample-dental-radiograph.dcm --invert --brightness 15
-```
-
-```bash
 cargo run --manifest-path backend/Cargo.toml -- --input images/sample-dental-radiograph.dcm --contrast 1.6 --equalize
-```
 
-### Presets
-
-```bash
-cargo run --manifest-path backend/Cargo.toml -- --input images/sample-dental-radiograph.dcm --preset xray
-```
-
-```bash
+# Preset with override
 cargo run --manifest-path backend/Cargo.toml -- --input images/sample-dental-radiograph.dcm --preset xray --brightness 5
-```
 
-### Pipeline ordering
-
-```bash
+# Custom pipeline ordering
 cargo run --manifest-path backend/Cargo.toml -- --input images/sample-dental-radiograph.dcm --invert --contrast 1.5 --equalize --pipeline grayscale,contrast,invert,equalize
-```
 
-### Pseudocolor
-
-```bash
+# Pseudocolor
 cargo run --manifest-path backend/Cargo.toml -- --input images/sample-dental-radiograph.dcm --palette hot
-```
 
-### Comparison output
-
-```bash
-cargo run --manifest-path backend/Cargo.toml -- --input images/sample-dental-radiograph.dcm --compare
-```
-
-```bash
+# Side-by-side comparison
 cargo run --manifest-path backend/Cargo.toml -- --input images/sample-dental-radiograph.dcm --preset xray --compare
+
+# Describe study metadata
+cargo run --manifest-path backend/Cargo.toml -- --input images/sample-dental-radiograph.dcm --describe-study
+
+# Auto-tooth analysis
+cargo run --manifest-path backend/Cargo.toml -- --input images/sample-dental-radiograph.dcm --analyze-tooth --preview-output /tmp/preview.png
 ```
 
 ## Validation Rules
 
-- `--input` is required
-- Input must be a `.dcm` or `.dicom` file
-- Output must be a `.dcm` or `.dicom` file
+- `--input` is required and must be a `.dcm` or `.dicom` file
+- `--output` (if provided) must end with `.dcm` or `.dicom`
 - `--palette` must be `none`, `hot`, or `bone`
 - `--preset` must be `default`, `xray`, or `high-contrast`
-- `--pipeline` may only contain `grayscale`, `invert`, `brightness`, `contrast`, and `equalize`
+- `--pipeline` may only contain `grayscale`, `invert`, `brightness`, `contrast`, and `equalize` (no duplicates)
+
+## Architecture
+
+### Two-crate Rust workspace
+
+- **`backend/`** — Library-first crate with modular layout: `api/`, `app/`, `study/`, `render/`, `processing/`, `analysis/`, `annotations/`, `export/`, `jobs/`, `cache/`, `persistence/`. Also provides a thin CLI binary.
+- **`frontend/src-tauri/`** — Tauri desktop shell. Depends on the backend as a library (direct in-process calls, no subprocess).
+
+### Contract generation
+
+Rust API types in `backend/src/api/contracts.rs` are the single source of truth. Running `npm --prefix frontend run generate:contracts` produces `frontend/src/lib/generated/contracts.ts`. Both `dev` and `build` scripts run generation automatically.
+
+### Data flow
+
+1. User opens a DICOM file -> `open_study` Tauri command -> backend registers study, decodes DICOM, returns metadata + study ID
+2. Render/process/analyze requests reference study by ID -> dispatched as async jobs -> progress emitted via Tauri events -> results cached as artifacts
+3. Frontend loads rendered PNG previews via Tauri's asset protocol
+4. Viewer renders on Canvas 2D with annotation overlay in image-space coordinates
 
 ## Test
 
 ```bash
-cd backend
-cargo test
+# Backend unit + integration tests
+cargo test --manifest-path backend/Cargo.toml
+
+# Frontend type-check
+npm --prefix frontend run build
 ```
