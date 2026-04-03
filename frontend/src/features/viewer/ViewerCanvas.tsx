@@ -67,6 +67,7 @@ export function ViewerCanvas({
   onUpdateLine,
 }: ViewerCanvasProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const imgRef = useRef<HTMLImageElement | null>(null);
   const [frame, setFrame] = useState<ViewerFrame>({ width: 0, height: 0 });
   const [viewport, setViewport] = useState(createViewport);
   const [loadFailed, setLoadFailed] = useState(false);
@@ -80,6 +81,8 @@ export function ViewerCanvas({
   useEffect(() => {
     setResolvedImageSize(imageSize);
   }, [imageSize]);
+
+  const canvasVisible = !!previewUrl && !loadFailed;
 
   useLayoutEffect(() => {
     const element = containerRef.current;
@@ -107,7 +110,7 @@ export function ViewerCanvas({
       observer.disconnect();
       window.removeEventListener("resize", updateFrame);
     };
-  }, []);
+  }, [canvasVisible]);
 
   useEffect(() => {
     setLoadFailed(false);
@@ -117,6 +120,17 @@ export function ViewerCanvas({
     setViewport(createViewport());
     if (!previewUrl && !imageSize) {
       setResolvedImageSize(null);
+    }
+    // Handle cached images whose onLoad won't fire
+    const img = imgRef.current;
+    if (previewUrl && img && img.complete && img.naturalWidth > 0) {
+      setImageReady(true);
+      if (!imageSize) {
+        setResolvedImageSize({
+          width: img.naturalWidth,
+          height: img.naturalHeight,
+        });
+      }
     }
   }, [previewUrl]);
 
@@ -352,6 +366,7 @@ export function ViewerCanvas({
         }}
       >
         <img
+          ref={imgRef}
           className={`viewer-canvas__image${imageReady ? " viewer-canvas__image--ready" : ""}`}
           src={previewUrl}
           alt="DICOM preview"
