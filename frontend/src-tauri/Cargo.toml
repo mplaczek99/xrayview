@@ -2,7 +2,7 @@
 # This crate is the desktop windowing/process shell; the heavy imaging work
 # stays in the sibling Rust backend so the UI layer stays thin.
 name = "xrayview-frontend"
-version = "0.2.0"
+version = "0.2.1"
 description = "Tauri frontend shell for XRayView"
 authors = ["OpenCode"]
 edition = "2021"

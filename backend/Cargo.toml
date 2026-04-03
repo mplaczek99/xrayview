@@ -2,7 +2,7 @@
 # This crate owns DICOM decoding, preview generation, and processed output
 # writing for both the CLI and the Tauri desktop shell.
 name = "xrayview-backend"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 
 [dependencies]
