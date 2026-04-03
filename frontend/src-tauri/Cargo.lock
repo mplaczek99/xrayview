@@ -6386,7 +6386,6 @@ dependencies = [
  "rfd",
  "tauri",
  "tauri-build",
- "tempfile",
  "xrayview-backend",
 ]
 

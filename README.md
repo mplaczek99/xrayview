@@ -51,13 +51,22 @@ In the current desktop Processing tab, these controls execute end to end:
 If you do not choose a save destination, the app keeps the processed DICOM in a
 managed temporary path and shows that path after processing completes.
 
-To build desktop bundles with the Rust backend embedded as a sidecar:
+To build desktop bundles with the Rust backend linked in-process through the
+desktop shell:
 
 ```bash
 npm run tauri:build
 ```
 
 On Linux, bundle builds also require the usual Tauri system packages such as WebKitGTK and `patchelf`.
+
+To run the release smoke validation without generating installers:
+
+```bash
+npm run release:smoke
+```
+
+Add `-- --bundle` if you also want to verify installer/AppImage output.
 
 To iterate on the UI in browser-only mock mode:
 
@@ -71,6 +80,9 @@ Prebuilt desktop packages are published on GitHub Releases.
 
 - Linux: download the `.AppImage`, run `chmod +x <asset>.AppImage`, then run it
 - Windows: download the `.msi` installer and run it
+
+The desktop packages embed the Rust backend directly; there is no separate
+backend sidecar to install or keep in sync.
 
 ## Basic Usage
 

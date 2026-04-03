@@ -9,6 +9,7 @@ export const tauriRoot = path.join(frontendRoot, "src-tauri");
 export const targetDir = path.join(tauriRoot, "target");
 export const releaseDir = path.join(targetDir, "release");
 export const bundleDir = path.join(releaseDir, "bundle");
+export const binariesDir = path.join(tauriRoot, "binaries");
 
 function removeRenamedBinaryArtifacts(dir) {
   if (!fs.existsSync(dir)) {
@@ -29,6 +30,20 @@ function removeRenamedBinaryArtifacts(dir) {
     if (entry.isDirectory()) {
       removeRenamedBinaryArtifacts(entryPath);
     }
+  }
+}
+
+function removeLegacySidecars() {
+  if (!fs.existsSync(binariesDir)) {
+    return;
+  }
+
+  for (const entry of fs.readdirSync(binariesDir, { withFileTypes: true })) {
+    if (!entry.isFile() || !entry.name.startsWith("xrayview-backend-")) {
+      continue;
+    }
+
+    fs.rmSync(path.join(binariesDir, entry.name), { force: true });
   }
 }
 
@@ -78,6 +93,7 @@ function targetHasForeignWorkspaceArtifacts() {
 
 export function prepareTauriTarget() {
   removeRenamedBinaryArtifacts(targetDir);
+  removeLegacySidecars();
 
   if (targetHasForeignWorkspaceArtifacts()) {
     fs.rmSync(targetDir, { force: true, recursive: true });

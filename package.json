@@ -5,6 +5,8 @@
   "scripts": {
     "postinstall": "npm --prefix frontend install",
     "dev": "npm --prefix frontend run dev --",
+    "release:smoke": "npm --prefix frontend run release:smoke --",
+    "release:smoke:bundle": "npm --prefix frontend run release:smoke:bundle --",
     "tauri": "npm --prefix frontend run tauri --",
     "tauri:dev": "npm --prefix frontend run tauri:dev --",
     "tauri:build": "npm --prefix frontend run tauri:build --"

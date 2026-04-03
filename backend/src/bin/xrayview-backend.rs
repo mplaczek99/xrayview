@@ -228,7 +228,7 @@ mod tests {
     }
 
     #[test]
-    fn clap_parses_tauri_sidecar_invocations() {
+    fn clap_parses_desktop_and_cli_invocations() {
         let cli =
             Cli::try_parse_from(["xrayview", "--describe-presets"]).expect("describe-presets");
         assert!(cli.describe_presets);

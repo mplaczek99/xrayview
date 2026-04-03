@@ -13,7 +13,6 @@ tauri-build = { version = "2.0.2", features = [] }
 [dependencies]
 rfd = "0.15.2"
 tauri = { version = "2.1.1", features = ["protocol-asset"] }
-tempfile = "3.14.0"
 xrayview-backend = { path = "../../backend" }
 
 [target.'cfg(target_os = "linux")'.dependencies]

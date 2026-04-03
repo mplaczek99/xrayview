@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Default desktop capability for the XRayView frontend shell.",
+  "description": "Desktop capability for the main XRayView window. The frontend relies on app-local custom commands only.",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": []
 }

@@ -25,10 +25,8 @@
       "assetProtocol": {
         "enable": true,
         "scope": [
-          "$TEMP/xrayview-frontend-*",
-          "$TEMP/xrayview",
-          "$TEMP/xrayview/*",
-          "$TEMP/xrayview/**/*"
+          "$TEMP/xrayview/cache/artifacts/*",
+          "$TEMP/xrayview/cache/artifacts/**/*"
         ]
       }
     }
@@ -42,7 +40,6 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ],
-    "externalBin": ["binaries/xrayview-backend"]
+    ]
   }
 }

@@ -13,5 +13,7 @@ Current scope:
 
 Current architecture note:
 
-- the frontend still shells out to this backend binary today; later phases in
-  `IMPLEMENTATION_PLAN.md` move that boundary to a library-first Rust API
+- the desktop frontend links this crate directly and calls the library-first
+  app/service layer in-process
+- the CLI binary remains available for direct DICOM workflows and release smoke
+  validation
