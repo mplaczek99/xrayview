@@ -111,7 +111,6 @@ mod tests {
             brightness: 10,
             contrast: 1.4,
             equalize: true,
-            pipeline: None,
         };
 
         let load_start = Instant::now();

@@ -59,10 +59,6 @@ struct Cli {
     #[arg(long)]
     compare: bool,
 
-    /// Comma-separated processing pipeline
-    #[arg(long)]
-    pipeline: Option<String>,
-
     /// Color palette (none, hot, bone)
     #[arg(long)]
     palette: Option<String>,
@@ -136,7 +132,6 @@ fn run() -> Result<()> {
         contrast: cli.contrast,
         equalize: cli.equalize,
         compare: cli.compare,
-        pipeline: cli.pipeline.clone(),
         palette: cli.palette.clone(),
     })?;
 
@@ -186,7 +181,6 @@ fn is_plain_preview_request(cli: &Cli) -> bool {
         && cli.contrast.is_none()
         && !cli.equalize
         && !cli.compare
-        && cli.pipeline.is_none()
         && cli.palette.is_none()
 }
 

@@ -3,8 +3,6 @@ import type {
   MeasurementScale,
   PaletteName,
   ProcessingControls,
-  ProcessingPipelineStep,
-  ProcessingPreset,
   ToothAnalysis,
 } from "./generated/contracts";
 
@@ -32,8 +30,8 @@ export interface ProcessingRequest {
   controls: ProcessingControls;
   compare: boolean;
   outputPath: string | null;
-  pipeline: ProcessingPipelineStep[];
-  preset: ProcessingPreset;
+  presetId: string;
+  presetControls: ProcessingControls;
 }
 
 export interface PreviewResult {

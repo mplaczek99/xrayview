@@ -18,9 +18,7 @@ The desktop UI lives in `frontend/`. The Rust backend in `backend/` powers all D
   - Grayscale controls: invert, brightness, contrast, histogram equalization
   - Pseudocolor palettes: none, hot, bone
   - Compare mode: side-by-side original vs processed output
-  - Pipeline ordering: drag steps to control grayscale filter order
   - Save destination via native file picker, or managed temp path
-  - Live CLI command preview
 - **Job Center** — Background job queue with progress bars, cancellation, and cache hit indicators
 - **Study persistence** — Recent studies catalog (last 10 opened)
 
@@ -133,25 +131,11 @@ If `--output` is omitted, the tool writes a file next to the input using this pa
 - `--brightness` — Integer brightness delta (positive brightens, negative darkens)
 - `--contrast` — Floating-point contrast factor (`1.0` = unchanged, `>1.0` = more contrast)
 - `--equalize` — Enables histogram equalization
+- Grayscale processing always runs in this fixed order: `invert`, `brightness`, `contrast`, `equalize`
 
 ### Comparison Output
 
 - `--compare` — Writes a side-by-side comparison (original left, processed right) into the derived DICOM output
-
-### Pipeline Ordering
-
-- `--pipeline` — Comma-separated list of grayscale processing steps to control filter order
-  - Supported steps: `grayscale`, `invert`, `brightness`, `contrast`, `equalize`
-  - Enabled steps omitted from the list still run afterward in the default order
-  - Duplicate step names are rejected
-
-Default order (when `--pipeline` is omitted):
-
-```text
-grayscale,invert,brightness,contrast,equalize
-```
-
-`grayscale` is always the starting point. Pseudocolor is applied after the grayscale pipeline. Comparison output is applied after all processing.
 
 ### Pseudocolor
 
@@ -179,9 +163,6 @@ cargo run --manifest-path backend/Cargo.toml -- --input images/sample-dental-rad
 # Preset with override
 cargo run --manifest-path backend/Cargo.toml -- --input images/sample-dental-radiograph.dcm --preset xray --brightness 5
 
-# Custom pipeline ordering
-cargo run --manifest-path backend/Cargo.toml -- --input images/sample-dental-radiograph.dcm --invert --contrast 1.5 --equalize --pipeline grayscale,contrast,invert,equalize
-
 # Pseudocolor
 cargo run --manifest-path backend/Cargo.toml -- --input images/sample-dental-radiograph.dcm --palette hot
 
@@ -201,7 +182,6 @@ cargo run --manifest-path backend/Cargo.toml -- --input images/sample-dental-rad
 - `--output` (if provided) must end with `.dcm` or `.dicom`
 - `--palette` must be `none`, `hot`, or `bone`
 - `--preset` must be `default`, `xray`, or `high-contrast`
-- `--pipeline` may only contain `grayscale`, `invert`, `brightness`, `contrast`, and `equalize` (no duplicates)
 
 ## Architecture
 

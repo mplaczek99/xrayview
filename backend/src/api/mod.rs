@@ -11,7 +11,7 @@ pub use contracts::{
     JobProgress, JobResult, JobSnapshot, JobState, MeasureLineAnnotationCommand,
     MeasureLineAnnotationCommandResult, MeasurementScale, OpenStudyCommand, OpenStudyCommandResult,
     PaletteName, ProcessStudyCommand, ProcessStudyCommandResult, ProcessingControls,
-    ProcessingManifest, ProcessingPipelineStep, ProcessingPreset, RenderStudyCommand,
+    ProcessingManifest, ProcessingPreset, RenderStudyCommand,
     RenderStudyCommandResult, StartedJob, StudyDescription, StudyRecord,
     generated_typescript_contracts, write_typescript_contracts,
 };
@@ -43,7 +43,6 @@ pub struct ProcessStudyRequest {
     pub contrast: Option<f64>,
     pub equalize: bool,
     pub compare: bool,
-    pub pipeline: Option<String>,
     pub palette: Option<String>,
 }
 

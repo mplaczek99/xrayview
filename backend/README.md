@@ -7,8 +7,8 @@ Current scope:
 - accepts CLI DICOM workflows for preview rendering, derived DICOM output, and
   automatic tooth analysis
 - implements `--describe-presets` and `--describe-study` JSON metadata modes
-- supports presets, invert, brightness, contrast, equalize, compare output,
-  palette selection, and grayscale pipeline ordering
+- supports a fixed grayscale processing chain (invert, brightness, contrast,
+  equalize), compare output, presets, and palette selection
 - serves as the processing engine used by the Tauri desktop frontend
 
 Current architecture note:

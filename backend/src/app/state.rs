@@ -111,7 +111,6 @@ impl AppState {
             contrast: request.contrast,
             equalize: request.equalize,
             compare: request.compare,
-            pipeline: request.pipeline.map(join_pipeline_steps),
             palette: request.palette.map(|palette| palette.as_str().to_string()),
         })?;
 
@@ -222,7 +221,7 @@ impl AppState {
     ) -> BackendResult<StartedJob> {
         let study = self.require_study(&request.study_id)?;
         let preview_fingerprint = fingerprint(
-            "process-study-v1",
+            "process-study-v2",
             &serde_json::json!({
                 "inputPath": &study.input_path,
                 "outputPath": &request.output_path,
@@ -232,7 +231,6 @@ impl AppState {
                 "contrast": request.contrast,
                 "equalize": request.equalize,
                 "compare": request.compare,
-                "pipeline": &request.pipeline,
                 "palette": &request.palette,
             }),
         )?;
@@ -456,7 +454,6 @@ impl AppState {
                 contrast: request.contrast,
                 equalize: request.equalize,
                 compare: request.compare,
-                pipeline: request.pipeline.clone().map(join_pipeline_steps),
                 palette: request.palette.map(|palette| palette.as_str().to_string()),
             };
             super::validate_processing_request(&process_request)?;
@@ -693,12 +690,4 @@ where
     namespace.hash(&mut hasher);
     serialized.hash(&mut hasher);
     Ok(format!("{:016x}", hasher.finish()))
-}
-
-fn join_pipeline_steps(steps: Vec<crate::api::ProcessingPipelineStep>) -> String {
-    steps
-        .into_iter()
-        .map(|step| step.as_str())
-        .collect::<Vec<_>>()
-        .join(",")
 }

@@ -3,7 +3,6 @@ import type {
   MeasurementScale,
   ProcessingControls,
   ProcessingManifest,
-  ProcessingPipelineStep,
   ToothAnalysis,
 } from "../../lib/generated/contracts";
 import type {
@@ -18,19 +17,10 @@ import {
   type ViewerTool,
 } from "../annotations/tools";
 
-export const DEFAULT_PIPELINE: ProcessingPipelineStep[] = [
-  "grayscale",
-  "invert",
-  "brightness",
-  "contrast",
-  "equalize",
-];
-
 export interface ProcessingForm {
   controls: ProcessingControls;
   outputPath: string | null;
   compare: boolean;
-  pipeline: ProcessingPipelineStep[];
 }
 
 export interface ProcessingSession {
@@ -79,7 +69,6 @@ export function createProcessingForm(
     controls: { ...defaultControls },
     outputPath: null,
     compare: false,
-    pipeline: [...DEFAULT_PIPELINE],
   };
 }
 

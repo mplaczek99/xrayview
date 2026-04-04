@@ -15,7 +15,7 @@ use crate::error::{BackendError, BackendResult};
 use crate::export::secondary_capture::export_secondary_capture;
 use crate::preview::{PreviewImage, save_preview_png};
 use crate::processing::pipeline::process_source_image;
-use crate::processing::{GrayscaleControls, validate_pipeline};
+use crate::processing::GrayscaleControls;
 use crate::render::render_plan::{RenderPlan, render_source_image};
 use crate::study::source_image::{load_source_study, measurement_scale_from_obj};
 use crate::tooth_measurement::analyze_grayscale_pixels;
@@ -246,15 +246,12 @@ fn resolve_processing(request: &ProcessStudyRequest) -> BackendResult<ResolvedPr
             ));
         }
     }
-    validate_pipeline(request.pipeline.as_deref())?;
-
     Ok(ResolvedProcessing {
         controls: GrayscaleControls {
             invert,
             brightness,
             contrast,
             equalize,
-            pipeline: request.pipeline.clone(),
         },
         palette,
         compare: request.compare,

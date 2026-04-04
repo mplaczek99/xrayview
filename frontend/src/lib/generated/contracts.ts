@@ -3,13 +3,6 @@
 
 export type PaletteName = "none" | "hot" | "bone";
 
-export type ProcessingPipelineStep =
-  | "grayscale"
-  | "invert"
-  | "brightness"
-  | "contrast"
-  | "equalize";
-
 export interface ProcessingControls {
   brightness: number;
   contrast: number;
@@ -149,7 +142,6 @@ export interface ProcessStudyCommand {
   contrast?: number | null;
   equalize: boolean;
   compare: boolean;
-  pipeline?: ProcessingPipelineStep[] | null;
   palette?: PaletteName | null;
 }
 

@@ -18,7 +18,6 @@ import {
 import type {
   LineAnnotation,
   ProcessingControls,
-  ProcessingPipelineStep,
 } from "../../lib/generated/contracts";
 import type { ProcessingRequest } from "../../lib/types";
 import type { JobSnapshot, ProcessingRunState } from "../../features/jobs/model";
@@ -508,24 +507,6 @@ class WorkbenchStore {
         form: {
           ...current.processing.form,
           compare,
-        },
-      },
-    }));
-  }
-
-  setProcessingPipeline(pipeline: ProcessingPipelineStep[]) {
-    const study = this.activeStudy();
-    if (!study) {
-      return;
-    }
-
-    this.setStudyState(study.studyId, (current) => ({
-      ...current,
-      processing: {
-        ...current.processing,
-        form: {
-          ...current.processing.form,
-          pipeline: [...pipeline],
         },
       },
     }));

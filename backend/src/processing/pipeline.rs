@@ -64,7 +64,6 @@ mod tests {
             brightness: 20,
             contrast: 1.0,
             equalize: false,
-            pipeline: None,
         };
 
         let output =
@@ -90,7 +89,6 @@ mod tests {
             brightness: 0,
             contrast: 1.0,
             equalize: false,
-            pipeline: None,
         };
 
         let output =

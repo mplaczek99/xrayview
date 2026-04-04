@@ -1,7 +1,6 @@
 import { useMemo, useState } from "react";
 import { workbenchActions, useWorkbenchStore, selectActiveStudy, selectManifest } from "../../app/store/workbenchStore";
 import {
-  buildProcessingArgs,
   FALLBACK_PROCESSING_MANIFEST,
   formatBackendError,
 } from "../../lib/backend";
@@ -20,15 +19,8 @@ import {
 import { describeProgress, useProgressClock } from "../../features/jobs/progressTiming";
 import { DicomViewer } from "../viewer/DicomViewer";
 import { GrayscaleControls } from "./GrayscaleControls";
-import { PipelineEditor } from "./PipelineEditor";
 
 const CUSTOM_PRESET_ID = "__custom";
-
-function formatArgPreview(args: readonly string[]): string {
-  return args
-    .map((arg) => (/[\s"'\\]/.test(arg) ? JSON.stringify(arg) : arg))
-    .join(" ");
-}
 
 export function ProcessingTab() {
   const study = useWorkbenchStore(selectActiveStudy);
@@ -44,18 +36,13 @@ export function ProcessingTab() {
     processingUi.presets.find((preset) =>
       processingControlsEqual(preset.controls, form.controls),
     ) ?? null;
-  const commandPreset = activePreset
-    ? {
-        id: activePreset.id,
-        controls: activePreset.controls,
-      }
-    : defaultPreset;
+  const baselinePreset = activePreset ?? defaultPreset;
   const request: ProcessingRequest = {
     controls: form.controls,
     compare: form.compare,
     outputPath: form.outputPath,
-    pipeline: form.pipeline,
-    preset: commandPreset,
+    presetId: baselinePreset.id,
+    presetControls: baselinePreset.controls,
   };
   const previewUrl = study?.originalPreview?.previewUrl ?? null;
   const processedPreviewUrl = study?.processing.output?.previewUrl ?? null;
@@ -76,7 +63,6 @@ export function ProcessingTab() {
         )
       : null;
   const canRun = Boolean(study) && !busy;
-  const args = study ? buildProcessingArgs(study.inputPath, request) : [];
 
   function updateControls(nextControls: ProcessingControls) {
     workbenchActions.setProcessingControls(nextControls);
@@ -254,15 +240,6 @@ export function ProcessingTab() {
             Write side-by-side comparison output into the processed DICOM.
           </p>
         </section>
-
-        <PipelineEditor pipeline={form.pipeline} busy={busy} />
-
-        {study && args.length > 0 && (
-          <section className="form-section">
-            <div className="form-label">Command Preview</div>
-            <pre className="args-preview u-mono">{`xrayview ${formatArgPreview(args)}`}</pre>
-          </section>
-        )}
 
         <div className="processing-tab__actions">
           <button

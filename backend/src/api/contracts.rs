@@ -29,28 +29,6 @@ impl PaletteName {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum ProcessingPipelineStep {
-    Grayscale,
-    Invert,
-    Brightness,
-    Contrast,
-    Equalize,
-}
-
-impl ProcessingPipelineStep {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Grayscale => "grayscale",
-            Self::Invert => "invert",
-            Self::Brightness => "brightness",
-            Self::Contrast => "contrast",
-            Self::Equalize => "equalize",
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProcessingControls {
@@ -350,8 +328,6 @@ pub struct ProcessStudyCommand {
     pub equalize: bool,
     pub compare: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub pipeline: Option<Vec<ProcessingPipelineStep>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub palette: Option<PaletteName>,
 }
 
@@ -427,13 +403,6 @@ pub fn generated_typescript_contracts() -> String {
 // Run `npm --prefix frontend run generate:contracts` after changing Rust contracts.
 
 export type PaletteName = "none" | "hot" | "bone";
-
-export type ProcessingPipelineStep =
-  | "grayscale"
-  | "invert"
-  | "brightness"
-  | "contrast"
-  | "equalize";
 
 export interface ProcessingControls {
   brightness: number;
@@ -574,7 +543,6 @@ export interface ProcessStudyCommand {
   contrast?: number | null;
   equalize: boolean;
   compare: boolean;
-  pipeline?: ProcessingPipelineStep[] | null;
   palette?: PaletteName | null;
 }
 

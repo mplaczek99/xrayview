@@ -16,7 +16,6 @@ import type {
   ProcessStudyCommand,
   ProcessStudyCommandResult,
   ProcessingManifest,
-  ProcessingPipelineStep,
   RenderStudyCommand,
   RenderStudyCommandResult,
   StartedJob,
@@ -46,13 +45,6 @@ const MOCK_STUDY_DIRECTORY = "mock-data";
 const MOCK_EXPORT_DIRECTORY = "mock-exports";
 const MOCK_DICOM_PATH = `${MOCK_STUDY_DIRECTORY}/mock-dental-study.dcm`;
 const MOCK_PROCESSED_DICOM_PATH = `${MOCK_STUDY_DIRECTORY}/mock-dental-study_processed.dcm`;
-const DEFAULT_PIPELINE: ProcessingPipelineStep[] = [
-  "grayscale",
-  "invert",
-  "brightness",
-  "contrast",
-  "equalize",
-];
 const PALETTE_LABELS: Record<Palette, string> = {
   none: "Neutral",
   hot: "Hot",
@@ -92,13 +84,6 @@ function nextMockStudyId(): string {
 function nextMockJobId(): string {
   mockJobSequence += 1;
   return `mock-job-${mockJobSequence}`;
-}
-
-function pipelinesEqual(
-  left: readonly ProcessingPipelineStep[],
-  right: readonly ProcessingPipelineStep[],
-): boolean {
-  return left.length === right.length && left.every((step, index) => step === right[index]);
 }
 
 async function runInRuntime<T>(options: {
@@ -183,21 +168,20 @@ function buildProcessStudyCommand(
   return {
     studyId,
     outputPath: request.outputPath,
-    presetId: request.preset.id,
-    invert: request.controls.invert && !request.preset.controls.invert,
+    presetId: request.presetId,
+    invert: request.controls.invert && !request.presetControls.invert,
     brightness:
-      request.controls.brightness !== request.preset.controls.brightness
+      request.controls.brightness !== request.presetControls.brightness
         ? request.controls.brightness
         : null,
     contrast:
-      request.controls.contrast !== request.preset.controls.contrast
+      request.controls.contrast !== request.presetControls.contrast
         ? request.controls.contrast
         : null,
-    equalize: request.controls.equalize && !request.preset.controls.equalize,
+    equalize: request.controls.equalize && !request.presetControls.equalize,
     compare: request.compare,
-    pipeline: pipelinesEqual(request.pipeline, DEFAULT_PIPELINE) ? null : request.pipeline,
     palette:
-      request.controls.palette !== request.preset.controls.palette
+      request.controls.palette !== request.presetControls.palette
         ? request.controls.palette
         : null,
   };
@@ -503,41 +487,6 @@ export async function startRenderStudyJob(studyId: string): Promise<StartedJob> 
       return invokeWithBackendError<StartedJob>("start_render_job", { request });
     },
   });
-}
-
-export function buildProcessingArgs(
-  inputPath: string,
-  request: ProcessingRequest,
-): string[] {
-  const args = ["--input", inputPath, "--preset", request.preset.id];
-
-  if (request.outputPath) {
-    args.push("--output", request.outputPath);
-  }
-
-  if (request.controls.invert && !request.preset.controls.invert) {
-    args.push("--invert");
-  }
-  if (request.controls.brightness !== request.preset.controls.brightness) {
-    args.push("--brightness", String(request.controls.brightness));
-  }
-  if (request.controls.contrast !== request.preset.controls.contrast) {
-    args.push("--contrast", String(request.controls.contrast));
-  }
-  if (request.controls.equalize && !request.preset.controls.equalize) {
-    args.push("--equalize");
-  }
-  if (request.controls.palette !== request.preset.controls.palette) {
-    args.push("--palette", request.controls.palette);
-  }
-  if (request.compare) {
-    args.push("--compare");
-  }
-  if (!pipelinesEqual(request.pipeline, DEFAULT_PIPELINE)) {
-    args.push("--pipeline", request.pipeline.join(","));
-  }
-
-  return args;
 }
 
 export async function startProcessStudyJob(
