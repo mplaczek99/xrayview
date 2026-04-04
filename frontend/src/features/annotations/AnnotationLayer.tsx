@@ -46,6 +46,7 @@ export function AnnotationLayer({
       width={width}
       height={height}
       viewBox={`0 0 ${width} ${height}`}
+      aria-hidden="true"
     >
       <g
         transform={`translate(${transform.offsetX} ${transform.offsetY}) scale(${transform.scale})`}

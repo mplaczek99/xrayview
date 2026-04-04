@@ -96,6 +96,8 @@ export function ProcessingTab() {
   }
 
   return (
+    <>
+    <h2 className="sr-only">Processing</h2>
     <div className="processing-tab">
       <div className="processing-tab__preview">
         <DicomViewer
@@ -408,5 +410,6 @@ export function ProcessingTab() {
         )}
       </div>
     </div>
+    </>
   );
 }

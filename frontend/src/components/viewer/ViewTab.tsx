@@ -26,7 +26,7 @@ function MeasurementSection({
 }: MeasurementSectionProps) {
   return (
     <section className="measurement-card">
-      <div className="measurement-card__eyebrow">{title}</div>
+      <h3 className="measurement-card__eyebrow">{title}</h3>
       <div className="measurement-grid">
         <div className="measurement-grid__item">
           <span className="measurement-grid__label">Tooth width</span>
@@ -100,6 +100,7 @@ export function ViewTab() {
 
   return (
     <div className="view-tab">
+      <h2 className="sr-only">View</h2>
       <div className="view-panel__toolbar">
         <button
           className="button button--primary"
@@ -152,7 +153,7 @@ export function ViewTab() {
         )}
       </div>
 
-      <p className="view-panel__status">{status}</p>
+      <p className="view-panel__status" aria-live="polite">{status}</p>
 
       <div className="study-analysis">
         <div className="study-analysis__viewer">
@@ -178,7 +179,7 @@ export function ViewTab() {
 
         <aside className="study-analysis__sidebar">
           <section className="measurement-card">
-            <div className="measurement-card__eyebrow">Viewer Tools</div>
+            <h3 className="measurement-card__eyebrow">Viewer Tools</h3>
             <p className="measurement-card__copy">
               Drag to pan, use the mouse wheel to zoom, then switch to Measure
               line to place calibrated annotations in source pixel space.
@@ -196,7 +197,7 @@ export function ViewTab() {
           </section>
 
           <section className="measurement-card">
-            <div className="measurement-card__eyebrow">Line Annotations</div>
+            <h3 className="measurement-card__eyebrow">Line Annotations</h3>
             {annotations.lines.length ? (
               <div className="annotation-list">
                 {annotations.lines.map((annotation) => (
@@ -208,6 +209,8 @@ export function ViewTab() {
                         : ""
                     }`}
                     type="button"
+                    aria-label={annotation.label}
+                    aria-pressed={annotation.id === selectedAnnotationId}
                     onClick={() =>
                       workbenchActions.selectAnnotation(annotation.id)
                     }
@@ -238,9 +241,9 @@ export function ViewTab() {
           </section>
 
           <section className="measurement-card">
-            <div className="measurement-card__eyebrow">
+            <h3 className="measurement-card__eyebrow">
               Automatic Measurement
-            </div>
+            </h3>
             {tooth ? (
               <>
                 <div className="measurement-card__hero">
@@ -272,7 +275,7 @@ export function ViewTab() {
           )}
 
           <section className="measurement-card">
-            <div className="measurement-card__eyebrow">Calibration</div>
+            <h3 className="measurement-card__eyebrow">Calibration</h3>
             {measurementScale ? (
               <>
                 <div className="measurement-card__hero">
@@ -296,7 +299,7 @@ export function ViewTab() {
 
           {warnings.length ? (
             <section className="measurement-card">
-              <div className="measurement-card__eyebrow">Backend notes</div>
+              <h3 className="measurement-card__eyebrow">Backend notes</h3>
               <div className="measurement-note-list">
                 {warnings.map((warning) => (
                   <p key={warning} className="measurement-card__copy">
@@ -309,7 +312,7 @@ export function ViewTab() {
 
           {analysisJob?.state === "failed" && (
             <section className="measurement-card">
-              <div className="measurement-card__eyebrow">Job Error</div>
+              <h3 className="measurement-card__eyebrow">Job Error</h3>
               <p className="measurement-card__copy">
                 {formatBackendError(analysisJob.error, "Measurement failed.")}
               </p>
