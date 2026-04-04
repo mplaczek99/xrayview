@@ -9,6 +9,15 @@ export function ViewTab() {
   const isOpeningStudy = useWorkbenchStore(selectIsOpeningStudy);
   const jobs = useWorkbenchStore(selectJobs);
 
+  const teeth = useMemo(
+    () =>
+      study?.analysis?.teeth.length
+        ? study.analysis.teeth
+        : study?.analysis?.tooth
+          ? [study.analysis.tooth]
+          : [],
+    [study?.analysis?.teeth, study?.analysis?.tooth],
+  );
   const tooth = useMemo(() => study?.analysis?.tooth ?? null, [study?.analysis?.tooth]);
   const warnings = useMemo(() => study?.analysis?.warnings ?? [], [study?.analysis?.warnings]);
   const analysisJob = useMemo(
@@ -154,9 +163,9 @@ export function ViewTab() {
               ? analysisJob?.state === "cancelling"
                 ? "Cancelling..."
                 : "Measuring..."
-              : tooth
-                ? "Re-run measurement"
-                : "Measure tooth"}
+              : teeth.length
+                ? "Re-run detection"
+                : "Measure teeth"}
           </button>
           <button
             className="button button--ghost"
@@ -202,6 +211,7 @@ export function ViewTab() {
           selectedLine={selectedLine}
           annotations={annotations}
           selectedAnnotationId={selectedAnnotationId}
+          teeth={teeth}
           tooth={tooth}
           measurementScale={measurementScale}
           warnings={warnings}

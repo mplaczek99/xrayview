@@ -17,6 +17,7 @@ pub struct ToothAnalysis {
     pub calibration: ToothCalibration,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tooth: Option<ToothCandidate>,
+    pub teeth: Vec<ToothCandidate>,
     pub warnings: Vec<String>,
 }
 
@@ -179,8 +180,8 @@ pub fn analyze_grayscale_pixels(
     );
 
     let candidates = collect_candidates(&mask, &normalized, &toothness, width, height, search);
-    let selected = select_best_candidate(&candidates, true)
-        .or_else(|| select_best_candidate(&candidates, false));
+    let detected_candidates = select_detected_candidates(&candidates);
+    let primary_candidate = select_primary_candidate(&detected_candidates);
 
     let mut warnings = Vec::new();
     if measurement_scale.is_none() {
@@ -188,16 +189,20 @@ pub fn analyze_grayscale_pixels(
             .push("Calibration metadata unavailable; returning pixel measurements only.".into());
     }
 
-    let tooth = selected.map(|candidate| {
-        if !candidate.strict {
-            warnings.push(
-                "No component met the primary tooth filters; using the strongest relaxed candidate."
-                    .into(),
-            );
-        }
+    if !detected_candidates.is_empty()
+        && primary_candidate.is_some_and(|candidate| !candidate.strict)
+    {
+        warnings.push(
+            "No component met the primary tooth filters; using relaxed tooth candidates.".into(),
+        );
+    }
 
-        build_tooth_candidate(candidate, measurement_scale, width)
-    });
+    let teeth = detected_candidates
+        .iter()
+        .map(|candidate| build_tooth_candidate(candidate, measurement_scale, width))
+        .collect::<Vec<_>>();
+    let tooth = primary_candidate
+        .map(|candidate| build_tooth_candidate(candidate, measurement_scale, width));
 
     if tooth.is_none() {
         warnings.push("The backend could not isolate a tooth candidate from this study.".into());
@@ -211,6 +216,7 @@ pub fn analyze_grayscale_pixels(
             real_world_measurements_available: measurement_scale.is_some(),
         },
         tooth,
+        teeth,
         warnings,
     })
 }
@@ -544,15 +550,46 @@ fn score_candidate(
     score
 }
 
-fn select_best_candidate(
-    candidates: &[ComponentCandidate],
-    strict_only: bool,
-) -> Option<&ComponentCandidate> {
+fn select_detected_candidates(candidates: &[ComponentCandidate]) -> Vec<&ComponentCandidate> {
+    let mut detected_candidates = candidates
+        .iter()
+        .filter(|candidate| candidate.area > 150)
+        .collect::<Vec<_>>();
+    sort_detected_candidates(&mut detected_candidates);
+    detected_candidates
+}
+
+fn select_primary_candidate<'a>(
+    candidates: &[&'a ComponentCandidate],
+) -> Option<&'a ComponentCandidate> {
     candidates
         .iter()
-        .filter(|candidate| !strict_only || candidate.strict)
-        .filter(|candidate| candidate.area > 150)
+        .copied()
+        .filter(|candidate| candidate.strict)
         .max_by(|left, right| left.score.total_cmp(&right.score))
+        .or_else(|| {
+            candidates
+                .iter()
+                .copied()
+                .max_by(|left, right| left.score.total_cmp(&right.score))
+        })
+}
+
+fn sort_detected_candidates(candidates: &mut Vec<&ComponentCandidate>) {
+    candidates.sort_by(|left, right| {
+        candidate_center_x(left)
+            .cmp(&candidate_center_x(right))
+            .then(candidate_center_y(left).cmp(&candidate_center_y(right)))
+            .then_with(|| right.score.total_cmp(&left.score))
+    });
+}
+
+fn candidate_center_x(candidate: &ComponentCandidate) -> u64 {
+    u64::from(candidate.bbox.x) * 2 + u64::from(candidate.bbox.width)
+}
+
+fn candidate_center_y(candidate: &ComponentCandidate) -> u64 {
+    u64::from(candidate.bbox.y) * 2 + u64::from(candidate.bbox.height)
 }
 
 fn geometry_from_pixels(pixels: &[usize], bbox: BoundingBox, image_width: u32) -> ToothGeometry {
@@ -753,6 +790,19 @@ mod tests {
     }
 
     #[test]
+    fn sample_dicom_returns_multiple_detected_teeth() {
+        let sample =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../images/sample-dental-radiograph.dcm");
+        let preview = load_preview(&sample).expect("load sample preview");
+        let analysis = analyze_preview(&preview, None).expect("analyze sample preview");
+
+        assert!(
+            analysis.teeth.len() > 1,
+            "sample panoramic study should return multiple tooth candidates"
+        );
+    }
+
+    #[test]
     fn calibration_generates_millimeter_measurements() {
         let analysis = analyze_preview(
             &synthetic_tooth_preview(),
@@ -781,8 +831,9 @@ mod tests {
         assert_eq!(analysis.image.width, 2048);
         assert_eq!(analysis.image.height, 1088);
         assert!(
-            analysis.tooth.is_some() || !analysis.warnings.is_empty(),
-            "analysis should produce either a candidate or a structured warning"
+            !analysis.teeth.is_empty() || !analysis.warnings.is_empty(),
+            "analysis should produce either tooth candidates or a structured warning"
         );
+        assert_eq!(analysis.tooth.is_some(), !analysis.teeth.is_empty());
     }
 }

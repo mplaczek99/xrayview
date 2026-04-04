@@ -569,6 +569,7 @@ export interface ToothAnalysis {
   image: ToothImageMetadata;
   calibration: ToothCalibration;
   tooth?: ToothCandidate | null;
+  teeth: ToothCandidate[];
   warnings: string[];
 }
 

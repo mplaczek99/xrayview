@@ -65,6 +65,34 @@ function isPendingJob(job: JobSnapshot | null): boolean {
   return job !== null && ["queued", "running", "cancelling"].includes(job.state);
 }
 
+function detectedToothCount(analysis: WorkbenchStudy["analysis"]): number {
+  if (!analysis) {
+    return 0;
+  }
+
+  if (analysis.teeth.length > 0) {
+    return analysis.teeth.length;
+  }
+
+  return analysis.tooth ? 1 : 0;
+}
+
+function formatAnalyzeStatus(toothCount: number, fromCache: boolean): string {
+  if (toothCount === 0) {
+    return "Measurement completed, but the backend could not isolate a tooth candidate.";
+  }
+
+  if (fromCache) {
+    return toothCount === 1
+      ? "Tooth suggestions loaded from cache."
+      : `${toothCount} tooth suggestions loaded from cache.`;
+  }
+
+  return toothCount === 1
+    ? "Tooth measurement complete. Suggestions are ready to edit."
+    : `${toothCount} teeth measured. Suggestions are ready to edit.`;
+}
+
 function createPendingJobSnapshot(
   jobId: string,
   jobKind: JobSnapshot["jobKind"],
@@ -147,7 +175,7 @@ function applyAnalyzeJob(study: WorkbenchStudy, job: JobSnapshot): WorkbenchStud
         return study;
       }
 
-      const toothFound = Boolean(job.result.payload.analysis.tooth);
+      const toothCount = detectedToothCount(job.result.payload.analysis);
       return {
         ...study,
         analysisJobId: job.jobId,
@@ -171,11 +199,7 @@ function applyAnalyzeJob(study: WorkbenchStudy, job: JobSnapshot): WorkbenchStud
           study.annotations,
           job.result.payload.suggestedAnnotations,
         ),
-        status: toothFound
-          ? job.fromCache
-            ? "Tooth suggestions loaded from cache."
-            : "Tooth measurement complete. Suggestions are ready to edit."
-          : "Measurement completed, but the backend could not isolate a tooth candidate.",
+        status: formatAnalyzeStatus(toothCount, job.fromCache),
       };
     }
     case "failed":

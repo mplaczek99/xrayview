@@ -97,17 +97,8 @@ export function createMockPreview(processed: boolean, palette: Palette): string 
 }
 
 export function createMockToothAnalysis(): ToothAnalysis {
-  return {
-    image: {
-      width: 1200,
-      height: 820,
-    },
-    calibration: {
-      pixelUnits: "px",
-      measurementScale: null,
-      realWorldMeasurementsAvailable: false,
-    },
-    tooth: {
+  const teeth: ToothAnalysis["teeth"] = [
+    {
       confidence: 0.74,
       maskAreaPixels: 18492,
       measurements: {
@@ -137,6 +128,50 @@ export function createMockToothAnalysis(): ToothAnalysis {
         },
       },
     },
+    {
+      confidence: 0.69,
+      maskAreaPixels: 16084,
+      measurements: {
+        pixel: {
+          toothWidth: 124,
+          toothHeight: 194,
+          boundingBoxWidth: 132,
+          boundingBoxHeight: 208,
+          units: "px",
+        },
+        calibrated: null,
+      },
+      geometry: {
+        boundingBox: {
+          x: 612,
+          y: 402,
+          width: 132,
+          height: 208,
+        },
+        widthLine: {
+          start: { x: 618, y: 446 },
+          end: { x: 741, y: 446 },
+        },
+        heightLine: {
+          start: { x: 676, y: 408 },
+          end: { x: 676, y: 601 },
+        },
+      },
+    },
+  ];
+
+  return {
+    image: {
+      width: 1200,
+      height: 820,
+    },
+    calibration: {
+      pixelUnits: "px",
+      measurementScale: null,
+      realWorldMeasurementsAvailable: false,
+    },
+    tooth: teeth[0],
+    teeth,
     warnings: [
       "Calibration metadata unavailable; returning pixel measurements only.",
     ],
@@ -147,8 +182,8 @@ export function createMockSuggestedAnnotations(): AnnotationBundle {
   return {
     lines: [
       {
-        id: "auto-tooth-width",
-        label: "Tooth width",
+        id: "auto-tooth-1-width",
+        label: "Tooth 1 width",
         source: "autoTooth",
         start: { x: 428, y: 454 },
         end: { x: 560, y: 454 },
@@ -160,8 +195,8 @@ export function createMockSuggestedAnnotations(): AnnotationBundle {
         },
       },
       {
-        id: "auto-tooth-height",
-        label: "Tooth height",
+        id: "auto-tooth-1-height",
+        label: "Tooth 1 height",
         source: "autoTooth",
         start: { x: 492, y: 420 },
         end: { x: 492, y: 620 },
@@ -172,11 +207,37 @@ export function createMockSuggestedAnnotations(): AnnotationBundle {
           calibratedLengthMm: null,
         },
       },
+      {
+        id: "auto-tooth-2-width",
+        label: "Tooth 2 width",
+        source: "autoTooth",
+        start: { x: 618, y: 446 },
+        end: { x: 741, y: 446 },
+        editable: true,
+        confidence: 0.69,
+        measurement: {
+          pixelLength: 123,
+          calibratedLengthMm: null,
+        },
+      },
+      {
+        id: "auto-tooth-2-height",
+        label: "Tooth 2 height",
+        source: "autoTooth",
+        start: { x: 676, y: 408 },
+        end: { x: 676, y: 601 },
+        editable: true,
+        confidence: 0.69,
+        measurement: {
+          pixelLength: 193,
+          calibratedLengthMm: null,
+        },
+      },
     ],
     rectangles: [
       {
-        id: "auto-tooth-bounding-box",
-        label: "Tooth bounding box",
+        id: "auto-tooth-1-bounding-box",
+        label: "Tooth 1 bounding box",
         source: "autoTooth",
         x: 422,
         y: 414,
@@ -184,6 +245,17 @@ export function createMockSuggestedAnnotations(): AnnotationBundle {
         height: 220,
         editable: false,
         confidence: 0.74,
+      },
+      {
+        id: "auto-tooth-2-bounding-box",
+        label: "Tooth 2 bounding box",
+        source: "autoTooth",
+        x: 612,
+        y: 402,
+        width: 132,
+        height: 208,
+        editable: false,
+        confidence: 0.69,
       },
     ],
   };

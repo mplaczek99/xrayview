@@ -113,6 +113,10 @@ fn analyze_tooth_command_returns_json_and_preview() {
     assert!(analysis["image"]["height"].is_number());
     assert!(analysis["warnings"].is_array());
     assert!(
+        analysis.get("teeth").is_some(),
+        "analysis should include a teeth field even when empty"
+    );
+    assert!(
         analysis.get("tooth").is_some(),
         "analysis should include a tooth field even when null"
     );
