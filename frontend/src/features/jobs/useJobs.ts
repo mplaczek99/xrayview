@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { getJob } from "../../lib/backend";
 import { workbenchActions } from "../../app/store/workbenchStore";
 
-const POLL_INTERVAL_MS = 450;
+const POLL_INTERVAL_MS = 1500;
 
 export function useJobs() {
   useEffect(() => {

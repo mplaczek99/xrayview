@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { workbenchActions, useWorkbenchStore } from "../../app/store/workbenchStore";
+import { workbenchActions, useWorkbenchStore, selectJobOrder, selectJobs, selectStudies } from "../../app/store/workbenchStore";
 import { formatBackendError } from "../../lib/backend";
 
 function titleForJob(kind: string): string {
@@ -35,9 +35,9 @@ function stateLabel(state: string): string {
 }
 
 export function JobCenter() {
-  const jobOrder = useWorkbenchStore((state) => state.jobOrder);
-  const jobMap = useWorkbenchStore((state) => state.jobs);
-  const studies = useWorkbenchStore((state) => state.studies);
+  const jobOrder = useWorkbenchStore(selectJobOrder);
+  const jobMap = useWorkbenchStore(selectJobs);
+  const studies = useWorkbenchStore(selectStudies);
   const jobs = useMemo(
     () =>
       jobOrder

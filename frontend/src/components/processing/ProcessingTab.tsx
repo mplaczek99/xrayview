@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { workbenchActions, useWorkbenchStore } from "../../app/store/workbenchStore";
+import { workbenchActions, useWorkbenchStore, selectActiveStudy, selectManifest } from "../../app/store/workbenchStore";
 import {
   buildProcessingArgs,
   FALLBACK_PROCESSING_MANIFEST,
@@ -28,15 +28,9 @@ function formatArgPreview(args: readonly string[]): string {
     .join(" ");
 }
 
-function useActiveStudy() {
-  return useWorkbenchStore((state) =>
-    state.activeStudyId ? state.studies[state.activeStudyId] ?? null : null,
-  );
-}
-
 export function ProcessingTab() {
-  const study = useActiveStudy();
-  const manifest = useWorkbenchStore((state) => state.manifest);
+  const study = useWorkbenchStore(selectActiveStudy);
+  const manifest = useWorkbenchStore(selectManifest);
   const processingUi = useMemo(() => buildProcessingUiState(manifest), [manifest]);
   const [pipelineOpen, setPipelineOpen] = useState(false);
   const defaultPreset =

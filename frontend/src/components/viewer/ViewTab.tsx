@@ -2,7 +2,7 @@ import type {
   MeasurementScale,
   ToothMeasurementValues,
 } from "../../lib/generated/contracts";
-import { workbenchActions, useWorkbenchStore } from "../../app/store/workbenchStore";
+import { workbenchActions, useWorkbenchStore, selectActiveStudy, selectIsOpeningStudy, selectJobs, selectWorkbenchStatus } from "../../app/store/workbenchStore";
 import { formatBackendError } from "../../lib/backend";
 import {
   annotationSourceLabel,
@@ -57,17 +57,11 @@ function MeasurementSection({
   );
 }
 
-function useActiveStudy() {
-  return useWorkbenchStore((state) =>
-    state.activeStudyId ? state.studies[state.activeStudyId] ?? null : null,
-  );
-}
-
 export function ViewTab() {
-  const study = useActiveStudy();
-  const isOpeningStudy = useWorkbenchStore((state) => state.isOpeningStudy);
-  const jobs = useWorkbenchStore((state) => state.jobs);
-  const workbenchStatus = useWorkbenchStore((state) => state.workbenchStatus);
+  const study = useWorkbenchStore(selectActiveStudy);
+  const isOpeningStudy = useWorkbenchStore(selectIsOpeningStudy);
+  const jobs = useWorkbenchStore(selectJobs);
+  const workbenchStatus = useWorkbenchStore(selectWorkbenchStatus);
   const tooth = study?.analysis?.tooth ?? null;
   const warnings = study?.analysis?.warnings ?? [];
   const analysisJob = study?.analysisJobId ? jobs[study.analysisJobId] ?? null : null;

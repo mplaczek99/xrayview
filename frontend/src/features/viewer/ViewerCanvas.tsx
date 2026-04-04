@@ -171,6 +171,14 @@ export function ViewerCanvas({
     return getViewerTransform(frame, resolvedImageSize, viewport);
   }, [frame, resolvedImageSize, viewport]);
 
+  const draftLineRef = useRef(draftLine);
+  useEffect(() => { draftLineRef.current = draftLine; }, [draftLine]);
+
+  const callbacksRef = useRef({ onCreateLine, onSelectAnnotation, onUpdateLine });
+  useEffect(() => {
+    callbacksRef.current = { onCreateLine, onSelectAnnotation, onUpdateLine };
+  }, [onCreateLine, onSelectAnnotation, onUpdateLine]);
+
   useEffect(() => {
     const activeInteraction = interaction;
     const activeTransform = transform;
@@ -233,7 +241,7 @@ export function ViewerCanvas({
     }
 
     function handlePointerUp() {
-      const nextDraft = draftLine;
+      const nextDraft = draftLineRef.current;
       const nextInteraction = stableInteraction;
       setInteraction(null);
       setDraftLine(null);
@@ -249,14 +257,15 @@ export function ViewerCanvas({
         return;
       }
 
+      const cbs = callbacksRef.current;
       if (nextInteraction.kind === "draw") {
-        void onCreateLine(nextDraft);
-        onSelectAnnotation(nextDraft.id);
+        void cbs.onCreateLine(nextDraft);
+        cbs.onSelectAnnotation(nextDraft.id);
         return;
       }
 
-      void onUpdateLine(nextDraft);
-      onSelectAnnotation(nextDraft.id);
+      void cbs.onUpdateLine(nextDraft);
+      cbs.onSelectAnnotation(nextDraft.id);
     }
 
     window.addEventListener("pointermove", handlePointerMove);
@@ -266,15 +275,7 @@ export function ViewerCanvas({
       window.removeEventListener("pointermove", handlePointerMove);
       window.removeEventListener("pointerup", handlePointerUp);
     };
-  }, [
-    draftLine,
-    interaction,
-    onCreateLine,
-    onSelectAnnotation,
-    onUpdateLine,
-    resolvedImageSize,
-    transform,
-  ]);
+  }, [interaction, resolvedImageSize, transform]);
 
   const displayedAnnotations = useMemo(() => {
     if (interaction?.kind !== "edit" || !draftLine) {

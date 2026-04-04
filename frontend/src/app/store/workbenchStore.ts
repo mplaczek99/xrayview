@@ -708,4 +708,13 @@ export function useWorkbenchStore<T>(selector: (state: WorkbenchState) => T): T 
   );
 }
 
+export const selectJobs = (s: WorkbenchState) => s.jobs;
+export const selectJobOrder = (s: WorkbenchState) => s.jobOrder;
+export const selectStudies = (s: WorkbenchState) => s.studies;
+export const selectIsOpeningStudy = (s: WorkbenchState) => s.isOpeningStudy;
+export const selectWorkbenchStatus = (s: WorkbenchState) => s.workbenchStatus;
+export const selectManifest = (s: WorkbenchState) => s.manifest;
+export const selectActiveStudy = (s: WorkbenchState) =>
+  s.activeStudyId ? s.studies[s.activeStudyId] ?? null : null;
+
 export type { ProcessingRunState };
