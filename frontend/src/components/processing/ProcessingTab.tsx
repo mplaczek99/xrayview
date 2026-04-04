@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { workbenchActions, useWorkbenchStore, selectActiveStudy, selectManifest } from "../../app/store/workbenchStore";
 import {
   buildProcessingArgs,
@@ -58,6 +58,7 @@ export function ProcessingTab() {
   };
   const previewUrl = study?.originalPreview?.previewUrl ?? null;
   const processedPreviewUrl = study?.processing.output?.previewUrl ?? null;
+  const [compareView, setCompareView] = useState<"original" | "processed" | "split">("processed");
   const busy = runStatus.state === "running" || runStatus.state === "cancelling";
   const isRunning = runStatus.state === "running";
   const isCancelling = runStatus.state === "cancelling";
@@ -83,11 +84,55 @@ export function ProcessingTab() {
     <h2 className="sr-only">Processing</h2>
     <div className="processing-tab">
       <div className="processing-tab__preview">
-        <DicomViewer
-          previewUrl={previewUrl}
-          emptyTitle="No image loaded"
-          emptyDescription="Load a DICOM file in the View tab first."
-        />
+        {processedPreviewUrl ? (
+          <>
+            <div className="compare-toggle">
+              <button
+                className={`compare-toggle__btn${compareView === "original" ? " compare-toggle__btn--active" : ""}`}
+                type="button"
+                onClick={() => setCompareView("original")}
+              >
+                Original
+              </button>
+              <button
+                className={`compare-toggle__btn${compareView === "processed" ? " compare-toggle__btn--active" : ""}`}
+                type="button"
+                onClick={() => setCompareView("processed")}
+              >
+                Processed
+              </button>
+              <button
+                className={`compare-toggle__btn${compareView === "split" ? " compare-toggle__btn--active" : ""}`}
+                type="button"
+                onClick={() => setCompareView("split")}
+              >
+                Split
+              </button>
+            </div>
+            {compareView === "split" ? (
+              <div className="compare-split">
+                <div className="compare-split__pane">
+                  <div className="compare-split__label">Original</div>
+                  <DicomViewer previewUrl={previewUrl} />
+                </div>
+                <div className="compare-split__pane">
+                  <div className="compare-split__label">Processed</div>
+                  <DicomViewer previewUrl={processedPreviewUrl} />
+                </div>
+              </div>
+            ) : (
+              <DicomViewer
+                previewUrl={compareView === "processed" ? processedPreviewUrl : previewUrl}
+              />
+            )}
+          </>
+        ) : (
+          <DicomViewer
+            previewUrl={previewUrl}
+            emptyTitle="No image loaded"
+            emptyDescription="Load a DICOM file in the View tab first."
+          />
+        )}
       </div>
 
       <div className="processing-tab__form">
@@ -257,14 +302,11 @@ export function ProcessingTab() {
           )}
         </div>
 
-        {processedPreviewUrl && (
+        {runStatus.state === "success" && runStatus.outputPath && (
           <div className="processing-tab__output">
-            <DicomViewer previewUrl={processedPreviewUrl} />
-            {runStatus.state === "success" && (
-              <p className="processing-tab__output-path u-mono">
-                {runStatus.outputPath}
-              </p>
-            )}
+            <p className="processing-tab__output-path u-mono">
+              {runStatus.outputPath}
+            </p>
           </div>
         )}
       </div>

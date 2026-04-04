@@ -140,31 +140,24 @@ export function ViewSidebar({
         )}
       </section>
 
-      <section className="measurement-card">
-        <h3 className="measurement-card__eyebrow">
-          Automatic Measurement
-        </h3>
-        {tooth ? (
-          <>
-            <div className="measurement-card__hero">
-              <span className="measurement-card__hero-label">Confidence</span>
-              <span className="measurement-card__hero-value">
-                {Math.round(tooth.confidence * 100)}%
-              </span>
-            </div>
-            <p className="measurement-card__copy">
-              Mask area {tooth.maskAreaPixels.toLocaleString()} px. Overlay
-              guides are returned as editable annotation suggestions from
-              the backend candidate geometry.
-            </p>
-          </>
-        ) : (
+      {tooth && (
+        <section className="measurement-card">
+          <h3 className="measurement-card__eyebrow">
+            Automatic Measurement
+          </h3>
+          <div className="measurement-card__hero">
+            <span className="measurement-card__hero-label">Confidence</span>
+            <span className="measurement-card__hero-value">
+              {Math.round(tooth.confidence * 100)}%
+            </span>
+          </div>
           <p className="measurement-card__copy">
-            Load a study, then click Measure tooth to run the backend
-            analysis and populate the returned measurements here.
+            Mask area {tooth.maskAreaPixels.toLocaleString()} px. Overlay
+            guides are returned as editable annotation suggestions from
+            the backend candidate geometry.
           </p>
-        )}
-      </section>
+        </section>
+      )}
 
       {tooth && <MeasurementSection title="Pixel measurements" measurements={tooth.measurements.pixel} />}
       {tooth?.measurements.calibrated && (
@@ -174,28 +167,21 @@ export function ViewSidebar({
         />
       )}
 
-      <section className="measurement-card">
-        <h3 className="measurement-card__eyebrow">Calibration</h3>
-        {measurementScale ? (
-          <>
-            <div className="measurement-card__hero">
-              <span className="measurement-card__hero-label">Source</span>
-              <span className="measurement-card__hero-value">
-                {measurementScale.source}
-              </span>
-            </div>
-            <p className="measurement-card__copy">
-              Row {measurementScale.rowSpacingMm.toFixed(3)} mm, column{" "}
-              {measurementScale.columnSpacingMm.toFixed(3)} mm.
-            </p>
-          </>
-        ) : (
+      {measurementScale && (
+        <section className="measurement-card">
+          <h3 className="measurement-card__eyebrow">Calibration</h3>
+          <div className="measurement-card__hero">
+            <span className="measurement-card__hero-label">Source</span>
+            <span className="measurement-card__hero-value">
+              {measurementScale.source}
+            </span>
+          </div>
           <p className="measurement-card__copy">
-            No calibration metadata was available in the study, so the
-            backend returned pixel units only.
+            Row {measurementScale.rowSpacingMm.toFixed(3)} mm, column{" "}
+            {measurementScale.columnSpacingMm.toFixed(3)} mm.
           </p>
-        )}
-      </section>
+        </section>
+      )}
 
       {warnings.length ? (
         <section className="measurement-card">

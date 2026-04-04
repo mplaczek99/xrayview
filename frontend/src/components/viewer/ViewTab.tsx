@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import type { MeasurementScale } from "../../lib/generated/contracts";
-import { workbenchActions, useWorkbenchStore, selectActiveStudy, selectIsOpeningStudy, selectJobs, selectWorkbenchStatus } from "../../app/store/workbenchStore";
+import { workbenchActions, useWorkbenchStore, selectActiveStudy, selectIsOpeningStudy, selectJobs } from "../../app/store/workbenchStore";
 import { ViewerCanvas } from "../../features/viewer/ViewerCanvas";
 import { ViewSidebar } from "./ViewSidebar";
 
@@ -8,7 +8,6 @@ export function ViewTab() {
   const study = useWorkbenchStore(selectActiveStudy);
   const isOpeningStudy = useWorkbenchStore(selectIsOpeningStudy);
   const jobs = useWorkbenchStore(selectJobs);
-  const workbenchStatus = useWorkbenchStore(selectWorkbenchStatus);
 
   const tooth = useMemo(() => study?.analysis?.tooth ?? null, [study?.analysis?.tooth]);
   const warnings = useMemo(() => study?.analysis?.warnings ?? [], [study?.analysis?.warnings]);
@@ -51,65 +50,120 @@ export function ViewTab() {
     [annotations.lines, selectedAnnotationId],
   );
   const viewerTool = study?.viewer.tool ?? "pan";
-  const status = study?.status ?? workbenchStatus;
   const inputName = study?.inputName ?? "No study loaded";
+
+  if (!study) {
+    return (
+      <div className="view-tab">
+        <h2 className="sr-only">View</h2>
+        <div className="empty-state">
+          <svg className="empty-state__icon" viewBox="0 0 48 48" fill="none" aria-hidden="true">
+            <rect x="6" y="8" width="36" height="32" rx="4" stroke="currentColor" strokeWidth="2" />
+            <path d="M6 16h36" stroke="currentColor" strokeWidth="2" />
+            <circle cx="18" cy="30" r="5" stroke="currentColor" strokeWidth="2" />
+            <path d="M30 25l5 5-5 5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          <h3 className="empty-state__title">No study loaded</h3>
+          <p className="empty-state__copy">
+            Open a DICOM study to inspect it, pan and zoom, draw manual line
+            measurements, or run automatic tooth analysis.
+          </p>
+          <button
+            className="button button--primary empty-state__cta"
+            type="button"
+            onClick={() => void workbenchActions.openStudy()}
+            disabled={isOpeningStudy}
+          >
+            {isOpeningStudy ? "Opening..." : "Open DICOM"}
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="view-tab">
       <h2 className="sr-only">View</h2>
       <div className="view-panel__toolbar">
-        <button
-          className="button button--primary"
-          type="button"
-          onClick={() => void workbenchActions.openStudy()}
-          disabled={isOpeningStudy}
-        >
-          {isOpeningStudy ? "Opening..." : "Open DICOM"}
-        </button>
-        <button
-          className="button button--ghost"
-          type="button"
-          onClick={() => void workbenchActions.measureActiveStudy()}
-          disabled={!study || isMeasuring}
-        >
-          {isMeasuring
-            ? analysisJob?.state === "cancelling"
-              ? "Cancelling..."
-              : "Measuring..."
-            : tooth
-              ? "Re-run measurement"
-              : "Measure tooth"}
-        </button>
-        <button
-          className={`button button--ghost${viewerTool === "pan" ? " viewer-tool--active" : ""}`}
-          type="button"
-          onClick={() => workbenchActions.setViewerTool("pan")}
-          disabled={!study}
-        >
-          Pan
-        </button>
-        <button
-          className={`button button--ghost${viewerTool === "measureLine" ? " viewer-tool--active" : ""}`}
-          type="button"
-          onClick={() => workbenchActions.setViewerTool("measureLine")}
-          disabled={!study}
-        >
-          Measure line
-        </button>
-        <button
-          className="button button--ghost"
-          type="button"
-          onClick={() => workbenchActions.deleteSelectedAnnotation()}
-          disabled={!selectedAnnotationId}
-        >
-          Remove selected
-        </button>
+        <div className="toolbar-group">
+          <button
+            className="button button--primary"
+            type="button"
+            onClick={() => void workbenchActions.openStudy()}
+            disabled={isOpeningStudy}
+          >
+            <svg className="button__icon" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M2 3a1 1 0 011-1h4l2 2h4a1 1 0 011 1v7a1 1 0 01-1 1H3a1 1 0 01-1-1V3z" stroke="currentColor" strokeWidth="1.5" />
+            </svg>
+            {isOpeningStudy ? "Opening..." : "Open DICOM"}
+          </button>
+        </div>
+
+        <span className="toolbar-divider" aria-hidden="true" />
+
+        <div className="toolbar-group">
+          <button
+            className={`button button--ghost${viewerTool === "pan" ? " viewer-tool--active" : ""}`}
+            type="button"
+            onClick={() => workbenchActions.setViewerTool("pan")}
+          >
+            <svg className="button__icon" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M8 1v3M8 12v3M1 8h3M12 8h3M3.5 3.5l2 2M10.5 10.5l2 2M3.5 12.5l2-2M10.5 5.5l2-2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+            </svg>
+            Pan
+          </button>
+          <button
+            className={`button button--ghost${viewerTool === "measureLine" ? " viewer-tool--active" : ""}`}
+            type="button"
+            onClick={() => workbenchActions.setViewerTool("measureLine")}
+          >
+            <svg className="button__icon" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M2 14L14 2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+              <path d="M2 14v-4M2 14h4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+              <path d="M14 2v4M14 2h-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+            </svg>
+            Measure line
+          </button>
+        </div>
+
+        <span className="toolbar-divider" aria-hidden="true" />
+
+        <div className="toolbar-group">
+          <button
+            className="button button--ghost"
+            type="button"
+            onClick={() => void workbenchActions.measureActiveStudy()}
+            disabled={isMeasuring}
+          >
+            <svg className="button__icon" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.5" />
+              <path d="M8 5v6M5 8h6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+            </svg>
+            {isMeasuring
+              ? analysisJob?.state === "cancelling"
+                ? "Cancelling..."
+                : "Measuring..."
+              : tooth
+                ? "Re-run measurement"
+                : "Measure tooth"}
+          </button>
+          <button
+            className="button button--ghost"
+            type="button"
+            onClick={() => workbenchActions.deleteSelectedAnnotation()}
+            disabled={!selectedAnnotationId}
+          >
+            <svg className="button__icon" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M5 2h6M3 4h10M4 4l1 9a1 1 0 001 1h4a1 1 0 001-1l1-9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            Remove selected
+          </button>
+        </div>
+
         {previewUrl && (
           <span className="view-panel__filename u-mono">{inputName}</span>
         )}
       </div>
-
-      <p className="view-panel__status" aria-live="polite">{status}</p>
 
       <div className="study-analysis">
         <div className="study-analysis__viewer">

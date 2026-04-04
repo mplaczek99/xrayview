@@ -76,6 +76,7 @@ export function ViewerCanvas({
   );
   const [interaction, setInteraction] = useState<ViewerInteraction | null>(null);
   const [draftLine, setDraftLine] = useState<LineAnnotation | null>(null);
+  const [hoverCoord, setHoverCoord] = useState<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
     setResolvedImageSize(imageSize);
@@ -300,6 +301,30 @@ export function ViewerCanvas({
     };
   }
 
+  function handleMouseMove(event: React.MouseEvent<HTMLDivElement>) {
+    if (!transform || !resolvedImageSize || !imageReady) {
+      setHoverCoord(null);
+      return;
+    }
+    const rect = event.currentTarget.getBoundingClientRect();
+    const pointer = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+    const imgPt = screenToImage(pointer, transform);
+    if (imgPt.x < 0 || imgPt.y < 0 || imgPt.x > resolvedImageSize.width || imgPt.y > resolvedImageSize.height) {
+      setHoverCoord(null);
+      return;
+    }
+    setHoverCoord({ x: Math.round(imgPt.x), y: Math.round(imgPt.y) });
+  }
+
+  function handleMouseLeave() {
+    setHoverCoord(null);
+  }
+
+  const draftDistance = useMemo(() => {
+    if (!draftLine) return null;
+    return pointDistance(draftLine.start, draftLine.end);
+  }, [draftLine]);
+
   function beginBackgroundInteraction(
     event: ReactPointerEvent<HTMLDivElement>,
   ) {
@@ -366,6 +391,16 @@ export function ViewerCanvas({
   return (
     <div className="viewer-stage viewer-stage--interactive">
       <div className="viewer-stage__hud">
+        {hoverCoord && (
+          <span className="viewer-stage__hud-chip viewer-stage__hud-chip--coord">
+            {hoverCoord.x}, {hoverCoord.y}
+          </span>
+        )}
+        {draftDistance !== null && draftDistance >= 2 && (
+          <span className="viewer-stage__hud-chip viewer-stage__hud-chip--dist">
+            {Math.round(draftDistance)} px
+          </span>
+        )}
         <span className="viewer-stage__hud-chip">
           {Math.round(viewport.zoom * 100)}%
         </span>
@@ -382,6 +417,8 @@ export function ViewerCanvas({
         ref={containerRef}
         className={`viewer-canvas viewer-canvas--${tool}`}
         onPointerDown={beginBackgroundInteraction}
+        onMouseMove={handleMouseMove}
+        onMouseLeave={handleMouseLeave}
       >
         <img
           ref={imgRef}

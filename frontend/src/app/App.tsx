@@ -3,10 +3,37 @@ import { ProcessingTab } from "../components/processing/ProcessingTab";
 import { ViewTab } from "../components/viewer/ViewTab";
 import { JobCenter } from "../features/jobs/JobCenter";
 import { useJobs } from "../features/jobs/useJobs";
-import { workbenchActions } from "./store/workbenchStore";
+import { workbenchActions, useWorkbenchStore, selectActiveStudy, selectWorkbenchStatus } from "./store/workbenchStore";
 import type { ActiveTab } from "../lib/types";
 
 const TABS: ActiveTab[] = ["view", "processing"];
+
+function StatusIcon({ status }: { status: string }) {
+  if (/fail|error/i.test(status)) {
+    return (
+      <svg className="status-bar__icon status-bar__icon--error" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+        <path d="M8 1.5l6.5 12H1.5L8 1.5z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+        <path d="M8 6.5v3M8 11.5v.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+      </svg>
+    );
+  }
+  if (/opening|running|measuring|processing|cancelling/i.test(status)) {
+    return <span className="status-bar__spinner" aria-hidden="true" />;
+  }
+  if (/loaded|complete|success/i.test(status)) {
+    return (
+      <svg className="status-bar__icon status-bar__icon--success" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+        <path d="M3.5 8.5l3 3 6-7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    );
+  }
+  return (
+    <svg className="status-bar__icon" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <circle cx="8" cy="8" r="5.5" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M8 5v3l2 2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
 
 export function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>("view");
@@ -14,6 +41,9 @@ export function App() {
     view: null,
     processing: null,
   });
+  const study = useWorkbenchStore(selectActiveStudy);
+  const workbenchStatus = useWorkbenchStore(selectWorkbenchStatus);
+  const status = study?.status ?? workbenchStatus;
   useJobs();
 
   useEffect(() => {
@@ -84,6 +114,11 @@ export function App() {
       >
         {activeTab === "view" ? <ViewTab /> : <ProcessingTab />}
       </main>
+
+      <div className="status-bar" role="status" aria-live="polite">
+        <StatusIcon status={status} />
+        <span className="status-bar__text">{status}</span>
+      </div>
 
       <JobCenter />
     </div>

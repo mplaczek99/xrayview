@@ -28,14 +28,32 @@ export function GrayscaleControls({
         <span>Invert</span>
       </label>
 
-      <div className="form-field">
+      <div className="form-field form-field--slider">
         <label className="form-field__label" htmlFor="proc-brightness">
           Brightness
         </label>
         <input
+          id="proc-brightness-range"
+          className="form-range"
+          type="range"
+          min={-100}
+          max={100}
+          step={1}
+          value={controls.brightness}
+          onChange={(event) =>
+            onUpdateControl(
+              "brightness",
+              parseInt(event.target.value, 10),
+            )
+          }
+          disabled={busy}
+        />
+        <input
           id="proc-brightness"
           className="form-input form-input--number"
           type="number"
+          min={-100}
+          max={100}
           value={controls.brightness}
           step={1}
           onChange={(event) =>
@@ -48,17 +66,34 @@ export function GrayscaleControls({
         />
       </div>
 
-      <div className="form-field">
+      <div className="form-field form-field--slider">
         <label className="form-field__label" htmlFor="proc-contrast">
           Contrast
         </label>
+        <input
+          id="proc-contrast-range"
+          className="form-range"
+          type="range"
+          min={0.1}
+          max={3.0}
+          step={0.1}
+          value={controls.contrast}
+          onChange={(event) =>
+            onUpdateControl(
+              "contrast",
+              parseFloat(event.target.value),
+            )
+          }
+          disabled={busy}
+        />
         <input
           id="proc-contrast"
           className="form-input form-input--number"
           type="number"
           value={controls.contrast}
           step={0.1}
-          min={0}
+          min={0.1}
+          max={3.0}
           onChange={(event) =>
             onUpdateControl(
               "contrast",
