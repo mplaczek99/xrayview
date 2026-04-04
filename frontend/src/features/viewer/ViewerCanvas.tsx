@@ -1,7 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type {
   PointerEvent as ReactPointerEvent,
-  WheelEvent as ReactWheelEvent,
 } from "react";
 import type {
   AnnotationBundle,
@@ -105,10 +104,40 @@ export function ViewerCanvas({
     });
     observer.observe(element);
 
-    window.addEventListener("resize", updateFrame);
     return () => {
       observer.disconnect();
-      window.removeEventListener("resize", updateFrame);
+    };
+  }, [canvasVisible]);
+
+  const wheelStateRef = useRef({ resolvedImageSize, imageReady, frame });
+  useEffect(() => {
+    wheelStateRef.current = { resolvedImageSize, imageReady, frame };
+  }, [resolvedImageSize, imageReady, frame]);
+
+  useEffect(() => {
+    const element = containerRef.current;
+    if (!element) return;
+
+    function handleWheel(event: WheelEvent) {
+      const { resolvedImageSize: imgSize, imageReady: ready, frame: fr } =
+        wheelStateRef.current;
+      if (!imgSize || !ready) return;
+
+      event.preventDefault();
+      const rect = element!.getBoundingClientRect();
+      const pointer = {
+        x: event.clientX - rect.left,
+        y: event.clientY - rect.top,
+      };
+      const factor = event.deltaY < 0 ? 1.12 : 0.9;
+      setViewport((current) =>
+        zoomAtPoint(current, fr, imgSize, pointer, factor),
+      );
+    }
+
+    element.addEventListener("wheel", handleWheel, { passive: false });
+    return () => {
+      element.removeEventListener("wheel", handleWheel);
     };
   }, [canvasVisible]);
 
@@ -261,7 +290,7 @@ export function ViewerCanvas({
   }, [annotations, draftLine, interaction]);
 
   function pointerToLocalPoint(
-    event: ReactPointerEvent<HTMLDivElement> | ReactWheelEvent<HTMLDivElement>,
+    event: ReactPointerEvent<HTMLDivElement>,
   ): AnnotationPoint {
     const rect = event.currentTarget.getBoundingClientRect();
     return {
@@ -352,18 +381,6 @@ export function ViewerCanvas({
         ref={containerRef}
         className={`viewer-canvas viewer-canvas--${tool}`}
         onPointerDown={beginBackgroundInteraction}
-        onWheel={(event) => {
-          if (!resolvedImageSize || !imageReady) {
-            return;
-          }
-
-          event.preventDefault();
-          const pointer = pointerToLocalPoint(event);
-          const factor = event.deltaY < 0 ? 1.12 : 0.9;
-          setViewport((current) =>
-            zoomAtPoint(current, frame, resolvedImageSize, pointer, factor),
-          );
-        }}
       >
         <img
           ref={imgRef}
