@@ -313,8 +313,6 @@ export function ProcessingTab() {
               <div>{runStatus.progress.message}</div>
               {progressView?.detailLabel ? (
                 <div className="run-status__detail">{progressView.detailLabel}</div>
-              ) : progressView?.indeterminate ? (
-                <div className="run-status__detail">Estimating remaining time...</div>
               ) : null}
             </div>
           )}

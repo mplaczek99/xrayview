@@ -19,6 +19,9 @@ export interface JobProgressTiming {
   startedAtMs: number;
   lastUpdatedAtMs: number;
   lastProgressAtMs: number;
+  firstMeasuredSample: JobProgressSample | null;
+  measuredSampleCount: number;
+  smoothedRate: number | null;
   samples: JobProgressSample[];
 }
 
