@@ -12,10 +12,7 @@ body,
 body {
   margin: 0;
   font-family: var(--font-ui);
-  background:
-    radial-gradient(circle at top left, rgba(55, 148, 255, 0.14), transparent 28%),
-    radial-gradient(circle at top right, rgba(78, 201, 176, 0.08), transparent 26%),
-    linear-gradient(180deg, #0c1117 0%, #0f141b 52%, #101720 100%);
+  background: linear-gradient(180deg, #0c1117 0%, #0f141b 52%, #101720 100%);
   color: var(--text);
 }
 
@@ -27,6 +24,11 @@ select {
 
 button {
   border: 0;
+}
+
+*:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 /* ── App Shell ───────────────────────────────────── */
@@ -49,7 +51,7 @@ button {
 }
 
 .tab-bar__tab {
-  padding: 10px 20px;
+  padding: var(--space-2) var(--space-5);
   color: var(--text-dim);
   background: transparent;
   border: none;
@@ -69,7 +71,7 @@ button {
 .tab-bar__tab--active {
   color: var(--text);
   background: var(--bg);
-  border-top-color: #007ACC;
+  border-top-color: var(--accent);
 }
 
 /* ── Tab Content ─────────────────────────────────── */
@@ -90,8 +92,7 @@ button {
   gap: var(--space-3);
   padding: var(--space-3) var(--space-5) var(--space-4);
   border-top: 1px solid rgba(126, 148, 178, 0.12);
-  background: rgba(7, 11, 16, 0.92);
-  backdrop-filter: blur(10px);
+  background: rgba(7, 11, 16, 0.98);
 }
 
 .job-center__header {
@@ -116,15 +117,15 @@ button {
 
 .job-center__list {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
   gap: var(--space-3);
 }
 
 .job-card {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 14px;
+  gap: var(--space-2);
+  padding: var(--space-3);
   border: 1px solid rgba(126, 148, 178, 0.12);
   border-radius: var(--radius-md);
   background: rgba(15, 21, 29, 0.88);
@@ -150,7 +151,7 @@ button {
 }
 
 .job-card__cancel {
-  padding: 6px 10px;
+  padding: var(--space-1) var(--space-2);
   font-size: 11px;
 }
 
@@ -250,7 +251,7 @@ button {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
-  padding: 16px;
+  padding: var(--space-3);
   border: 1px solid rgba(126, 148, 178, 0.14);
   border-radius: var(--radius-md);
   background: rgba(12, 17, 24, 0.82);
@@ -293,14 +294,14 @@ button {
 .measurement-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 12px;
+  gap: var(--space-2);
 }
 
 .measurement-grid__item {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 10px 12px;
+  gap: var(--space-1);
+  padding: var(--space-2);
   border-radius: var(--radius-sm);
   background: rgba(23, 30, 40, 0.78);
 }
@@ -321,7 +322,7 @@ button {
 .measurement-note-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-1);
 }
 
 /* ── Processing Tab ──────────────────────────────── */
@@ -404,6 +405,7 @@ button {
 
 .form-input:disabled {
   opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .form-input--number {
@@ -421,6 +423,7 @@ button {
 
 .form-select:disabled {
   opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .form-error {
@@ -440,13 +443,13 @@ button {
   color: var(--text-dim);
   font-size: 11px;
   font-style: italic;
-  margin-left: 8px;
+  margin-left: var(--space-1);
 }
 
 .form-toggle {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-1);
   padding: 6px 0;
   color: var(--text);
   font-size: 13px;
@@ -456,7 +459,7 @@ button {
 .form-field {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-2);
 }
 
 .form-field__label {
@@ -470,7 +473,7 @@ button {
 .form-collapse-toggle {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-1);
   padding: 0;
   background: none;
   color: var(--text-dim);
@@ -505,14 +508,14 @@ button {
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--space-1);
 }
 
 .pipeline-item {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 6px 10px;
+  padding: var(--space-1) var(--space-2);
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   background: rgba(17, 24, 33, 0.7);
@@ -526,7 +529,7 @@ button {
 
 .pipeline-item__actions {
   display: flex;
-  gap: 4px;
+  gap: var(--space-1);
 }
 
 .pipeline-btn {
@@ -576,11 +579,11 @@ button {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: var(--space-1);
 }
 
 .run-status {
-  padding: 10px 14px;
+  padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-sm);
   border: 1px solid rgba(126, 148, 178, 0.16);
   background: rgba(17, 24, 33, 0.72);
@@ -613,8 +616,8 @@ button {
   display: inline-block;
   width: 14px;
   height: 14px;
-  border: 2px solid rgba(6, 17, 31, 0.3);
-  border-top-color: #06111f;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-top-color: #fff;
   border-radius: 50%;
   animation: spin 600ms linear infinite;
 }
@@ -622,7 +625,7 @@ button {
 /* ── Buttons ─────────────────────────────────────── */
 
 .button {
-  padding: 10px 14px;
+  padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-sm);
   font-weight: 700;
   cursor: pointer;
@@ -681,12 +684,12 @@ button {
 
 .viewer-stage__hud {
   position: absolute;
-  top: 14px;
-  right: 14px;
+  top: var(--space-3);
+  right: var(--space-3);
   z-index: 3;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-1);
 }
 
 .viewer-stage__hud-chip {
@@ -751,7 +754,7 @@ button {
   display: grid;
   place-items: center;
   max-width: 420px;
-  padding: 28px;
+  padding: var(--space-5);
   border: 1px dashed rgba(126, 148, 178, 0.28);
   border-radius: var(--radius-md);
   background: rgba(34, 43, 56, 0.72);
@@ -787,6 +790,7 @@ button {
   user-select: none;
   -webkit-user-drag: none;
   opacity: 0;
+  transition: opacity 150ms ease;
 }
 
 .viewer-canvas__image--ready {
@@ -820,7 +824,8 @@ button {
 }
 
 .annotation-layer__line--selected {
-  filter: drop-shadow(0 0 8px rgba(255, 255, 255, 0.26));
+  stroke-width: 5;
+  stroke-opacity: 1;
 }
 
 .annotation-layer__line--draft {
@@ -846,14 +851,14 @@ button {
 .annotation-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-1);
 }
 
 .annotation-list__item {
   display: grid;
-  gap: 4px;
+  gap: var(--space-1);
   width: 100%;
-  padding: 10px 12px;
+  padding: var(--space-2);
   border: 1px solid rgba(126, 148, 178, 0.14);
   border-radius: var(--radius-sm);
   background: rgba(17, 24, 33, 0.76);
