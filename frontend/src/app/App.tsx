@@ -9,6 +9,14 @@ import type { ActiveTab } from "../lib/types";
 const TABS: ActiveTab[] = ["view", "processing"];
 
 function StatusIcon({ status }: { status: string }) {
+  if (/cancelled|canceled/i.test(status)) {
+    return (
+      <svg className="status-bar__icon" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+        <circle cx="8" cy="8" r="5.5" stroke="currentColor" strokeWidth="1.5" />
+        <path d="M5.5 5.5l5 5M10.5 5.5l-5 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+      </svg>
+    );
+  }
   if (/fail|error/i.test(status)) {
     return (
       <svg className="status-bar__icon status-bar__icon--error" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -17,15 +25,15 @@ function StatusIcon({ status }: { status: string }) {
       </svg>
     );
   }
-  if (/opening|running|measuring|processing|cancelling/i.test(status)) {
-    return <span className="status-bar__spinner" aria-hidden="true" />;
-  }
   if (/loaded|complete|success/i.test(status)) {
     return (
       <svg className="status-bar__icon status-bar__icon--success" viewBox="0 0 16 16" fill="none" aria-hidden="true">
         <path d="M3.5 8.5l3 3 6-7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
       </svg>
     );
+  }
+  if (/opening|running|measuring|processing|cancelling/i.test(status)) {
+    return <span className="status-bar__spinner" aria-hidden="true" />;
   }
   return (
     <svg className="status-bar__icon" viewBox="0 0 16 16" fill="none" aria-hidden="true">
