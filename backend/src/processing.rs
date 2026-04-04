@@ -157,7 +157,8 @@ mod tests {
             equalize: false,
         };
 
-        let mode = process_grayscale_pixels(&mut pixels, &controls).expect("process grayscale pixels");
+        let mode =
+            process_grayscale_pixels(&mut pixels, &controls).expect("process grayscale pixels");
 
         assert_eq!(pixels, vec![222]);
         assert_eq!(
