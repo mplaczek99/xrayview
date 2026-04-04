@@ -22,6 +22,7 @@ import type {
 } from "../../lib/generated/contracts";
 import type { ProcessingRequest } from "../../lib/types";
 import type { JobSnapshot, ProcessingRunState } from "../../features/jobs/model";
+import { advanceJobProgressTiming } from "../../features/jobs/progressTiming";
 import {
   removeAnnotation,
   replaceSuggestedAnnotations,
@@ -63,6 +64,34 @@ function activeJob(jobId: string | null, jobs: WorkbenchState["jobs"]): JobSnaps
 
 function isPendingJob(job: JobSnapshot | null): boolean {
   return job !== null && ["queued", "running", "cancelling"].includes(job.state);
+}
+
+function createPendingJobSnapshot(
+  jobId: string,
+  jobKind: JobSnapshot["jobKind"],
+  studyId: string,
+  message: string,
+): JobSnapshot {
+  const snapshot: JobSnapshot = {
+    jobId,
+    jobKind,
+    studyId,
+    state: "queued",
+    progress: {
+      percent: 0,
+      stage: "queued",
+      message,
+    },
+    fromCache: false,
+    result: null,
+    error: null,
+    timing: null,
+  };
+
+  return {
+    ...snapshot,
+    timing: advanceJobProgressTiming(null, snapshot),
+  };
 }
 
 function applyRenderJob(study: WorkbenchStudy, job: JobSnapshot): WorkbenchStudy {
@@ -178,6 +207,7 @@ function applyProcessJob(study: WorkbenchStudy, job: JobSnapshot): WorkbenchStud
             state: "running",
             jobId: job.jobId,
             progress: job.progress,
+            timing: job.timing,
           },
         },
       };
@@ -191,6 +221,7 @@ function applyProcessJob(study: WorkbenchStudy, job: JobSnapshot): WorkbenchStud
             state: "cancelling",
             jobId: job.jobId,
             progress: job.progress,
+            timing: job.timing,
           },
         },
       };
@@ -341,11 +372,14 @@ class WorkbenchStore {
       }));
 
       const started = await startRenderStudyJob(study.studyId);
-      this.setStudyState(study.studyId, (current) => ({
-        ...current,
-        renderJobId: started.jobId,
-        status: "Queued source preview render...",
-      }));
+      this.receiveJobUpdate(
+        createPendingJobSnapshot(
+          started.jobId,
+          "renderStudy",
+          study.studyId,
+          "Queued source preview render...",
+        ),
+      );
       await this.syncJob(started.jobId);
     } catch (error) {
       this.setState((current) => ({
@@ -368,11 +402,14 @@ class WorkbenchStore {
 
     try {
       const started = await startAnalyzeStudyJob(study.studyId);
-      this.setStudyState(study.studyId, (current) => ({
-        ...current,
-        analysisJobId: started.jobId,
-        status: "Queued tooth measurement...",
-      }));
+      this.receiveJobUpdate(
+        createPendingJobSnapshot(
+          started.jobId,
+          "analyzeStudy",
+          study.studyId,
+          "Queued tooth measurement...",
+        ),
+      );
       await this.syncJob(started.jobId);
     } catch (error) {
       this.setStudyState(study.studyId, (current) => ({
@@ -541,22 +578,14 @@ class WorkbenchStore {
 
     try {
       const started = await startProcessStudyJob(study.studyId, request);
-      this.setStudyState(study.studyId, (current) => ({
-        ...current,
-        status: "Queued processing job...",
-        processing: {
-          ...current.processing,
-          runStatus: {
-            state: "running",
-            jobId: started.jobId,
-            progress: {
-              percent: 0,
-              stage: "queued",
-              message: "Queued processing job...",
-            },
-          },
-        },
-      }));
+      this.receiveJobUpdate(
+        createPendingJobSnapshot(
+          started.jobId,
+          "processStudy",
+          study.studyId,
+          "Queued processing job...",
+        ),
+      );
       await this.syncJob(started.jobId);
     } catch (error) {
       this.setStudyState(study.studyId, (current) => ({
@@ -593,13 +622,21 @@ class WorkbenchStore {
 
   receiveJobUpdate(job: JobSnapshot) {
     this.setState((current) => {
+      const previous = current.jobs[job.jobId];
+      const nextJob: JobSnapshot = {
+        ...job,
+        timing: advanceJobProgressTiming(
+          previous?.timing ?? job.timing,
+          job,
+        ),
+      };
       const jobs = {
         ...current.jobs,
-        [job.jobId]: job,
+        [job.jobId]: nextJob,
       };
       const studies = { ...current.studies };
-      if (job.studyId && studies[job.studyId]) {
-        studies[job.studyId] = applyJobToStudy(studies[job.studyId], job);
+      if (nextJob.studyId && studies[nextJob.studyId]) {
+        studies[nextJob.studyId] = applyJobToStudy(studies[nextJob.studyId], nextJob);
       }
 
       const activeStudy = current.activeStudyId ? studies[current.activeStudyId] : null;
@@ -608,7 +645,7 @@ class WorkbenchStore {
         ...current,
         jobs,
         studies,
-        jobOrder: nextJobOrder(current.jobOrder, job.jobId),
+        jobOrder: nextJobOrder(current.jobOrder, nextJob.jobId),
         workbenchStatus: activeStudy?.status ?? current.workbenchStatus,
       };
     });

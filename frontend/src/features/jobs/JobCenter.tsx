@@ -1,6 +1,7 @@
 import { useMemo, useState, useCallback } from "react";
 import { workbenchActions, useWorkbenchStore, selectJobOrder, selectJobs, selectStudies } from "../../app/store/workbenchStore";
 import { formatBackendError } from "../../lib/backend";
+import { describeProgress, useProgressClock } from "./progressTiming";
 
 function titleForJob(kind: string): string {
   switch (kind) {
@@ -59,6 +60,7 @@ export function JobCenter() {
     () => jobs.filter((job) => !isTerminal(job.state)).length,
     [jobs],
   );
+  const nowMs = useProgressClock(activeCount > 0);
 
   const dismissJob = useCallback((jobId: string) => {
     setDismissed((prev) => new Set(prev).add(jobId));
@@ -114,6 +116,7 @@ export function JobCenter() {
             const studyName = job.studyId ? studies[job.studyId]?.inputName ?? null : null;
             const canCancel = job.state === "queued" || job.state === "running";
             const terminal = isTerminal(job.state);
+            const progressView = describeProgress(job, nowMs);
             const message =
               job.state === "failed"
                 ? formatBackendError(job.error, "Job failed.")
@@ -152,11 +155,31 @@ export function JobCenter() {
 
                 <div className="job-card__progress">
                   <div
-                    className={`job-card__progress-bar job-card__progress-bar--${job.state}`}
-                    style={{ width: `${Math.max(job.progress.percent, job.state === "completed" ? 100 : 4)}%` }}
+                    className={[
+                      "job-card__progress-bar",
+                      `job-card__progress-bar--${job.state}`,
+                      progressView.indeterminate
+                        ? "job-card__progress-bar--indeterminate"
+                        : "",
+                    ]
+                      .filter(Boolean)
+                      .join(" ")}
+                    style={
+                      progressView.indeterminate
+                        ? undefined
+                        : {
+                            width: `${Math.max(
+                              job.progress.percent,
+                              job.state === "completed" ? 100 : 4,
+                            )}%`,
+                          }
+                    }
                   />
                 </div>
                 <p className="job-card__message">{message}</p>
+                {progressView.detailLabel ? (
+                  <p className="job-card__detail">{progressView.detailLabel}</p>
+                ) : null}
               </article>
             );
           })}

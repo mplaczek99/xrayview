@@ -312,6 +312,7 @@ function normalizeJobSnapshot(snapshot: ContractJobSnapshot): JobSnapshot {
     fromCache: snapshot.fromCache,
     result: snapshot.result ? normalizeJobResultPayload(snapshot.result) : null,
     error: snapshot.error ? normalizeBackendError(snapshot.error) : null,
+    timing: null,
   };
 }
 
@@ -340,6 +341,7 @@ function buildMockJobSnapshot(
     fromCache: false,
     result: null,
     error: null,
+    timing: null,
   };
 }
 

@@ -10,6 +10,18 @@ import type {
   ToothAnalysisResult,
 } from "../../lib/types";
 
+export interface JobProgressSample {
+  atMs: number;
+  percent: number;
+}
+
+export interface JobProgressTiming {
+  startedAtMs: number;
+  lastUpdatedAtMs: number;
+  lastProgressAtMs: number;
+  samples: JobProgressSample[];
+}
+
 export type JobResultPayload =
   | { kind: "renderStudy"; payload: PreviewResult }
   | { kind: "processStudy"; payload: ProcessResult }
@@ -24,12 +36,23 @@ export interface JobSnapshot {
   fromCache: boolean;
   result: JobResultPayload | null;
   error: BackendError | null;
+  timing: JobProgressTiming | null;
 }
 
 export type ProcessingRunState =
   | { state: "idle" }
-  | { state: "running"; jobId: string; progress: JobProgress }
-  | { state: "cancelling"; jobId: string; progress: JobProgress }
+  | {
+      state: "running";
+      jobId: string;
+      progress: JobProgress;
+      timing: JobProgressTiming | null;
+    }
+  | {
+      state: "cancelling";
+      jobId: string;
+      progress: JobProgress;
+      timing: JobProgressTiming | null;
+    }
   | { state: "success"; jobId: string; outputPath: string; fromCache: boolean }
   | { state: "error"; jobId: string; error: BackendError }
   | { state: "cancelled"; jobId: string };

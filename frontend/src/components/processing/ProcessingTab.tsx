@@ -17,6 +17,7 @@ import {
 import {
   createProcessingForm,
 } from "../../features/study/model";
+import { describeProgress, useProgressClock } from "../../features/jobs/progressTiming";
 import { DicomViewer } from "../viewer/DicomViewer";
 import { GrayscaleControls } from "./GrayscaleControls";
 import { PipelineEditor } from "./PipelineEditor";
@@ -61,6 +62,19 @@ export function ProcessingTab() {
   const [compareView, setCompareView] = useState<"original" | "processed" | "split">("processed");
   const busy = runStatus.state === "running" || runStatus.state === "cancelling";
   const isCancelling = runStatus.state === "cancelling";
+  const nowMs = useProgressClock(busy);
+  const progressView =
+    runStatus.state === "running" || runStatus.state === "cancelling"
+      ? describeProgress(
+          {
+            state: runStatus.state,
+            progress: runStatus.progress,
+            timing: runStatus.timing,
+            fromCache: false,
+          },
+          nowMs,
+        )
+      : null;
   const canRun = Boolean(study) && !busy;
   const args = study ? buildProcessingArgs(study.inputPath, request) : [];
 
@@ -296,7 +310,12 @@ export function ProcessingTab() {
           )}
           {busy && (
             <div className="run-status">
-              {runStatus.progress.message} ({runStatus.progress.percent}%)
+              <div>{runStatus.progress.message}</div>
+              {progressView?.detailLabel ? (
+                <div className="run-status__detail">{progressView.detailLabel}</div>
+              ) : progressView?.indeterminate ? (
+                <div className="run-status__detail">Estimating remaining time...</div>
+              ) : null}
             </div>
           )}
         </div>
