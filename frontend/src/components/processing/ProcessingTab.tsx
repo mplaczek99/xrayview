@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { workbenchActions, useWorkbenchStore, selectActiveStudy, selectManifest } from "../../app/store/workbenchStore";
 import {
   buildProcessingArgs,
@@ -16,9 +16,10 @@ import {
 } from "../../features/processing/presets";
 import {
   createProcessingForm,
-  DEFAULT_PIPELINE,
 } from "../../features/study/model";
 import { DicomViewer } from "../viewer/DicomViewer";
+import { GrayscaleControls } from "./GrayscaleControls";
+import { PipelineEditor } from "./PipelineEditor";
 
 const CUSTOM_PRESET_ID = "__custom";
 
@@ -32,7 +33,6 @@ export function ProcessingTab() {
   const study = useWorkbenchStore(selectActiveStudy);
   const manifest = useWorkbenchStore(selectManifest);
   const processingUi = useMemo(() => buildProcessingUiState(manifest), [manifest]);
-  const [pipelineOpen, setPipelineOpen] = useState(false);
   const defaultPreset =
     manifest.presets.find((preset) => preset.id === manifest.defaultPresetId) ??
     manifest.presets[0] ??
@@ -76,17 +76,6 @@ export function ProcessingTab() {
       ...form.controls,
       [key]: value,
     });
-  }
-
-  function movePipelineStep(index: number, direction: -1 | 1) {
-    const target = index + direction;
-    if (target < 0 || target >= form.pipeline.length) {
-      return;
-    }
-
-    const next = [...form.pipeline];
-    [next[index], next[target]] = [next[target], next[index]];
-    workbenchActions.setProcessingPipeline(next);
   }
 
   return (
@@ -166,72 +155,11 @@ export function ProcessingTab() {
           </p>
         </section>
 
-        <section className="form-section">
-          <div className="form-label">Grayscale Controls</div>
-
-          <label className="form-toggle">
-            <input
-              type="checkbox"
-              checked={form.controls.invert}
-              onChange={(event) => updateControl("invert", event.target.checked)}
-              disabled={busy}
-            />
-            <span>Invert</span>
-          </label>
-
-          <div className="form-field">
-            <label className="form-field__label" htmlFor="proc-brightness">
-              Brightness
-            </label>
-            <input
-              id="proc-brightness"
-              className="form-input form-input--number"
-              type="number"
-              value={form.controls.brightness}
-              step={1}
-              onChange={(event) =>
-                updateControl(
-                  "brightness",
-                  parseInt(event.target.value, 10) || 0,
-                )
-              }
-              disabled={busy}
-            />
-          </div>
-
-          <div className="form-field">
-            <label className="form-field__label" htmlFor="proc-contrast">
-              Contrast
-            </label>
-            <input
-              id="proc-contrast"
-              className="form-input form-input--number"
-              type="number"
-              value={form.controls.contrast}
-              step={0.1}
-              min={0}
-              onChange={(event) =>
-                updateControl(
-                  "contrast",
-                  parseFloat(event.target.value) || 0,
-                )
-              }
-              disabled={busy}
-            />
-          </div>
-
-          <label className="form-toggle">
-            <input
-              type="checkbox"
-              checked={form.controls.equalize}
-              onChange={(event) =>
-                updateControl("equalize", event.target.checked)
-              }
-              disabled={busy}
-            />
-            <span>Equalize</span>
-          </label>
-        </section>
+        <GrayscaleControls
+          controls={form.controls}
+          busy={busy}
+          onUpdateControl={updateControl}
+        />
 
         <section className="form-section">
           <label className="form-label" htmlFor="proc-palette">
@@ -269,68 +197,7 @@ export function ProcessingTab() {
           </p>
         </section>
 
-        <section className="form-section">
-          <button
-            className="form-collapse-toggle"
-            type="button"
-            onClick={() => setPipelineOpen((current) => !current)}
-          >
-            <span
-              className={`form-collapse-arrow${pipelineOpen ? " form-collapse-arrow--open" : ""}`}
-            >
-              &#9654;
-            </span>
-            Advanced: Pipeline Order
-          </button>
-
-          {pipelineOpen && (
-            <div className="pipeline-editor">
-              <ul className="pipeline-list">
-                {form.pipeline.map((step, index) => (
-                  <li key={step} className="pipeline-item">
-                    <span className="pipeline-item__name">{step}</span>
-                    <div className="pipeline-item__actions">
-                      <button
-                        className="pipeline-btn"
-                        type="button"
-                        onClick={() => movePipelineStep(index, -1)}
-                        disabled={index === 0 || busy}
-                        aria-label={`Move ${step} up`}
-                      >
-                        &#9650;
-                      </button>
-                      <button
-                        className="pipeline-btn"
-                        type="button"
-                        onClick={() => movePipelineStep(index, 1)}
-                        disabled={index === form.pipeline.length - 1 || busy}
-                        aria-label={`Move ${step} down`}
-                      >
-                        &#9660;
-                      </button>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-              <p className="form-hint">
-                `grayscale` is always the starting point. Pseudocolor runs after
-                the grayscale pipeline.
-              </p>
-              {form.pipeline.some((step, index) => step !== DEFAULT_PIPELINE[index]) && (
-                <button
-                  className="button button--ghost pipeline-reset"
-                  type="button"
-                  onClick={() =>
-                    workbenchActions.setProcessingPipeline([...DEFAULT_PIPELINE])
-                  }
-                  disabled={busy}
-                >
-                  Reset to default order
-                </button>
-              )}
-            </div>
-          )}
-        </section>
+        <PipelineEditor pipeline={form.pipeline} busy={busy} />
 
         {study && args.length > 0 && (
           <section className="form-section">

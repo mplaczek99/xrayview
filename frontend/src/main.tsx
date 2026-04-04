@@ -34,6 +34,13 @@ class RootErrorBoundary extends React.Component<
             <p className="viewer-placeholder__copy">
               {this.state.error.message}
             </p>
+            <button
+              className="button button--primary"
+              type="button"
+              onClick={() => window.location.reload()}
+            >
+              Reload
+            </button>
           </div>
         </div>
       );
