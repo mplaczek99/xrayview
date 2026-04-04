@@ -57,25 +57,36 @@ export function ViewTab() {
       <div className="view-tab">
         <h2 className="sr-only">View</h2>
         <div className="empty-state">
-          <svg className="empty-state__icon" viewBox="0 0 48 48" fill="none" aria-hidden="true">
-            <rect x="6" y="8" width="36" height="32" rx="4" stroke="currentColor" strokeWidth="2" />
-            <path d="M6 16h36" stroke="currentColor" strokeWidth="2" />
-            <circle cx="18" cy="30" r="5" stroke="currentColor" strokeWidth="2" />
-            <path d="M30 25l5 5-5 5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-          <h3 className="empty-state__title">No study loaded</h3>
-          <p className="empty-state__copy">
-            Open a DICOM study to inspect it, pan and zoom, draw manual line
-            measurements, or run automatic tooth analysis.
-          </p>
-          <button
-            className="button button--primary empty-state__cta"
-            type="button"
-            onClick={() => void workbenchActions.openStudy()}
-            disabled={isOpeningStudy}
-          >
-            {isOpeningStudy ? "Opening..." : "Open DICOM"}
-          </button>
+          {isOpeningStudy ? (
+            <>
+              <span className="empty-state__loader" aria-hidden="true" />
+              <h3 className="empty-state__title">Opening study...</h3>
+              <p className="empty-state__copy">
+                Loading and rendering the DICOM preview.
+              </p>
+            </>
+          ) : (
+            <>
+              <svg className="empty-state__icon" viewBox="0 0 48 48" fill="none" aria-hidden="true">
+                <rect x="6" y="8" width="36" height="32" rx="4" stroke="currentColor" strokeWidth="2" />
+                <path d="M6 16h36" stroke="currentColor" strokeWidth="2" />
+                <circle cx="18" cy="30" r="5" stroke="currentColor" strokeWidth="2" />
+                <path d="M30 25l5 5-5 5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              <h3 className="empty-state__title">No study loaded</h3>
+              <p className="empty-state__copy">
+                Open a DICOM study to inspect it, pan and zoom, draw manual line
+                measurements, or run automatic tooth analysis.
+              </p>
+              <button
+                className="button button--primary empty-state__cta"
+                type="button"
+                onClick={() => void workbenchActions.openStudy()}
+              >
+                Open DICOM
+              </button>
+            </>
+          )}
         </div>
       </div>
     );

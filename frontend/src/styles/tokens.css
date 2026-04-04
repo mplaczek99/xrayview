@@ -18,8 +18,8 @@
   --warning: #d7ba7d;
   --danger: #f48771;
   --shadow: 0 24px 50px rgba(0, 0, 0, 0.34);
-  --font-ui: "IBM Plex Sans", Aptos, "Segoe UI", sans-serif;
-  --font-mono: "IBM Plex Mono", "JetBrains Mono", "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+  --font-ui: Aptos, "Segoe UI", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
   --radius-xl: 24px;
   --radius-lg: 18px;
   --radius-md: 12px;

@@ -60,7 +60,6 @@ export function ProcessingTab() {
   const processedPreviewUrl = study?.processing.output?.previewUrl ?? null;
   const [compareView, setCompareView] = useState<"original" | "processed" | "split">("processed");
   const busy = runStatus.state === "running" || runStatus.state === "cancelling";
-  const isRunning = runStatus.state === "running";
   const isCancelling = runStatus.state === "cancelling";
   const canRun = Boolean(study) && !busy;
   const args = study ? buildProcessingArgs(study.inputPath, request) : [];

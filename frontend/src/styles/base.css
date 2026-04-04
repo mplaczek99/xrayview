@@ -88,12 +88,18 @@ button {
 
 /* ── Tab Content ─────────────────────────────────── */
 
+@keyframes tab-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
 .tab-content {
   flex: 1;
   display: flex;
   flex-direction: column;
   padding: var(--space-5);
   overflow-y: auto;
+  animation: tab-fade-in 120ms ease;
 }
 
 /* ── Status Bar ─────────────────────────────────── */
@@ -304,6 +310,16 @@ button {
   color: var(--text-soft);
   font-size: 13px;
   line-height: 1.6;
+}
+
+.empty-state__loader {
+  display: inline-block;
+  width: 40px;
+  height: 40px;
+  border: 3px solid rgba(255, 255, 255, 0.12);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 800ms linear infinite;
 }
 
 .empty-state__cta {
@@ -1025,6 +1041,10 @@ button {
   line-height: 1.5;
 }
 
+/* touch-action: none is required so the browser doesn't intercept pointer
+   events for native scroll/pinch while the custom pan/zoom handler is active.
+   Acceptable for the desktop-first Tauri use case. If mobile support is added,
+   consider touch-action: pinch-zoom to allow native pinch while capturing pan. */
 .viewer-canvas {
   position: relative;
   flex: 1;
