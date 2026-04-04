@@ -240,7 +240,7 @@ button {
 
 .study-analysis {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 340px;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 380px);
   gap: var(--space-4);
   flex: 1;
   min-height: 0;
@@ -342,7 +342,7 @@ button {
 
 .processing-tab {
   display: grid;
-  grid-template-columns: 1fr 380px;
+  grid-template-columns: 1fr minmax(280px, 380px);
   gap: var(--space-5);
   flex: 1;
   min-height: 0;
@@ -358,8 +358,6 @@ button {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
-  overflow-y: auto;
-  max-height: calc(100vh - 80px);
   padding-right: var(--space-2);
 }
 
@@ -918,10 +916,6 @@ button {
 
   .study-analysis {
     grid-template-columns: 1fr;
-  }
-
-  .processing-tab__form {
-    max-height: none;
   }
 
   .viewer-stage {

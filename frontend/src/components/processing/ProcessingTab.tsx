@@ -335,9 +335,7 @@ export function ProcessingTab() {
         {study && args.length > 0 && (
           <section className="form-section">
             <div className="form-label">Command Preview</div>
-            <pre className="args-preview u-mono">
-              xrayview {formatArgPreview(args)}
-            </pre>
+            <pre className="args-preview u-mono">{`xrayview ${formatArgPreview(args)}`}</pre>
           </section>
         )}
 
