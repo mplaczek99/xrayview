@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] - 2026-04-04
+
+### Added
+
+- Dedicated view sidebar with a more compact measurement workflow
+- Batch measurement for all detected teeth, including completion timing
+- Job progress timing utilities with smoother ETA feedback
+
+### Changed
+
+- Reworked the View and Processing tabs to simplify the workstation layout
+- Split grayscale controls into a dedicated panel and removed command preview / advanced pipeline ordering from processing
+- Refined visual styling and mock-study data used in browser-only development
+
+### Fixed
+
+- Processing completion status icon state in the Job Center
+- Tooth measurement and auto-detection integration across the backend contract and frontend workbench flow
+
 ## [0.2.1] - 2026-04-03
 
 ### Added
