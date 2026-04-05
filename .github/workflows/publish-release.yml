@@ -100,11 +100,34 @@ jobs:
     needs: build-release-package
 
     steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
       - name: Download release assets
         uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
+
+      - name: Extract release notes from changelog
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          raw_notes="$RUNNER_TEMP/release-notes.raw.md"
+          notes_file="$RUNNER_TEMP/release-notes.md"
+
+          awk -v version="$version" '
+            BEGIN { target = "## [" version "] - " }
+            index($0, target) == 1 { in_section = 1; next }
+            in_section && index($0, "## [") == 1 { exit }
+            in_section { print }
+          ' CHANGELOG.md > "$raw_notes"
+
+          sed '/./,$!d' "$raw_notes" | tac | sed '/./,$!d' | tac > "$notes_file"
+
+          if [ ! -s "$notes_file" ]; then
+            printf 'Could not extract release notes for version %s from CHANGELOG.md\n' "$version" >&2
+            exit 1
+          fi
 
       - name: Create or update GitHub release
         env:
@@ -113,6 +136,7 @@ jobs:
         run: |
           if gh release view "${GITHUB_REF_NAME}" --repo "${GH_REPO}" >/dev/null 2>&1; then
             gh release upload "${GITHUB_REF_NAME}" dist/* --repo "${GH_REPO}" --clobber
+            gh release edit "${GITHUB_REF_NAME}" --repo "${GH_REPO}" --title "${GITHUB_REF_NAME}" --notes-file "$RUNNER_TEMP/release-notes.md"
           else
-            gh release create "${GITHUB_REF_NAME}" dist/* --repo "${GH_REPO}" --title "${GITHUB_REF_NAME}" --generate-notes
+            gh release create "${GITHUB_REF_NAME}" dist/* --repo "${GH_REPO}" --title "${GITHUB_REF_NAME}" --notes-file "$RUNNER_TEMP/release-notes.md"
           fi
