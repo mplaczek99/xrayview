@@ -1,6 +1,6 @@
 # xrayview Go Backend
 
-This module is the current Go sidecar backend for the migration path. Phase 7 established the local HTTP transport, phase 8 let the Tauri shell manage this process automatically for the `go-sidecar` runtime, phase 9 moved the processing manifest endpoint into Go, and phase 10 moved `open_study` registration into Go.
+This module is the current Go sidecar backend for the migration path. Phase 7 established the local HTTP transport, phase 8 let the Tauri shell manage this process automatically for the `go-sidecar` runtime, phase 9 moved the processing manifest endpoint into Go, phase 10 moved `open_study` registration into Go, phase 11 proved metadata reading in Go, and phase 12 locked the pixel-decode strategy around a narrow Rust helper instead of a premature pure-Go commitment.
 
 Current scope:
 
@@ -10,6 +10,7 @@ Current scope:
 - return the frozen processing manifest for `get_processing_manifest`
 - validate DICOM metadata and register studies for `open_study`
 - extract `open_study` metadata needed for migration parity: rows, columns, spacing tags, window defaults, photometric interpretation, and transfer syntax UID
+- inspect decode-relevant DICOM metadata for migration planning
 - populate `measurementScale` when spacing tags are present
 - write the recent-study catalog hook on study open
 - publish health/runtime metadata
@@ -19,6 +20,7 @@ Current scope:
 Current non-goals:
 
 - no Go pixel decode yet
+- phase 12 intentionally does not claim pure-Go decode readiness from the current narrow sample corpus
 - no Go DICOM export yet
 - no job execution yet
 - no render/process/analyze execution yet
@@ -28,6 +30,7 @@ Current non-goals:
 ```bash
 go run ./cmd/xrayviewd
 go run ./cmd/xrayview-cli print-config
+go run ./cmd/xrayview-cli inspect-decode ../images/sample-dental-radiograph.dcm
 go run ./cmd/xrayview-cli list-commands
 ```
 
@@ -59,6 +62,8 @@ Current metadata-reader limits:
 
 - full pixel decode remains out of scope for this phase
 - deflated transfer syntax is still rejected in the prototype reader
+- the committed sample corpus contains only native single-frame monochrome explicit-VR-little-endian studies
+- phase 12 therefore locks decode strategy to Go orchestration plus a narrow Rust decode helper for phase 13
 
 Transport guarantees:
 

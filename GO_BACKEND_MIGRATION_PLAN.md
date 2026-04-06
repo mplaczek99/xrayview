@@ -921,6 +921,10 @@ Yes.
 
 Make an explicit technical decision for pixel decode.
 
+### Status
+
+Completed. See [GO_BACKEND_PHASE12_DECIDE_DICOM_DECODE_STRATEGY.md](GO_BACKEND_PHASE12_DECIDE_DICOM_DECODE_STRATEGY.md).
+
 ### Why this phase exists
 
 This is the highest-risk subsystem.

@@ -12,6 +12,7 @@ import (
 	"xrayview/go-backend/internal/app"
 	"xrayview/go-backend/internal/config"
 	"xrayview/go-backend/internal/contracts"
+	"xrayview/go-backend/internal/dicommeta"
 )
 
 func main() {
@@ -31,6 +32,8 @@ func run(args []string) error {
 		return serve()
 	case "print-config":
 		return printConfig()
+	case "inspect-decode":
+		return inspectDecode(args[1:])
 	case "list-commands":
 		for _, command := range contracts.SupportedCommandStrings() {
 			fmt.Println(command)
@@ -71,12 +74,28 @@ func printConfig() error {
 	return encoder.Encode(cfg)
 }
 
+func inspectDecode(paths []string) error {
+	if len(paths) == 0 {
+		return fmt.Errorf("inspect-decode requires at least one DICOM path")
+	}
+
+	report, err := dicommeta.InspectFiles(paths)
+	if err != nil {
+		return err
+	}
+
+	encoder := json.NewEncoder(os.Stdout)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(report)
+}
+
 func printUsage(stream *os.File) {
 	fmt.Fprintln(stream, "usage: xrayview-cli <subcommand>")
 	fmt.Fprintln(stream, "")
 	fmt.Fprintln(stream, "subcommands:")
 	fmt.Fprintln(stream, "  serve         run the phase 7 local HTTP backend")
 	fmt.Fprintln(stream, "  print-config  print resolved backend configuration as JSON")
+	fmt.Fprintln(stream, "  inspect-decode inspect decode-relevant DICOM metadata as JSON")
 	fmt.Fprintln(stream, "  list-commands print supported command names")
 	fmt.Fprintln(stream, "  version       print service and contract version")
 }

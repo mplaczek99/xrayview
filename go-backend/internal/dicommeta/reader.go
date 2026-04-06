@@ -50,6 +50,13 @@ type SpacingPair struct {
 type Metadata struct {
 	Rows                       uint16
 	Columns                    uint16
+	SamplesPerPixel            uint16
+	BitsAllocated              uint16
+	BitsStored                 uint16
+	PixelRepresentation        uint16
+	PlanarConfiguration        uint16
+	NumberOfFrames             uint32
+	PixelDataEncoding          string
 	PixelSpacing               *SpacingPair
 	ImagerPixelSpacing         *SpacingPair
 	NominalScannedPixelSpacing *SpacingPair
@@ -61,10 +68,16 @@ type Metadata struct {
 
 var (
 	tagTransferSyntaxUID          = tag{group: 0x0002, element: 0x0010}
+	tagSamplesPerPixel            = tag{group: 0x0028, element: 0x0002}
 	tagRows                       = tag{group: 0x0028, element: 0x0010}
 	tagColumns                    = tag{group: 0x0028, element: 0x0011}
 	tagPhotometricInterpretation  = tag{group: 0x0028, element: 0x0004}
 	tagPixelSpacing               = tag{group: 0x0028, element: 0x0030}
+	tagNumberOfFrames             = tag{group: 0x0028, element: 0x0008}
+	tagPlanarConfiguration        = tag{group: 0x0028, element: 0x0006}
+	tagBitsAllocated              = tag{group: 0x0028, element: 0x0100}
+	tagBitsStored                 = tag{group: 0x0028, element: 0x0101}
+	tagPixelRepresentation        = tag{group: 0x0028, element: 0x0103}
 	tagImagerPixelSpacing         = tag{group: 0x0018, element: 0x1164}
 	tagNominalScannedPixelSpacing = tag{group: 0x0018, element: 0x2010}
 	tagWindowCenter               = tag{group: 0x0028, element: 0x1050}
@@ -73,6 +86,12 @@ var (
 	tagItemDelimitation           = tag{group: 0xfffe, element: 0xe00d}
 	tagSequenceDelimitation       = tag{group: 0xfffe, element: 0xe0dd}
 	fileMetaTransferSyntax        = transferSyntax{byteOrder: binary.LittleEndian, explicit: true}
+)
+
+const (
+	PixelDataEncodingMissing      = "missing"
+	PixelDataEncodingNative       = "native"
+	PixelDataEncodingEncapsulated = "encapsulated"
 )
 
 func ReadFile(path string) (Metadata, error) {
@@ -111,6 +130,7 @@ func Read(source readerAtSeeker) (Metadata, error) {
 	if err := parseDataset(source, syntax, &metadata); err != nil {
 		return Metadata{}, err
 	}
+	metadata.applyDecodeDefaults()
 
 	if metadata.Rows == 0 {
 		return Metadata{}, fmt.Errorf("invalid DICOM metadata: missing Rows (0028,0010)")
@@ -215,6 +235,7 @@ func parseDataset(source readerAtSeeker, syntax transferSyntax, metadata *Metada
 		}
 
 		if header.tag == tagPixelData {
+			metadata.PixelDataEncoding = pixelDataEncodingForHeader(header)
 			return nil
 		}
 
@@ -242,6 +263,10 @@ func parseDataset(source readerAtSeeker, syntax transferSyntax, metadata *Metada
 
 func applyValue(metadata *Metadata, syntax transferSyntax, header elementHeader, value []byte) {
 	switch header.tag {
+	case tagSamplesPerPixel:
+		if parsed, ok := parseUint16Value(value, syntax.byteOrder); ok {
+			metadata.SamplesPerPixel = parsed
+		}
 	case tagRows:
 		if parsed, ok := parseUint16Value(value, syntax.byteOrder); ok {
 			metadata.Rows = parsed
@@ -252,6 +277,26 @@ func applyValue(metadata *Metadata, syntax transferSyntax, header elementHeader,
 		}
 	case tagPixelSpacing:
 		metadata.PixelSpacing = parseSpacingPair(value)
+	case tagNumberOfFrames:
+		if parsed, ok := parseIntStringValue(value, 32); ok {
+			metadata.NumberOfFrames = parsed
+		}
+	case tagPlanarConfiguration:
+		if parsed, ok := parseUint16Value(value, syntax.byteOrder); ok {
+			metadata.PlanarConfiguration = parsed
+		}
+	case tagBitsAllocated:
+		if parsed, ok := parseUint16Value(value, syntax.byteOrder); ok {
+			metadata.BitsAllocated = parsed
+		}
+	case tagBitsStored:
+		if parsed, ok := parseUint16Value(value, syntax.byteOrder); ok {
+			metadata.BitsStored = parsed
+		}
+	case tagPixelRepresentation:
+		if parsed, ok := parseUint16Value(value, syntax.byteOrder); ok {
+			metadata.PixelRepresentation = parsed
+		}
 	case tagImagerPixelSpacing:
 		metadata.ImagerPixelSpacing = parseSpacingPair(value)
 	case tagNominalScannedPixelSpacing:
@@ -263,6 +308,29 @@ func applyValue(metadata *Metadata, syntax transferSyntax, header elementHeader,
 	case tagPhotometricInterpretation:
 		metadata.PhotometricInterpretation = trimStringValue(value)
 	}
+}
+
+func (metadata *Metadata) applyDecodeDefaults() {
+	if metadata.SamplesPerPixel == 0 {
+		metadata.SamplesPerPixel = 1
+	}
+	if metadata.NumberOfFrames == 0 {
+		metadata.NumberOfFrames = 1
+	}
+	if metadata.BitsStored == 0 && metadata.BitsAllocated > 0 {
+		metadata.BitsStored = metadata.BitsAllocated
+	}
+	if metadata.PixelDataEncoding == "" {
+		metadata.PixelDataEncoding = PixelDataEncodingMissing
+	}
+}
+
+func pixelDataEncodingForHeader(header elementHeader) string {
+	if header.length == undefinedLength {
+		return PixelDataEncodingEncapsulated
+	}
+
+	return PixelDataEncodingNative
 }
 
 func syntaxFromUID(uid string) (transferSyntax, error) {
@@ -422,10 +490,16 @@ func uses32BitLength(vr string) bool {
 
 func isTrackedTag(value tag) bool {
 	switch value {
-	case tagRows,
+	case tagSamplesPerPixel,
+		tagRows,
 		tagColumns,
 		tagPhotometricInterpretation,
 		tagPixelSpacing,
+		tagNumberOfFrames,
+		tagPlanarConfiguration,
+		tagBitsAllocated,
+		tagBitsStored,
+		tagPixelRepresentation,
 		tagImagerPixelSpacing,
 		tagNominalScannedPixelSpacing,
 		tagWindowCenter,
@@ -455,6 +529,20 @@ func parseUint16Value(
 	}
 
 	return uint16(parsed), true
+}
+
+func parseIntStringValue(value []byte, bits int) (uint32, bool) {
+	trimmed := trimStringValue(value)
+	if trimmed == "" {
+		return 0, false
+	}
+
+	parsed, err := strconv.ParseUint(firstComponent(trimmed), 10, bits)
+	if err != nil {
+		return 0, false
+	}
+
+	return uint32(parsed), true
 }
 
 func parseSpacingPair(value []byte) *SpacingPair {

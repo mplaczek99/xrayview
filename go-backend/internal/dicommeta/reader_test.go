@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"testing"
 )
 
@@ -26,6 +27,24 @@ func TestReadFileSampleDentalRadiographMetadata(t *testing.T) {
 	if got, want := metadata.TransferSyntaxUID, "1.2.840.10008.1.2.1"; got != want {
 		t.Fatalf("TransferSyntaxUID = %q, want %q", got, want)
 	}
+	if got, want := metadata.SamplesPerPixel, uint16(1); got != want {
+		t.Fatalf("SamplesPerPixel = %d, want %d", got, want)
+	}
+	if got, want := metadata.BitsAllocated, uint16(8); got != want {
+		t.Fatalf("BitsAllocated = %d, want %d", got, want)
+	}
+	if got, want := metadata.BitsStored, uint16(8); got != want {
+		t.Fatalf("BitsStored = %d, want %d", got, want)
+	}
+	if got, want := metadata.PixelRepresentation, uint16(0); got != want {
+		t.Fatalf("PixelRepresentation = %d, want %d", got, want)
+	}
+	if got, want := metadata.NumberOfFrames, uint32(1); got != want {
+		t.Fatalf("NumberOfFrames = %d, want %d", got, want)
+	}
+	if got, want := metadata.PixelDataEncoding, PixelDataEncodingNative; got != want {
+		t.Fatalf("PixelDataEncoding = %q, want %q", got, want)
+	}
 	if got, want := floatValue(metadata.WindowCenter), 127.5; got != want {
 		t.Fatalf("WindowCenter = %v, want %v", got, want)
 	}
@@ -43,6 +62,38 @@ func TestReadFileSampleDentalRadiographMetadata(t *testing.T) {
 	}
 	if metadata.MeasurementScale() != nil {
 		t.Fatalf("MeasurementScale = %+v, want nil", metadata.MeasurementScale())
+	}
+}
+
+func TestReadFileProcessedSampleTracksNativeDecodeMetadata(t *testing.T) {
+	metadata, err := ReadFile(processedSampleDicomPath(t))
+	if err != nil {
+		t.Fatalf("ReadFile returned error: %v", err)
+	}
+
+	if got, want := metadata.Rows, uint16(1088); got != want {
+		t.Fatalf("Rows = %d, want %d", got, want)
+	}
+	if got, want := metadata.Columns, uint16(2048); got != want {
+		t.Fatalf("Columns = %d, want %d", got, want)
+	}
+	if got, want := metadata.SamplesPerPixel, uint16(1); got != want {
+		t.Fatalf("SamplesPerPixel = %d, want %d", got, want)
+	}
+	if got, want := metadata.PhotometricInterpretation, "MONOCHROME2"; got != want {
+		t.Fatalf("PhotometricInterpretation = %q, want %q", got, want)
+	}
+	if got, want := metadata.PlanarConfiguration, uint16(0); got != want {
+		t.Fatalf("PlanarConfiguration = %d, want %d", got, want)
+	}
+	if got, want := metadata.BitsAllocated, uint16(8); got != want {
+		t.Fatalf("BitsAllocated = %d, want %d", got, want)
+	}
+	if got, want := metadata.BitsStored, uint16(8); got != want {
+		t.Fatalf("BitsStored = %d, want %d", got, want)
+	}
+	if got, want := metadata.PixelDataEncoding, PixelDataEncodingNative; got != want {
+		t.Fatalf("PixelDataEncoding = %q, want %q", got, want)
 	}
 }
 
@@ -151,6 +202,49 @@ func TestReadFallsBackToRawImplicitLittleEndianDataset(t *testing.T) {
 	if got, want := metadata.TransferSyntaxUID, implicitLittleEndianTransferSyntax; got != want {
 		t.Fatalf("TransferSyntaxUID = %q, want %q", got, want)
 	}
+	if got, want := metadata.PixelDataEncoding, PixelDataEncodingNative; got != want {
+		t.Fatalf("PixelDataEncoding = %q, want %q", got, want)
+	}
+}
+
+func TestReadTracksDecodeRelevantFieldsForEncapsulatedPixelData(t *testing.T) {
+	metadata, err := Read(bytes.NewReader(buildTestDicom(buildOptions{
+		withPart10:                true,
+		transferSyntaxUID:         "1.2.840.10008.1.2.4.50",
+		datasetSyntax:             transferSyntax{byteOrder: binary.LittleEndian, explicit: true},
+		rows:                      640,
+		columns:                   480,
+		samplesPerPixel:           3,
+		photometricInterpretation: "RGB",
+		numberOfFrames:            2,
+		planarConfiguration:       0,
+		bitsAllocated:             8,
+		bitsStored:                8,
+		pixelRepresentation:       0,
+		pixelDataEncapsulated:     true,
+	})))
+	if err != nil {
+		t.Fatalf("Read returned error: %v", err)
+	}
+
+	if got, want := metadata.PixelDataEncoding, PixelDataEncodingEncapsulated; got != want {
+		t.Fatalf("PixelDataEncoding = %q, want %q", got, want)
+	}
+	if got, want := metadata.TransferSyntaxUID, "1.2.840.10008.1.2.4.50"; got != want {
+		t.Fatalf("TransferSyntaxUID = %q, want %q", got, want)
+	}
+	if got, want := metadata.SamplesPerPixel, uint16(3); got != want {
+		t.Fatalf("SamplesPerPixel = %d, want %d", got, want)
+	}
+	if got, want := metadata.BitsAllocated, uint16(8); got != want {
+		t.Fatalf("BitsAllocated = %d, want %d", got, want)
+	}
+	if got, want := metadata.BitsStored, uint16(8); got != want {
+		t.Fatalf("BitsStored = %d, want %d", got, want)
+	}
+	if got, want := metadata.NumberOfFrames, uint32(2); got != want {
+		t.Fatalf("NumberOfFrames = %d, want %d", got, want)
+	}
 }
 
 type buildOptions struct {
@@ -159,12 +253,19 @@ type buildOptions struct {
 	datasetSyntax              transferSyntax
 	rows                       uint16
 	columns                    uint16
+	samplesPerPixel            uint16
 	photometricInterpretation  string
+	numberOfFrames             uint32
+	planarConfiguration        uint16
+	bitsAllocated              uint16
+	bitsStored                 uint16
+	pixelRepresentation        uint16
 	pixelSpacing               string
 	imagerPixelSpacing         string
 	nominalScannedPixelSpacing string
 	windowCenter               string
 	windowWidth                string
+	pixelDataEncapsulated      bool
 }
 
 func buildTestDicom(options buildOptions) []byte {
@@ -185,6 +286,22 @@ func buildTestDicom(options buildOptions) []byte {
 	writeElement(
 		&payload,
 		options.datasetSyntax,
+		tagSamplesPerPixel,
+		"US",
+		encodeUint16(options.datasetSyntax.byteOrder, defaultUint16(options.samplesPerPixel, 1)),
+	)
+	if options.numberOfFrames != 0 {
+		writeElement(
+			&payload,
+			options.datasetSyntax,
+			tagNumberOfFrames,
+			"IS",
+			encodeString(strconv.FormatUint(uint64(options.numberOfFrames), 10), ' '),
+		)
+	}
+	writeElement(
+		&payload,
+		options.datasetSyntax,
 		tagRows,
 		"US",
 		encodeUint16(options.datasetSyntax.byteOrder, options.rows),
@@ -202,6 +319,36 @@ func buildTestDicom(options buildOptions) []byte {
 		tagPhotometricInterpretation,
 		"CS",
 		encodeString(options.photometricInterpretation, ' '),
+	)
+	if options.planarConfiguration != 0 || defaultUint16(options.samplesPerPixel, 1) > 1 {
+		writeElement(
+			&payload,
+			options.datasetSyntax,
+			tagPlanarConfiguration,
+			"US",
+			encodeUint16(options.datasetSyntax.byteOrder, options.planarConfiguration),
+		)
+	}
+	writeElement(
+		&payload,
+		options.datasetSyntax,
+		tagBitsAllocated,
+		"US",
+		encodeUint16(options.datasetSyntax.byteOrder, defaultUint16(options.bitsAllocated, 8)),
+	)
+	writeElement(
+		&payload,
+		options.datasetSyntax,
+		tagBitsStored,
+		"US",
+		encodeUint16(options.datasetSyntax.byteOrder, defaultUint16(options.bitsStored, defaultUint16(options.bitsAllocated, 8))),
+	)
+	writeElement(
+		&payload,
+		options.datasetSyntax,
+		tagPixelRepresentation,
+		"US",
+		encodeUint16(options.datasetSyntax.byteOrder, options.pixelRepresentation),
 	)
 	if options.pixelSpacing != "" {
 		writeElement(
@@ -249,13 +396,17 @@ func buildTestDicom(options buildOptions) []byte {
 		)
 	}
 
-	writeElement(
-		&payload,
-		options.datasetSyntax,
-		tagPixelData,
-		"OB",
-		nil,
-	)
+	if options.pixelDataEncapsulated {
+		writeUndefinedLengthElementHeader(&payload, options.datasetSyntax, tagPixelData, "OB")
+	} else {
+		writeElement(
+			&payload,
+			options.datasetSyntax,
+			tagPixelData,
+			"OB",
+			nil,
+		)
+	}
 
 	return payload.Bytes()
 }
@@ -285,6 +436,19 @@ func writeElement(
 	payload.Write(value)
 }
 
+func writeUndefinedLengthElementHeader(
+	payload *bytes.Buffer,
+	syntax transferSyntax,
+	field tag,
+	vr string,
+) {
+	writeUint16(payload, syntax.byteOrder, field.group)
+	writeUint16(payload, syntax.byteOrder, field.element)
+	payload.WriteString(vr)
+	payload.Write([]byte{0x00, 0x00})
+	writeUint32(payload, syntax.byteOrder, undefinedLength)
+}
+
 func writeUint16(payload *bytes.Buffer, byteOrder binary.ByteOrder, value uint16) {
 	var raw [2]byte
 	byteOrder.PutUint16(raw[:], value)
@@ -301,6 +465,14 @@ func encodeUint16(byteOrder binary.ByteOrder, value uint16) []byte {
 	var raw [2]byte
 	byteOrder.PutUint16(raw[:], value)
 	return raw[:]
+}
+
+func defaultUint16(value uint16, fallback uint16) uint16 {
+	if value == 0 {
+		return fallback
+	}
+
+	return value
 }
 
 func encodeUI(value string) []byte {
@@ -347,5 +519,18 @@ func sampleDicomPath(t *testing.T) string {
 
 	return filepath.Clean(
 		filepath.Join(filepath.Dir(currentFile), "..", "..", "..", "images", "sample-dental-radiograph.dcm"),
+	)
+}
+
+func processedSampleDicomPath(t *testing.T) string {
+	t.Helper()
+
+	_, currentFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller returned no file path")
+	}
+
+	return filepath.Clean(
+		filepath.Join(filepath.Dir(currentFile), "..", "..", "..", "images", "sample-dental-radiograph_processed.dcm"),
 	)
 }
