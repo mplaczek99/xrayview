@@ -1,5 +1,5 @@
-// This file is generated from `backend/src/api/contracts.rs`.
-// Run `npm --prefix frontend run generate:contracts` after changing Rust contracts.
+// This file is generated from `contracts/backend-contract-v1.schema.json`.
+// Run `npm --prefix frontend run generate:contracts` after changing the schema.
 // Backend contract version: v1
 
 export const BACKEND_CONTRACT_VERSION = 1 as const;
@@ -70,13 +70,7 @@ export interface AnnotationBundle {
   rectangles: RectangleAnnotation[];
 }
 
-export type BackendErrorCode =
-  | "invalidInput"
-  | "notFound"
-  | "cancelled"
-  | "conflict"
-  | "cacheCorrupted"
-  | "internal";
+export type BackendErrorCode = "invalidInput" | "notFound" | "cancelled" | "conflict" | "cacheCorrupted" | "internal";
 
 export interface BackendError {
   code: BackendErrorCode;
@@ -87,13 +81,7 @@ export interface BackendError {
 
 export type JobKind = "renderStudy" | "processStudy" | "analyzeStudy";
 
-export type JobState =
-  | "queued"
-  | "running"
-  | "cancelling"
-  | "completed"
-  | "failed"
-  | "cancelled";
+export type JobState = "queued" | "running" | "cancelling" | "completed" | "failed" | "cancelled";
 
 export interface JobProgress {
   percent: number;
@@ -242,9 +230,9 @@ export interface MeasureLineAnnotationCommandResult {
 }
 
 export type JobResult =
-  | { kind: "renderStudy"; payload: RenderStudyCommandResult }
-  | { kind: "processStudy"; payload: ProcessStudyCommandResult }
-  | { kind: "analyzeStudy"; payload: AnalyzeStudyCommandResult };
+  | { kind: "renderStudy"; payload: RenderStudyCommandResult; }
+  | { kind: "processStudy"; payload: ProcessStudyCommandResult; }
+  | { kind: "analyzeStudy"; payload: AnalyzeStudyCommandResult; };
 
 export interface JobSnapshot {
   jobId: string;

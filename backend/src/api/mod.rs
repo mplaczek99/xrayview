@@ -13,7 +13,6 @@ pub use contracts::{
     OpenStudyCommand, OpenStudyCommandResult, PaletteName, ProcessStudyCommand,
     ProcessStudyCommandResult, ProcessingControls, ProcessingManifest, ProcessingPreset,
     RenderStudyCommand, RenderStudyCommandResult, StartedJob, StudyDescription, StudyRecord,
-    generated_typescript_contracts, write_typescript_contracts,
 };
 
 #[derive(Debug, Clone)]

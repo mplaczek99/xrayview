@@ -1,0 +1,624 @@
+// Code generated from contracts/backend-contract-v1.schema.json. DO NOT EDIT.
+
+package contractv1
+
+const BackendContractVersion = 1
+
+const BackendContractSchemaID = "https://xrayview.local/contracts/backend-contract-v1.schema.json"
+
+// BackendContractSchemaJSON is the authoritative contract schema for future Go validation.
+const BackendContractSchemaJSON = `{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xrayview.local/contracts/backend-contract-v1.schema.json",
+  "title": "XRayView Backend Contract v1",
+  "description": "Language-neutral schema for the desktop/backend contract frozen in phase 2 and owned outside Rust in phase 3.",
+  "x-contract-version": 1,
+  "x-go-package": "contractv1",
+  "x-generated-targets": {
+    "typescript": "frontend/src/lib/generated/contracts.ts",
+    "goValidationBindings": "go/contracts/contractv1/bindings.go"
+  },
+  "x-export-order": [
+    "PaletteName",
+    "ProcessingControls",
+    "ProcessingPreset",
+    "ProcessingManifest",
+    "MeasurementScale",
+    "AnnotationSource",
+    "AnnotationPoint",
+    "LineMeasurement",
+    "LineAnnotation",
+    "RectangleAnnotation",
+    "AnnotationBundle",
+    "BackendErrorCode",
+    "BackendError",
+    "JobKind",
+    "JobState",
+    "JobProgress",
+    "StartedJob",
+    "JobCommand",
+    "OpenStudyCommand",
+    "StudyRecord",
+    "OpenStudyCommandResult",
+    "RenderStudyCommand",
+    "RenderStudyCommandResult",
+    "ProcessStudyCommand",
+    "ProcessStudyCommandResult",
+    "AnalyzeStudyCommand",
+    "MeasureLineAnnotationCommand",
+    "ToothAnalysis",
+    "ToothImageMetadata",
+    "ToothCalibration",
+    "ToothCandidate",
+    "ToothMeasurementBundle",
+    "ToothMeasurementValues",
+    "ToothGeometry",
+    "BoundingBox",
+    "LineSegment",
+    "Point",
+    "AnalyzeStudyCommandResult",
+    "MeasureLineAnnotationCommandResult",
+    "JobResult",
+    "JobSnapshot"
+  ],
+  "$defs": {
+    "PaletteName": {
+      "enum": ["none", "hot", "bone"]
+    },
+    "ProcessingControls": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "brightness": { "type": "number" },
+        "contrast": { "type": "number" },
+        "invert": { "type": "boolean" },
+        "equalize": { "type": "boolean" },
+        "palette": { "$ref": "#/$defs/PaletteName" }
+      },
+      "required": ["brightness", "contrast", "invert", "equalize", "palette"]
+    },
+    "ProcessingPreset": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "controls": { "$ref": "#/$defs/ProcessingControls" }
+      },
+      "required": ["id", "controls"]
+    },
+    "ProcessingManifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "defaultPresetId": { "type": "string" },
+        "presets": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ProcessingPreset" }
+        }
+      },
+      "required": ["defaultPresetId", "presets"]
+    },
+    "MeasurementScale": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "rowSpacingMm": { "type": "number" },
+        "columnSpacingMm": { "type": "number" },
+        "source": { "type": "string" }
+      },
+      "required": ["rowSpacingMm", "columnSpacingMm", "source"]
+    },
+    "AnnotationSource": {
+      "enum": ["manual", "autoTooth"]
+    },
+    "AnnotationPoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "x": { "type": "number" },
+        "y": { "type": "number" }
+      },
+      "required": ["x", "y"]
+    },
+    "LineMeasurement": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "pixelLength": { "type": "number" },
+        "calibratedLengthMm": {
+          "type": ["number", "null"]
+        }
+      },
+      "required": ["pixelLength"]
+    },
+    "LineAnnotation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "label": { "type": "string" },
+        "source": { "$ref": "#/$defs/AnnotationSource" },
+        "start": { "$ref": "#/$defs/AnnotationPoint" },
+        "end": { "$ref": "#/$defs/AnnotationPoint" },
+        "editable": { "type": "boolean" },
+        "confidence": {
+          "type": ["number", "null"]
+        },
+        "measurement": {
+          "anyOf": [
+            { "$ref": "#/$defs/LineMeasurement" },
+            { "type": "null" }
+          ]
+        }
+      },
+      "required": ["id", "label", "source", "start", "end", "editable"]
+    },
+    "RectangleAnnotation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "label": { "type": "string" },
+        "source": { "$ref": "#/$defs/AnnotationSource" },
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "width": { "type": "number" },
+        "height": { "type": "number" },
+        "editable": { "type": "boolean" },
+        "confidence": {
+          "type": ["number", "null"]
+        }
+      },
+      "required": ["id", "label", "source", "x", "y", "width", "height", "editable"]
+    },
+    "AnnotationBundle": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "lines": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/LineAnnotation" }
+        },
+        "rectangles": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/RectangleAnnotation" }
+        }
+      },
+      "required": ["lines", "rectangles"]
+    },
+    "BackendErrorCode": {
+      "enum": [
+        "invalidInput",
+        "notFound",
+        "cancelled",
+        "conflict",
+        "cacheCorrupted",
+        "internal"
+      ]
+    },
+    "BackendError": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "code": { "$ref": "#/$defs/BackendErrorCode" },
+        "message": { "type": "string" },
+        "details": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "recoverable": { "type": "boolean" }
+      },
+      "required": ["code", "message", "recoverable"]
+    },
+    "JobKind": {
+      "enum": ["renderStudy", "processStudy", "analyzeStudy"]
+    },
+    "JobState": {
+      "enum": ["queued", "running", "cancelling", "completed", "failed", "cancelled"]
+    },
+    "JobProgress": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "percent": { "type": "number" },
+        "stage": { "type": "string" },
+        "message": { "type": "string" }
+      },
+      "required": ["percent", "stage", "message"]
+    },
+    "StartedJob": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "jobId": { "type": "string" }
+      },
+      "required": ["jobId"]
+    },
+    "JobCommand": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "jobId": { "type": "string" }
+      },
+      "required": ["jobId"]
+    },
+    "OpenStudyCommand": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "inputPath": { "type": "string" }
+      },
+      "required": ["inputPath"]
+    },
+    "StudyRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "studyId": { "type": "string" },
+        "inputPath": { "type": "string" },
+        "inputName": { "type": "string" },
+        "measurementScale": {
+          "anyOf": [
+            { "$ref": "#/$defs/MeasurementScale" },
+            { "type": "null" }
+          ]
+        }
+      },
+      "required": ["studyId", "inputPath", "inputName"]
+    },
+    "OpenStudyCommandResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "study": { "$ref": "#/$defs/StudyRecord" }
+      },
+      "required": ["study"]
+    },
+    "RenderStudyCommand": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "studyId": { "type": "string" }
+      },
+      "required": ["studyId"]
+    },
+    "RenderStudyCommandResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "studyId": { "type": "string" },
+        "previewPath": { "type": "string" },
+        "loadedWidth": { "type": "number" },
+        "loadedHeight": { "type": "number" },
+        "measurementScale": {
+          "anyOf": [
+            { "$ref": "#/$defs/MeasurementScale" },
+            { "type": "null" }
+          ]
+        }
+      },
+      "required": ["studyId", "previewPath", "loadedWidth", "loadedHeight"]
+    },
+    "ProcessStudyCommand": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "studyId": { "type": "string" },
+        "outputPath": {
+          "type": ["string", "null"]
+        },
+        "presetId": { "type": "string" },
+        "invert": { "type": "boolean" },
+        "brightness": {
+          "type": ["number", "null"]
+        },
+        "contrast": {
+          "type": ["number", "null"]
+        },
+        "equalize": { "type": "boolean" },
+        "compare": { "type": "boolean" },
+        "palette": {
+          "anyOf": [
+            { "$ref": "#/$defs/PaletteName" },
+            { "type": "null" }
+          ]
+        }
+      },
+      "required": ["studyId", "presetId", "invert", "equalize", "compare"]
+    },
+    "ProcessStudyCommandResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "studyId": { "type": "string" },
+        "previewPath": { "type": "string" },
+        "dicomPath": { "type": "string" },
+        "loadedWidth": { "type": "number" },
+        "loadedHeight": { "type": "number" },
+        "mode": { "type": "string" },
+        "measurementScale": {
+          "anyOf": [
+            { "$ref": "#/$defs/MeasurementScale" },
+            { "type": "null" }
+          ]
+        }
+      },
+      "required": [
+        "studyId",
+        "previewPath",
+        "dicomPath",
+        "loadedWidth",
+        "loadedHeight",
+        "mode"
+      ]
+    },
+    "AnalyzeStudyCommand": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "studyId": { "type": "string" }
+      },
+      "required": ["studyId"]
+    },
+    "MeasureLineAnnotationCommand": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "studyId": { "type": "string" },
+        "annotation": { "$ref": "#/$defs/LineAnnotation" }
+      },
+      "required": ["studyId", "annotation"]
+    },
+    "ToothAnalysis": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "image": { "$ref": "#/$defs/ToothImageMetadata" },
+        "calibration": { "$ref": "#/$defs/ToothCalibration" },
+        "tooth": {
+          "anyOf": [
+            { "$ref": "#/$defs/ToothCandidate" },
+            { "type": "null" }
+          ]
+        },
+        "teeth": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/ToothCandidate" }
+        },
+        "warnings": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "required": ["image", "calibration", "teeth", "warnings"]
+    },
+    "ToothImageMetadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "width": { "type": "number" },
+        "height": { "type": "number" }
+      },
+      "required": ["width", "height"]
+    },
+    "ToothCalibration": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "pixelUnits": { "type": "string" },
+        "measurementScale": {
+          "anyOf": [
+            { "$ref": "#/$defs/MeasurementScale" },
+            { "type": "null" }
+          ]
+        },
+        "realWorldMeasurementsAvailable": { "type": "boolean" }
+      },
+      "required": ["pixelUnits", "realWorldMeasurementsAvailable"]
+    },
+    "ToothCandidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "confidence": { "type": "number" },
+        "maskAreaPixels": { "type": "number" },
+        "measurements": { "$ref": "#/$defs/ToothMeasurementBundle" },
+        "geometry": { "$ref": "#/$defs/ToothGeometry" }
+      },
+      "required": ["confidence", "maskAreaPixels", "measurements", "geometry"]
+    },
+    "ToothMeasurementBundle": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "pixel": { "$ref": "#/$defs/ToothMeasurementValues" },
+        "calibrated": {
+          "anyOf": [
+            { "$ref": "#/$defs/ToothMeasurementValues" },
+            { "type": "null" }
+          ]
+        }
+      },
+      "required": ["pixel"]
+    },
+    "ToothMeasurementValues": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "toothWidth": { "type": "number" },
+        "toothHeight": { "type": "number" },
+        "boundingBoxWidth": { "type": "number" },
+        "boundingBoxHeight": { "type": "number" },
+        "units": { "type": "string" }
+      },
+      "required": [
+        "toothWidth",
+        "toothHeight",
+        "boundingBoxWidth",
+        "boundingBoxHeight",
+        "units"
+      ]
+    },
+    "ToothGeometry": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "boundingBox": { "$ref": "#/$defs/BoundingBox" },
+        "widthLine": { "$ref": "#/$defs/LineSegment" },
+        "heightLine": { "$ref": "#/$defs/LineSegment" }
+      },
+      "required": ["boundingBox", "widthLine", "heightLine"]
+    },
+    "BoundingBox": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "width": { "type": "number" },
+        "height": { "type": "number" }
+      },
+      "required": ["x", "y", "width", "height"]
+    },
+    "LineSegment": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "start": { "$ref": "#/$defs/Point" },
+        "end": { "$ref": "#/$defs/Point" }
+      },
+      "required": ["start", "end"]
+    },
+    "Point": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "x": { "type": "number" },
+        "y": { "type": "number" }
+      },
+      "required": ["x", "y"]
+    },
+    "AnalyzeStudyCommandResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "studyId": { "type": "string" },
+        "previewPath": { "type": "string" },
+        "analysis": { "$ref": "#/$defs/ToothAnalysis" },
+        "suggestedAnnotations": { "$ref": "#/$defs/AnnotationBundle" }
+      },
+      "required": ["studyId", "previewPath", "analysis", "suggestedAnnotations"]
+    },
+    "MeasureLineAnnotationCommandResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "studyId": { "type": "string" },
+        "annotation": { "$ref": "#/$defs/LineAnnotation" }
+      },
+      "required": ["studyId", "annotation"]
+    },
+    "JobResult": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": { "const": "renderStudy" },
+            "payload": { "$ref": "#/$defs/RenderStudyCommandResult" }
+          },
+          "required": ["kind", "payload"]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": { "const": "processStudy" },
+            "payload": { "$ref": "#/$defs/ProcessStudyCommandResult" }
+          },
+          "required": ["kind", "payload"]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "kind": { "const": "analyzeStudy" },
+            "payload": { "$ref": "#/$defs/AnalyzeStudyCommandResult" }
+          },
+          "required": ["kind", "payload"]
+        }
+      ]
+    },
+    "JobSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "jobId": { "type": "string" },
+        "jobKind": { "$ref": "#/$defs/JobKind" },
+        "studyId": {
+          "type": ["string", "null"]
+        },
+        "state": { "$ref": "#/$defs/JobState" },
+        "progress": { "$ref": "#/$defs/JobProgress" },
+        "fromCache": { "type": "boolean" },
+        "result": {
+          "anyOf": [
+            { "$ref": "#/$defs/JobResult" },
+            { "type": "null" }
+          ]
+        },
+        "error": {
+          "anyOf": [
+            { "$ref": "#/$defs/BackendError" },
+            { "type": "null" }
+          ]
+        }
+      },
+      "required": ["jobId", "jobKind", "state", "progress", "fromCache"]
+    }
+  }
+}`
+
+var DefinitionRefs = map[string]string{
+	"PaletteName": "#/$defs/PaletteName",
+	"ProcessingControls": "#/$defs/ProcessingControls",
+	"ProcessingPreset": "#/$defs/ProcessingPreset",
+	"ProcessingManifest": "#/$defs/ProcessingManifest",
+	"MeasurementScale": "#/$defs/MeasurementScale",
+	"AnnotationSource": "#/$defs/AnnotationSource",
+	"AnnotationPoint": "#/$defs/AnnotationPoint",
+	"LineMeasurement": "#/$defs/LineMeasurement",
+	"LineAnnotation": "#/$defs/LineAnnotation",
+	"RectangleAnnotation": "#/$defs/RectangleAnnotation",
+	"AnnotationBundle": "#/$defs/AnnotationBundle",
+	"BackendErrorCode": "#/$defs/BackendErrorCode",
+	"BackendError": "#/$defs/BackendError",
+	"JobKind": "#/$defs/JobKind",
+	"JobState": "#/$defs/JobState",
+	"JobProgress": "#/$defs/JobProgress",
+	"StartedJob": "#/$defs/StartedJob",
+	"JobCommand": "#/$defs/JobCommand",
+	"OpenStudyCommand": "#/$defs/OpenStudyCommand",
+	"StudyRecord": "#/$defs/StudyRecord",
+	"OpenStudyCommandResult": "#/$defs/OpenStudyCommandResult",
+	"RenderStudyCommand": "#/$defs/RenderStudyCommand",
+	"RenderStudyCommandResult": "#/$defs/RenderStudyCommandResult",
+	"ProcessStudyCommand": "#/$defs/ProcessStudyCommand",
+	"ProcessStudyCommandResult": "#/$defs/ProcessStudyCommandResult",
+	"AnalyzeStudyCommand": "#/$defs/AnalyzeStudyCommand",
+	"MeasureLineAnnotationCommand": "#/$defs/MeasureLineAnnotationCommand",
+	"ToothAnalysis": "#/$defs/ToothAnalysis",
+	"ToothImageMetadata": "#/$defs/ToothImageMetadata",
+	"ToothCalibration": "#/$defs/ToothCalibration",
+	"ToothCandidate": "#/$defs/ToothCandidate",
+	"ToothMeasurementBundle": "#/$defs/ToothMeasurementBundle",
+	"ToothMeasurementValues": "#/$defs/ToothMeasurementValues",
+	"ToothGeometry": "#/$defs/ToothGeometry",
+	"BoundingBox": "#/$defs/BoundingBox",
+	"LineSegment": "#/$defs/LineSegment",
+	"Point": "#/$defs/Point",
+	"AnalyzeStudyCommandResult": "#/$defs/AnalyzeStudyCommandResult",
+	"MeasureLineAnnotationCommandResult": "#/$defs/MeasureLineAnnotationCommandResult",
+	"JobResult": "#/$defs/JobResult",
+	"JobSnapshot": "#/$defs/JobSnapshot",
+}

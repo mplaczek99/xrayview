@@ -192,9 +192,12 @@ cargo run --manifest-path backend/Cargo.toml -- --input images/sample-dental-rad
 
 ### Contract generation
 
-Rust API types in `backend/src/api/contracts.rs` are the single source of truth. Running `npm --prefix frontend run generate:contracts` produces `frontend/src/lib/generated/contracts.ts`. Both `dev` and `build` scripts run generation automatically.
+The contract source of truth now lives in [contracts/backend-contract-v1.schema.json](contracts/backend-contract-v1.schema.json). Running `npm --prefix frontend run generate:contracts` regenerates:
 
-Phase 2 of the Go migration freezes this surface as backend contract v1. `BACKEND_CONTRACT_VERSION` is declared in Rust, emitted into the generated TypeScript contracts, and `cargo test --manifest-path backend/Cargo.toml --test contracts` fails if the generator output drifts from the committed frontend contract file.
+- [frontend/src/lib/generated/contracts.ts](frontend/src/lib/generated/contracts.ts)
+- [go/contracts/contractv1/bindings.go](go/contracts/contractv1/bindings.go)
+
+Phase 2 froze this surface as backend contract v1. Phase 3 moves generation out of Rust: `cargo test --manifest-path backend/Cargo.toml --test contracts` now checks that committed generated bindings match the schema and that representative Rust payloads still validate against that schema.
 
 ### Data flow
 

@@ -5,20 +5,16 @@ import { fileURLToPath } from "node:url";
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const frontendRoot = path.resolve(scriptDir, "..");
 const workspaceRoot = path.resolve(frontendRoot, "..");
-const outputPath = path.join(frontendRoot, "src", "lib", "generated", "contracts.ts");
+const generatorPath = path.join(
+  workspaceRoot,
+  "contracts",
+  "scripts",
+  "generate-contract-bindings.mjs",
+);
 
 const result = spawnSync(
-  "cargo",
-  [
-    "run",
-    "--quiet",
-    "--manifest-path",
-    "backend/Cargo.toml",
-    "--bin",
-    "generate-contracts",
-    "--",
-    outputPath,
-  ],
+  "node",
+  [generatorPath],
   {
     cwd: workspaceRoot,
     stdio: "inherit",

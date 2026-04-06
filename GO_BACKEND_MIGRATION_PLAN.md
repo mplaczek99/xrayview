@@ -462,12 +462,17 @@ Partially.
 
 Move contract ownership away from Rust.
 
+### Status
+
+Completed. See [GO_BACKEND_PHASE3_LANGUAGE_NEUTRAL_CONTRACTS.md](GO_BACKEND_PHASE3_LANGUAGE_NEUTRAL_CONTRACTS.md).
+
 ### Why this phase exists
 
 Rust cannot remain the authority if Go is becoming primary backend language.
 
 ### Exact code areas likely involved
 
+- [contracts/backend-contract-v1.schema.json](contracts/backend-contract-v1.schema.json)
 - [backend/src/bin/generate-contracts.rs](backend/src/bin/generate-contracts.rs)
 - [frontend/scripts/generate-contracts.mjs](frontend/scripts/generate-contracts.mjs)
 
