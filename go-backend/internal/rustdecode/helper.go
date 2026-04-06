@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"xrayview/go-backend/internal/contracts"
+	"xrayview/go-backend/internal/imaging"
 )
 
 const (
@@ -21,24 +22,9 @@ const (
 )
 
 type SourceStudy struct {
-	Image            SourceImage                 `json:"image"`
+	Image            imaging.SourceImage         `json:"image"`
 	Metadata         SourceMetadata              `json:"metadata"`
 	MeasurementScale *contracts.MeasurementScale `json:"measurementScale,omitempty"`
-}
-
-type SourceImage struct {
-	Width         uint32       `json:"width"`
-	Height        uint32       `json:"height"`
-	Pixels        []float32    `json:"pixels"`
-	MinValue      float32      `json:"minValue"`
-	MaxValue      float32      `json:"maxValue"`
-	DefaultWindow *WindowLevel `json:"defaultWindow,omitempty"`
-	Invert        bool         `json:"invert"`
-}
-
-type WindowLevel struct {
-	Center float32 `json:"center"`
-	Width  float32 `json:"width"`
 }
 
 type SourceMetadata struct {
@@ -164,18 +150,8 @@ func (execRunner) Run(ctx context.Context, command []string) ([]byte, []byte, er
 }
 
 func validateStudy(study SourceStudy) error {
-	if study.Image.Width == 0 || study.Image.Height == 0 {
-		return errors.New("rust helper returned an empty image size")
-	}
-
-	expectedPixels := uint64(study.Image.Width) * uint64(study.Image.Height)
-	if uint64(len(study.Image.Pixels)) != expectedPixels {
-		return fmt.Errorf(
-			"rust helper pixel count %d does not match image size %dx%d",
-			len(study.Image.Pixels),
-			study.Image.Width,
-			study.Image.Height,
-		)
+	if err := study.Image.Validate(); err != nil {
+		return fmt.Errorf("rust helper returned an invalid image: %w", err)
 	}
 
 	if strings.TrimSpace(study.Metadata.StudyInstanceUID) == "" {

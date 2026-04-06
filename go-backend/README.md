@@ -1,6 +1,6 @@
 # xrayview Go Backend
 
-This module is the current Go sidecar backend for the migration path. Phase 7 established the local HTTP transport, phase 8 let the Tauri shell manage this process automatically for the `go-sidecar` runtime, phase 9 moved the processing manifest endpoint into Go, phase 10 moved `open_study` registration into Go, phase 11 proved metadata reading in Go, phase 12 locked the pixel-decode strategy around a narrow Rust helper instead of a premature pure-Go commitment, and phase 13 added the temporary Rust decode helper plus a Go invocation layer.
+This module is the current Go sidecar backend for the migration path. Phase 7 established the local HTTP transport, phase 8 let the Tauri shell manage this process automatically for the `go-sidecar` runtime, phase 9 moved the processing manifest endpoint into Go, phase 10 moved `open_study` registration into Go, phase 11 proved metadata reading in Go, phase 12 locked the pixel-decode strategy around a narrow Rust helper instead of a premature pure-Go commitment, phase 13 added the temporary Rust decode helper plus a Go invocation layer, and phase 14 introduced the shared Go-native imaging model that future render and preview work will build on.
 
 Current scope:
 
@@ -12,6 +12,8 @@ Current scope:
 - extract `open_study` metadata needed for migration parity: rows, columns, spacing tags, window defaults, photometric interpretation, and transfer syntax UID
 - inspect decode-relevant DICOM metadata for migration planning
 - invoke the temporary Rust decode helper from Go and validate its normalized source-study payload
+- normalize decoded source studies into a shared `internal/imaging` model with explicit image-format metadata
+- validate source-image and preview-image buffer geometry before later render-pipeline work
 - populate `measurementScale` when spacing tags are present
 - write the recent-study catalog hook on study open
 - publish health/runtime metadata

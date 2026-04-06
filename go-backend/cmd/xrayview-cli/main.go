@@ -13,6 +13,7 @@ import (
 	"xrayview/go-backend/internal/config"
 	"xrayview/go-backend/internal/contracts"
 	"xrayview/go-backend/internal/dicommeta"
+	"xrayview/go-backend/internal/imaging"
 	"xrayview/go-backend/internal/rustdecode"
 )
 
@@ -110,10 +111,11 @@ func decodeSource(args []string) error {
 	summary := struct {
 		Width                 uint32                      `json:"width"`
 		Height                uint32                      `json:"height"`
+		Format                imaging.ImageFormat         `json:"format"`
 		PixelCount            int                         `json:"pixelCount"`
 		MinValue              float32                     `json:"minValue"`
 		MaxValue              float32                     `json:"maxValue"`
-		DefaultWindow         *rustdecode.WindowLevel     `json:"defaultWindow,omitempty"`
+		DefaultWindow         *imaging.WindowLevel        `json:"defaultWindow,omitempty"`
 		Invert                bool                        `json:"invert"`
 		MeasurementScale      *contracts.MeasurementScale `json:"measurementScale,omitempty"`
 		StudyInstanceUID      string                      `json:"studyInstanceUid"`
@@ -121,6 +123,7 @@ func decodeSource(args []string) error {
 	}{
 		Width:                 study.Image.Width,
 		Height:                study.Image.Height,
+		Format:                study.Image.Format,
 		PixelCount:            len(study.Image.Pixels),
 		MinValue:              study.Image.MinValue,
 		MaxValue:              study.Image.MaxValue,

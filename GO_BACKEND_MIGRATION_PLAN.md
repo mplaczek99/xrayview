@@ -1023,6 +1023,10 @@ Yes.
 
 Define the Go-native in-memory image representation.
 
+### Status
+
+Completed. See [GO_BACKEND_PHASE14_IMPLEMENT_GO_PREVIEW_IMAGE_MODEL.md](GO_BACKEND_PHASE14_IMPLEMENT_GO_PREVIEW_IMAGE_MODEL.md).
+
 ### Why this phase exists
 
 Every downstream subsystem depends on a stable image model.

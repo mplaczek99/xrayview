@@ -9,6 +9,8 @@ import (
 	"runtime"
 	"testing"
 	"time"
+
+	"xrayview/go-backend/internal/imaging"
 )
 
 type stubRunner struct {
@@ -37,6 +39,7 @@ func TestDecodeStudyParsesPayloadAndAppendsInputFlag(t *testing.T) {
 			"image": {
 				"width": 2,
 				"height": 2,
+				"format": "gray-f32",
 				"pixels": [0, 64, 128, 255],
 				"minValue": 0,
 				"maxValue": 255,
@@ -87,6 +90,9 @@ func TestDecodeStudyParsesPayloadAndAppendsInputFlag(t *testing.T) {
 	if got, want := len(study.Image.Pixels), 4; got != want {
 		t.Fatalf("len(Image.Pixels) = %d, want %d", got, want)
 	}
+	if got, want := study.Image.Format, imaging.FormatGrayFloat32; got != want {
+		t.Fatalf("Image.Format = %q, want %q", got, want)
+	}
 	if study.Image.DefaultWindow == nil {
 		t.Fatal("DefaultWindow = nil, want decoded window")
 	}
@@ -129,6 +135,67 @@ func TestDecodeStudyRejectsMismatchedPixelCount(t *testing.T) {
 	_, err = helper.DecodeStudy(context.Background(), "/tmp/sample-study.dcm")
 	if err == nil {
 		t.Fatal("DecodeStudy returned nil error, want validation failure")
+	}
+}
+
+func TestDecodeStudyDefaultsMissingFormatForOlderHelperPayloads(t *testing.T) {
+	runner := &stubRunner{
+		stdout: []byte(`{
+			"image": {
+				"width": 2,
+				"height": 2,
+				"pixels": [0, 64, 128, 255],
+				"minValue": 0,
+				"maxValue": 255,
+				"invert": false
+			},
+			"metadata": {
+				"studyInstanceUid": "1.2.3.4",
+				"preservedElements": []
+			}
+		}`),
+	}
+	helper, err := newHelper([]string{"helper-bin"}, runner)
+	if err != nil {
+		t.Fatalf("newHelper returned error: %v", err)
+	}
+
+	study, err := helper.DecodeStudy(context.Background(), "/tmp/sample-study.dcm")
+	if err != nil {
+		t.Fatalf("DecodeStudy returned error: %v", err)
+	}
+
+	if got, want := study.Image.Format, imaging.FormatGrayFloat32; got != want {
+		t.Fatalf("Image.Format = %q, want %q", got, want)
+	}
+}
+
+func TestDecodeStudyRejectsUnexpectedImageFormat(t *testing.T) {
+	runner := &stubRunner{
+		stdout: []byte(`{
+			"image": {
+				"width": 2,
+				"height": 2,
+				"format": "rgba8",
+				"pixels": [0, 64, 128, 255],
+				"minValue": 0,
+				"maxValue": 255,
+				"invert": false
+			},
+			"metadata": {
+				"studyInstanceUid": "1.2.3.4",
+				"preservedElements": []
+			}
+		}`),
+	}
+	helper, err := newHelper([]string{"helper-bin"}, runner)
+	if err != nil {
+		t.Fatalf("newHelper returned error: %v", err)
+	}
+
+	_, err = helper.DecodeStudy(context.Background(), "/tmp/sample-study.dcm")
+	if err == nil {
+		t.Fatal("DecodeStudy returned nil error, want format validation failure")
 	}
 }
 

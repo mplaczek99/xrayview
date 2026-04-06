@@ -24,6 +24,7 @@ pub struct DecodedSourceStudy {
 pub struct DecodedSourceImage {
     pub width: u32,
     pub height: u32,
+    pub format: &'static str,
     pub pixels: Vec<f32>,
     pub min_value: f32,
     pub max_value: f32,
@@ -73,6 +74,7 @@ impl DecodedSourceStudy {
         let image = DecodedSourceImage {
             width: source.image.width,
             height: source.image.height,
+            format: "gray-f32",
             pixels: source.image.pixels,
             min_value: source.image.min_value,
             max_value: source.image.max_value,
@@ -155,6 +157,7 @@ mod tests {
 
         assert_eq!(decoded.image.width, 2);
         assert_eq!(decoded.image.height, 2);
+        assert_eq!(decoded.image.format, "gray-f32");
         assert_eq!(decoded.image.pixels, vec![0.0, 64.0, 128.0, 255.0]);
         assert_eq!(decoded.image.min_value, 0.0);
         assert_eq!(decoded.image.max_value, 255.0);
