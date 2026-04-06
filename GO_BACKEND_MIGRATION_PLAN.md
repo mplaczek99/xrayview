@@ -409,6 +409,10 @@ Yes.
 
 Freeze the current backend API semantics before migration.
 
+### Status
+
+Completed. See [GO_BACKEND_PHASE2_BACKEND_CONTRACT_FREEZE.md](GO_BACKEND_PHASE2_BACKEND_CONTRACT_FREEZE.md).
+
 ### Why this phase exists
 
 You want the backend to change language before it changes behavior.

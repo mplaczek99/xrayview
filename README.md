@@ -194,6 +194,8 @@ cargo run --manifest-path backend/Cargo.toml -- --input images/sample-dental-rad
 
 Rust API types in `backend/src/api/contracts.rs` are the single source of truth. Running `npm --prefix frontend run generate:contracts` produces `frontend/src/lib/generated/contracts.ts`. Both `dev` and `build` scripts run generation automatically.
 
+Phase 2 of the Go migration freezes this surface as backend contract v1. `BACKEND_CONTRACT_VERSION` is declared in Rust, emitted into the generated TypeScript contracts, and `cargo test --manifest-path backend/Cargo.toml --test contracts` fails if the generator output drifts from the committed frontend contract file.
+
 ### Data flow
 
 1. User opens a DICOM file -> `open_study` Tauri command -> backend registers study, decodes DICOM, returns metadata + study ID

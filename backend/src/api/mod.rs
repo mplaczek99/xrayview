@@ -7,12 +7,13 @@ use serde::Serialize;
 use crate::ToothAnalysis;
 
 pub use contracts::{
-    AnalyzeStudyCommand, AnalyzeStudyCommandResult, DescribeStudyCommand, JobCommand, JobKind,
-    JobProgress, JobResult, JobSnapshot, JobState, MeasureLineAnnotationCommand,
-    MeasureLineAnnotationCommandResult, MeasurementScale, OpenStudyCommand, OpenStudyCommandResult,
-    PaletteName, ProcessStudyCommand, ProcessStudyCommandResult, ProcessingControls,
-    ProcessingManifest, ProcessingPreset, RenderStudyCommand, RenderStudyCommandResult, StartedJob,
-    StudyDescription, StudyRecord, generated_typescript_contracts, write_typescript_contracts,
+    AnalyzeStudyCommand, AnalyzeStudyCommandResult, BACKEND_CONTRACT_VERSION, DescribeStudyCommand,
+    JobCommand, JobKind, JobProgress, JobResult, JobSnapshot, JobState,
+    MeasureLineAnnotationCommand, MeasureLineAnnotationCommandResult, MeasurementScale,
+    OpenStudyCommand, OpenStudyCommandResult, PaletteName, ProcessStudyCommand,
+    ProcessStudyCommandResult, ProcessingControls, ProcessingManifest, ProcessingPreset,
+    RenderStudyCommand, RenderStudyCommandResult, StartedJob, StudyDescription, StudyRecord,
+    generated_typescript_contracts, write_typescript_contracts,
 };
 
 #[derive(Debug, Clone)]

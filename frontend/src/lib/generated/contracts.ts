@@ -1,5 +1,8 @@
 // This file is generated from `backend/src/api/contracts.rs`.
 // Run `npm --prefix frontend run generate:contracts` after changing Rust contracts.
+// Backend contract version: v1
+
+export const BACKEND_CONTRACT_VERSION = 1 as const;
 
 export type PaletteName = "none" | "hot" | "bone";
 
@@ -78,7 +81,7 @@ export type BackendErrorCode =
 export interface BackendError {
   code: BackendErrorCode;
   message: string;
-  details: string[];
+  details?: string[];
   recoverable: boolean;
 }
 

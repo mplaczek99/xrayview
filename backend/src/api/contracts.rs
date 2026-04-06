@@ -1,3 +1,4 @@
+use std::fmt::Write as _;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -10,6 +11,8 @@ use crate::annotations::{
     RectangleAnnotation,
 };
 use crate::error::BackendError;
+
+pub const BACKEND_CONTRACT_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -398,11 +401,31 @@ pub struct JobSnapshot {
 }
 
 pub fn generated_typescript_contracts() -> String {
-    String::from(
-        r#"// This file is generated from `backend/src/api/contracts.rs`.
-// Run `npm --prefix frontend run generate:contracts` after changing Rust contracts.
-
-export type PaletteName = "none" | "hot" | "bone";
+    let mut contracts = String::new();
+    writeln!(
+        contracts,
+        "// This file is generated from `backend/src/api/contracts.rs`."
+    )
+    .expect("write contracts header");
+    writeln!(
+        contracts,
+        "// Run `npm --prefix frontend run generate:contracts` after changing Rust contracts."
+    )
+    .expect("write contracts generation hint");
+    writeln!(
+        contracts,
+        "// Backend contract version: v{BACKEND_CONTRACT_VERSION}"
+    )
+    .expect("write contracts version header");
+    writeln!(contracts).expect("write contracts header spacer");
+    writeln!(
+        contracts,
+        "export const BACKEND_CONTRACT_VERSION = {BACKEND_CONTRACT_VERSION} as const;"
+    )
+    .expect("write contracts version export");
+    writeln!(contracts).expect("write contracts version spacer");
+    contracts.push_str(
+        r#"export type PaletteName = "none" | "hot" | "bone";
 
 export interface ProcessingControls {
   brightness: number;
@@ -479,7 +502,7 @@ export type BackendErrorCode =
 export interface BackendError {
   code: BackendErrorCode;
   message: string;
-  details: string[];
+  details?: string[];
   recoverable: boolean;
 }
 
@@ -655,7 +678,8 @@ export interface JobSnapshot {
   error?: BackendError | null;
 }
 "#,
-    )
+    );
+    contracts
 }
 
 pub fn write_typescript_contracts(path: &Path) -> io::Result<()> {
@@ -679,6 +703,7 @@ mod tests {
     fn generated_contracts_include_job_types() {
         let contracts = generated_typescript_contracts();
 
+        assert!(contracts.contains("export const BACKEND_CONTRACT_VERSION = 1 as const;"));
         assert!(contracts.contains("export interface ProcessStudyCommand {"));
         assert!(contracts.contains("export interface AnalyzeStudyCommandResult {"));
         assert!(contracts.contains("export interface MeasureLineAnnotationCommand {"));
@@ -686,5 +711,6 @@ mod tests {
         assert!(contracts.contains("export interface JobSnapshot {"));
         assert!(contracts.contains("export type JobState ="));
         assert!(contracts.contains("export interface BackendError {"));
+        assert!(contracts.contains("details?: string[];"));
     }
 }
