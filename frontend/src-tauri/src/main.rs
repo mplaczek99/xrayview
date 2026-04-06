@@ -1,5 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod go_sidecar;
+
 use rfd::FileDialog;
 use std::env;
 use std::path::PathBuf;
@@ -54,7 +56,10 @@ fn start_render_job(
     request: RenderStudyCommand,
 ) -> Result<StartedJob, BackendError> {
     let publish = job_publisher(app);
-    backend_state.inner().clone().start_render_job(request, publish)
+    backend_state
+        .inner()
+        .clone()
+        .start_render_job(request, publish)
 }
 
 #[tauri::command]
@@ -64,7 +69,10 @@ fn start_process_job(
     request: ProcessStudyCommand,
 ) -> Result<StartedJob, BackendError> {
     let publish = job_publisher(app);
-    backend_state.inner().clone().start_process_job(request, publish)
+    backend_state
+        .inner()
+        .clone()
+        .start_process_job(request, publish)
 }
 
 #[tauri::command]
@@ -74,7 +82,10 @@ fn start_analyze_job(
     request: AnalyzeStudyCommand,
 ) -> Result<StartedJob, BackendError> {
     let publish = job_publisher(app);
-    backend_state.inner().clone().start_analyze_job(request, publish)
+    backend_state
+        .inner()
+        .clone()
+        .start_analyze_job(request, publish)
 }
 
 #[tauri::command]
@@ -101,7 +112,10 @@ fn measure_line_annotation(
     backend_state: tauri::State<'_, BackendAppState>,
     request: MeasureLineAnnotationCommand,
 ) -> Result<MeasureLineAnnotationCommandResult, BackendError> {
-    backend_state.inner().clone().measure_line_annotation(request)
+    backend_state
+        .inner()
+        .clone()
+        .measure_line_annotation(request)
 }
 
 async fn run_blocking<T, F>(work: F) -> Result<T, BackendError>
@@ -156,7 +170,10 @@ fn main() {
 
     tauri::Builder::default()
         .manage(BackendAppState::default())
+        .manage(go_sidecar::GoBackendSidecarState::default())
         .setup(|app| {
+            go_sidecar::setup(app)?;
+
             #[cfg(target_os = "linux")]
             {
                 if let Some(window) = app.get_webview_window("main") {
@@ -180,5 +197,5 @@ fn main() {
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|_, _| {});
+        .run(|app, event| go_sidecar::handle_run_event(app, &event));
 }

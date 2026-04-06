@@ -6383,9 +6383,12 @@ name = "xrayview-frontend"
 version = "0.2.2"
 dependencies = [
  "glib",
+ "libc",
  "rfd",
+ "serde_json",
  "tauri",
  "tauri-build",
+ "url",
  "xrayview-backend",
 ]
 

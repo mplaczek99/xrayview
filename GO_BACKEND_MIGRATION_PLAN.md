@@ -726,6 +726,10 @@ Yes.
 
 Have the current shell manage the Go backend process lifecycle.
 
+### Status
+
+Completed. See [GO_BACKEND_PHASE8_ADD_TAURI_GO_PROCESS_MANAGEMENT.md](GO_BACKEND_PHASE8_ADD_TAURI_GO_PROCESS_MANAGEMENT.md).
+
 ### Why this phase exists
 
 The user should still launch one desktop app, not manage two processes.

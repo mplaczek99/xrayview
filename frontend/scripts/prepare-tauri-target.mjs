@@ -39,7 +39,11 @@ function removeLegacySidecars() {
   }
 
   for (const entry of fs.readdirSync(binariesDir, { withFileTypes: true })) {
-    if (!entry.isFile() || !entry.name.startsWith("xrayview-backend-")) {
+    if (
+      !entry.isFile() ||
+      (!entry.name.startsWith("xrayview-backend-") &&
+        !entry.name.startsWith("xrayview-go-backend-"))
+    ) {
       continue;
     }
 

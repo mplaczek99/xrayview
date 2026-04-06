@@ -1,12 +1,14 @@
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import { bundleDir, frontendRoot, prepareTauriTarget } from "./prepare-tauri-target.mjs";
+import { prepareGoSidecarBinary } from "./prepare-go-sidecar.mjs";
 import { applyFrontendRuntimeEnv } from "./runtime-env.mjs";
 
 const args = process.argv.slice(2);
 const env = applyFrontendRuntimeEnv(process.env);
 
 prepareTauriTarget();
+prepareGoSidecarBinary(args);
 
 // Clear previous bundles so packaging only picks up artifacts from this build.
 if (fs.existsSync(bundleDir)) {

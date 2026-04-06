@@ -9,6 +9,7 @@ import {
   prepareTauriTarget,
   tauriRoot,
 } from "./prepare-tauri-target.mjs";
+import { resolveGoSidecarTargetTriple } from "./prepare-go-sidecar.mjs";
 
 const workspaceRoot = path.resolve(frontendRoot, "..");
 const includeBundles = process.argv.includes("--bundle");
@@ -39,8 +40,9 @@ function run(command, args, cwd) {
 prepareTauriTarget();
 
 const tauriConfig = JSON.parse(fs.readFileSync(tauriConfigPath, "utf8"));
-if (tauriConfig.bundle?.externalBin) {
-  throw new Error("Tauri bundle config still declares external sidecar binaries.");
+const externalBins = tauriConfig.bundle?.externalBin ?? [];
+if (!externalBins.includes("binaries/xrayview-go-backend")) {
+  throw new Error("Tauri bundle config must declare the Go sidecar external binary.");
 }
 
 const defaultCapability = JSON.parse(fs.readFileSync(capabilityPath, "utf8"));
@@ -61,13 +63,14 @@ if (!fs.existsSync(releaseBinary)) {
   throw new Error(`Expected desktop release binary at ${releaseBinary}`);
 }
 
-if (fs.existsSync(binariesDir)) {
-  const staleSidecars = fs
-    .readdirSync(binariesDir)
-    .filter((entry) => entry.startsWith("xrayview-backend-"));
-  if (staleSidecars.length > 0) {
-    throw new Error(`Found stale sidecar artifacts: ${staleSidecars.join(", ")}`);
-  }
+const targetTriple = resolveGoSidecarTargetTriple();
+const sidecarFileName =
+  process.platform === "win32"
+    ? `xrayview-go-backend-${targetTriple}.exe`
+    : `xrayview-go-backend-${targetTriple}`;
+const sidecarPath = path.join(binariesDir, sidecarFileName);
+if (!fs.existsSync(sidecarPath)) {
+  throw new Error(`Expected Go sidecar binary at ${sidecarPath}`);
 }
 
 if (includeBundles) {

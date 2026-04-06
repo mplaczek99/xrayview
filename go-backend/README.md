@@ -1,6 +1,6 @@
 # xrayview Go Backend
 
-This module is the phase 7 migration transport for the future Go sidecar backend.
+This module is the current Go sidecar backend for the migration path. Phase 7 established the local HTTP transport and phase 8 lets the Tauri shell manage this process automatically for the `go-sidecar` runtime.
 
 Current scope:
 
@@ -25,6 +25,11 @@ go run ./cmd/xrayviewd
 go run ./cmd/xrayview-cli print-config
 go run ./cmd/xrayview-cli list-commands
 ```
+
+When you run the desktop app in `go-sidecar` mode through `npm run tauri:dev`
+or `npm run tauri:build`, the shell now prepares and launches this binary for
+you. Manual `go run ./cmd/xrayviewd` is mainly useful for direct transport
+inspection during migration work.
 
 ## Transport
 
