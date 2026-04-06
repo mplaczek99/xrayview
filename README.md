@@ -1,6 +1,6 @@
 # xrayview
 
-`xrayview` is a DICOM X-ray visualization and analysis workstation built with Tauri (React/TypeScript frontend, Rust backend). The repository now also includes a phase 6 Go backend workspace that boots as a local HTTP sidecar skeleton for the ongoing migration.
+`xrayview` is a DICOM X-ray visualization and analysis workstation built with Tauri (React/TypeScript frontend, Rust backend). The repository now also includes a phase 7 Go backend workspace with a defined local HTTP sidecar transport for the ongoing migration.
 
 The desktop UI lives in `frontend/`. The Rust backend in `backend/` powers all DICOM decoding, image processing, rendering, measurement, and export. The backend is library-first — Tauri calls Rust directly in-process (no subprocess). The CLI binary remains available for headless DICOM workflows.
 
@@ -50,7 +50,7 @@ cd backend
 cargo build --release
 ```
 
-### Go backend skeleton
+### Go backend transport
 
 ```bash
 npm run go:backend:test
@@ -58,14 +58,20 @@ npm run go:backend:build
 npm run go:backend:serve
 ```
 
-The phase 6 Go backend binds to `127.0.0.1:38181` by default and exposes:
+The phase 7 Go backend binds to `127.0.0.1:38181` by default and exposes:
 
 - `GET /healthz`
 - `GET /api/v1/runtime`
 - `GET /api/v1/commands`
 - `POST /api/v1/commands/{command}`
 
-At this stage the command routes are transport placeholders only. They return structured backend errors for the phase 5 command names until later phases move real behavior into Go.
+The transport is intentionally local-only:
+
+- the backend binds only to loopback hosts
+- the frontend accepts only loopback `http://` sidecar URLs
+- the server handles the CORS/preflight flow required by the Tauri webview
+
+At this stage the command routes still return structured placeholder errors for the phase 5 command names until later phases move real behavior into Go. See [GO_BACKEND_PHASE7_DEFINE_LOCAL_BACKEND_TRANSPORT.md](GO_BACKEND_PHASE7_DEFINE_LOCAL_BACKEND_TRANSPORT.md).
 
 ### Desktop app
 
@@ -122,7 +128,7 @@ XRAYVIEW_BACKEND_RUNTIME=legacy-rust npm run tauri:dev
 XRAYVIEW_BACKEND_RUNTIME=go-sidecar XRAYVIEW_GO_BACKEND_URL=http://127.0.0.1:38181 npm run tauri:dev
 ```
 
-`XRAYVIEW_GO_BACKEND_URL` is only used for the `go-sidecar` runtime. The frontend entry scripts also accept the Vite-prefixed forms `VITE_XRAYVIEW_BACKEND_RUNTIME` and `VITE_XRAYVIEW_GO_BACKEND_URL`.
+`XRAYVIEW_GO_BACKEND_URL` is only used for the `go-sidecar` runtime and must be a loopback `http://` URL such as `http://127.0.0.1:38181`. The frontend entry scripts also accept the Vite-prefixed forms `VITE_XRAYVIEW_BACKEND_RUNTIME` and `VITE_XRAYVIEW_GO_BACKEND_URL`.
 The `go-sidecar` adapter is part of the migration path; it expects a compatible local HTTP backend and is not the default packaged runtime yet.
 
 ## Releases

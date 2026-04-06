@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"xrayview/go-backend/internal/contracts"
@@ -117,9 +118,26 @@ func LoadFromLookup(lookup lookupEnvFunc) (Config, error) {
 		cfg.Server.ShutdownTimeout = timeout
 	}
 
+	if !isLoopbackHost(cfg.Server.Host) {
+		return Config{}, fmt.Errorf(
+			"%s must be a loopback host for the local sidecar transport: %q",
+			HostEnvKey,
+			cfg.Server.Host,
+		)
+	}
+
 	return cfg, nil
 }
 
 func (cfg Config) ListenAddress() string {
 	return net.JoinHostPort(cfg.Server.Host, strconv.Itoa(cfg.Server.Port))
+}
+
+func isLoopbackHost(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+
+	ip := net.ParseIP(strings.Trim(host, "[]"))
+	return ip != nil && ip.IsLoopback()
 }

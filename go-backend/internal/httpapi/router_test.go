@@ -50,8 +50,24 @@ func TestHealthzIncludesContractMetadata(t *testing.T) {
 		t.Fatalf("service = %q, want %q", payload.Service, contracts.ServiceName)
 	}
 
+	if payload.Transport != TransportKind {
+		t.Fatalf("transport = %q, want %q", payload.Transport, TransportKind)
+	}
+
+	if !payload.LocalOnly {
+		t.Fatal("localOnly = false, want true")
+	}
+
 	if payload.BackendContractVersion != contracts.BackendContractVersion {
 		t.Fatalf("contract version = %d, want %d", payload.BackendContractVersion, contracts.BackendContractVersion)
+	}
+
+	if payload.APIBasePath != APIBasePath {
+		t.Fatalf("api base path = %q, want %q", payload.APIBasePath, APIBasePath)
+	}
+
+	if payload.CommandEndpoint != CommandEndpointTemplate {
+		t.Fatalf("command endpoint = %q, want %q", payload.CommandEndpoint, CommandEndpointTemplate)
 	}
 }
 
@@ -91,5 +107,57 @@ func TestCommandPlaceholderReturnsBackendError(t *testing.T) {
 
 	if payload.Code != "internal" {
 		t.Fatalf("code = %q, want %q", payload.Code, "internal")
+	}
+}
+
+func TestAllowedOriginReceivesCORSHeaders(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	request.Header.Set("Origin", "http://localhost:1420")
+	testRouter(t).ServeHTTP(recorder, request)
+
+	if got, want := recorder.Header().Get("Access-Control-Allow-Origin"), "http://localhost:1420"; got != want {
+		t.Fatalf("allow origin = %q, want %q", got, want)
+	}
+}
+
+func TestOptionsPreflightReturnsNoContent(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodOptions, CommandsPath+"/open_study", nil)
+	request.Header.Set("Origin", "tauri://localhost")
+	request.Header.Set("Access-Control-Request-Method", http.MethodPost)
+	request.Header.Set("Access-Control-Request-Headers", "content-type")
+	testRouter(t).ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusNoContent)
+	}
+
+	if got, want := recorder.Header().Get("Access-Control-Allow-Origin"), "tauri://localhost"; got != want {
+		t.Fatalf("allow origin = %q, want %q", got, want)
+	}
+
+	if got := recorder.Header().Get("Access-Control-Allow-Methods"); !strings.Contains(got, http.MethodPost) {
+		t.Fatalf("allow methods = %q, want POST included", got)
+	}
+}
+
+func TestDisallowedOriginIsRejected(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	request.Header.Set("Origin", "https://example.com")
+	testRouter(t).ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusForbidden)
+	}
+
+	var payload backendError
+	if err := json.NewDecoder(recorder.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode failed: %v", err)
+	}
+
+	if payload.Code != "invalidInput" {
+		t.Fatalf("code = %q, want %q", payload.Code, "invalidInput")
 	}
 }

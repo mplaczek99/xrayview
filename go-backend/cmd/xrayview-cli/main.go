@@ -75,7 +75,7 @@ func printUsage(stream *os.File) {
 	fmt.Fprintln(stream, "usage: xrayview-cli <subcommand>")
 	fmt.Fprintln(stream, "")
 	fmt.Fprintln(stream, "subcommands:")
-	fmt.Fprintln(stream, "  serve         run the phase 6 HTTP backend")
+	fmt.Fprintln(stream, "  serve         run the phase 7 local HTTP backend")
 	fmt.Fprintln(stream, "  print-config  print resolved backend configuration as JSON")
 	fmt.Fprintln(stream, "  list-commands print supported command names")
 	fmt.Fprintln(stream, "  version       print service and contract version")

@@ -35,7 +35,7 @@ func TestDefaultConfigMatchesFrontendSidecarDefaults(t *testing.T) {
 
 func TestLoadFromLookupAppliesOverrides(t *testing.T) {
 	cfg, err := LoadFromLookup(lookupFromMap(map[string]string{
-		HostEnvKey:            "0.0.0.0",
+		HostEnvKey:            "::1",
 		PortEnvKey:            "39123",
 		LogLevelEnvKey:        "debug",
 		BaseDirEnvKey:         "/tmp/xrayview-go",
@@ -45,7 +45,7 @@ func TestLoadFromLookupAppliesOverrides(t *testing.T) {
 		t.Fatalf("LoadFromLookup returned error: %v", err)
 	}
 
-	if got, want := cfg.Server.Host, "0.0.0.0"; got != want {
+	if got, want := cfg.Server.Host, "::1"; got != want {
 		t.Fatalf("Host = %q, want %q", got, want)
 	}
 
@@ -72,5 +72,14 @@ func TestLoadFromLookupRejectsInvalidPort(t *testing.T) {
 	}))
 	if err == nil {
 		t.Fatal("expected invalid port to fail")
+	}
+}
+
+func TestLoadFromLookupRejectsNonLoopbackHost(t *testing.T) {
+	_, err := LoadFromLookup(lookupFromMap(map[string]string{
+		HostEnvKey: "0.0.0.0",
+	}))
+	if err == nil {
+		t.Fatal("expected non-loopback host to fail")
 	}
 }

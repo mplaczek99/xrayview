@@ -669,6 +669,10 @@ Yes.
 
 Choose the backend communication mechanism for migration.
 
+### Status
+
+Completed. See [GO_BACKEND_PHASE7_DEFINE_LOCAL_BACKEND_TRANSPORT.md](GO_BACKEND_PHASE7_DEFINE_LOCAL_BACKEND_TRANSPORT.md).
+
 ### Why this phase exists
 
 The migration architecture depends on it.

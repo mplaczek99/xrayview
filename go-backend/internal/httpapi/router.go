@@ -29,8 +29,12 @@ type Dependencies struct {
 type runtimeResponse struct {
 	Status                 string   `json:"status"`
 	Service                string   `json:"service"`
+	Transport              string   `json:"transport"`
+	LocalOnly              bool     `json:"localOnly"`
 	BackendContractVersion int      `json:"backendContractVersion"`
 	BackendContractSchema  string   `json:"backendContractSchemaId"`
+	APIBasePath            string   `json:"apiBasePath"`
+	CommandEndpoint        string   `json:"commandEndpoint"`
 	ListenAddress          string   `json:"listenAddress"`
 	CacheDir               string   `json:"cacheDir"`
 	PersistenceDir         string   `json:"persistenceDir"`
@@ -59,19 +63,19 @@ func NewRouter(deps Dependencies) http.Handler {
 		writeJSON(writer, http.StatusOK, buildRuntimeResponse(deps))
 	})
 
-	mux.HandleFunc("GET /api/v1/runtime", func(writer http.ResponseWriter, request *http.Request) {
+	mux.HandleFunc("GET "+RuntimePath, func(writer http.ResponseWriter, request *http.Request) {
 		writeJSON(writer, http.StatusOK, buildRuntimeResponse(deps))
 	})
 
-	mux.HandleFunc("GET /api/v1/commands", func(writer http.ResponseWriter, request *http.Request) {
+	mux.HandleFunc("GET "+CommandsPath, func(writer http.ResponseWriter, request *http.Request) {
 		writeJSON(writer, http.StatusOK, commandListResponse{
 			Commands:               contracts.SupportedCommandStrings(),
 			BackendContractVersion: contracts.BackendContractVersion,
 		})
 	})
 
-	mux.HandleFunc("/api/v1/commands/", func(writer http.ResponseWriter, request *http.Request) {
-		commandName := strings.TrimPrefix(request.URL.Path, "/api/v1/commands/")
+	mux.HandleFunc(CommandsPath+"/", func(writer http.ResponseWriter, request *http.Request) {
+		commandName := strings.TrimPrefix(request.URL.Path, CommandsPath+"/")
 		if request.Method != http.MethodPost {
 			writeJSON(writer, http.StatusMethodNotAllowed, backendError{
 				Code:        "invalidInput",
@@ -101,11 +105,11 @@ func NewRouter(deps Dependencies) http.Handler {
 			return
 		}
 
-		deps.Logger.Info("phase 6 placeholder command hit", slog.String("command", commandName))
+		deps.Logger.Info("phase 7 placeholder command hit", slog.String("command", commandName))
 		writeJSON(writer, http.StatusNotImplemented, backendError{
 			Code:        "internal",
-			Message:     fmt.Sprintf("command %s is not implemented in the phase 6 skeleton", commandName),
-			Details:     []string{"phase=6", "transport=http-json"},
+			Message:     fmt.Sprintf("command %s is not implemented in the Go backend yet", commandName),
+			Details:     []string{"phase=7", "transport=" + TransportKind},
 			Recoverable: true,
 		})
 	})
@@ -122,15 +126,19 @@ func NewRouter(deps Dependencies) http.Handler {
 		})
 	})
 
-	return mux
+	return wrapLocalTransport(mux, deps.Logger)
 }
 
 func buildRuntimeResponse(deps Dependencies) runtimeResponse {
 	return runtimeResponse{
 		Status:                 "ok",
 		Service:                deps.Config.ServiceName,
+		Transport:              TransportKind,
+		LocalOnly:              true,
 		BackendContractVersion: contracts.BackendContractVersion,
 		BackendContractSchema:  contracts.BackendContractSchemaID,
+		APIBasePath:            APIBasePath,
+		CommandEndpoint:        CommandEndpointTemplate,
 		ListenAddress:          deps.Config.ListenAddress(),
 		CacheDir:               deps.Cache.RootDir(),
 		PersistenceDir:         deps.Persistence.RootDir(),

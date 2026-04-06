@@ -23,6 +23,15 @@ function normalizeUrl(value: string): string {
   return value.replace(/\/+$/, "");
 }
 
+function isLoopbackHostname(hostname: string): boolean {
+  return (
+    hostname === "localhost" ||
+    hostname === "127.0.0.1" ||
+    hostname === "[::1]" ||
+    hostname === "::1"
+  );
+}
+
 function resolveGoSidecarBaseUrl(rawValue: string | undefined): {
   baseUrl: string;
   warning: string | null;
@@ -36,8 +45,22 @@ function resolveGoSidecarBaseUrl(rawValue: string | undefined): {
 
   try {
     const parsed = new URL(rawValue.trim());
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    if (parsed.protocol !== "http:") {
       throw new Error(`unsupported protocol: ${parsed.protocol}`);
+    }
+
+    if (!isLoopbackHostname(parsed.hostname)) {
+      throw new Error(`host must be localhost, 127.0.0.1, or [::1]: ${parsed.hostname}`);
+    }
+
+    if (
+      (parsed.pathname && parsed.pathname !== "/") ||
+      parsed.search ||
+      parsed.hash ||
+      parsed.username ||
+      parsed.password
+    ) {
+      throw new Error("URL must not include a path, query, hash, or credentials");
     }
 
     return {
@@ -50,7 +73,8 @@ function resolveGoSidecarBaseUrl(rawValue: string | undefined): {
     return {
       baseUrl: DEFAULT_GO_SIDECAR_BASE_URL,
       warning:
-        `${GO_SIDECAR_URL_ENV_KEY} must be an absolute http(s) URL. ` +
+        `${GO_SIDECAR_URL_ENV_KEY} must be an absolute loopback http URL ` +
+        `(for example ${DEFAULT_GO_SIDECAR_BASE_URL}). ` +
         `Falling back to ${DEFAULT_GO_SIDECAR_BASE_URL}. (${reason})`,
     };
   }
