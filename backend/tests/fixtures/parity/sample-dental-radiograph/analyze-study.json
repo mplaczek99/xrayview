@@ -1,0 +1,2968 @@
+{
+  "analysis": {
+    "calibration": {
+      "pixelUnits": "px",
+      "realWorldMeasurementsAvailable": false
+    },
+    "image": {
+      "height": 1088,
+      "width": 2048
+    },
+    "teeth": [
+      {
+        "confidence": 0.33,
+        "geometry": {
+          "boundingBox": {
+            "height": 104,
+            "width": 62,
+            "x": 256,
+            "y": 646
+          },
+          "heightLine": {
+            "end": {
+              "x": 279,
+              "y": 700
+            },
+            "start": {
+              "x": 279,
+              "y": 653
+            }
+          },
+          "widthLine": {
+            "end": {
+              "x": 279,
+              "y": 653
+            },
+            "start": {
+              "x": 256,
+              "y": 653
+            }
+          }
+        },
+        "maskAreaPixels": 1198,
+        "measurements": {
+          "pixel": {
+            "boundingBoxHeight": 104.0,
+            "boundingBoxWidth": 62.0,
+            "toothHeight": 48.0,
+            "toothWidth": 24.0,
+            "units": "px"
+          }
+        }
+      },
+      {
+        "confidence": 0.15,
+        "geometry": {
+          "boundingBox": {
+            "height": 12,
+            "width": 31,
+            "x": 289,
+            "y": 459
+          },
+          "heightLine": {
+            "end": {
+              "x": 294,
+              "y": 470
+            },
+            "start": {
+              "x": 294,
+              "y": 462
+            }
+          },
+          "widthLine": {
+            "end": {
+              "x": 319,
+              "y": 464
+            },
+            "start": {
+              "x": 289,
+              "y": 464
+            }
+          }
+        },
+        "maskAreaPixels": 190,
+        "measurements": {
+          "pixel": {
+            "boundingBoxHeight": 12.0,
+            "boundingBoxWidth": 31.0,
+            "toothHeight": 9.0,
+            "toothWidth": 31.0,
+            "units": "px"
+          }
+        }
+      },
+      {
+        "confidence": 0.16,
+        "geometry": {
+          "boundingBox": {
+            "height": 19,
+            "width": 31,
+            "x": 301,
+            "y": 218
+          },
+          "heightLine": {
+            "end": {
+              "x": 307,
+              "y": 224
+            },
+            "start": {
+              "x": 307,
+              "y": 218
+            }
+          },
+          "widthLine": {
+            "end": {
+              "x": 316,
+              "y": 223
+            },
+            "start": {
+              "x": 305,
+              "y": 223
+            }
+          }
+        },
+        "maskAreaPixels": 175,
+        "measurements": {
+          "pixel": {
+            "boundingBoxHeight": 19.0,
+            "boundingBoxWidth": 31.0,
+            "toothHeight": 7.0,
+            "toothWidth": 12.0,
+            "units": "px"
+          }
+        }
+      },
+      {
+        "confidence": 0.15,
+        "geometry": {
+          "boundingBox": {
+            "height": 13,
+            "width": 46,
+            "x": 320,
+            "y": 696
+          },
+          "heightLine": {
+            "end": {
+              "x": 332,
+              "y": 708
+            },
+            "start": {
+              "x": 332,
+              "y": 696
+            }
+          },
+          "widthLine": {
+            "end": {
+              "x": 365,
+              "y": 700
+            },
+            "start": {
+              "x": 320,
+              "y": 700
+            }
+          }
+        },
+        "maskAreaPixels": 363,
+        "measurements": {
+          "pixel": {
+            "boundingBoxHeight": 13.0,
+            "boundingBoxWidth": 46.0,
+            "toothHeight": 13.0,
+            "toothWidth": 46.0,
+            "units": "px"
+          }
+        }
+      },
+      {
+        "confidence": 0.15,
+        "geometry": {
+          "boundingBox": {
+            "height": 13,
+            "width": 27,
+            "x": 416,
+            "y": 730
+          },
+          "heightLine": {
+            "end": {
+              "x": 424,
+              "y": 742
+            },
+            "start": {
+              "x": 424,
+              "y": 730
+            }
+          },
+          "widthLine": {
+            "end": {
+              "x": 442,
+              "y": 734
+            },
+            "start": {
+              "x": 416,
+              "y": 734
+            }
+          }
+        },
+        "maskAreaPixels": 236,
+        "measurements": {
+          "pixel": {
+            "boundingBoxHeight": 13.0,
+            "boundingBoxWidth": 27.0,
+            "toothHeight": 13.0,
+            "toothWidth": 27.0,
+            "units": "px"
+          }
+        }
+      },
+      {
+        "confidence": 0.5,
+        "geometry": {
+          "boundingBox": {
+            "height": 594,
+            "width": 528,
+            "x": 256,
+            "y": 238
+          },
+          "heightLine": {
+            "end": {
+              "x": 517,
+              "y": 831
+            },
+            "start": {
+              "x": 517,
+              "y": 372
+            }
+          },
+          "widthLine": {
+            "end": {
+              "x": 783,
+              "y": 679
+            },
+            "start": {
+              "x": 351,
+              "y": 679
+            }
+          }
+        },
+        "maskAreaPixels": 57234,
+        "measurements": {
+          "pixel": {
+            "boundingBoxHeight": 594.0,
+            "boundingBoxWidth": 528.0,
+            "toothHeight": 460.0,
+            "toothWidth": 433.0,
+            "units": "px"
+          }
+        }
+      },
+      {
+        "confidence": 0.27,
+        "geometry": {
+          "boundingBox": {
+            "height": 37,
+            "width": 192,
+            "x": 448,
+            "y": 324
+          },
+          "heightLine": {
+            "end": {
+              "x": 536,
+              "y": 351
+            },
+            "start": {
+              "x": 536,
+              "y": 324
+            }
+          },
+          "widthLine": {
+            "end": {
+              "x": 639,
+              "y": 343
+            },
+            "start": {
+              "x": 461,
+              "y": 343
+            }
+          }
+        },
+        "maskAreaPixels": 2942,
+        "measurements": {
+          "pixel": {
+            "boundingBoxHeight": 37.0,
+            "boundingBoxWidth": 192.0,
+            "toothHeight": 28.0,
+            "toothWidth": 179.0,
+            "units": "px"
+          }
+        }
+      },
+      {
+        "confidence": 0.48,
+        "geometry": {
+          "boundingBox": {
+            "height": 108,
+            "width": 84,
+            "x": 588,
+            "y": 726
+          },
+          "heightLine": {
+            "end": {
+              "x": 615,
+              "y": 832
+            },
+            "start": {
+              "x": 615,
+              "y": 726
+            }
+          },
+          "widthLine": {
+            "end": {
+              "x": 671,
+              "y": 810
+            },
+            "start": {
+              "x": 592,
+              "y": 810
+            }
+          }
+        },
+        "maskAreaPixels": 4207,
+        "measurements": {
+          "pixel": {
+            "boundingBoxHeight": 108.0,
+            "boundingBoxWidth": 84.0,
+            "toothHeight": 107.0,
+            "toothWidth": 80.0,
+            "units": "px"
+          }
+        }
+      },
+      {
+        "confidence": 0.46,
+        "geometry": {
+          "boundingBox": {
+            "height": 162,
+            "width": 350,
+            "x": 470,
+            "y": 468
+          },
+          "heightLine": {
+            "end": {
+              "x": 536,
+              "y": 626
+            },
+            "start": {
+              "x": 536,
+              "y": 468
+            }
+          },
+          "widthLine": {
+            "end": {
+              "x": 819,
+              "y": 588
+            },
+            "start": {
+              "x": 480,
+              "y": 588
+            }
+          }
+        },
+        "maskAreaPixels": 28277,
+        "measurements": {
+          "pixel": {
+            "boundingBoxHeight": 162.0,
+            "boundingBoxWidth": 350.0,
+            "toothHeight": 159.0,
+            "toothWidth": 340.0,
+            "units": "px"
+          }
+        }
+      },
+      {
+        "confidence": 0.27,
+        "geometry": {
+          "boundingBox": {
+            "height": 60,
+            "width": 20,
+            "x": 669,
+            "y": 737
+          },
+          "heightLine": {
+            "end": {
+              "x": 676,
+              "y": 796
+            },
+            "start": {
+              "x": 676,
+              "y": 737
+            }
+          },
+          "widthLine": {
+            "end": {
+              "x": 685,
+              "y": 783
+            },
+            "start": {
+              "x": 670,
+              "y": 783
+            }
+          }
+        },
+        "maskAreaPixels": 700,
+        "measurements": {
+          "pixel": {
+            "boundingBoxHeight": 60.0,
+            "boundingBoxWidth": 20.0,
+            "toothHeight": 60.0,
+            "toothWidth": 16.0,
+            "units": "px"
+          }
+        }
+      },
+      {
+        "confidence": 0.34,
+        "geometry": {
+          "boundingBox": {
+            "height": 83,
+            "width": 317,
+            "x": 640,
+            "y": 290
+          },
+          "heightLine": {
+            "end": {
+              "x": 764,
+              "y": 370
+            },
+            "start": {
+              "x": 764,
+              "y": 290
+            }
+          },
+          "widthLine": {
+            "end": {
+              "x": 938,
+              "y": 338
+            },
+            "start": {
+              "x": 705,
+              "y": 338
+            }
+          }
+        },
+        "maskAreaPixels": 8315,
+        "measurements": {
+          "pixel": {
+            "boundingBoxHeight": 83.0,
+            "boundingBoxWidth": 317.0,
+            "toothHeight": 81.0,
+            "toothWidth": 234.0,
+            "units": "px"
+          }
+        }
+      },
+      {
+        "confidence": 0.28,
+        "geometry": {
+          "boundingBox": {
+            "height": 21,
+            "width": 37,
+            "x": 814,
+            "y": 674
+          },
+          "heightLine": {
+            "end": {
+              "x": 819,
+              "y": 694
+            },
+            "start": {
+              "x": 819,
+              "y": 675
+            }
+          },
+          "widthLine": {
+            "end": {
+              "x": 850,
+              "y": 681
+            },
+            "start": {
+              "x": 814,
+              "y": 681
+            }
+          }
+        },
+        "maskAreaPixels": 473,
+        "measurements": {
+          "pixel": {
+            "boundingBoxHeight": 21.0,
+            "boundingBoxWidth": 37.0,
+            "toothHeight": 20.0,
+            "toothWidth": 37.0,
+            "units": "px"
+          }
+        }
+      },
+      {
+        "confidence": 0.4,
+        "geometry": {
+          "boundingBox": {
+            "height": 42,
+            "width": 19,
+            "x": 992,
+            "y": 754
+          },
+          "heightLine": {
+            "end": {
+              "x": 1001,
+              "y": 793
+            },
+            "start": {
+              "x": 1001,
+              "y": 754
+            }
+          },
+          "widthLine": {
+            "end": {
+              "x": 1009,
+              "y": 790
+            },
+            "start": {
+              "x": 992,
+              "y": 790
+            }
+          }
+        },
+        "maskAreaPixels": 397,
+        "measurements": {
+          "pixel": {
+            "boundingBoxHeight": 42.0,
+            "boundingBoxWidth": 19.0,
+            "toothHeight": 40.0,
+            "toothWidth": 18.0,
+            "units": "px"
+          }
+        }
+      },
+      {
+        "confidence": 0.32,
+        "geometry": {
+          "boundingBox": {
+            "height": 20,
+            "width": 21,
+            "x": 993,
+            "y": 676
+          },
+          "heightLine": {
+            "end": {
+              "x": 1010,
+              "y": 695
+            },
+            "start": {
+              "x": 1010,
+              "y": 678
+            }
+          },
+          "widthLine": {
+            "end": {
+              "x": 1013,
+              "y": 685
+            },
+            "start": {
+              "x": 993,
+              "y": 685
+            }
+          }
+        },
+        "maskAreaPixels": 257,
+        "measurements": {
+          "pixel": {
+            "boundingBoxHeight": 20.0,
+            "boundingBoxWidth": 21.0,
+            "toothHeight": 18.0,
+            "toothWidth": 21.0,
+            "units": "px"
+          }
+        }
+      },
+      {
+        "confidence": 0.34,
+        "geometry": {
+          "boundingBox": {
+            "height": 24,
+            "width": 26,
+            "x": 1003,
+            "y": 341
+          },
+          "heightLine": {
+            "end": {
+              "x": 1018,
+              "y": 362
+            },
+            "start": {
+              "x": 1018,
+              "y": 351
+            }
+          },
+          "widthLine": {
+            "end": {
+              "x": 1028,
+              "y": 359
+            },
+            "start": {
+              "x": 1017,
+              "y": 359
+            }
+          }
+        },
+        "maskAreaPixels": 196,
+        "measurements": {
+          "pixel": {
+            "boundingBoxHeight": 24.0,
+            "boundingBoxWidth": 26.0,
+            "toothHeight": 12.0,
+            "toothWidth": 12.0,
+            "units": "px"
+          }
+        }
+      },
+      {
+        "confidence": 0.3,
+        "geometry": {
+          "boundingBox": {
+            "height": 15,
+            "width": 14,
+            "x": 1011,
+            "y": 554
+          },
+          "heightLine": {
+            "end": {
+              "x": 1017,
+              "y": 568
+            },
+            "start": {
+              "x": 1017,
+              "y": 554
+            }
+          },
+          "widthLine": {
+            "end": {
+              "x": 1024,
+              "y": 561
+            },
+            "start": {
+              "x": 1011,
+              "y": 561
+            }
+          }
+        },
+        "maskAreaPixels": 162,
+        "measurements": {
+          "pixel": {
+            "boundingBoxHeight": 15.0,
+            "boundingBoxWidth": 14.0,
+            "toothHeight": 15.0,
+            "toothWidth": 14.0,
+            "units": "px"
+          }
+        }
+      },
+      {
+        "confidence": 0.46,
+        "geometry": {
+          "boundingBox": {
+            "height": 89,
+            "width": 135,
+            "x": 954,
+            "y": 277
+          },
+          "heightLine": {
+            "end": {
+              "x": 1043,
+              "y": 361
+            },
+            "start": {
+              "x": 1043,
+              "y": 277
+            }
+          },
+          "widthLine": {
+            "end": {
+              "x": 1088,
+              "y": 340
+            },
+            "start": {
+              "x": 954,
+              "y": 340
+            }
+          }
+        },
+        "maskAreaPixels": 3728,
+        "measurements": {
+          "pixel": {
+            "boundingBoxHeight": 89.0,
+            "boundingBoxWidth": 135.0,
+            "toothHeight": 85.0,
+            "toothWidth": 135.0,
+            "units": "px"
+          }
+        }
+      },
+      {
+        "confidence": 0.35,
+        "geometry": {
+          "boundingBox": {
+            "height": 28,
+            "width": 26,
+            "x": 1020,
+            "y": 650
+          },
+          "heightLine": {
+            "end": {
+              "x": 1036,
+              "y": 677
+            },
+            "start": {
+              "x": 1036,
+              "y": 655
+            }
+          },
+          "widthLine": {
+            "end": {
+              "x": 1045,
+              "y": 653
+            },
+            "start": {
+              "x": 1020,
+              "y": 653
+            }
+          }
+        },
+        "maskAreaPixels": 427,
+        "measurements": {
+          "pixel": {
+            "boundingBoxHeight": 28.0,
+            "boundingBoxWidth": 26.0,
+            "toothHeight": 23.0,
+            "toothWidth": 26.0,
+            "units": "px"
+          }
+        }
+      },
+      {
+        "confidence": 0.29,
+        "geometry": {
+          "boundingBox": {
+            "height": 17,
+            "width": 14,
+            "x": 1051,
+            "y": 672
+          },
+          "heightLine": {
+            "end": {
+              "x": 1055,
+              "y": 688
+            },
+            "start": {
+              "x": 1055,
+              "y": 672
+            }
+          },
+          "widthLine": {
+            "end": {
+              "x": 1064,
+              "y": 680
+            },
+            "start": {
+              "x": 1051,
+              "y": 680
+            }
+          }
+        },
+        "maskAreaPixels": 199,
+        "measurements": {
+          "pixel": {
+            "boundingBoxHeight": 17.0,
+            "boundingBoxWidth": 14.0,
+            "toothHeight": 17.0,
+            "toothWidth": 14.0,
+            "units": "px"
+          }
+        }
+      },
+      {
+        "confidence": 0.37,
+        "geometry": {
+          "boundingBox": {
+            "height": 26,
+            "width": 14,
+            "x": 1054,
+            "y": 768
+          },
+          "heightLine": {
+            "end": {
+              "x": 1059,
+              "y": 793
+            },
+            "start": {
+              "x": 1059,
+              "y": 768
+            }
+          },
+          "widthLine": {
+            "end": {
+              "x": 1067,
+              "y": 782
+            },
+            "start": {
+              "x": 1054,
+              "y": 782
+            }
+          }
+        },
+        "maskAreaPixels": 229,
+        "measurements": {
+          "pixel": {
+            "boundingBoxHeight": 26.0,
+            "boundingBoxWidth": 14.0,
+            "toothHeight": 26.0,
+            "toothWidth": 14.0,
+            "units": "px"
+          }
+        }
+      },
+      {
+        "confidence": 0.34,
+        "geometry": {
+          "boundingBox": {
+            "height": 21,
+            "width": 13,
+            "x": 1154,
+            "y": 758
+          },
+          "heightLine": {
+            "end": {
+              "x": 1158,
+              "y": 774
+            },
+            "start": {
+              "x": 1158,
+              "y": 758
+            }
+          },
+          "widthLine": {
+            "end": {
+              "x": 1166,
+              "y": 764
+            },
+            "start": {
+              "x": 1154,
+              "y": 764
+            }
+          }
+        },
+        "maskAreaPixels": 163,
+        "measurements": {
+          "pixel": {
+            "boundingBoxHeight": 21.0,
+            "boundingBoxWidth": 13.0,
+            "toothHeight": 17.0,
+            "toothWidth": 13.0,
+            "units": "px"
+          }
+        }
+      },
+      {
+        "confidence": 0.31,
+        "geometry": {
+          "boundingBox": {
+            "height": 50,
+            "width": 273,
+            "x": 1124,
+            "y": 316
+          },
+          "heightLine": {
+            "end": {
+              "x": 1286,
+              "y": 363
+            },
+            "start": {
+              "x": 1286,
+              "y": 326
+            }
+          },
+          "widthLine": {
+            "end": {
+              "x": 1376,
+              "y": 345
+            },
+            "start": {
+              "x": 1125,
+              "y": 345
+            }
+          }
+        },
+        "maskAreaPixels": 6255,
+        "measurements": {
+          "pixel": {
+            "boundingBoxHeight": 50.0,
+            "boundingBoxWidth": 273.0,
+            "toothHeight": 38.0,
+            "toothWidth": 252.0,
+            "units": "px"
+          }
+        }
+      },
+      {
+        "confidence": 0.31,
+        "geometry": {
+          "boundingBox": {
+            "height": 39,
+            "width": 62,
+            "x": 1280,
+            "y": 662
+          },
+          "heightLine": {
+            "end": {
+              "x": 1338,
+              "y": 700
+            },
+            "start": {
+              "x": 1338,
+              "y": 666
+            }
+          },
+          "widthLine": {
+            "end": {
+              "x": 1340,
+              "y": 670
+            },
+            "start": {
+              "x": 1280,
+              "y": 670
+            }
+          }
+        },
+        "maskAreaPixels": 876,
+        "measurements": {
+          "pixel": {
+            "boundingBoxHeight": 39.0,
+            "boundingBoxWidth": 62.0,
+            "toothHeight": 35.0,
+            "toothWidth": 61.0,
+            "units": "px"
+          }
+        }
+      },
+      {
+        "confidence": 0.44,
+        "geometry": {
+          "boundingBox": {
+            "height": 93,
+            "width": 55,
+            "x": 1381,
+            "y": 756
+          },
+          "heightLine": {
+            "end": {
+              "x": 1405,
+              "y": 818
+            },
+            "start": {
+              "x": 1405,
+              "y": 757
+            }
+          },
+          "widthLine": {
+            "end": {
+              "x": 1412,
+              "y": 776
+            },
+            "start": {
+              "x": 1383,
+              "y": 776
+            }
+          }
+        },
+        "maskAreaPixels": 1678,
+        "measurements": {
+          "pixel": {
+            "boundingBoxHeight": 93.0,
+            "boundingBoxWidth": 55.0,
+            "toothHeight": 62.0,
+            "toothWidth": 30.0,
+            "units": "px"
+          }
+        }
+      },
+      {
+        "confidence": 0.43,
+        "geometry": {
+          "boundingBox": {
+            "height": 140,
+            "width": 375,
+            "x": 1232,
+            "y": 484
+          },
+          "heightLine": {
+            "end": {
+              "x": 1513,
+              "y": 623
+            },
+            "start": {
+              "x": 1513,
+              "y": 486
+            }
+          },
+          "widthLine": {
+            "end": {
+              "x": 1581,
+              "y": 574
+            },
+            "start": {
+              "x": 1232,
+              "y": 574
+            }
+          }
+        },
+        "maskAreaPixels": 27517,
+        "measurements": {
+          "pixel": {
+            "boundingBoxHeight": 140.0,
+            "boundingBoxWidth": 375.0,
+            "toothHeight": 138.0,
+            "toothWidth": 350.0,
+            "units": "px"
+          }
+        }
+      },
+      {
+        "confidence": 0.45,
+        "geometry": {
+          "boundingBox": {
+            "height": 119,
+            "width": 51,
+            "x": 1424,
+            "y": 721
+          },
+          "heightLine": {
+            "end": {
+              "x": 1449,
+              "y": 827
+            },
+            "start": {
+              "x": 1449,
+              "y": 721
+            }
+          },
+          "widthLine": {
+            "end": {
+              "x": 1466,
+              "y": 758
+            },
+            "start": {
+              "x": 1431,
+              "y": 758
+            }
+          }
+        },
+        "maskAreaPixels": 2444,
+        "measurements": {
+          "pixel": {
+            "boundingBoxHeight": 119.0,
+            "boundingBoxWidth": 51.0,
+            "toothHeight": 107.0,
+            "toothWidth": 36.0,
+            "units": "px"
+          }
+        }
+      },
+      {
+        "confidence": 0.55,
+        "geometry": {
+          "boundingBox": {
+            "height": 179,
+            "width": 216,
+            "x": 1349,
+            "y": 651
+          },
+          "heightLine": {
+            "end": {
+              "x": 1529,
+              "y": 829
+            },
+            "start": {
+              "x": 1529,
+              "y": 652
+            }
+          },
+          "widthLine": {
+            "end": {
+              "x": 1564,
+              "y": 676
+            },
+            "start": {
+              "x": 1349,
+              "y": 676
+            }
+          }
+        },
+        "maskAreaPixels": 15112,
+        "measurements": {
+          "pixel": {
+            "boundingBoxHeight": 179.0,
+            "boundingBoxWidth": 216.0,
+            "toothHeight": 178.0,
+            "toothWidth": 216.0,
+            "units": "px"
+          }
+        }
+      },
+      {
+        "confidence": 0.22,
+        "geometry": {
+          "boundingBox": {
+            "height": 13,
+            "width": 124,
+            "x": 1490,
+            "y": 341
+          },
+          "heightLine": {
+            "end": {
+              "x": 1533,
+              "y": 353
+            },
+            "start": {
+              "x": 1533,
+              "y": 342
+            }
+          },
+          "widthLine": {
+            "end": {
+              "x": 1611,
+              "y": 349
+            },
+            "start": {
+              "x": 1490,
+              "y": 349
+            }
+          }
+        },
+        "maskAreaPixels": 1091,
+        "measurements": {
+          "pixel": {
+            "boundingBoxHeight": 13.0,
+            "boundingBoxWidth": 124.0,
+            "toothHeight": 12.0,
+            "toothWidth": 122.0,
+            "units": "px"
+          }
+        }
+      },
+      {
+        "confidence": 0.56,
+        "geometry": {
+          "boundingBox": {
+            "height": 400,
+            "width": 229,
+            "x": 1563,
+            "y": 346
+          },
+          "heightLine": {
+            "end": {
+              "x": 1578,
+              "y": 743
+            },
+            "start": {
+              "x": 1578,
+              "y": 370
+            }
+          },
+          "widthLine": {
+            "end": {
+              "x": 1791,
+              "y": 457
+            },
+            "start": {
+              "x": 1620,
+              "y": 457
+            }
+          }
+        },
+        "maskAreaPixels": 37895,
+        "measurements": {
+          "pixel": {
+            "boundingBoxHeight": 400.0,
+            "boundingBoxWidth": 229.0,
+            "toothHeight": 374.0,
+            "toothWidth": 172.0,
+            "units": "px"
+          }
+        }
+      },
+      {
+        "confidence": 0.37,
+        "geometry": {
+          "boundingBox": {
+            "height": 112,
+            "width": 61,
+            "x": 1663,
+            "y": 218
+          },
+          "heightLine": {
+            "end": {
+              "x": 1679,
+              "y": 301
+            },
+            "start": {
+              "x": 1679,
+              "y": 246
+            }
+          },
+          "widthLine": {
+            "end": {
+              "x": 1713,
+              "y": 246
+            },
+            "start": {
+              "x": 1679,
+              "y": 246
+            }
+          }
+        },
+        "maskAreaPixels": 1304,
+        "measurements": {
+          "pixel": {
+            "boundingBoxHeight": 112.0,
+            "boundingBoxWidth": 61.0,
+            "toothHeight": 56.0,
+            "toothWidth": 35.0,
+            "units": "px"
+          }
+        }
+      },
+      {
+        "confidence": 0.2,
+        "geometry": {
+          "boundingBox": {
+            "height": 29,
+            "width": 26,
+            "x": 1705,
+            "y": 272
+          },
+          "heightLine": {
+            "end": {
+              "x": 1721,
+              "y": 288
+            },
+            "start": {
+              "x": 1721,
+              "y": 278
+            }
+          },
+          "widthLine": {
+            "end": {
+              "x": 1725,
+              "y": 284
+            },
+            "start": {
+              "x": 1715,
+              "y": 284
+            }
+          }
+        },
+        "maskAreaPixels": 203,
+        "measurements": {
+          "pixel": {
+            "boundingBoxHeight": 29.0,
+            "boundingBoxWidth": 26.0,
+            "toothHeight": 11.0,
+            "toothWidth": 11.0,
+            "units": "px"
+          }
+        }
+      },
+      {
+        "confidence": 0.19,
+        "geometry": {
+          "boundingBox": {
+            "height": 33,
+            "width": 50,
+            "x": 1741,
+            "y": 232
+          },
+          "heightLine": {
+            "end": {
+              "x": 1762,
+              "y": 264
+            },
+            "start": {
+              "x": 1762,
+              "y": 243
+            }
+          },
+          "widthLine": {
+            "end": {
+              "x": 1770,
+              "y": 248
+            },
+            "start": {
+              "x": 1741,
+              "y": 248
+            }
+          }
+        },
+        "maskAreaPixels": 554,
+        "measurements": {
+          "pixel": {
+            "boundingBoxHeight": 33.0,
+            "boundingBoxWidth": 50.0,
+            "toothHeight": 22.0,
+            "toothWidth": 30.0,
+            "units": "px"
+          }
+        }
+      },
+      {
+        "confidence": 0.17,
+        "geometry": {
+          "boundingBox": {
+            "height": 20,
+            "width": 29,
+            "x": 1763,
+            "y": 678
+          },
+          "heightLine": {
+            "end": {
+              "x": 1774,
+              "y": 697
+            },
+            "start": {
+              "x": 1774,
+              "y": 678
+            }
+          },
+          "widthLine": {
+            "end": {
+              "x": 1791,
+              "y": 687
+            },
+            "start": {
+              "x": 1765,
+              "y": 687
+            }
+          }
+        },
+        "maskAreaPixels": 297,
+        "measurements": {
+          "pixel": {
+            "boundingBoxHeight": 20.0,
+            "boundingBoxWidth": 29.0,
+            "toothHeight": 20.0,
+            "toothWidth": 27.0,
+            "units": "px"
+          }
+        }
+      }
+    ],
+    "tooth": {
+      "confidence": 0.55,
+      "geometry": {
+        "boundingBox": {
+          "height": 179,
+          "width": 216,
+          "x": 1349,
+          "y": 651
+        },
+        "heightLine": {
+          "end": {
+            "x": 1529,
+            "y": 829
+          },
+          "start": {
+            "x": 1529,
+            "y": 652
+          }
+        },
+        "widthLine": {
+          "end": {
+            "x": 1564,
+            "y": 676
+          },
+          "start": {
+            "x": 1349,
+            "y": 676
+          }
+        }
+      },
+      "maskAreaPixels": 15112,
+      "measurements": {
+        "pixel": {
+          "boundingBoxHeight": 179.0,
+          "boundingBoxWidth": 216.0,
+          "toothHeight": 178.0,
+          "toothWidth": 216.0,
+          "units": "px"
+        }
+      }
+    },
+    "warnings": [
+      "Calibration metadata unavailable; returning pixel measurements only."
+    ]
+  },
+  "suggestedAnnotations": {
+    "lines": [
+      {
+        "confidence": 0.33,
+        "editable": true,
+        "end": {
+          "x": 279.0,
+          "y": 653.0
+        },
+        "id": "auto-tooth-1-width",
+        "label": "Tooth 1 width",
+        "measurement": {
+          "pixelLength": 23.0
+        },
+        "source": "autoTooth",
+        "start": {
+          "x": 256.0,
+          "y": 653.0
+        }
+      },
+      {
+        "confidence": 0.33,
+        "editable": true,
+        "end": {
+          "x": 279.0,
+          "y": 700.0
+        },
+        "id": "auto-tooth-1-height",
+        "label": "Tooth 1 height",
+        "measurement": {
+          "pixelLength": 47.0
+        },
+        "source": "autoTooth",
+        "start": {
+          "x": 279.0,
+          "y": 653.0
+        }
+      },
+      {
+        "confidence": 0.15,
+        "editable": true,
+        "end": {
+          "x": 319.0,
+          "y": 464.0
+        },
+        "id": "auto-tooth-2-width",
+        "label": "Tooth 2 width",
+        "measurement": {
+          "pixelLength": 30.0
+        },
+        "source": "autoTooth",
+        "start": {
+          "x": 289.0,
+          "y": 464.0
+        }
+      },
+      {
+        "confidence": 0.15,
+        "editable": true,
+        "end": {
+          "x": 294.0,
+          "y": 470.0
+        },
+        "id": "auto-tooth-2-height",
+        "label": "Tooth 2 height",
+        "measurement": {
+          "pixelLength": 8.0
+        },
+        "source": "autoTooth",
+        "start": {
+          "x": 294.0,
+          "y": 462.0
+        }
+      },
+      {
+        "confidence": 0.16,
+        "editable": true,
+        "end": {
+          "x": 316.0,
+          "y": 223.0
+        },
+        "id": "auto-tooth-3-width",
+        "label": "Tooth 3 width",
+        "measurement": {
+          "pixelLength": 11.0
+        },
+        "source": "autoTooth",
+        "start": {
+          "x": 305.0,
+          "y": 223.0
+        }
+      },
+      {
+        "confidence": 0.16,
+        "editable": true,
+        "end": {
+          "x": 307.0,
+          "y": 224.0
+        },
+        "id": "auto-tooth-3-height",
+        "label": "Tooth 3 height",
+        "measurement": {
+          "pixelLength": 6.0
+        },
+        "source": "autoTooth",
+        "start": {
+          "x": 307.0,
+          "y": 218.0
+        }
+      },
+      {
+        "confidence": 0.15,
+        "editable": true,
+        "end": {
+          "x": 365.0,
+          "y": 700.0
+        },
+        "id": "auto-tooth-4-width",
+        "label": "Tooth 4 width",
+        "measurement": {
+          "pixelLength": 45.0
+        },
+        "source": "autoTooth",
+        "start": {
+          "x": 320.0,
+          "y": 700.0
+        }
+      },
+      {
+        "confidence": 0.15,
+        "editable": true,
+        "end": {
+          "x": 332.0,
+          "y": 708.0
+        },
+        "id": "auto-tooth-4-height",
+        "label": "Tooth 4 height",
+        "measurement": {
+          "pixelLength": 12.0
+        },
+        "source": "autoTooth",
+        "start": {
+          "x": 332.0,
+          "y": 696.0
+        }
+      },
+      {
+        "confidence": 0.15,
+        "editable": true,
+        "end": {
+          "x": 442.0,
+          "y": 734.0
+        },
+        "id": "auto-tooth-5-width",
+        "label": "Tooth 5 width",
+        "measurement": {
+          "pixelLength": 26.0
+        },
+        "source": "autoTooth",
+        "start": {
+          "x": 416.0,
+          "y": 734.0
+        }
+      },
+      {
+        "confidence": 0.15,
+        "editable": true,
+        "end": {
+          "x": 424.0,
+          "y": 742.0
+        },
+        "id": "auto-tooth-5-height",
+        "label": "Tooth 5 height",
+        "measurement": {
+          "pixelLength": 12.0
+        },
+        "source": "autoTooth",
+        "start": {
+          "x": 424.0,
+          "y": 730.0
+        }
+      },
+      {
+        "confidence": 0.5,
+        "editable": true,
+        "end": {
+          "x": 783.0,
+          "y": 679.0
+        },
+        "id": "auto-tooth-6-width",
+        "label": "Tooth 6 width",
+        "measurement": {
+          "pixelLength": 432.0
+        },
+        "source": "autoTooth",
+        "start": {
+          "x": 351.0,
+          "y": 679.0
+        }
+      },
+      {
+        "confidence": 0.5,
+        "editable": true,
+        "end": {
+          "x": 517.0,
+          "y": 831.0
+        },
+        "id": "auto-tooth-6-height",
+        "label": "Tooth 6 height",
+        "measurement": {
+          "pixelLength": 459.0
+        },
+        "source": "autoTooth",
+        "start": {
+          "x": 517.0,
+          "y": 372.0
+        }
+      },
+      {
+        "confidence": 0.27,
+        "editable": true,
+        "end": {
+          "x": 639.0,
+          "y": 343.0
+        },
+        "id": "auto-tooth-7-width",
+        "label": "Tooth 7 width",
+        "measurement": {
+          "pixelLength": 178.0
+        },
+        "source": "autoTooth",
+        "start": {
+          "x": 461.0,
+          "y": 343.0
+        }
+      },
+      {
+        "confidence": 0.27,
+        "editable": true,
+        "end": {
+          "x": 536.0,
+          "y": 351.0
+        },
+        "id": "auto-tooth-7-height",
+        "label": "Tooth 7 height",
+        "measurement": {
+          "pixelLength": 27.0
+        },
+        "source": "autoTooth",
+        "start": {
+          "x": 536.0,
+          "y": 324.0
+        }
+      },
+      {
+        "confidence": 0.48,
+        "editable": true,
+        "end": {
+          "x": 671.0,
+          "y": 810.0
+        },
+        "id": "auto-tooth-8-width",
+        "label": "Tooth 8 width",
+        "measurement": {
+          "pixelLength": 79.0
+        },
+        "source": "autoTooth",
+        "start": {
+          "x": 592.0,
+          "y": 810.0
+        }
+      },
+      {
+        "confidence": 0.48,
+        "editable": true,
+        "end": {
+          "x": 615.0,
+          "y": 832.0
+        },
+        "id": "auto-tooth-8-height",
+        "label": "Tooth 8 height",
+        "measurement": {
+          "pixelLength": 106.0
+        },
+        "source": "autoTooth",
+        "start": {
+          "x": 615.0,
+          "y": 726.0
+        }
+      },
+      {
+        "confidence": 0.46,
+        "editable": true,
+        "end": {
+          "x": 819.0,
+          "y": 588.0
+        },
+        "id": "auto-tooth-9-width",
+        "label": "Tooth 9 width",
+        "measurement": {
+          "pixelLength": 339.0
+        },
+        "source": "autoTooth",
+        "start": {
+          "x": 480.0,
+          "y": 588.0
+        }
+      },
+      {
+        "confidence": 0.46,
+        "editable": true,
+        "end": {
+          "x": 536.0,
+          "y": 626.0
+        },
+        "id": "auto-tooth-9-height",
+        "label": "Tooth 9 height",
+        "measurement": {
+          "pixelLength": 158.0
+        },
+        "source": "autoTooth",
+        "start": {
+          "x": 536.0,
+          "y": 468.0
+        }
+      },
+      {
+        "confidence": 0.27,
+        "editable": true,
+        "end": {
+          "x": 685.0,
+          "y": 783.0
+        },
+        "id": "auto-tooth-10-width",
+        "label": "Tooth 10 width",
+        "measurement": {
+          "pixelLength": 15.0
+        },
+        "source": "autoTooth",
+        "start": {
+          "x": 670.0,
+          "y": 783.0
+        }
+      },
+      {
+        "confidence": 0.27,
+        "editable": true,
+        "end": {
+          "x": 676.0,
+          "y": 796.0
+        },
+        "id": "auto-tooth-10-height",
+        "label": "Tooth 10 height",
+        "measurement": {
+          "pixelLength": 59.0
+        },
+        "source": "autoTooth",
+        "start": {
+          "x": 676.0,
+          "y": 737.0
+        }
+      },
+      {
+        "confidence": 0.34,
+        "editable": true,
+        "end": {
+          "x": 938.0,
+          "y": 338.0
+        },
+        "id": "auto-tooth-11-width",
+        "label": "Tooth 11 width",
+        "measurement": {
+          "pixelLength": 233.0
+        },
+        "source": "autoTooth",
+        "start": {
+          "x": 705.0,
+          "y": 338.0
+        }
+      },
+      {
+        "confidence": 0.34,
+        "editable": true,
+        "end": {
+          "x": 764.0,
+          "y": 370.0
+        },
+        "id": "auto-tooth-11-height",
+        "label": "Tooth 11 height",
+        "measurement": {
+          "pixelLength": 80.0
+        },
+        "source": "autoTooth",
+        "start": {
+          "x": 764.0,
+          "y": 290.0
+        }
+      },
+      {
+        "confidence": 0.28,
+        "editable": true,
+        "end": {
+          "x": 850.0,
+          "y": 681.0
+        },
+        "id": "auto-tooth-12-width",
+        "label": "Tooth 12 width",
+        "measurement": {
+          "pixelLength": 36.0
+        },
+        "source": "autoTooth",
+        "start": {
+          "x": 814.0,
+          "y": 681.0
+        }
+      },
+      {
+        "confidence": 0.28,
+        "editable": true,
+        "end": {
+          "x": 819.0,
+          "y": 694.0
+        },
+        "id": "auto-tooth-12-height",
+        "label": "Tooth 12 height",
+        "measurement": {
+          "pixelLength": 19.0
+        },
+        "source": "autoTooth",
+        "start": {
+          "x": 819.0,
+          "y": 675.0
+        }
+      },
+      {
+        "confidence": 0.4,
+        "editable": true,
+        "end": {
+          "x": 1009.0,
+          "y": 790.0
+        },
+        "id": "auto-tooth-13-width",
+        "label": "Tooth 13 width",
+        "measurement": {
+          "pixelLength": 17.0
+        },
+        "source": "autoTooth",
+        "start": {
+          "x": 992.0,
+          "y": 790.0
+        }
+      },
+      {
+        "confidence": 0.4,
+        "editable": true,
+        "end": {
+          "x": 1001.0,
+          "y": 793.0
+        },
+        "id": "auto-tooth-13-height",
+        "label": "Tooth 13 height",
+        "measurement": {
+          "pixelLength": 39.0
+        },
+        "source": "autoTooth",
+        "start": {
+          "x": 1001.0,
+          "y": 754.0
+        }
+      },
+      {
+        "confidence": 0.32,
+        "editable": true,
+        "end": {
+          "x": 1013.0,
+          "y": 685.0
+        },
+        "id": "auto-tooth-14-width",
+        "label": "Tooth 14 width",
+        "measurement": {
+          "pixelLength": 20.0
+        },
+        "source": "autoTooth",
+        "start": {
+          "x": 993.0,
+          "y": 685.0
+        }
+      },
+      {
+        "confidence": 0.32,
+        "editable": true,
+        "end": {
+          "x": 1010.0,
+          "y": 695.0
+        },
+        "id": "auto-tooth-14-height",
+        "label": "Tooth 14 height",
+        "measurement": {
+          "pixelLength": 17.0
+        },
+        "source": "autoTooth",
+        "start": {
+          "x": 1010.0,
+          "y": 678.0
+        }
+      },
+      {
+        "confidence": 0.34,
+        "editable": true,
+        "end": {
+          "x": 1028.0,
+          "y": 359.0
+        },
+        "id": "auto-tooth-15-width",
+        "label": "Tooth 15 width",
+        "measurement": {
+          "pixelLength": 11.0
+        },
+        "source": "autoTooth",
+        "start": {
+          "x": 1017.0,
+          "y": 359.0
+        }
+      },
+      {
+        "confidence": 0.34,
+        "editable": true,
+        "end": {
+          "x": 1018.0,
+          "y": 362.0
+        },
+        "id": "auto-tooth-15-height",
+        "label": "Tooth 15 height",
+        "measurement": {
+          "pixelLength": 11.0
+        },
+        "source": "autoTooth",
+        "start": {
+          "x": 1018.0,
+          "y": 351.0
+        }
+      },
+      {
+        "confidence": 0.3,
+        "editable": true,
+        "end": {
+          "x": 1024.0,
+          "y": 561.0
+        },
+        "id": "auto-tooth-16-width",
+        "label": "Tooth 16 width",
+        "measurement": {
+          "pixelLength": 13.0
+        },
+        "source": "autoTooth",
+        "start": {
+          "x": 1011.0,
+          "y": 561.0
+        }
+      },
+      {
+        "confidence": 0.3,
+        "editable": true,
+        "end": {
+          "x": 1017.0,
+          "y": 568.0
+        },
+        "id": "auto-tooth-16-height",
+        "label": "Tooth 16 height",
+        "measurement": {
+          "pixelLength": 14.0
+        },
+        "source": "autoTooth",
+        "start": {
+          "x": 1017.0,
+          "y": 554.0
+        }
+      },
+      {
+        "confidence": 0.46,
+        "editable": true,
+        "end": {
+          "x": 1088.0,
+          "y": 340.0
+        },
+        "id": "auto-tooth-17-width",
+        "label": "Tooth 17 width",
+        "measurement": {
+          "pixelLength": 134.0
+        },
+        "source": "autoTooth",
+        "start": {
+          "x": 954.0,
+          "y": 340.0
+        }
+      },
+      {
+        "confidence": 0.46,
+        "editable": true,
+        "end": {
+          "x": 1043.0,
+          "y": 361.0
+        },
+        "id": "auto-tooth-17-height",
+        "label": "Tooth 17 height",
+        "measurement": {
+          "pixelLength": 84.0
+        },
+        "source": "autoTooth",
+        "start": {
+          "x": 1043.0,
+          "y": 277.0
+        }
+      },
+      {
+        "confidence": 0.35,
+        "editable": true,
+        "end": {
+          "x": 1045.0,
+          "y": 653.0
+        },
+        "id": "auto-tooth-18-width",
+        "label": "Tooth 18 width",
+        "measurement": {
+          "pixelLength": 25.0
+        },
+        "source": "autoTooth",
+        "start": {
+          "x": 1020.0,
+          "y": 653.0
+        }
+      },
+      {
+        "confidence": 0.35,
+        "editable": true,
+        "end": {
+          "x": 1036.0,
+          "y": 677.0
+        },
+        "id": "auto-tooth-18-height",
+        "label": "Tooth 18 height",
+        "measurement": {
+          "pixelLength": 22.0
+        },
+        "source": "autoTooth",
+        "start": {
+          "x": 1036.0,
+          "y": 655.0
+        }
+      },
+      {
+        "confidence": 0.29,
+        "editable": true,
+        "end": {
+          "x": 1064.0,
+          "y": 680.0
+        },
+        "id": "auto-tooth-19-width",
+        "label": "Tooth 19 width",
+        "measurement": {
+          "pixelLength": 13.0
+        },
+        "source": "autoTooth",
+        "start": {
+          "x": 1051.0,
+          "y": 680.0
+        }
+      },
+      {
+        "confidence": 0.29,
+        "editable": true,
+        "end": {
+          "x": 1055.0,
+          "y": 688.0
+        },
+        "id": "auto-tooth-19-height",
+        "label": "Tooth 19 height",
+        "measurement": {
+          "pixelLength": 16.0
+        },
+        "source": "autoTooth",
+        "start": {
+          "x": 1055.0,
+          "y": 672.0
+        }
+      },
+      {
+        "confidence": 0.37,
+        "editable": true,
+        "end": {
+          "x": 1067.0,
+          "y": 782.0
+        },
+        "id": "auto-tooth-20-width",
+        "label": "Tooth 20 width",
+        "measurement": {
+          "pixelLength": 13.0
+        },
+        "source": "autoTooth",
+        "start": {
+          "x": 1054.0,
+          "y": 782.0
+        }
+      },
+      {
+        "confidence": 0.37,
+        "editable": true,
+        "end": {
+          "x": 1059.0,
+          "y": 793.0
+        },
+        "id": "auto-tooth-20-height",
+        "label": "Tooth 20 height",
+        "measurement": {
+          "pixelLength": 25.0
+        },
+        "source": "autoTooth",
+        "start": {
+          "x": 1059.0,
+          "y": 768.0
+        }
+      },
+      {
+        "confidence": 0.34,
+        "editable": true,
+        "end": {
+          "x": 1166.0,
+          "y": 764.0
+        },
+        "id": "auto-tooth-21-width",
+        "label": "Tooth 21 width",
+        "measurement": {
+          "pixelLength": 12.0
+        },
+        "source": "autoTooth",
+        "start": {
+          "x": 1154.0,
+          "y": 764.0
+        }
+      },
+      {
+        "confidence": 0.34,
+        "editable": true,
+        "end": {
+          "x": 1158.0,
+          "y": 774.0
+        },
+        "id": "auto-tooth-21-height",
+        "label": "Tooth 21 height",
+        "measurement": {
+          "pixelLength": 16.0
+        },
+        "source": "autoTooth",
+        "start": {
+          "x": 1158.0,
+          "y": 758.0
+        }
+      },
+      {
+        "confidence": 0.31,
+        "editable": true,
+        "end": {
+          "x": 1376.0,
+          "y": 345.0
+        },
+        "id": "auto-tooth-22-width",
+        "label": "Tooth 22 width",
+        "measurement": {
+          "pixelLength": 251.0
+        },
+        "source": "autoTooth",
+        "start": {
+          "x": 1125.0,
+          "y": 345.0
+        }
+      },
+      {
+        "confidence": 0.31,
+        "editable": true,
+        "end": {
+          "x": 1286.0,
+          "y": 363.0
+        },
+        "id": "auto-tooth-22-height",
+        "label": "Tooth 22 height",
+        "measurement": {
+          "pixelLength": 37.0
+        },
+        "source": "autoTooth",
+        "start": {
+          "x": 1286.0,
+          "y": 326.0
+        }
+      },
+      {
+        "confidence": 0.31,
+        "editable": true,
+        "end": {
+          "x": 1340.0,
+          "y": 670.0
+        },
+        "id": "auto-tooth-23-width",
+        "label": "Tooth 23 width",
+        "measurement": {
+          "pixelLength": 60.0
+        },
+        "source": "autoTooth",
+        "start": {
+          "x": 1280.0,
+          "y": 670.0
+        }
+      },
+      {
+        "confidence": 0.31,
+        "editable": true,
+        "end": {
+          "x": 1338.0,
+          "y": 700.0
+        },
+        "id": "auto-tooth-23-height",
+        "label": "Tooth 23 height",
+        "measurement": {
+          "pixelLength": 34.0
+        },
+        "source": "autoTooth",
+        "start": {
+          "x": 1338.0,
+          "y": 666.0
+        }
+      },
+      {
+        "confidence": 0.44,
+        "editable": true,
+        "end": {
+          "x": 1412.0,
+          "y": 776.0
+        },
+        "id": "auto-tooth-24-width",
+        "label": "Tooth 24 width",
+        "measurement": {
+          "pixelLength": 29.0
+        },
+        "source": "autoTooth",
+        "start": {
+          "x": 1383.0,
+          "y": 776.0
+        }
+      },
+      {
+        "confidence": 0.44,
+        "editable": true,
+        "end": {
+          "x": 1405.0,
+          "y": 818.0
+        },
+        "id": "auto-tooth-24-height",
+        "label": "Tooth 24 height",
+        "measurement": {
+          "pixelLength": 61.0
+        },
+        "source": "autoTooth",
+        "start": {
+          "x": 1405.0,
+          "y": 757.0
+        }
+      },
+      {
+        "confidence": 0.43,
+        "editable": true,
+        "end": {
+          "x": 1581.0,
+          "y": 574.0
+        },
+        "id": "auto-tooth-25-width",
+        "label": "Tooth 25 width",
+        "measurement": {
+          "pixelLength": 349.0
+        },
+        "source": "autoTooth",
+        "start": {
+          "x": 1232.0,
+          "y": 574.0
+        }
+      },
+      {
+        "confidence": 0.43,
+        "editable": true,
+        "end": {
+          "x": 1513.0,
+          "y": 623.0
+        },
+        "id": "auto-tooth-25-height",
+        "label": "Tooth 25 height",
+        "measurement": {
+          "pixelLength": 137.0
+        },
+        "source": "autoTooth",
+        "start": {
+          "x": 1513.0,
+          "y": 486.0
+        }
+      },
+      {
+        "confidence": 0.45,
+        "editable": true,
+        "end": {
+          "x": 1466.0,
+          "y": 758.0
+        },
+        "id": "auto-tooth-26-width",
+        "label": "Tooth 26 width",
+        "measurement": {
+          "pixelLength": 35.0
+        },
+        "source": "autoTooth",
+        "start": {
+          "x": 1431.0,
+          "y": 758.0
+        }
+      },
+      {
+        "confidence": 0.45,
+        "editable": true,
+        "end": {
+          "x": 1449.0,
+          "y": 827.0
+        },
+        "id": "auto-tooth-26-height",
+        "label": "Tooth 26 height",
+        "measurement": {
+          "pixelLength": 106.0
+        },
+        "source": "autoTooth",
+        "start": {
+          "x": 1449.0,
+          "y": 721.0
+        }
+      },
+      {
+        "confidence": 0.55,
+        "editable": true,
+        "end": {
+          "x": 1564.0,
+          "y": 676.0
+        },
+        "id": "auto-tooth-27-width",
+        "label": "Tooth 27 width",
+        "measurement": {
+          "pixelLength": 215.0
+        },
+        "source": "autoTooth",
+        "start": {
+          "x": 1349.0,
+          "y": 676.0
+        }
+      },
+      {
+        "confidence": 0.55,
+        "editable": true,
+        "end": {
+          "x": 1529.0,
+          "y": 829.0
+        },
+        "id": "auto-tooth-27-height",
+        "label": "Tooth 27 height",
+        "measurement": {
+          "pixelLength": 177.0
+        },
+        "source": "autoTooth",
+        "start": {
+          "x": 1529.0,
+          "y": 652.0
+        }
+      },
+      {
+        "confidence": 0.22,
+        "editable": true,
+        "end": {
+          "x": 1611.0,
+          "y": 349.0
+        },
+        "id": "auto-tooth-28-width",
+        "label": "Tooth 28 width",
+        "measurement": {
+          "pixelLength": 121.0
+        },
+        "source": "autoTooth",
+        "start": {
+          "x": 1490.0,
+          "y": 349.0
+        }
+      },
+      {
+        "confidence": 0.22,
+        "editable": true,
+        "end": {
+          "x": 1533.0,
+          "y": 353.0
+        },
+        "id": "auto-tooth-28-height",
+        "label": "Tooth 28 height",
+        "measurement": {
+          "pixelLength": 11.0
+        },
+        "source": "autoTooth",
+        "start": {
+          "x": 1533.0,
+          "y": 342.0
+        }
+      },
+      {
+        "confidence": 0.56,
+        "editable": true,
+        "end": {
+          "x": 1791.0,
+          "y": 457.0
+        },
+        "id": "auto-tooth-29-width",
+        "label": "Tooth 29 width",
+        "measurement": {
+          "pixelLength": 171.0
+        },
+        "source": "autoTooth",
+        "start": {
+          "x": 1620.0,
+          "y": 457.0
+        }
+      },
+      {
+        "confidence": 0.56,
+        "editable": true,
+        "end": {
+          "x": 1578.0,
+          "y": 743.0
+        },
+        "id": "auto-tooth-29-height",
+        "label": "Tooth 29 height",
+        "measurement": {
+          "pixelLength": 373.0
+        },
+        "source": "autoTooth",
+        "start": {
+          "x": 1578.0,
+          "y": 370.0
+        }
+      },
+      {
+        "confidence": 0.37,
+        "editable": true,
+        "end": {
+          "x": 1713.0,
+          "y": 246.0
+        },
+        "id": "auto-tooth-30-width",
+        "label": "Tooth 30 width",
+        "measurement": {
+          "pixelLength": 34.0
+        },
+        "source": "autoTooth",
+        "start": {
+          "x": 1679.0,
+          "y": 246.0
+        }
+      },
+      {
+        "confidence": 0.37,
+        "editable": true,
+        "end": {
+          "x": 1679.0,
+          "y": 301.0
+        },
+        "id": "auto-tooth-30-height",
+        "label": "Tooth 30 height",
+        "measurement": {
+          "pixelLength": 55.0
+        },
+        "source": "autoTooth",
+        "start": {
+          "x": 1679.0,
+          "y": 246.0
+        }
+      },
+      {
+        "confidence": 0.2,
+        "editable": true,
+        "end": {
+          "x": 1725.0,
+          "y": 284.0
+        },
+        "id": "auto-tooth-31-width",
+        "label": "Tooth 31 width",
+        "measurement": {
+          "pixelLength": 10.0
+        },
+        "source": "autoTooth",
+        "start": {
+          "x": 1715.0,
+          "y": 284.0
+        }
+      },
+      {
+        "confidence": 0.2,
+        "editable": true,
+        "end": {
+          "x": 1721.0,
+          "y": 288.0
+        },
+        "id": "auto-tooth-31-height",
+        "label": "Tooth 31 height",
+        "measurement": {
+          "pixelLength": 10.0
+        },
+        "source": "autoTooth",
+        "start": {
+          "x": 1721.0,
+          "y": 278.0
+        }
+      },
+      {
+        "confidence": 0.19,
+        "editable": true,
+        "end": {
+          "x": 1770.0,
+          "y": 248.0
+        },
+        "id": "auto-tooth-32-width",
+        "label": "Tooth 32 width",
+        "measurement": {
+          "pixelLength": 29.0
+        },
+        "source": "autoTooth",
+        "start": {
+          "x": 1741.0,
+          "y": 248.0
+        }
+      },
+      {
+        "confidence": 0.19,
+        "editable": true,
+        "end": {
+          "x": 1762.0,
+          "y": 264.0
+        },
+        "id": "auto-tooth-32-height",
+        "label": "Tooth 32 height",
+        "measurement": {
+          "pixelLength": 21.0
+        },
+        "source": "autoTooth",
+        "start": {
+          "x": 1762.0,
+          "y": 243.0
+        }
+      },
+      {
+        "confidence": 0.17,
+        "editable": true,
+        "end": {
+          "x": 1791.0,
+          "y": 687.0
+        },
+        "id": "auto-tooth-33-width",
+        "label": "Tooth 33 width",
+        "measurement": {
+          "pixelLength": 26.0
+        },
+        "source": "autoTooth",
+        "start": {
+          "x": 1765.0,
+          "y": 687.0
+        }
+      },
+      {
+        "confidence": 0.17,
+        "editable": true,
+        "end": {
+          "x": 1774.0,
+          "y": 697.0
+        },
+        "id": "auto-tooth-33-height",
+        "label": "Tooth 33 height",
+        "measurement": {
+          "pixelLength": 19.0
+        },
+        "source": "autoTooth",
+        "start": {
+          "x": 1774.0,
+          "y": 678.0
+        }
+      }
+    ],
+    "rectangles": [
+      {
+        "confidence": 0.33,
+        "editable": false,
+        "height": 104.0,
+        "id": "auto-tooth-1-bounding-box",
+        "label": "Tooth 1 bounding box",
+        "source": "autoTooth",
+        "width": 62.0,
+        "x": 256.0,
+        "y": 646.0
+      },
+      {
+        "confidence": 0.15,
+        "editable": false,
+        "height": 12.0,
+        "id": "auto-tooth-2-bounding-box",
+        "label": "Tooth 2 bounding box",
+        "source": "autoTooth",
+        "width": 31.0,
+        "x": 289.0,
+        "y": 459.0
+      },
+      {
+        "confidence": 0.16,
+        "editable": false,
+        "height": 19.0,
+        "id": "auto-tooth-3-bounding-box",
+        "label": "Tooth 3 bounding box",
+        "source": "autoTooth",
+        "width": 31.0,
+        "x": 301.0,
+        "y": 218.0
+      },
+      {
+        "confidence": 0.15,
+        "editable": false,
+        "height": 13.0,
+        "id": "auto-tooth-4-bounding-box",
+        "label": "Tooth 4 bounding box",
+        "source": "autoTooth",
+        "width": 46.0,
+        "x": 320.0,
+        "y": 696.0
+      },
+      {
+        "confidence": 0.15,
+        "editable": false,
+        "height": 13.0,
+        "id": "auto-tooth-5-bounding-box",
+        "label": "Tooth 5 bounding box",
+        "source": "autoTooth",
+        "width": 27.0,
+        "x": 416.0,
+        "y": 730.0
+      },
+      {
+        "confidence": 0.5,
+        "editable": false,
+        "height": 594.0,
+        "id": "auto-tooth-6-bounding-box",
+        "label": "Tooth 6 bounding box",
+        "source": "autoTooth",
+        "width": 528.0,
+        "x": 256.0,
+        "y": 238.0
+      },
+      {
+        "confidence": 0.27,
+        "editable": false,
+        "height": 37.0,
+        "id": "auto-tooth-7-bounding-box",
+        "label": "Tooth 7 bounding box",
+        "source": "autoTooth",
+        "width": 192.0,
+        "x": 448.0,
+        "y": 324.0
+      },
+      {
+        "confidence": 0.48,
+        "editable": false,
+        "height": 108.0,
+        "id": "auto-tooth-8-bounding-box",
+        "label": "Tooth 8 bounding box",
+        "source": "autoTooth",
+        "width": 84.0,
+        "x": 588.0,
+        "y": 726.0
+      },
+      {
+        "confidence": 0.46,
+        "editable": false,
+        "height": 162.0,
+        "id": "auto-tooth-9-bounding-box",
+        "label": "Tooth 9 bounding box",
+        "source": "autoTooth",
+        "width": 350.0,
+        "x": 470.0,
+        "y": 468.0
+      },
+      {
+        "confidence": 0.27,
+        "editable": false,
+        "height": 60.0,
+        "id": "auto-tooth-10-bounding-box",
+        "label": "Tooth 10 bounding box",
+        "source": "autoTooth",
+        "width": 20.0,
+        "x": 669.0,
+        "y": 737.0
+      },
+      {
+        "confidence": 0.34,
+        "editable": false,
+        "height": 83.0,
+        "id": "auto-tooth-11-bounding-box",
+        "label": "Tooth 11 bounding box",
+        "source": "autoTooth",
+        "width": 317.0,
+        "x": 640.0,
+        "y": 290.0
+      },
+      {
+        "confidence": 0.28,
+        "editable": false,
+        "height": 21.0,
+        "id": "auto-tooth-12-bounding-box",
+        "label": "Tooth 12 bounding box",
+        "source": "autoTooth",
+        "width": 37.0,
+        "x": 814.0,
+        "y": 674.0
+      },
+      {
+        "confidence": 0.4,
+        "editable": false,
+        "height": 42.0,
+        "id": "auto-tooth-13-bounding-box",
+        "label": "Tooth 13 bounding box",
+        "source": "autoTooth",
+        "width": 19.0,
+        "x": 992.0,
+        "y": 754.0
+      },
+      {
+        "confidence": 0.32,
+        "editable": false,
+        "height": 20.0,
+        "id": "auto-tooth-14-bounding-box",
+        "label": "Tooth 14 bounding box",
+        "source": "autoTooth",
+        "width": 21.0,
+        "x": 993.0,
+        "y": 676.0
+      },
+      {
+        "confidence": 0.34,
+        "editable": false,
+        "height": 24.0,
+        "id": "auto-tooth-15-bounding-box",
+        "label": "Tooth 15 bounding box",
+        "source": "autoTooth",
+        "width": 26.0,
+        "x": 1003.0,
+        "y": 341.0
+      },
+      {
+        "confidence": 0.3,
+        "editable": false,
+        "height": 15.0,
+        "id": "auto-tooth-16-bounding-box",
+        "label": "Tooth 16 bounding box",
+        "source": "autoTooth",
+        "width": 14.0,
+        "x": 1011.0,
+        "y": 554.0
+      },
+      {
+        "confidence": 0.46,
+        "editable": false,
+        "height": 89.0,
+        "id": "auto-tooth-17-bounding-box",
+        "label": "Tooth 17 bounding box",
+        "source": "autoTooth",
+        "width": 135.0,
+        "x": 954.0,
+        "y": 277.0
+      },
+      {
+        "confidence": 0.35,
+        "editable": false,
+        "height": 28.0,
+        "id": "auto-tooth-18-bounding-box",
+        "label": "Tooth 18 bounding box",
+        "source": "autoTooth",
+        "width": 26.0,
+        "x": 1020.0,
+        "y": 650.0
+      },
+      {
+        "confidence": 0.29,
+        "editable": false,
+        "height": 17.0,
+        "id": "auto-tooth-19-bounding-box",
+        "label": "Tooth 19 bounding box",
+        "source": "autoTooth",
+        "width": 14.0,
+        "x": 1051.0,
+        "y": 672.0
+      },
+      {
+        "confidence": 0.37,
+        "editable": false,
+        "height": 26.0,
+        "id": "auto-tooth-20-bounding-box",
+        "label": "Tooth 20 bounding box",
+        "source": "autoTooth",
+        "width": 14.0,
+        "x": 1054.0,
+        "y": 768.0
+      },
+      {
+        "confidence": 0.34,
+        "editable": false,
+        "height": 21.0,
+        "id": "auto-tooth-21-bounding-box",
+        "label": "Tooth 21 bounding box",
+        "source": "autoTooth",
+        "width": 13.0,
+        "x": 1154.0,
+        "y": 758.0
+      },
+      {
+        "confidence": 0.31,
+        "editable": false,
+        "height": 50.0,
+        "id": "auto-tooth-22-bounding-box",
+        "label": "Tooth 22 bounding box",
+        "source": "autoTooth",
+        "width": 273.0,
+        "x": 1124.0,
+        "y": 316.0
+      },
+      {
+        "confidence": 0.31,
+        "editable": false,
+        "height": 39.0,
+        "id": "auto-tooth-23-bounding-box",
+        "label": "Tooth 23 bounding box",
+        "source": "autoTooth",
+        "width": 62.0,
+        "x": 1280.0,
+        "y": 662.0
+      },
+      {
+        "confidence": 0.44,
+        "editable": false,
+        "height": 93.0,
+        "id": "auto-tooth-24-bounding-box",
+        "label": "Tooth 24 bounding box",
+        "source": "autoTooth",
+        "width": 55.0,
+        "x": 1381.0,
+        "y": 756.0
+      },
+      {
+        "confidence": 0.43,
+        "editable": false,
+        "height": 140.0,
+        "id": "auto-tooth-25-bounding-box",
+        "label": "Tooth 25 bounding box",
+        "source": "autoTooth",
+        "width": 375.0,
+        "x": 1232.0,
+        "y": 484.0
+      },
+      {
+        "confidence": 0.45,
+        "editable": false,
+        "height": 119.0,
+        "id": "auto-tooth-26-bounding-box",
+        "label": "Tooth 26 bounding box",
+        "source": "autoTooth",
+        "width": 51.0,
+        "x": 1424.0,
+        "y": 721.0
+      },
+      {
+        "confidence": 0.55,
+        "editable": false,
+        "height": 179.0,
+        "id": "auto-tooth-27-bounding-box",
+        "label": "Tooth 27 bounding box",
+        "source": "autoTooth",
+        "width": 216.0,
+        "x": 1349.0,
+        "y": 651.0
+      },
+      {
+        "confidence": 0.22,
+        "editable": false,
+        "height": 13.0,
+        "id": "auto-tooth-28-bounding-box",
+        "label": "Tooth 28 bounding box",
+        "source": "autoTooth",
+        "width": 124.0,
+        "x": 1490.0,
+        "y": 341.0
+      },
+      {
+        "confidence": 0.56,
+        "editable": false,
+        "height": 400.0,
+        "id": "auto-tooth-29-bounding-box",
+        "label": "Tooth 29 bounding box",
+        "source": "autoTooth",
+        "width": 229.0,
+        "x": 1563.0,
+        "y": 346.0
+      },
+      {
+        "confidence": 0.37,
+        "editable": false,
+        "height": 112.0,
+        "id": "auto-tooth-30-bounding-box",
+        "label": "Tooth 30 bounding box",
+        "source": "autoTooth",
+        "width": 61.0,
+        "x": 1663.0,
+        "y": 218.0
+      },
+      {
+        "confidence": 0.2,
+        "editable": false,
+        "height": 29.0,
+        "id": "auto-tooth-31-bounding-box",
+        "label": "Tooth 31 bounding box",
+        "source": "autoTooth",
+        "width": 26.0,
+        "x": 1705.0,
+        "y": 272.0
+      },
+      {
+        "confidence": 0.19,
+        "editable": false,
+        "height": 33.0,
+        "id": "auto-tooth-32-bounding-box",
+        "label": "Tooth 32 bounding box",
+        "source": "autoTooth",
+        "width": 50.0,
+        "x": 1741.0,
+        "y": 232.0
+      },
+      {
+        "confidence": 0.17,
+        "editable": false,
+        "height": 20.0,
+        "id": "auto-tooth-33-bounding-box",
+        "label": "Tooth 33 bounding box",
+        "source": "autoTooth",
+        "width": 29.0,
+        "x": 1763.0,
+        "y": 678.0
+      }
+    ]
+  }
+}

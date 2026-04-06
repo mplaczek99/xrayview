@@ -354,6 +354,10 @@ Yes.
 
 Create a baseline input/output set for migration validation.
 
+### Status
+
+Completed. See [GO_BACKEND_PHASE1_PARITY_FIXTURE_SUITE.md](GO_BACKEND_PHASE1_PARITY_FIXTURE_SUITE.md).
+
 ### Why this phase exists
 
 Without fixtures, parity claims are weak.
