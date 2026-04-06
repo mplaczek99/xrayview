@@ -820,6 +820,10 @@ Yes.
 
 Move study registration and metadata response to Go.
 
+### Status
+
+Completed. See [GO_BACKEND_PHASE10_IMPLEMENT_GO_STUDY_REGISTRY_AND_OPEN_STUDY.md](GO_BACKEND_PHASE10_IMPLEMENT_GO_STUDY_REGISTRY_AND_OPEN_STUDY.md).
+
 ### Why this phase exists
 
 This is the first real stateful backend capability.

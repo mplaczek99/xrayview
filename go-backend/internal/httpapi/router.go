@@ -3,8 +3,10 @@ package httpapi
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -49,13 +51,6 @@ type commandListResponse struct {
 	BackendContractVersion int      `json:"backendContractVersion"`
 }
 
-type backendError struct {
-	Code        string   `json:"code"`
-	Message     string   `json:"message"`
-	Details     []string `json:"details,omitempty"`
-	Recoverable bool     `json:"recoverable"`
-}
-
 func NewRouter(deps Dependencies) http.Handler {
 	mux := http.NewServeMux()
 
@@ -77,41 +72,38 @@ func NewRouter(deps Dependencies) http.Handler {
 	mux.HandleFunc(CommandsPath+"/", func(writer http.ResponseWriter, request *http.Request) {
 		commandName := strings.TrimPrefix(request.URL.Path, CommandsPath+"/")
 		if request.Method != http.MethodPost {
-			writeJSON(writer, http.StatusMethodNotAllowed, backendError{
-				Code:        "invalidInput",
-				Message:     "commands must be called with POST",
-				Details:     []string{request.Method},
-				Recoverable: true,
-			})
+			writeJSON(
+				writer,
+				http.StatusMethodNotAllowed,
+				contracts.InvalidInput("commands must be called with POST").WithDetails(request.Method),
+			)
 			return
 		}
 
 		if commandName == "" || strings.Contains(commandName, "/") {
-			writeJSON(writer, http.StatusNotFound, backendError{
-				Code:        "notFound",
-				Message:     "command not found",
-				Recoverable: true,
-			})
+			writeJSON(writer, http.StatusNotFound, contracts.NotFound("command not found"))
 			return
 		}
 
 		if !contracts.IsSupportedCommand(commandName) {
-			writeJSON(writer, http.StatusNotFound, backendError{
-				Code:        "notFound",
-				Message:     fmt.Sprintf("unsupported command: %s", commandName),
-				Details:     contracts.SupportedCommandStrings(),
-				Recoverable: true,
-			})
+			writeJSON(
+				writer,
+				http.StatusNotFound,
+				contracts.NotFound(fmt.Sprintf("unsupported command: %s", commandName)).
+					WithDetails(contracts.SupportedCommandStrings()...),
+			)
 			return
 		}
 
 		switch contracts.CommandName(commandName) {
 		case contracts.CommandGetProcessingManifest:
 			writeJSON(writer, http.StatusOK, contracts.DefaultProcessingManifest())
+		case contracts.CommandOpenStudy:
+			handleOpenStudy(writer, request, deps)
 		default:
 			deps.Logger.Info("go backend command not implemented", slog.String("command", commandName))
-			writeJSON(writer, http.StatusNotImplemented, backendError{
-				Code:        "internal",
+			writeJSON(writer, http.StatusNotImplemented, contracts.BackendError{
+				Code:        contracts.BackendErrorCodeInternal,
 				Message:     fmt.Sprintf("command %s is not implemented in the Go backend yet", commandName),
 				Details:     []string{"transport=" + TransportKind},
 				Recoverable: true,
@@ -160,5 +152,110 @@ func writeJSON(writer http.ResponseWriter, statusCode int, payload any) {
 
 	if err := json.NewEncoder(writer).Encode(payload); err != nil {
 		http.Error(writer, err.Error(), http.StatusInternalServerError)
+	}
+}
+
+func handleOpenStudy(writer http.ResponseWriter, request *http.Request, deps Dependencies) {
+	var command contracts.OpenStudyCommand
+	if err := decodeJSONRequest(request, &command); err != nil {
+		writeBackendError(writer, err)
+		return
+	}
+
+	if command.InputPath == "" {
+		writeBackendError(writer, contracts.InvalidInput("inputPath is required"))
+		return
+	}
+
+	info, err := os.Stat(command.InputPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			writeBackendError(
+				writer,
+				contracts.NotFound(fmt.Sprintf("input file does not exist: %s", command.InputPath)),
+			)
+			return
+		}
+
+		writeBackendError(
+			writer,
+			contracts.Internal(fmt.Sprintf("failed to inspect input file %s: %v", command.InputPath, err)),
+		)
+		return
+	}
+
+	if info.IsDir() {
+		writeBackendError(
+			writer,
+			contracts.InvalidInput(fmt.Sprintf("input path must be a file: %s", command.InputPath)),
+		)
+		return
+	}
+
+	study, err := deps.Studies.Register(command.InputPath, nil)
+	if err != nil {
+		writeBackendError(
+			writer,
+			contracts.Internal(fmt.Sprintf("failed to register study: %v", err)),
+		)
+		return
+	}
+
+	if err := deps.Persistence.RecordOpenedStudy(study); err != nil && deps.Logger != nil {
+		deps.Logger.Warn(
+			"failed to record opened study",
+			slog.String("study_id", study.StudyID),
+			slog.String("input_path", study.InputPath),
+			slog.Any("error", err),
+		)
+	}
+
+	writeJSON(writer, http.StatusOK, contracts.OpenStudyCommandResult{Study: study})
+}
+
+func decodeJSONRequest(request *http.Request, payload any) error {
+	decoder := json.NewDecoder(request.Body)
+	decoder.DisallowUnknownFields()
+
+	if err := decoder.Decode(payload); err != nil {
+		return contracts.InvalidInput("invalid command payload").WithDetails(err.Error())
+	}
+
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return contracts.InvalidInput("invalid command payload").
+				WithDetails("unexpected trailing JSON content")
+		}
+
+		return contracts.InvalidInput("invalid command payload").WithDetails(err.Error())
+	}
+
+	return nil
+}
+
+func writeBackendError(writer http.ResponseWriter, err error) {
+	backendErr, ok := err.(contracts.BackendError)
+	if !ok {
+		backendErr = contracts.Internal(err.Error())
+	}
+
+	writeJSON(writer, statusCodeForBackendError(backendErr), backendErr)
+}
+
+func statusCodeForBackendError(err contracts.BackendError) int {
+	switch err.Code {
+	case contracts.BackendErrorCodeInvalidInput:
+		return http.StatusBadRequest
+	case contracts.BackendErrorCodeNotFound:
+		return http.StatusNotFound
+	case contracts.BackendErrorCodeConflict:
+		return http.StatusConflict
+	case contracts.BackendErrorCodeCancelled:
+		return http.StatusConflict
+	case contracts.BackendErrorCodeCacheCorrupted:
+		return http.StatusInternalServerError
+	default:
+		return http.StatusInternalServerError
 	}
 }

@@ -7,6 +7,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"xrayview/go-backend/internal/contracts"
 )
 
 const (
@@ -43,12 +45,13 @@ func wrapLocalTransport(next http.Handler, logger *slog.Logger) http.Handler {
 
 		if origin != "" {
 			if !isAllowedOrigin(origin) {
-				writeJSON(recorder, http.StatusForbidden, backendError{
-					Code:        "invalidInput",
-					Message:     "request origin is not allowed for the local backend transport",
-					Details:     []string{origin},
-					Recoverable: true,
-				})
+				writeJSON(
+					recorder,
+					http.StatusForbidden,
+					contracts.InvalidInput(
+						"request origin is not allowed for the local backend transport",
+					).WithDetails(origin),
+				)
 				logRequest(logger, request, recorder.statusCode, startedAt, origin)
 				return
 			}

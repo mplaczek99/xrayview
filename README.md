@@ -1,6 +1,6 @@
 # xrayview
 
-`xrayview` is a DICOM X-ray visualization and analysis workstation built with Tauri (React/TypeScript frontend, Rust backend). The repository now also includes a phase 9 Go backend sidecar path with shell-managed startup/shutdown and a live processing-manifest endpoint for the ongoing migration.
+`xrayview` is a DICOM X-ray visualization and analysis workstation built with Tauri (React/TypeScript frontend, Rust backend). The repository now also includes a phase 10 Go backend sidecar path with shell-managed startup/shutdown, a live processing-manifest endpoint, and Go-backed `open_study` registration for the ongoing migration.
 
 The desktop UI lives in `frontend/`. The Rust backend in `backend/` powers all DICOM decoding, image processing, rendering, measurement, and export. The backend is library-first — Tauri calls Rust directly in-process (no subprocess). The CLI binary remains available for headless DICOM workflows.
 
@@ -74,9 +74,10 @@ The transport is intentionally local-only:
 Current Go command behavior:
 
 - `get_processing_manifest` returns the frozen processing manifest payload
+- `open_study` validates and registers studies in Go and records the recent-study catalog hook
 - the remaining Go command routes still return structured placeholder errors until later phases move real behavior into Go
 
-See [GO_BACKEND_PHASE7_DEFINE_LOCAL_BACKEND_TRANSPORT.md](GO_BACKEND_PHASE7_DEFINE_LOCAL_BACKEND_TRANSPORT.md), [GO_BACKEND_PHASE8_ADD_TAURI_GO_PROCESS_MANAGEMENT.md](GO_BACKEND_PHASE8_ADD_TAURI_GO_PROCESS_MANAGEMENT.md), and [GO_BACKEND_PHASE9_IMPLEMENT_GO_PROCESSING_MANIFEST_ENDPOINT.md](GO_BACKEND_PHASE9_IMPLEMENT_GO_PROCESSING_MANIFEST_ENDPOINT.md).
+See [GO_BACKEND_PHASE7_DEFINE_LOCAL_BACKEND_TRANSPORT.md](GO_BACKEND_PHASE7_DEFINE_LOCAL_BACKEND_TRANSPORT.md), [GO_BACKEND_PHASE8_ADD_TAURI_GO_PROCESS_MANAGEMENT.md](GO_BACKEND_PHASE8_ADD_TAURI_GO_PROCESS_MANAGEMENT.md), [GO_BACKEND_PHASE9_IMPLEMENT_GO_PROCESSING_MANIFEST_ENDPOINT.md](GO_BACKEND_PHASE9_IMPLEMENT_GO_PROCESSING_MANIFEST_ENDPOINT.md), and [GO_BACKEND_PHASE10_IMPLEMENT_GO_STUDY_REGISTRY_AND_OPEN_STUDY.md](GO_BACKEND_PHASE10_IMPLEMENT_GO_STUDY_REGISTRY_AND_OPEN_STUDY.md).
 
 ### Desktop app
 
@@ -134,7 +135,7 @@ XRAYVIEW_BACKEND_RUNTIME=go-sidecar XRAYVIEW_GO_BACKEND_URL=http://127.0.0.1:381
 ```
 
 `XRAYVIEW_GO_BACKEND_URL` is only used for the `go-sidecar` runtime and must be a loopback `http://` URL such as `http://127.0.0.1:38181`. The frontend entry scripts also accept the Vite-prefixed forms `VITE_XRAYVIEW_BACKEND_RUNTIME` and `VITE_XRAYVIEW_GO_BACKEND_URL`.
-The `go-sidecar` adapter is part of the migration path; the Tauri shell now starts and stops that local backend automatically, `get_processing_manifest` is live in Go, the rest of the command surface is still migrating, and it is not the default packaged runtime yet.
+The `go-sidecar` adapter is part of the migration path; the Tauri shell now starts and stops that local backend automatically, `get_processing_manifest` and `open_study` are live in Go, the rest of the command surface is still migrating, and it is not the default packaged runtime yet.
 
 ## Releases
 

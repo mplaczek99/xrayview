@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -19,10 +21,10 @@ import (
 	"xrayview/go-backend/internal/studies"
 )
 
-func testRouter(t *testing.T) http.Handler {
+func testDependencies(t *testing.T) Dependencies {
 	t.Helper()
 
-	return NewRouter(Dependencies{
+	return Dependencies{
 		Config:      config.Default(),
 		Logger:      slog.New(slog.NewTextHandler(io.Discard, nil)),
 		Cache:       cache.New(t.TempDir()),
@@ -30,7 +32,13 @@ func testRouter(t *testing.T) http.Handler {
 		Jobs:        jobs.New(),
 		Studies:     studies.New(),
 		StartedAt:   time.Date(2026, time.January, 2, 3, 4, 5, 0, time.UTC),
-	})
+	}
+}
+
+func testRouter(t *testing.T) http.Handler {
+	t.Helper()
+
+	return NewRouter(testDependencies(t))
 }
 
 func TestHealthzIncludesContractMetadata(t *testing.T) {
@@ -146,12 +154,112 @@ func TestGetProcessingManifestReturnsFrozenPayload(t *testing.T) {
 	}
 }
 
-func TestUnimplementedCommandReturnsBackendError(t *testing.T) {
+func TestOpenStudyRegistersStudyAndReturnsContractPayload(t *testing.T) {
+	deps := testDependencies(t)
+	handler := NewRouter(deps)
+	inputPath := filepath.Join(t.TempDir(), "sample-study.dcm")
+	if err := os.WriteFile(inputPath, []byte("dicom"), 0o644); err != nil {
+		t.Fatalf("WriteFile returned error: %v", err)
+	}
+
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(
 		http.MethodPost,
 		"/api/v1/commands/open_study",
-		strings.NewReader(`{"inputPath":"/tmp/sample.dcm"}`),
+		strings.NewReader(`{"inputPath":"`+inputPath+`"}`),
+	)
+	request.Header.Set("content-type", "application/json")
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
+	}
+
+	var payload contracts.OpenStudyCommandResult
+	if err := json.NewDecoder(recorder.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode failed: %v", err)
+	}
+
+	if payload.Study.StudyID == "" {
+		t.Fatal("studyId = empty, want generated identifier")
+	}
+
+	if got, want := payload.Study.InputPath, inputPath; got != want {
+		t.Fatalf("inputPath = %q, want %q", got, want)
+	}
+
+	if got, want := payload.Study.InputName, "sample-study.dcm"; got != want {
+		t.Fatalf("inputName = %q, want %q", got, want)
+	}
+
+	if got, want := deps.Studies.Count(), 1; got != want {
+		t.Fatalf("study count = %d, want %d", got, want)
+	}
+
+	catalog, err := deps.Persistence.Load()
+	if err != nil {
+		t.Fatalf("catalog load failed: %v", err)
+	}
+
+	if got, want := len(catalog.RecentStudies), 1; got != want {
+		t.Fatalf("recent study count = %d, want %d", got, want)
+	}
+}
+
+func TestOpenStudyRejectsUnknownFields(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/commands/open_study",
+		strings.NewReader(`{"inputPath":"/tmp/sample.dcm","unexpected":true}`),
+	)
+	request.Header.Set("content-type", "application/json")
+	testRouter(t).ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadRequest)
+	}
+
+	var payload contracts.BackendError
+	if err := json.NewDecoder(recorder.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode failed: %v", err)
+	}
+
+	if got, want := payload.Code, contracts.BackendErrorCodeInvalidInput; got != want {
+		t.Fatalf("code = %q, want %q", got, want)
+	}
+}
+
+func TestOpenStudyReturnsNotFoundForMissingInput(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/commands/open_study",
+		strings.NewReader(`{"inputPath":"/tmp/does-not-exist.dcm"}`),
+	)
+	request.Header.Set("content-type", "application/json")
+	testRouter(t).ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusNotFound)
+	}
+
+	var payload contracts.BackendError
+	if err := json.NewDecoder(recorder.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode failed: %v", err)
+	}
+
+	if got, want := payload.Code, contracts.BackendErrorCodeNotFound; got != want {
+		t.Fatalf("code = %q, want %q", got, want)
+	}
+}
+
+func TestUnimplementedCommandReturnsBackendError(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/commands/start_render_job",
+		strings.NewReader(`{"studyId":"study-1"}`),
 	)
 	request.Header.Set("content-type", "application/json")
 	testRouter(t).ServeHTTP(recorder, request)
@@ -160,13 +268,13 @@ func TestUnimplementedCommandReturnsBackendError(t *testing.T) {
 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusNotImplemented)
 	}
 
-	var payload backendError
+	var payload contracts.BackendError
 	if err := json.NewDecoder(recorder.Body).Decode(&payload); err != nil {
 		t.Fatalf("decode failed: %v", err)
 	}
 
-	if payload.Code != "internal" {
-		t.Fatalf("code = %q, want %q", payload.Code, "internal")
+	if payload.Code != contracts.BackendErrorCodeInternal {
+		t.Fatalf("code = %q, want %q", payload.Code, contracts.BackendErrorCodeInternal)
 	}
 }
 
@@ -212,13 +320,13 @@ func TestDisallowedOriginIsRejected(t *testing.T) {
 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusForbidden)
 	}
 
-	var payload backendError
+	var payload contracts.BackendError
 	if err := json.NewDecoder(recorder.Body).Decode(&payload); err != nil {
 		t.Fatalf("decode failed: %v", err)
 	}
 
-	if payload.Code != "invalidInput" {
-		t.Fatalf("code = %q, want %q", payload.Code, "invalidInput")
+	if payload.Code != contracts.BackendErrorCodeInvalidInput {
+		t.Fatalf("code = %q, want %q", payload.Code, contracts.BackendErrorCodeInvalidInput)
 	}
 }
 
