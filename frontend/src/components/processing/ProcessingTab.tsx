@@ -1,9 +1,7 @@
 import { useMemo, useState } from "react";
 import { workbenchActions, useWorkbenchStore, selectActiveStudy, selectManifest } from "../../app/store/workbenchStore";
-import {
-  FALLBACK_PROCESSING_MANIFEST,
-  formatBackendError,
-} from "../../lib/backend";
+import { formatBackendError } from "../../lib/backendErrors";
+import { FALLBACK_PROCESSING_MANIFEST } from "../../lib/runtime";
 import type {
   PaletteName as Palette,
   ProcessingControls,

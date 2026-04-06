@@ -2,19 +2,10 @@ import { useSyncExternalStore } from "react";
 import {
   FALLBACK_PROCESSING_MANIFEST,
   buildOutputName,
-  cancelJob as cancelBackendJob,
   ensureDicomExtension,
-  formatBackendError,
-  getJob,
-  loadProcessingManifest,
-  measureLineAnnotation,
-  openStudy as openBackendStudy,
-  pickDicomFile,
-  pickSaveDicomPath,
-  startAnalyzeStudyJob,
-  startProcessStudyJob,
-  startRenderStudyJob,
-} from "../../lib/backend";
+  getRuntimeAdapter,
+} from "../../lib/runtime";
+import { formatBackendError } from "../../lib/backendErrors";
 import type {
   LineAnnotation,
   ProcessingControls,
@@ -34,6 +25,8 @@ import {
   type WorkbenchState,
   type WorkbenchStudy,
 } from "../../features/study/model";
+
+const runtime = getRuntimeAdapter();
 
 const INITIAL_STATE: WorkbenchState = {
   manifest: FALLBACK_PROCESSING_MANIFEST,
@@ -341,7 +334,7 @@ class WorkbenchStore {
     }));
 
     try {
-      const manifest = await loadProcessingManifest();
+      const manifest = await runtime.loadProcessingManifest();
       this.setState((current) => ({
         ...current,
         manifest,
@@ -361,7 +354,7 @@ class WorkbenchStore {
       return;
     }
 
-    const selectedPath = await pickDicomFile();
+    const selectedPath = await runtime.pickDicomFile();
     if (!selectedPath) {
       return;
     }
@@ -373,7 +366,7 @@ class WorkbenchStore {
     }));
 
     try {
-      const study = await openBackendStudy(selectedPath);
+      const study = await runtime.openStudy(selectedPath);
       const workbenchStudy = createWorkbenchStudy(
         study,
         defaultControlsForManifest(this.state.manifest),
@@ -394,7 +387,7 @@ class WorkbenchStore {
         workbenchStatus: workbenchStudy.status,
       }));
 
-      const started = await startRenderStudyJob(study.studyId);
+      const started = await runtime.startRenderStudyJob(study.studyId);
       this.receiveJobUpdate(
         createPendingJobSnapshot(
           started.jobId,
@@ -424,7 +417,7 @@ class WorkbenchStore {
     }
 
     try {
-      const started = await startAnalyzeStudyJob(study.studyId);
+      const started = await runtime.startAnalyzeStudyJob(study.studyId);
       this.receiveJobUpdate(
         createPendingJobSnapshot(
           started.jobId,
@@ -560,7 +553,7 @@ class WorkbenchStore {
       return;
     }
 
-    const selectedPath = await pickSaveDicomPath(buildOutputName(study.inputPath));
+    const selectedPath = await runtime.pickSaveDicomPath(buildOutputName(study.inputPath));
     if (!selectedPath) {
       return;
     }
@@ -582,7 +575,7 @@ class WorkbenchStore {
     }
 
     try {
-      const started = await startProcessStudyJob(study.studyId, request);
+      const started = await runtime.startProcessStudyJob(study.studyId, request);
       this.receiveJobUpdate(
         createPendingJobSnapshot(
           started.jobId,
@@ -615,7 +608,7 @@ class WorkbenchStore {
 
   async cancelJob(jobId: string) {
     try {
-      const snapshot = await cancelBackendJob(jobId);
+      const snapshot = await runtime.cancelJob(jobId);
       this.receiveJobUpdate(snapshot);
     } catch (error) {
       this.setState((current) => ({
@@ -666,7 +659,7 @@ class WorkbenchStore {
 
   private async syncJob(jobId: string) {
     try {
-      const snapshot = await getJob(jobId);
+      const snapshot = await runtime.getJob(jobId);
       this.receiveJobUpdate(snapshot);
     } catch {
       // Event listeners will still reconcile later if the job already emitted.
@@ -683,7 +676,7 @@ class WorkbenchStore {
     }
 
     try {
-      const measured = await measureLineAnnotation(study.studyId, annotation);
+      const measured = await runtime.measureLineAnnotation(study.studyId, annotation);
       this.setStudyState(study.studyId, (current) => ({
         ...current,
         annotations: upsertLineAnnotation(current.annotations, measured),

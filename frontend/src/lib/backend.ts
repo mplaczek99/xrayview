@@ -1,25 +1,23 @@
-import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { invoke } from "@tauri-apps/api/core";
 import type {
   AnalyzeStudyCommand,
-  AnalyzeStudyCommandResult,
-  LineAnnotation,
-  BackendError,
   JobCommand,
+  JobResult,
   JobSnapshot as ContractJobSnapshot,
   JobState,
+  LineAnnotation,
   MeasureLineAnnotationCommand,
   MeasureLineAnnotationCommandResult,
-  MeasurementScale,
   OpenStudyCommand,
   OpenStudyCommandResult,
   PaletteName,
   ProcessStudyCommand,
-  ProcessStudyCommandResult,
   ProcessingManifest,
   RenderStudyCommand,
-  RenderStudyCommandResult,
   StartedJob,
 } from "./generated/contracts";
+import { normalizeBackendError } from "./backendErrors";
+import { MOCK_PROCESSED_DICOM_PATH } from "./mockRuntime";
 import { MOCK_PROCESSING_MANIFEST } from "./mockProcessingManifest";
 import {
   createMockPreview,
@@ -27,50 +25,22 @@ import {
   createMockToothAnalysis,
   measureMockLineAnnotation,
 } from "./mockStudy";
-import type {
-  JobResultPayload,
-  JobSnapshot,
-} from "../features/jobs/model";
-import type {
-  OpenedStudy,
-  Palette,
-  PreviewResult,
-  ProcessResult,
-  ProcessingRequest,
-  RuntimeMode,
-  ToothAnalysisResult,
-} from "./types";
+import type { BackendAPI } from "./runtimeTypes";
+import type { ProcessingRequest } from "./types";
 
-const MOCK_STUDY_DIRECTORY = "mock-data";
-const MOCK_EXPORT_DIRECTORY = "mock-exports";
-const MOCK_DICOM_PATH = `${MOCK_STUDY_DIRECTORY}/mock-dental-study.dcm`;
-const MOCK_PROCESSED_DICOM_PATH = `${MOCK_STUDY_DIRECTORY}/mock-dental-study_processed.dcm`;
-const PALETTE_LABELS: Record<Palette, string> = {
+const PALETTE_LABELS: Record<PaletteName, string> = {
   none: "Neutral",
   hot: "Hot",
   bone: "Bone",
 };
 
-const mockJobListeners = new Set<(job: JobSnapshot) => void>();
-const mockJobs = new Map<string, JobSnapshot>();
+const mockJobs = new Map<string, ContractJobSnapshot>();
 const mockJobControllers = new Map<string, { cancelled: boolean }>();
 
 let mockStudySequence = 0;
 let mockJobSequence = 0;
 
 export const FALLBACK_PROCESSING_MANIFEST = MOCK_PROCESSING_MANIFEST;
-
-function isTauriRuntime(): boolean {
-  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
-}
-
-function getRuntimeMode(): RuntimeMode {
-  return isTauriRuntime() ? "tauri" : "mock";
-}
-
-function buildMockPath(directory: string, fileName: string): string {
-  return `${directory}/${fileName}`;
-}
 
 function fileNameFromPath(inputPath: string): string {
   return inputPath.split(/[\\/]/).pop() ?? inputPath;
@@ -84,81 +54,6 @@ function nextMockStudyId(): string {
 function nextMockJobId(): string {
   mockJobSequence += 1;
   return `mock-job-${mockJobSequence}`;
-}
-
-async function runInRuntime<T>(options: {
-  mock: () => T | Promise<T>;
-  tauri: () => Promise<T>;
-}): Promise<T> {
-  return isTauriRuntime() ? options.tauri() : options.mock();
-}
-
-function toPreviewUrl(previewPath: string, runtime: RuntimeMode): string {
-  return runtime === "tauri" ? convertFileSrc(previewPath) : previewPath;
-}
-
-function asOpenedStudy(
-  studyId: string,
-  inputPath: string,
-  inputName: string,
-  runtime: RuntimeMode,
-  measurementScale: MeasurementScale | null | undefined,
-): OpenedStudy {
-  return {
-    studyId,
-    inputPath,
-    inputName,
-    measurementScale: measurementScale ?? null,
-    runtime,
-  };
-}
-
-function asPreviewResult(
-  studyId: string,
-  previewPath: string,
-  runtime: RuntimeMode,
-  imageSize: { width: number; height: number },
-  measurementScale: MeasurementScale | null | undefined,
-): PreviewResult {
-  return {
-    studyId,
-    previewUrl: toPreviewUrl(previewPath, runtime),
-    imageSize,
-    measurementScale: measurementScale ?? null,
-    runtime,
-  };
-}
-
-function asProcessResult(
-  studyId: string,
-  previewPath: string,
-  dicomPath: string,
-  runtime: RuntimeMode,
-  imageSize: { width: number; height: number },
-  measurementScale: MeasurementScale | null | undefined,
-  mode: string,
-): ProcessResult {
-  return {
-    ...asPreviewResult(studyId, previewPath, runtime, imageSize, measurementScale),
-    dicomPath,
-    mode,
-  };
-}
-
-function asToothAnalysisResult(
-  studyId: string,
-  previewPath: string,
-  runtime: RuntimeMode,
-  analysis: AnalyzeStudyCommandResult["analysis"],
-  suggestedAnnotations: AnalyzeStudyCommandResult["suggestedAnnotations"],
-): ToothAnalysisResult {
-  return {
-    studyId,
-    previewUrl: toPreviewUrl(previewPath, runtime),
-    analysis,
-    suggestedAnnotations,
-    runtime,
-  };
 }
 
 function buildProcessStudyCommand(
@@ -187,131 +82,11 @@ function buildProcessStudyCommand(
   };
 }
 
-function normalizeBackendError(error: unknown): BackendError {
-  if (error && typeof error === "object") {
-    const candidate = error as Partial<BackendError>;
-    if (typeof candidate.message === "string" && typeof candidate.code === "string") {
-      return {
-        code: candidate.code,
-        message: candidate.message,
-        details: Array.isArray(candidate.details)
-          ? candidate.details.filter((entry): entry is string => typeof entry === "string")
-          : [],
-        recoverable: Boolean(candidate.recoverable),
-      };
-    }
-  }
-
-  if (error instanceof Error && error.message.trim()) {
-    return {
-      code: "internal",
-      message: error.message,
-      details: [],
-      recoverable: false,
-    };
-  }
-
-  if (typeof error === "string" && error.trim()) {
-    return {
-      code: "internal",
-      message: error,
-      details: [],
-      recoverable: false,
-    };
-  }
-
-  return {
-    code: "internal",
-    message: "Unexpected backend error",
-    details: [],
-    recoverable: false,
-  };
-}
-
-export function formatBackendError(
-  error: BackendError | unknown,
-  fallback = "Unexpected backend error.",
-): string {
-  const normalized = normalizeBackendError(error);
-  return normalized.message.trim() || fallback;
-}
-
-function normalizeJobResultPayload(
-  result: NonNullable<ContractJobSnapshot["result"]>,
-): JobResultPayload {
-  const runtime = getRuntimeMode();
-
-  switch (result.kind) {
-    case "renderStudy":
-      return {
-        kind: "renderStudy",
-        payload: asPreviewResult(
-          result.payload.studyId,
-          result.payload.previewPath,
-          runtime,
-          {
-            width: result.payload.loadedWidth,
-            height: result.payload.loadedHeight,
-          },
-          result.payload.measurementScale,
-        ),
-      };
-    case "processStudy":
-      return {
-        kind: "processStudy",
-        payload: asProcessResult(
-          result.payload.studyId,
-          result.payload.previewPath,
-          result.payload.dicomPath,
-          runtime,
-          {
-            width: result.payload.loadedWidth,
-            height: result.payload.loadedHeight,
-          },
-          result.payload.measurementScale,
-          result.payload.mode,
-        ),
-      };
-    case "analyzeStudy":
-      return {
-        kind: "analyzeStudy",
-        payload: asToothAnalysisResult(
-          result.payload.studyId,
-          result.payload.previewPath,
-          runtime,
-          result.payload.analysis,
-          result.payload.suggestedAnnotations,
-        ),
-      };
-  }
-}
-
-function normalizeJobSnapshot(snapshot: ContractJobSnapshot): JobSnapshot {
-  return {
-    jobId: snapshot.jobId,
-    jobKind: snapshot.jobKind,
-    studyId: snapshot.studyId ?? null,
-    state: snapshot.state,
-    progress: snapshot.progress,
-    fromCache: snapshot.fromCache,
-    result: snapshot.result ? normalizeJobResultPayload(snapshot.result) : null,
-    error: snapshot.error ? normalizeBackendError(snapshot.error) : null,
-    timing: null,
-  };
-}
-
-function emitMockJob(snapshot: JobSnapshot) {
-  mockJobs.set(snapshot.jobId, snapshot);
-  for (const listener of mockJobListeners) {
-    listener(snapshot);
-  }
-}
-
 function buildMockJobSnapshot(
   jobId: string,
-  jobKind: JobSnapshot["jobKind"],
+  jobKind: ContractJobSnapshot["jobKind"],
   studyId: string,
-): JobSnapshot {
+): ContractJobSnapshot {
   return {
     jobId,
     jobKind,
@@ -325,14 +100,13 @@ function buildMockJobSnapshot(
     fromCache: false,
     result: null,
     error: null,
-    timing: null,
   };
 }
 
 function updateMockJob(
   jobId: string,
-  updater: (job: JobSnapshot) => JobSnapshot,
-): JobSnapshot {
+  updater: (job: ContractJobSnapshot) => ContractJobSnapshot,
+): ContractJobSnapshot {
   const current = mockJobs.get(jobId);
   if (!current) {
     throw normalizeBackendError({
@@ -344,17 +118,20 @@ function updateMockJob(
   }
 
   const next = updater(current);
-  emitMockJob(next);
+  mockJobs.set(jobId, next);
   return next;
 }
 
-function scheduleMockCompletion(
-  jobId: string,
-  resultFactory: () => JobResultPayload,
-) {
+function scheduleMockCompletion(jobId: string, resultFactory: () => JobResult) {
   const controller = { cancelled: false };
   mockJobControllers.set(jobId, controller);
-  const steps: Array<{ delay: number; state: JobState; percent: number; stage: string; message: string }> = [
+  const steps: Array<{
+    delay: number;
+    state: JobState;
+    percent: number;
+    stage: string;
+    message: string;
+  }> = [
     { delay: 50, state: "running", percent: 18, stage: "preparing", message: "Preparing job" },
     { delay: 180, state: "running", percent: 62, stage: "working", message: "Working" },
     { delay: 360, state: "running", percent: 90, stage: "finishing", message: "Finishing" },
@@ -365,6 +142,7 @@ function scheduleMockCompletion(
       if (controller.cancelled) {
         return;
       }
+
       updateMockJob(jobId, (job) => ({
         ...job,
         state: step.state,
@@ -381,7 +159,7 @@ function scheduleMockCompletion(
     if (controller.cancelled) {
       return;
     }
-    const result = resultFactory();
+
     updateMockJob(jobId, (job) => ({
       ...job,
       state: "completed",
@@ -390,19 +168,20 @@ function scheduleMockCompletion(
         stage: "completed",
         message: "Completed",
       },
-      result,
+      result: resultFactory(),
       error: null,
     }));
+    mockJobControllers.delete(jobId);
   }, 520);
 }
 
 function startMockJob(
-  jobKind: JobSnapshot["jobKind"],
+  jobKind: ContractJobSnapshot["jobKind"],
   studyId: string,
-  resultFactory: () => JobResultPayload,
+  resultFactory: () => JobResult,
 ): StartedJob {
   const jobId = nextMockJobId();
-  emitMockJob(buildMockJobSnapshot(jobId, jobKind, studyId));
+  mockJobs.set(jobId, buildMockJobSnapshot(jobId, jobKind, studyId));
   scheduleMockCompletion(jobId, resultFactory);
   return { jobId };
 }
@@ -418,128 +197,53 @@ async function invokeWithBackendError<T>(
   }
 }
 
-export async function loadProcessingManifest(): Promise<ProcessingManifest> {
-  return runInRuntime({
-    mock: () => MOCK_PROCESSING_MANIFEST,
-    tauri: () => invokeWithBackendError<ProcessingManifest>("get_processing_manifest"),
-  });
-}
-
-export async function pickDicomFile(): Promise<string | null> {
-  return runInRuntime({
-    mock: () => MOCK_DICOM_PATH,
-    tauri: () => invokeWithBackendError<string | null>("pick_dicom_file"),
-  });
-}
-
-export async function pickSaveDicomPath(defaultName: string): Promise<string | null> {
-  return runInRuntime({
-    mock: () => buildMockPath(MOCK_EXPORT_DIRECTORY, defaultName),
-    tauri: () =>
-      invokeWithBackendError<string | null>("pick_save_dicom_path", { defaultName }),
-  });
-}
-
-export async function openStudy(inputPath: string): Promise<OpenedStudy> {
-  return runInRuntime({
-    mock: () =>
-      asOpenedStudy(
-        nextMockStudyId(),
+export function createMockBackendAPI(): BackendAPI {
+  return {
+    mode: "mock",
+    loadProcessingManifest: async (): Promise<ProcessingManifest> => MOCK_PROCESSING_MANIFEST,
+    openStudy: async (inputPath): Promise<OpenStudyCommandResult> => ({
+      study: {
+        studyId: nextMockStudyId(),
         inputPath,
-        fileNameFromPath(inputPath),
-        getRuntimeMode(),
-        null,
-      ),
-    tauri: async () => {
-      const request: OpenStudyCommand = { inputPath };
-      const payload = await invokeWithBackendError<OpenStudyCommandResult>("open_study", {
-        request,
-      });
-      return asOpenedStudy(
-        payload.study.studyId,
-        payload.study.inputPath,
-        payload.study.inputName,
-        getRuntimeMode(),
-        payload.study.measurementScale,
-      );
-    },
-  });
-}
-
-export async function startRenderStudyJob(studyId: string): Promise<StartedJob> {
-  return runInRuntime({
-    mock: () =>
+        inputName: fileNameFromPath(inputPath),
+        measurementScale: null,
+      },
+    }),
+    startRenderStudyJob: async (studyId) =>
       startMockJob("renderStudy", studyId, () => ({
         kind: "renderStudy",
-        payload: asPreviewResult(
+        payload: {
           studyId,
-          createMockPreview(false, "none"),
-          getRuntimeMode(),
-          {
-            width: 1200,
-            height: 820,
-          },
-          null,
-        ),
+          previewPath: createMockPreview(false, "none"),
+          loadedWidth: 1200,
+          loadedHeight: 820,
+          measurementScale: null,
+        },
       })),
-    tauri: async () => {
-      const request: RenderStudyCommand = { studyId };
-      return invokeWithBackendError<StartedJob>("start_render_job", { request });
-    },
-  });
-}
-
-export async function startProcessStudyJob(
-  studyId: string,
-  request: ProcessingRequest,
-): Promise<StartedJob> {
-  const command = buildProcessStudyCommand(studyId, request);
-
-  return runInRuntime({
-    mock: () =>
+    startProcessStudyJob: async (studyId, request) =>
       startMockJob("processStudy", studyId, () => ({
         kind: "processStudy",
-        payload: asProcessResult(
+        payload: {
           studyId,
-          createMockPreview(true, request.controls.palette),
-          request.outputPath ?? MOCK_PROCESSED_DICOM_PATH,
-          getRuntimeMode(),
-          {
-            width: 1200,
-            height: 820,
-          },
-          null,
-          request.compare ? "comparison output" : "processed preview",
-        ),
+          previewPath: createMockPreview(true, request.controls.palette),
+          dicomPath: request.outputPath ?? MOCK_PROCESSED_DICOM_PATH,
+          loadedWidth: 1200,
+          loadedHeight: 820,
+          mode: request.compare ? "comparison output" : "processed preview",
+          measurementScale: null,
+        },
       })),
-    tauri: async () =>
-      invokeWithBackendError<StartedJob>("start_process_job", { request: command }),
-  });
-}
-
-export async function startAnalyzeStudyJob(studyId: string): Promise<StartedJob> {
-  return runInRuntime({
-    mock: () =>
+    startAnalyzeStudyJob: async (studyId) =>
       startMockJob("analyzeStudy", studyId, () => ({
         kind: "analyzeStudy",
         payload: {
           studyId,
-          previewUrl: createMockPreview(false, "none"),
+          previewPath: createMockPreview(false, "none"),
           analysis: createMockToothAnalysis(),
           suggestedAnnotations: createMockSuggestedAnnotations(),
-          runtime: getRuntimeMode(),
         },
       })),
-    tauri: async () => {
-      const request: AnalyzeStudyCommand = { studyId };
-      return invokeWithBackendError<StartedJob>("start_analyze_job", { request });
-    },
-  });
-}
-
-export async function getJob(jobId: string): Promise<JobSnapshot> {
-  return runInRuntime({
-    mock: () => {
+    getJob: async (jobId): Promise<ContractJobSnapshot> => {
       const snapshot = mockJobs.get(jobId);
       if (!snapshot) {
         throw normalizeBackendError({
@@ -549,19 +253,10 @@ export async function getJob(jobId: string): Promise<JobSnapshot> {
           recoverable: true,
         });
       }
+
       return snapshot;
     },
-    tauri: async () => {
-      const request: JobCommand = { jobId };
-      const snapshot = await invokeWithBackendError<ContractJobSnapshot>("get_job", { request });
-      return normalizeJobSnapshot(snapshot);
-    },
-  });
-}
-
-export async function cancelJob(jobId: string): Promise<JobSnapshot> {
-  return runInRuntime({
-    mock: () => {
+    cancelJob: async (jobId): Promise<ContractJobSnapshot> => {
       const snapshot = mockJobs.get(jobId);
       if (!snapshot) {
         throw normalizeBackendError({
@@ -571,6 +266,7 @@ export async function cancelJob(jobId: string): Promise<JobSnapshot> {
           recoverable: true,
         });
       }
+
       if (
         snapshot.state === "completed" ||
         snapshot.state === "failed" ||
@@ -605,28 +301,49 @@ export async function cancelJob(jobId: string): Promise<JobSnapshot> {
               message: "Cancelled by user",
             },
           }));
+          mockJobControllers.delete(jobId);
         }, 30);
+      } else {
+        mockJobControllers.delete(jobId);
       }
 
       return cancelling;
     },
-    tauri: async () => {
-      const request: JobCommand = { jobId };
-      const snapshot = await invokeWithBackendError<ContractJobSnapshot>("cancel_job", {
-        request,
-      });
-      return normalizeJobSnapshot(snapshot);
-    },
-  });
+    measureLineAnnotation: async (_studyId, annotation): Promise<LineAnnotation> =>
+      measureMockLineAnnotation(annotation),
+  };
 }
 
-export async function measureLineAnnotation(
-  studyId: string,
-  annotation: LineAnnotation,
-): Promise<LineAnnotation> {
-  return runInRuntime({
-    mock: () => measureMockLineAnnotation(annotation),
-    tauri: async () => {
+export function createTauriBackendAPI(): BackendAPI {
+  return {
+    mode: "tauri",
+    loadProcessingManifest: () =>
+      invokeWithBackendError<ProcessingManifest>("get_processing_manifest"),
+    openStudy: async (inputPath): Promise<OpenStudyCommandResult> => {
+      const request: OpenStudyCommand = { inputPath };
+      return invokeWithBackendError<OpenStudyCommandResult>("open_study", { request });
+    },
+    startRenderStudyJob: async (studyId) => {
+      const request: RenderStudyCommand = { studyId };
+      return invokeWithBackendError<StartedJob>("start_render_job", { request });
+    },
+    startProcessStudyJob: async (studyId, request) =>
+      invokeWithBackendError<StartedJob>("start_process_job", {
+        request: buildProcessStudyCommand(studyId, request),
+      }),
+    startAnalyzeStudyJob: async (studyId) => {
+      const request: AnalyzeStudyCommand = { studyId };
+      return invokeWithBackendError<StartedJob>("start_analyze_job", { request });
+    },
+    getJob: async (jobId) => {
+      const request: JobCommand = { jobId };
+      return invokeWithBackendError<ContractJobSnapshot>("get_job", { request });
+    },
+    cancelJob: async (jobId) => {
+      const request: JobCommand = { jobId };
+      return invokeWithBackendError<ContractJobSnapshot>("cancel_job", { request });
+    },
+    measureLineAnnotation: async (studyId, annotation): Promise<LineAnnotation> => {
       const request: MeasureLineAnnotationCommand = {
         studyId,
         annotation,
@@ -637,7 +354,7 @@ export async function measureLineAnnotation(
       );
       return payload.annotation;
     },
-  });
+  };
 }
 
 export function ensureDicomExtension(path: string): string {

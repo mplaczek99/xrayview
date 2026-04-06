@@ -1,8 +1,9 @@
 import { useEffect } from "react";
-import { getJob } from "../../lib/backend";
+import { getRuntimeAdapter } from "../../lib/runtime";
 import { workbenchActions } from "../../app/store/workbenchStore";
 
 const POLL_INTERVAL_MS = 1500;
+const runtime = getRuntimeAdapter();
 
 export function useJobs() {
   useEffect(() => {
@@ -21,7 +22,7 @@ export function useJobs() {
       await Promise.all(
         pendingIds.map(async (jobId) => {
           try {
-            const job = await getJob(jobId);
+            const job = await runtime.getJob(jobId);
             if (!cancelled) {
               workbenchActions.receiveJobUpdate(job);
             }

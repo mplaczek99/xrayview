@@ -515,6 +515,10 @@ Yes, but inconvenient.
 
 Separate shell concerns from backend concerns in the frontend.
 
+### Status
+
+Completed. See [GO_BACKEND_PHASE4_FRONTEND_RUNTIME_ABSTRACTION_SPLIT.md](GO_BACKEND_PHASE4_FRONTEND_RUNTIME_ABSTRACTION_SPLIT.md).
+
 ### Why this phase exists
 
 The frontend currently uses one adapter, but it still blends shell and backend details. That needs to split cleanly before migration.

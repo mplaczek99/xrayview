@@ -1,6 +1,6 @@
 import { useMemo, useState, useCallback } from "react";
 import { workbenchActions, useWorkbenchStore, selectJobOrder, selectJobs, selectStudies } from "../../app/store/workbenchStore";
-import { formatBackendError } from "../../lib/backend";
+import { formatBackendError } from "../../lib/backendErrors";
 import { describeProgress, useProgressClock } from "./progressTiming";
 
 function titleForJob(kind: string): string {

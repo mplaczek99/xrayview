@@ -7,7 +7,7 @@ import type {
 } from "../../lib/generated/contracts";
 import type { JobSnapshot } from "../../features/jobs/model";
 import { workbenchActions } from "../../app/store/workbenchStore";
-import { formatBackendError } from "../../lib/backend";
+import { formatBackendError } from "../../lib/backendErrors";
 import {
   annotationSourceLabel,
   formatLineMeasurement,
