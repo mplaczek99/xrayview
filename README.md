@@ -84,6 +84,30 @@ Iterate on the UI without the Rust backend:
 npm run dev
 ```
 
+### Backend Runtime Selection
+
+The frontend now supports three backend runtime modes:
+
+- `mock`
+- `legacy-rust`
+- `go-sidecar`
+
+Defaults:
+
+- browser/Vite only: `mock`
+- Tauri desktop: `legacy-rust`
+
+You can override the backend runtime with:
+
+```bash
+XRAYVIEW_BACKEND_RUNTIME=mock npm run dev
+XRAYVIEW_BACKEND_RUNTIME=legacy-rust npm run tauri:dev
+XRAYVIEW_BACKEND_RUNTIME=go-sidecar XRAYVIEW_GO_BACKEND_URL=http://127.0.0.1:38181 npm run tauri:dev
+```
+
+`XRAYVIEW_GO_BACKEND_URL` is only used for the `go-sidecar` runtime. The frontend entry scripts also accept the Vite-prefixed forms `VITE_XRAYVIEW_BACKEND_RUNTIME` and `VITE_XRAYVIEW_GO_BACKEND_URL`.
+The `go-sidecar` adapter is part of the migration path; it expects a compatible local HTTP backend and is not the default packaged runtime yet.
+
 ## Releases
 
 Prebuilt desktop packages are published on GitHub Releases.

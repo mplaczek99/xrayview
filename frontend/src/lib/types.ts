@@ -8,7 +8,8 @@ import type {
 
 export type Palette = PaletteName;
 export type ViewerMode = "original" | "processed" | "compare";
-export type RuntimeMode = "tauri" | "mock";
+export type RuntimeMode = "mock" | "legacy-rust" | "go-sidecar";
+export type ShellMode = "mock" | "tauri";
 export type ActiveTab = "view" | "processing";
 
 export interface ProcessingPresetOption {

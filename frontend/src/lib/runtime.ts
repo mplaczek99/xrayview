@@ -2,8 +2,9 @@ import type { JobResultPayload, JobSnapshot } from "../features/jobs/model";
 import {
   FALLBACK_PROCESSING_MANIFEST,
   buildOutputName,
+  createGoSidecarBackendAPI,
+  createLegacyRustBackendAPI,
   createMockBackendAPI,
-  createTauriBackendAPI,
   ensureDicomExtension,
   paletteLabel,
 } from "./backend";
@@ -20,6 +21,10 @@ import {
   MOCK_DICOM_PATH,
   MOCK_EXPORT_DIRECTORY,
 } from "./mockRuntime";
+import {
+  resolveRuntimeConfiguration,
+  type RuntimeConfiguration,
+} from "./runtimeConfig";
 import { createMockShellAPI, createTauriShellAPI } from "./shell";
 import type { RuntimeAdapter, ShellAPI } from "./runtimeTypes";
 import type {
@@ -33,10 +38,6 @@ import type {
 
 function isTauriRuntime(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
-}
-
-function detectRuntimeMode(): RuntimeMode {
-  return isTauriRuntime() ? "tauri" : "mock";
 }
 
 function asOpenedStudy(
@@ -139,9 +140,15 @@ function normalizeJobSnapshot(
   };
 }
 
-function createRuntimeAdapter(mode: RuntimeMode): RuntimeAdapter {
-  const shell = mode === "tauri" ? createTauriShellAPI() : createMockShellAPI();
-  const backend = mode === "tauri" ? createTauriBackendAPI() : createMockBackendAPI();
+function createRuntimeAdapter(configuration: RuntimeConfiguration): RuntimeAdapter {
+  const { mode } = configuration;
+  const shell = mode === "mock" ? createMockShellAPI() : createTauriShellAPI();
+  const backend =
+    mode === "mock"
+      ? createMockBackendAPI()
+      : mode === "legacy-rust"
+        ? createLegacyRustBackendAPI()
+        : createGoSidecarBackendAPI(configuration.goSidecarBaseUrl);
 
   return {
     mode,
@@ -166,10 +173,27 @@ function createRuntimeAdapter(mode: RuntimeMode): RuntimeAdapter {
 }
 
 let activeRuntime: RuntimeAdapter | null = null;
+let loggedRuntimeConfiguration = false;
 
 export function getRuntimeAdapter(): RuntimeAdapter {
   if (!activeRuntime) {
-    activeRuntime = createRuntimeAdapter(detectRuntimeMode());
+    const configuration = resolveRuntimeConfiguration(isTauriRuntime());
+    activeRuntime = createRuntimeAdapter(configuration);
+
+    if (!loggedRuntimeConfiguration) {
+      for (const warning of configuration.warnings) {
+        console.warn("[xrayview] runtime configuration:", warning);
+      }
+
+      const description =
+        configuration.mode === "go-sidecar"
+          ? `${configuration.mode} (${configuration.goSidecarBaseUrl})`
+          : configuration.mode;
+      console.info(
+        `[xrayview] backend runtime: ${description} (${configuration.selectionSource})`,
+      );
+      loggedRuntimeConfiguration = true;
+    }
   }
 
   return activeRuntime;

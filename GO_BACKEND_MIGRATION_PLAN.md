@@ -565,6 +565,10 @@ Yes.
 
 Allow the app to run against multiple backend implementations during migration.
 
+### Status
+
+Completed. See [GO_BACKEND_PHASE5_BACKEND_RUNTIME_SELECTION.md](GO_BACKEND_PHASE5_BACKEND_RUNTIME_SELECTION.md).
+
 ### Why this phase exists
 
 You need safe side-by-side migration.

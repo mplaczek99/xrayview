@@ -1,9 +1,10 @@
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import { bundleDir, frontendRoot, prepareTauriTarget } from "./prepare-tauri-target.mjs";
+import { applyFrontendRuntimeEnv } from "./runtime-env.mjs";
 
 const args = process.argv.slice(2);
-const env = { ...process.env };
+const env = applyFrontendRuntimeEnv(process.env);
 
 prepareTauriTarget();
 

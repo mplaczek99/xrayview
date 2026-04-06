@@ -6,10 +6,15 @@ import type {
   ProcessingManifest,
   StartedJob,
 } from "./generated/contracts";
-import type { OpenedStudy, ProcessingRequest, RuntimeMode } from "./types";
+import type {
+  OpenedStudy,
+  ProcessingRequest,
+  RuntimeMode,
+  ShellMode,
+} from "./types";
 
 export interface ShellAPI {
-  mode: RuntimeMode;
+  mode: ShellMode;
   pickDicomFile(): Promise<string | null>;
   pickSaveDicomPath(defaultName: string): Promise<string | null>;
   resolvePreviewUrl(previewPath: string): string;

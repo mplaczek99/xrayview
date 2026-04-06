@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   AnalyzeStudyCommand,
+  BackendError,
   JobCommand,
   JobResult,
   JobSnapshot as ContractJobSnapshot,
@@ -33,6 +34,7 @@ const PALETTE_LABELS: Record<PaletteName, string> = {
   hot: "Hot",
   bone: "Bone",
 };
+const GO_SIDECAR_REQUEST_TIMEOUT_MS = 15_000;
 
 const mockJobs = new Map<string, ContractJobSnapshot>();
 const mockJobControllers = new Map<string, { cancelled: boolean }>();
@@ -197,6 +199,75 @@ async function invokeWithBackendError<T>(
   }
 }
 
+function buildGoSidecarCommandUrl(baseUrl: string, command: string): string {
+  return `${baseUrl}/api/v1/commands/${command}`;
+}
+
+function normalizeGoSidecarTransportError(
+  baseUrl: string,
+  error: unknown,
+): BackendError {
+  if (error instanceof DOMException && error.name === "AbortError") {
+    return {
+      code: "internal",
+      message: `go sidecar request timed out after ${GO_SIDECAR_REQUEST_TIMEOUT_MS}ms`,
+      details: [baseUrl],
+      recoverable: true,
+    };
+  }
+
+  if (error instanceof TypeError) {
+    return {
+      code: "internal",
+      message: `go sidecar is not reachable at ${baseUrl}`,
+      details: error.message ? [error.message] : [],
+      recoverable: true,
+    };
+  }
+
+  return normalizeBackendError(error);
+}
+
+async function invokeGoSidecar<T>(
+  baseUrl: string,
+  command: string,
+  payload?: unknown,
+): Promise<T> {
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), GO_SIDECAR_REQUEST_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(buildGoSidecarCommandUrl(baseUrl, command), {
+      method: "POST",
+      headers: {
+        accept: "application/json",
+        "content-type": "application/json",
+      },
+      body: payload === undefined ? undefined : JSON.stringify(payload),
+      signal: controller.signal,
+    });
+    const responseText = await response.text();
+    const responseValue = responseText ? JSON.parse(responseText) : null;
+
+    if (!response.ok) {
+      throw normalizeBackendError(
+        responseValue ?? {
+          code: "internal",
+          message: `go sidecar request failed with status ${response.status}`,
+          details: [response.statusText],
+          recoverable: response.status >= 500,
+        },
+      );
+    }
+
+    return responseValue as T;
+  } catch (error) {
+    throw normalizeGoSidecarTransportError(baseUrl, error);
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
+}
+
 export function createMockBackendAPI(): BackendAPI {
   return {
     mode: "mock",
@@ -314,9 +385,9 @@ export function createMockBackendAPI(): BackendAPI {
   };
 }
 
-export function createTauriBackendAPI(): BackendAPI {
+export function createLegacyRustBackendAPI(): BackendAPI {
   return {
-    mode: "tauri",
+    mode: "legacy-rust",
     loadProcessingManifest: () =>
       invokeWithBackendError<ProcessingManifest>("get_processing_manifest"),
     openStudy: async (inputPath): Promise<OpenStudyCommandResult> => {
@@ -351,6 +422,52 @@ export function createTauriBackendAPI(): BackendAPI {
       const payload = await invokeWithBackendError<MeasureLineAnnotationCommandResult>(
         "measure_line_annotation",
         { request },
+      );
+      return payload.annotation;
+    },
+  };
+}
+
+export function createGoSidecarBackendAPI(baseUrl: string): BackendAPI {
+  return {
+    mode: "go-sidecar",
+    loadProcessingManifest: () =>
+      invokeGoSidecar<ProcessingManifest>(baseUrl, "get_processing_manifest"),
+    openStudy: async (inputPath): Promise<OpenStudyCommandResult> => {
+      const request: OpenStudyCommand = { inputPath };
+      return invokeGoSidecar<OpenStudyCommandResult>(baseUrl, "open_study", request);
+    },
+    startRenderStudyJob: async (studyId) => {
+      const request: RenderStudyCommand = { studyId };
+      return invokeGoSidecar<StartedJob>(baseUrl, "start_render_job", request);
+    },
+    startProcessStudyJob: async (studyId, request) =>
+      invokeGoSidecar<StartedJob>(
+        baseUrl,
+        "start_process_job",
+        buildProcessStudyCommand(studyId, request),
+      ),
+    startAnalyzeStudyJob: async (studyId) => {
+      const request: AnalyzeStudyCommand = { studyId };
+      return invokeGoSidecar<StartedJob>(baseUrl, "start_analyze_job", request);
+    },
+    getJob: async (jobId) => {
+      const request: JobCommand = { jobId };
+      return invokeGoSidecar<ContractJobSnapshot>(baseUrl, "get_job", request);
+    },
+    cancelJob: async (jobId) => {
+      const request: JobCommand = { jobId };
+      return invokeGoSidecar<ContractJobSnapshot>(baseUrl, "cancel_job", request);
+    },
+    measureLineAnnotation: async (studyId, annotation): Promise<LineAnnotation> => {
+      const request: MeasureLineAnnotationCommand = {
+        studyId,
+        annotation,
+      };
+      const payload = await invokeGoSidecar<MeasureLineAnnotationCommandResult>(
+        baseUrl,
+        "measure_line_annotation",
+        request,
       );
       return payload.annotation;
     },
