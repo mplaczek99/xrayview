@@ -5,6 +5,9 @@
   "scripts": {
     "postinstall": "npm --prefix frontend install",
     "dev": "npm --prefix frontend run dev --",
+    "go:backend:build": "go -C go-backend build ./cmd/xrayviewd ./cmd/xrayview-cli",
+    "go:backend:serve": "go -C go-backend run ./cmd/xrayviewd",
+    "go:backend:test": "go -C go-backend test ./...",
     "release:smoke": "npm --prefix frontend run release:smoke --",
     "release:smoke:bundle": "npm --prefix frontend run release:smoke:bundle --",
     "tauri": "npm --prefix frontend run tauri --",

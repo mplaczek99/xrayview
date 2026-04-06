@@ -1,0 +1,95 @@
+package httpapi
+
+import (
+	"encoding/json"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"xrayview/go-backend/internal/cache"
+	"xrayview/go-backend/internal/config"
+	"xrayview/go-backend/internal/contracts"
+	"xrayview/go-backend/internal/jobs"
+	"xrayview/go-backend/internal/persistence"
+	"xrayview/go-backend/internal/studies"
+)
+
+func testRouter(t *testing.T) http.Handler {
+	t.Helper()
+
+	return NewRouter(Dependencies{
+		Config:      config.Default(),
+		Logger:      slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Cache:       cache.New(t.TempDir()),
+		Persistence: persistence.New(t.TempDir()),
+		Jobs:        jobs.New(),
+		Studies:     studies.New(),
+		StartedAt:   time.Date(2026, time.January, 2, 3, 4, 5, 0, time.UTC),
+	})
+}
+
+func TestHealthzIncludesContractMetadata(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	testRouter(t).ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
+	}
+
+	var payload runtimeResponse
+	if err := json.NewDecoder(recorder.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode failed: %v", err)
+	}
+
+	if payload.Service != contracts.ServiceName {
+		t.Fatalf("service = %q, want %q", payload.Service, contracts.ServiceName)
+	}
+
+	if payload.BackendContractVersion != contracts.BackendContractVersion {
+		t.Fatalf("contract version = %d, want %d", payload.BackendContractVersion, contracts.BackendContractVersion)
+	}
+}
+
+func TestCommandsEndpointListsSupportedCommands(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/commands", nil)
+	testRouter(t).ServeHTTP(recorder, request)
+
+	var payload commandListResponse
+	if err := json.NewDecoder(recorder.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode failed: %v", err)
+	}
+
+	if len(payload.Commands) != len(contracts.SupportedCommands) {
+		t.Fatalf("command count = %d, want %d", len(payload.Commands), len(contracts.SupportedCommands))
+	}
+}
+
+func TestCommandPlaceholderReturnsBackendError(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/commands/get_processing_manifest",
+		strings.NewReader("{}"),
+	)
+	request.Header.Set("content-type", "application/json")
+	testRouter(t).ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusNotImplemented {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusNotImplemented)
+	}
+
+	var payload backendError
+	if err := json.NewDecoder(recorder.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode failed: %v", err)
+	}
+
+	if payload.Code != "internal" {
+		t.Fatalf("code = %q, want %q", payload.Code, "internal")
+	}
+}

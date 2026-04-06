@@ -1,6 +1,6 @@
 # xrayview
 
-`xrayview` is a DICOM X-ray visualization and analysis workstation built with Tauri (React/TypeScript frontend, Rust backend).
+`xrayview` is a DICOM X-ray visualization and analysis workstation built with Tauri (React/TypeScript frontend, Rust backend). The repository now also includes a phase 6 Go backend workspace that boots as a local HTTP sidecar skeleton for the ongoing migration.
 
 The desktop UI lives in `frontend/`. The Rust backend in `backend/` powers all DICOM decoding, image processing, rendering, measurement, and export. The backend is library-first — Tauri calls Rust directly in-process (no subprocess). The CLI binary remains available for headless DICOM workflows.
 
@@ -49,6 +49,23 @@ It is **not** a medical device and must **not** be used for medical diagnosis, c
 cd backend
 cargo build --release
 ```
+
+### Go backend skeleton
+
+```bash
+npm run go:backend:test
+npm run go:backend:build
+npm run go:backend:serve
+```
+
+The phase 6 Go backend binds to `127.0.0.1:38181` by default and exposes:
+
+- `GET /healthz`
+- `GET /api/v1/runtime`
+- `GET /api/v1/commands`
+- `POST /api/v1/commands/{command}`
+
+At this stage the command routes are transport placeholders only. They return structured backend errors for the phase 5 command names until later phases move real behavior into Go.
 
 ### Desktop app
 
@@ -209,10 +226,12 @@ cargo run --manifest-path backend/Cargo.toml -- --input images/sample-dental-rad
 
 ## Architecture
 
-### Two-crate Rust workspace
+### Transitional Workspace Layout
 
 - **`backend/`** — Library-first crate with modular layout: `api/`, `app/`, `study/`, `render/`, `processing/`, `analysis/`, `annotations/`, `export/`, `jobs/`, `cache/`, `persistence/`. Also provides a thin CLI binary.
 - **`frontend/src-tauri/`** — Tauri desktop shell. Depends on the backend as a library (direct in-process calls, no subprocess).
+- **`go-backend/`** — Phase 6 Go backend module with the initial sidecar process skeleton.
+- **`go/contracts/`** — Go module for generated contract bindings owned by the language-neutral schema.
 
 ### Contract generation
 
@@ -235,6 +254,9 @@ Phase 2 froze this surface as backend contract v1. Phase 3 moves generation out 
 ```bash
 # Backend unit + integration tests
 cargo test --manifest-path backend/Cargo.toml
+
+# Go backend skeleton tests
+npm run go:backend:test
 
 # Frontend type-check
 npm --prefix frontend run build
