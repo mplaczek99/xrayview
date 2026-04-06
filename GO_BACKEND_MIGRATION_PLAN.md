@@ -971,6 +971,10 @@ Only with real rework.
 
 Preserve momentum if pure Go decode is not ready.
 
+### Status
+
+Completed. See [GO_BACKEND_PHASE13_BUILD_TEMPORARY_RUST_DECODE_HELPER.md](GO_BACKEND_PHASE13_BUILD_TEMPORARY_RUST_DECODE_HELPER.md).
+
 ### Why this phase exists
 
 You said you want a serious Go migration, not paralysis around one hard subsystem.

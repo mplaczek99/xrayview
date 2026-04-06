@@ -13,6 +13,7 @@ import (
 	"xrayview/go-backend/internal/config"
 	"xrayview/go-backend/internal/contracts"
 	"xrayview/go-backend/internal/dicommeta"
+	"xrayview/go-backend/internal/rustdecode"
 )
 
 func main() {
@@ -34,6 +35,8 @@ func run(args []string) error {
 		return printConfig()
 	case "inspect-decode":
 		return inspectDecode(args[1:])
+	case "decode-source":
+		return decodeSource(args[1:])
 	case "list-commands":
 		for _, command := range contracts.SupportedCommandStrings() {
 			fmt.Println(command)
@@ -89,6 +92,50 @@ func inspectDecode(paths []string) error {
 	return encoder.Encode(report)
 }
 
+func decodeSource(args []string) error {
+	if len(args) != 1 {
+		return fmt.Errorf("decode-source requires exactly one DICOM path")
+	}
+
+	helper, err := rustdecode.NewFromEnvironment()
+	if err != nil {
+		return err
+	}
+
+	study, err := helper.DecodeStudy(context.Background(), args[0])
+	if err != nil {
+		return err
+	}
+
+	summary := struct {
+		Width                 uint32                      `json:"width"`
+		Height                uint32                      `json:"height"`
+		PixelCount            int                         `json:"pixelCount"`
+		MinValue              float32                     `json:"minValue"`
+		MaxValue              float32                     `json:"maxValue"`
+		DefaultWindow         *rustdecode.WindowLevel     `json:"defaultWindow,omitempty"`
+		Invert                bool                        `json:"invert"`
+		MeasurementScale      *contracts.MeasurementScale `json:"measurementScale,omitempty"`
+		StudyInstanceUID      string                      `json:"studyInstanceUid"`
+		PreservedElementCount int                         `json:"preservedElementCount"`
+	}{
+		Width:                 study.Image.Width,
+		Height:                study.Image.Height,
+		PixelCount:            len(study.Image.Pixels),
+		MinValue:              study.Image.MinValue,
+		MaxValue:              study.Image.MaxValue,
+		DefaultWindow:         study.Image.DefaultWindow,
+		Invert:                study.Image.Invert,
+		MeasurementScale:      study.MeasurementScale,
+		StudyInstanceUID:      study.Metadata.StudyInstanceUID,
+		PreservedElementCount: len(study.Metadata.PreservedElements),
+	}
+
+	encoder := json.NewEncoder(os.Stdout)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(summary)
+}
+
 func printUsage(stream *os.File) {
 	fmt.Fprintln(stream, "usage: xrayview-cli <subcommand>")
 	fmt.Fprintln(stream, "")
@@ -96,6 +143,7 @@ func printUsage(stream *os.File) {
 	fmt.Fprintln(stream, "  serve         run the phase 7 local HTTP backend")
 	fmt.Fprintln(stream, "  print-config  print resolved backend configuration as JSON")
 	fmt.Fprintln(stream, "  inspect-decode inspect decode-relevant DICOM metadata as JSON")
+	fmt.Fprintln(stream, "  decode-source decode source pixels through the phase 13 Rust helper")
 	fmt.Fprintln(stream, "  list-commands print supported command names")
 	fmt.Fprintln(stream, "  version       print service and contract version")
 }

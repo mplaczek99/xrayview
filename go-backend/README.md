@@ -1,6 +1,6 @@
 # xrayview Go Backend
 
-This module is the current Go sidecar backend for the migration path. Phase 7 established the local HTTP transport, phase 8 let the Tauri shell manage this process automatically for the `go-sidecar` runtime, phase 9 moved the processing manifest endpoint into Go, phase 10 moved `open_study` registration into Go, phase 11 proved metadata reading in Go, and phase 12 locked the pixel-decode strategy around a narrow Rust helper instead of a premature pure-Go commitment.
+This module is the current Go sidecar backend for the migration path. Phase 7 established the local HTTP transport, phase 8 let the Tauri shell manage this process automatically for the `go-sidecar` runtime, phase 9 moved the processing manifest endpoint into Go, phase 10 moved `open_study` registration into Go, phase 11 proved metadata reading in Go, phase 12 locked the pixel-decode strategy around a narrow Rust helper instead of a premature pure-Go commitment, and phase 13 added the temporary Rust decode helper plus a Go invocation layer.
 
 Current scope:
 
@@ -11,6 +11,7 @@ Current scope:
 - validate DICOM metadata and register studies for `open_study`
 - extract `open_study` metadata needed for migration parity: rows, columns, spacing tags, window defaults, photometric interpretation, and transfer syntax UID
 - inspect decode-relevant DICOM metadata for migration planning
+- invoke the temporary Rust decode helper from Go and validate its normalized source-study payload
 - populate `measurementScale` when spacing tags are present
 - write the recent-study catalog hook on study open
 - publish health/runtime metadata
@@ -21,6 +22,7 @@ Current non-goals:
 
 - no Go pixel decode yet
 - phase 12 intentionally does not claim pure-Go decode readiness from the current narrow sample corpus
+- no HTTP command uses the Rust decode helper yet
 - no Go DICOM export yet
 - no job execution yet
 - no render/process/analyze execution yet
@@ -31,6 +33,7 @@ Current non-goals:
 go run ./cmd/xrayviewd
 go run ./cmd/xrayview-cli print-config
 go run ./cmd/xrayview-cli inspect-decode ../images/sample-dental-radiograph.dcm
+go run ./cmd/xrayview-cli decode-source ../images/sample-dental-radiograph.dcm
 go run ./cmd/xrayview-cli list-commands
 ```
 
@@ -64,6 +67,7 @@ Current metadata-reader limits:
 - deflated transfer syntax is still rejected in the prototype reader
 - the committed sample corpus contains only native single-frame monochrome explicit-VR-little-endian studies
 - phase 12 therefore locks decode strategy to Go orchestration plus a narrow Rust decode helper for phase 13
+- the helper emits normalized source-study JSON for Go consumption, but render/process HTTP commands still remain for later phases
 
 Transport guarantees:
 
@@ -80,3 +84,4 @@ Transport guarantees:
 - `XRAYVIEW_GO_BACKEND_CACHE_DIR`
 - `XRAYVIEW_GO_BACKEND_PERSISTENCE_DIR`
 - `XRAYVIEW_GO_BACKEND_SHUTDOWN_TIMEOUT`
+- `XRAYVIEW_RUST_DECODE_HELPER_BIN`
