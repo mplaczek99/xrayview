@@ -1,6 +1,8 @@
 package httpapi
 
 import (
+	"bytes"
+	"encoding/binary"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -9,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -157,10 +160,7 @@ func TestGetProcessingManifestReturnsFrozenPayload(t *testing.T) {
 func TestOpenStudyRegistersStudyAndReturnsContractPayload(t *testing.T) {
 	deps := testDependencies(t)
 	handler := NewRouter(deps)
-	inputPath := filepath.Join(t.TempDir(), "sample-study.dcm")
-	if err := os.WriteFile(inputPath, []byte("dicom"), 0o644); err != nil {
-		t.Fatalf("WriteFile returned error: %v", err)
-	}
+	inputPath := sampleDicomPath(t)
 
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(
@@ -188,8 +188,11 @@ func TestOpenStudyRegistersStudyAndReturnsContractPayload(t *testing.T) {
 		t.Fatalf("inputPath = %q, want %q", got, want)
 	}
 
-	if got, want := payload.Study.InputName, "sample-study.dcm"; got != want {
+	if got, want := payload.Study.InputName, "sample-dental-radiograph.dcm"; got != want {
 		t.Fatalf("inputName = %q, want %q", got, want)
+	}
+	if payload.Study.MeasurementScale != nil {
+		t.Fatalf("measurementScale = %+v, want nil for sample fixture", payload.Study.MeasurementScale)
 	}
 
 	if got, want := deps.Studies.Count(), 1; got != want {
@@ -203,6 +206,75 @@ func TestOpenStudyRegistersStudyAndReturnsContractPayload(t *testing.T) {
 
 	if got, want := len(catalog.RecentStudies), 1; got != want {
 		t.Fatalf("recent study count = %d, want %d", got, want)
+	}
+}
+
+func TestOpenStudyIncludesMeasurementScaleWhenSpacingMetadataExists(t *testing.T) {
+	deps := testDependencies(t)
+	handler := NewRouter(deps)
+	inputPath := filepath.Join(t.TempDir(), "scaled-study.dcm")
+	if err := os.WriteFile(inputPath, buildScaledDicomFixture(), 0o644); err != nil {
+		t.Fatalf("WriteFile returned error: %v", err)
+	}
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/commands/open_study",
+		strings.NewReader(`{"inputPath":"`+inputPath+`"}`),
+	)
+	request.Header.Set("content-type", "application/json")
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
+	}
+
+	var payload contracts.OpenStudyCommandResult
+	if err := json.NewDecoder(recorder.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode failed: %v", err)
+	}
+
+	if payload.Study.MeasurementScale == nil {
+		t.Fatal("measurementScale = nil, want PixelSpacing-derived scale")
+	}
+	if got, want := payload.Study.MeasurementScale.RowSpacingMM, 0.25; got != want {
+		t.Fatalf("measurementScale.rowSpacingMm = %v, want %v", got, want)
+	}
+	if got, want := payload.Study.MeasurementScale.ColumnSpacingMM, 0.40; got != want {
+		t.Fatalf("measurementScale.columnSpacingMm = %v, want %v", got, want)
+	}
+	if got, want := payload.Study.MeasurementScale.Source, "PixelSpacing"; got != want {
+		t.Fatalf("measurementScale.source = %q, want %q", got, want)
+	}
+}
+
+func TestOpenStudyRejectsNonDicomInput(t *testing.T) {
+	inputPath := filepath.Join(t.TempDir(), "not-a-dicom.dcm")
+	if err := os.WriteFile(inputPath, []byte("dicom"), 0o644); err != nil {
+		t.Fatalf("WriteFile returned error: %v", err)
+	}
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/commands/open_study",
+		strings.NewReader(`{"inputPath":"`+inputPath+`"}`),
+	)
+	request.Header.Set("content-type", "application/json")
+	testRouter(t).ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadRequest)
+	}
+
+	var payload contracts.BackendError
+	if err := json.NewDecoder(recorder.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode failed: %v", err)
+	}
+
+	if got, want := payload.Code, contracts.BackendErrorCodeInvalidInput; got != want {
+		t.Fatalf("code = %q, want %q", got, want)
 	}
 }
 
@@ -276,6 +348,99 @@ func TestUnimplementedCommandReturnsBackendError(t *testing.T) {
 	if payload.Code != contracts.BackendErrorCodeInternal {
 		t.Fatalf("code = %q, want %q", payload.Code, contracts.BackendErrorCodeInternal)
 	}
+}
+
+func sampleDicomPath(t *testing.T) string {
+	t.Helper()
+
+	_, currentFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller returned no file path")
+	}
+
+	return filepath.Clean(
+		filepath.Join(filepath.Dir(currentFile), "..", "..", "..", "images", "sample-dental-radiograph.dcm"),
+	)
+}
+
+func buildScaledDicomFixture() []byte {
+	var payload bytes.Buffer
+
+	payload.Write(make([]byte, 128))
+	payload.WriteString("DICM")
+	writeExplicitLittleElement(
+		&payload,
+		0x0002,
+		0x0010,
+		"UI",
+		encodePaddedString("1.2.840.10008.1.2.1", 0x00),
+	)
+	writeExplicitLittleElement(&payload, 0x0028, 0x0010, "US", encodeLittleEndianUint16(512))
+	writeExplicitLittleElement(&payload, 0x0028, 0x0011, "US", encodeLittleEndianUint16(768))
+	writeExplicitLittleElement(
+		&payload,
+		0x0028,
+		0x0004,
+		"CS",
+		encodePaddedString("MONOCHROME2", ' '),
+	)
+	writeExplicitLittleElement(
+		&payload,
+		0x0028,
+		0x0030,
+		"DS",
+		encodePaddedString("0.25\\0.40", ' '),
+	)
+	writeExplicitLittleElement(&payload, 0x7fe0, 0x0010, "OB", nil)
+
+	return payload.Bytes()
+}
+
+func writeExplicitLittleElement(
+	payload *bytes.Buffer,
+	group uint16,
+	element uint16,
+	vr string,
+	value []byte,
+) {
+	writeLittleEndianUint16(payload, group)
+	writeLittleEndianUint16(payload, element)
+	payload.WriteString(vr)
+
+	if vr == "OB" {
+		payload.Write([]byte{0x00, 0x00})
+		writeLittleEndianUint32(payload, uint32(len(value)))
+	} else {
+		writeLittleEndianUint16(payload, uint16(len(value)))
+	}
+
+	payload.Write(value)
+}
+
+func writeLittleEndianUint16(payload *bytes.Buffer, value uint16) {
+	var raw [2]byte
+	binary.LittleEndian.PutUint16(raw[:], value)
+	payload.Write(raw[:])
+}
+
+func writeLittleEndianUint32(payload *bytes.Buffer, value uint32) {
+	var raw [4]byte
+	binary.LittleEndian.PutUint32(raw[:], value)
+	payload.Write(raw[:])
+}
+
+func encodeLittleEndianUint16(value uint16) []byte {
+	var raw [2]byte
+	binary.LittleEndian.PutUint16(raw[:], value)
+	return raw[:]
+}
+
+func encodePaddedString(value string, padding byte) []byte {
+	raw := []byte(value)
+	if len(raw)%2 != 0 {
+		raw = append(raw, padding)
+	}
+	return raw
 }
 
 func TestAllowedOriginReceivesCORSHeaders(t *testing.T) {

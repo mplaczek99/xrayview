@@ -870,6 +870,10 @@ Yes.
 
 Prove Go can read the metadata needed for `openStudy`.
 
+### Status
+
+Completed. See [GO_BACKEND_PHASE11_PROTOTYPE_GO_DICOM_METADATA_READER.md](GO_BACKEND_PHASE11_PROTOTYPE_GO_DICOM_METADATA_READER.md).
+
 ### Why this phase exists
 
 Metadata extraction is easier than full pixel decode and is the right first DICOM step.

@@ -8,7 +8,9 @@ Current scope:
 - initialize cache and persistence roots
 - expose a local loopback HTTP/JSON server
 - return the frozen processing manifest for `get_processing_manifest`
-- validate and register studies for `open_study`
+- validate DICOM metadata and register studies for `open_study`
+- extract `open_study` metadata needed for migration parity: rows, columns, spacing tags, window defaults, photometric interpretation, and transfer syntax UID
+- populate `measurementScale` when spacing tags are present
 - write the recent-study catalog hook on study open
 - publish health/runtime metadata
 - reserve the command namespace expected by the frontend `go-sidecar` adapter
@@ -16,7 +18,8 @@ Current scope:
 
 Current non-goals:
 
-- no Go DICOM metadata reader yet
+- no Go pixel decode yet
+- no Go DICOM export yet
 - no job execution yet
 - no render/process/analyze execution yet
 
@@ -49,8 +52,13 @@ Exposed routes:
 Current command behavior:
 
 - `get_processing_manifest` returns the frozen processing manifest payload
-- `open_study` returns a Go-generated `StudyRecord` and records the recent-study catalog hook
+- `open_study` validates DICOM metadata, returns a Go-generated `StudyRecord`, and records the recent-study catalog hook
 - other command routes still return structured not-implemented backend errors
+
+Current metadata-reader limits:
+
+- full pixel decode remains out of scope for this phase
+- deflated transfer syntax is still rejected in the prototype reader
 
 Transport guarantees:
 

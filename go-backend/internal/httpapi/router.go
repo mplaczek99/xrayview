@@ -13,6 +13,7 @@ import (
 	"xrayview/go-backend/internal/cache"
 	"xrayview/go-backend/internal/config"
 	"xrayview/go-backend/internal/contracts"
+	"xrayview/go-backend/internal/dicommeta"
 	"xrayview/go-backend/internal/jobs"
 	"xrayview/go-backend/internal/persistence"
 	"xrayview/go-backend/internal/studies"
@@ -192,7 +193,16 @@ func handleOpenStudy(writer http.ResponseWriter, request *http.Request, deps Dep
 		return
 	}
 
-	study, err := deps.Studies.Register(command.InputPath, nil)
+	metadata, err := dicommeta.ReadFile(command.InputPath)
+	if err != nil {
+		writeBackendError(
+			writer,
+			contracts.InvalidInput(fmt.Sprintf("failed to read DICOM metadata: %v", err)),
+		)
+		return
+	}
+
+	study, err := deps.Studies.Register(command.InputPath, metadata.MeasurementScale())
 	if err != nil {
 		writeBackendError(
 			writer,
