@@ -303,6 +303,10 @@ Do not start with full export rewrite.
 
 Document what the Rust backend actually does today.
 
+### Status
+
+Completed. See [GO_BACKEND_PHASE0_REPOSITORY_BEHAVIOR_INVENTORY.md](GO_BACKEND_PHASE0_REPOSITORY_BEHAVIOR_INVENTORY.md).
+
 ### Why this phase exists
 
 You need a migration target grounded in actual behavior, not inferred behavior.
