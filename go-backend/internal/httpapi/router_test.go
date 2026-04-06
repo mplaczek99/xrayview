@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -86,12 +87,71 @@ func TestCommandsEndpointListsSupportedCommands(t *testing.T) {
 	}
 }
 
-func TestCommandPlaceholderReturnsBackendError(t *testing.T) {
+func TestGetProcessingManifestReturnsFrozenPayload(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(
 		http.MethodPost,
 		"/api/v1/commands/get_processing_manifest",
-		strings.NewReader("{}"),
+		nil,
+	)
+	testRouter(t).ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
+	}
+
+	var payload any
+	if err := json.NewDecoder(recorder.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode failed: %v", err)
+	}
+
+	expected := decodeJSONValue(t, `{
+		"defaultPresetId": "default",
+		"presets": [
+			{
+				"id": "default",
+				"controls": {
+					"brightness": 0,
+					"contrast": 1.0,
+					"invert": false,
+					"equalize": false,
+					"palette": "none"
+				}
+			},
+			{
+				"id": "xray",
+				"controls": {
+					"brightness": 10,
+					"contrast": 1.4,
+					"invert": false,
+					"equalize": true,
+					"palette": "bone"
+				}
+			},
+			{
+				"id": "high-contrast",
+				"controls": {
+					"brightness": 0,
+					"contrast": 1.8,
+					"invert": false,
+					"equalize": true,
+					"palette": "none"
+				}
+			}
+		]
+	}`)
+
+	if !reflect.DeepEqual(payload, expected) {
+		t.Fatalf("manifest = %#v, want %#v", payload, expected)
+	}
+}
+
+func TestUnimplementedCommandReturnsBackendError(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/commands/open_study",
+		strings.NewReader(`{"inputPath":"/tmp/sample.dcm"}`),
 	)
 	request.Header.Set("content-type", "application/json")
 	testRouter(t).ServeHTTP(recorder, request)
@@ -160,4 +220,15 @@ func TestDisallowedOriginIsRejected(t *testing.T) {
 	if payload.Code != "invalidInput" {
 		t.Fatalf("code = %q, want %q", payload.Code, "invalidInput")
 	}
+}
+
+func decodeJSONValue(t *testing.T, raw string) any {
+	t.Helper()
+
+	var value any
+	if err := json.NewDecoder(strings.NewReader(raw)).Decode(&value); err != nil {
+		t.Fatalf("decode expected JSON failed: %v", err)
+	}
+
+	return value
 }

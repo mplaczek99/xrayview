@@ -776,6 +776,10 @@ Yes.
 
 Move the simplest stable backend response to Go first.
 
+### Status
+
+Completed. See [GO_BACKEND_PHASE9_IMPLEMENT_GO_PROCESSING_MANIFEST_ENDPOINT.md](GO_BACKEND_PHASE9_IMPLEMENT_GO_PROCESSING_MANIFEST_ENDPOINT.md).
+
 ### Why this phase exists
 
 This is low risk and proves contracts + transport.

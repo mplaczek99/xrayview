@@ -123,7 +123,7 @@ func (app *App) bootstrap() error {
 	}
 
 	app.logger.Info(
-		"go backend phase 7 local transport ready",
+		"go backend ready",
 		slog.String("listen_address", app.config.ListenAddress()),
 		slog.String("cache_dir", app.cache.RootDir()),
 		slog.String("persistence_dir", app.persistence.RootDir()),

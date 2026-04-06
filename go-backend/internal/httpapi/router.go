@@ -105,13 +105,18 @@ func NewRouter(deps Dependencies) http.Handler {
 			return
 		}
 
-		deps.Logger.Info("phase 7 placeholder command hit", slog.String("command", commandName))
-		writeJSON(writer, http.StatusNotImplemented, backendError{
-			Code:        "internal",
-			Message:     fmt.Sprintf("command %s is not implemented in the Go backend yet", commandName),
-			Details:     []string{"phase=7", "transport=" + TransportKind},
-			Recoverable: true,
-		})
+		switch contracts.CommandName(commandName) {
+		case contracts.CommandGetProcessingManifest:
+			writeJSON(writer, http.StatusOK, contracts.DefaultProcessingManifest())
+		default:
+			deps.Logger.Info("go backend command not implemented", slog.String("command", commandName))
+			writeJSON(writer, http.StatusNotImplemented, backendError{
+				Code:        "internal",
+				Message:     fmt.Sprintf("command %s is not implemented in the Go backend yet", commandName),
+				Details:     []string{"transport=" + TransportKind},
+				Recoverable: true,
+			})
+		}
 	})
 
 	mux.HandleFunc("/", func(writer http.ResponseWriter, request *http.Request) {
