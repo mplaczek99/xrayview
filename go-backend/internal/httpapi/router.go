@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"xrayview/go-backend/internal/annotations"
 	"xrayview/go-backend/internal/cache"
 	"xrayview/go-backend/internal/config"
 	"xrayview/go-backend/internal/contracts"
@@ -109,6 +110,8 @@ func NewRouter(deps Dependencies) http.Handler {
 			handleGetJob(writer, request, deps)
 		case contracts.CommandCancelJob:
 			handleCancelJob(writer, request, deps)
+		case contracts.CommandMeasureLineAnnotation:
+			handleMeasureLineAnnotation(writer, request, deps)
 		default:
 			deps.Logger.Info("go backend command not implemented", slog.String("command", commandName))
 			writeJSON(writer, http.StatusNotImplemented, contracts.BackendError{
@@ -293,6 +296,34 @@ func handleCancelJob(writer http.ResponseWriter, request *http.Request, deps Dep
 	}
 
 	writeJSON(writer, http.StatusOK, snapshot)
+}
+
+func handleMeasureLineAnnotation(writer http.ResponseWriter, request *http.Request, deps Dependencies) {
+	var command contracts.MeasureLineAnnotationCommand
+	if err := decodeJSONRequest(request, &command); err != nil {
+		writeBackendError(writer, err)
+		return
+	}
+
+	studyID := strings.TrimSpace(command.StudyID)
+	if studyID == "" {
+		writeBackendError(writer, contracts.InvalidInput("studyId is required"))
+		return
+	}
+
+	study, ok := deps.Studies.Get(studyID)
+	if !ok {
+		writeBackendError(writer, contracts.NotFound(fmt.Sprintf("study not found: %s", studyID)))
+		return
+	}
+
+	writeJSON(writer, http.StatusOK, contracts.MeasureLineAnnotationCommandResult{
+		StudyID: study.StudyID,
+		Annotation: annotations.MeasureLineAnnotation(
+			command.Annotation,
+			study.MeasurementScale,
+		),
+	})
 }
 
 func decodeJSONRequest(request *http.Request, payload any) error {

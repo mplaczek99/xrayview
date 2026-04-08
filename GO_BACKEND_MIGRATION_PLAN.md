@@ -1528,6 +1528,10 @@ Yes.
 
 ## Phase 25: Port Line Measurement Logic to Go
 
+### Status
+
+Completed. See [GO_BACKEND_PHASE25_PORT_LINE_MEASUREMENT_LOGIC_TO_GO.md](GO_BACKEND_PHASE25_PORT_LINE_MEASUREMENT_LOGIC_TO_GO.md).
+
 ### Objective
 
 Move measurement helpers to Go.

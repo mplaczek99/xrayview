@@ -415,6 +415,129 @@ func TestOpenStudyReturnsNotFoundForMissingInput(t *testing.T) {
 	}
 }
 
+func TestMeasureLineAnnotationReturnsMeasuredPixels(t *testing.T) {
+	deps := testDependencies(t)
+	handler := NewRouter(deps)
+	study, err := deps.Studies.Register("/tmp/manual-measurement.dcm", nil)
+	if err != nil {
+		t.Fatalf("Register returned error: %v", err)
+	}
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/commands/measure_line_annotation",
+		strings.NewReader(
+			fmt.Sprintf(
+				`{"studyId":%q,"annotation":{"id":"line-1","label":"Measurement 1","source":"manual","start":{"x":12,"y":18},"end":{"x":15,"y":22},"editable":true}}`,
+				study.StudyID,
+			),
+		),
+	)
+	request.Header.Set("content-type", "application/json")
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
+	}
+
+	var payload contracts.MeasureLineAnnotationCommandResult
+	if err := json.NewDecoder(recorder.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode failed: %v", err)
+	}
+
+	if got, want := payload.StudyID, study.StudyID; got != want {
+		t.Fatalf("studyId = %q, want %q", got, want)
+	}
+	if payload.Annotation.Measurement == nil {
+		t.Fatal("annotation.measurement = nil, want populated measurement")
+	}
+	if got, want := payload.Annotation.Measurement.PixelLength, 5.0; got != want {
+		t.Fatalf("annotation.measurement.pixelLength = %v, want %v", got, want)
+	}
+	if payload.Annotation.Measurement.CalibratedLengthMM != nil {
+		t.Fatalf(
+			"annotation.measurement.calibratedLengthMm = %v, want nil",
+			*payload.Annotation.Measurement.CalibratedLengthMM,
+		)
+	}
+}
+
+func TestMeasureLineAnnotationReturnsCalibratedLength(t *testing.T) {
+	deps := testDependencies(t)
+	handler := NewRouter(deps)
+	study, err := deps.Studies.Register(
+		"/tmp/calibrated-measurement.dcm",
+		&contracts.MeasurementScale{
+			RowSpacingMM:    0.2,
+			ColumnSpacingMM: 0.3,
+			Source:          "PixelSpacing",
+		},
+	)
+	if err != nil {
+		t.Fatalf("Register returned error: %v", err)
+	}
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/commands/measure_line_annotation",
+		strings.NewReader(
+			fmt.Sprintf(
+				`{"studyId":%q,"annotation":{"id":"line-1","label":"Measurement 1","source":"manual","start":{"x":10,"y":8},"end":{"x":14,"y":11},"editable":true}}`,
+				study.StudyID,
+			),
+		),
+	)
+	request.Header.Set("content-type", "application/json")
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
+	}
+
+	var payload contracts.MeasureLineAnnotationCommandResult
+	if err := json.NewDecoder(recorder.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode failed: %v", err)
+	}
+
+	if payload.Annotation.Measurement == nil {
+		t.Fatal("annotation.measurement = nil, want populated measurement")
+	}
+	if payload.Annotation.Measurement.CalibratedLengthMM == nil {
+		t.Fatal("annotation.measurement.calibratedLengthMm = nil, want 1.3")
+	}
+	if got, want := *payload.Annotation.Measurement.CalibratedLengthMM, 1.3; got != want {
+		t.Fatalf("annotation.measurement.calibratedLengthMm = %v, want %v", got, want)
+	}
+}
+
+func TestMeasureLineAnnotationRejectsUnknownStudy(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/commands/measure_line_annotation",
+		strings.NewReader(
+			`{"studyId":"missing-study","annotation":{"id":"line-1","label":"Measurement 1","source":"manual","start":{"x":0,"y":0},"end":{"x":1,"y":1},"editable":true}}`,
+		),
+	)
+	request.Header.Set("content-type", "application/json")
+	testRouter(t).ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusNotFound)
+	}
+
+	var payload contracts.BackendError
+	if err := json.NewDecoder(recorder.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode failed: %v", err)
+	}
+
+	if got, want := payload.Code, contracts.BackendErrorCodeNotFound; got != want {
+		t.Fatalf("code = %q, want %q", got, want)
+	}
+}
+
 func TestRenderJobEndpointsCompletePreview(t *testing.T) {
 	command := rustdecode.CommandFromEnvironment()
 	if len(command) == 0 {
