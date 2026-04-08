@@ -264,7 +264,7 @@ func newService(
 	jobIDFactory idGenerator,
 ) *Service {
 	if cacheStore == nil {
-		cacheStore = cache.New(os.TempDir())
+		cacheStore = cache.NewWithRoot(cache.DefaultRootDir())
 	}
 	if studyRegistry == nil {
 		studyRegistry = studies.New()

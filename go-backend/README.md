@@ -5,7 +5,7 @@ This module is the current Go sidecar backend for the migration path. Phase 7 es
 Current scope:
 
 - load config from environment
-- initialize cache and persistence roots
+- initialize Rust-compatible cache and state roots under a shared disk layout
 - expose a local loopback HTTP/JSON server
 - return the frozen processing manifest for `get_processing_manifest`
 - validate DICOM metadata and register studies for `open_study`
@@ -106,3 +106,10 @@ Transport guarantees:
 - `XRAYVIEW_GO_BACKEND_PERSISTENCE_DIR`
 - `XRAYVIEW_GO_BACKEND_SHUTDOWN_TIMEOUT`
 - `XRAYVIEW_RUST_DECODE_HELPER_BIN`
+
+Default disk layout when only `XRAYVIEW_GO_BACKEND_BASE_DIR` is set or when no
+path overrides are provided:
+
+- `<temp>/xrayview/cache`
+- `<temp>/xrayview/cache/artifacts/<namespace>/<key>.<extension>`
+- `<temp>/xrayview/state/<name>`

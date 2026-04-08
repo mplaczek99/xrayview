@@ -3,6 +3,7 @@ use std::env;
 use std::error::Error;
 use std::ffi::OsString;
 use std::fmt;
+use std::fs;
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
 use std::path::PathBuf;
@@ -23,7 +24,7 @@ const SHUTDOWN_GRACE_PERIOD: Duration = Duration::from_secs(5);
 const PROBE_TIMEOUT: Duration = Duration::from_millis(350);
 const PROBE_INTERVAL: Duration = Duration::from_millis(125);
 const TEMP_ROOT_DIR_NAME: &str = "xrayview";
-const APP_PERSISTENCE_DIR_NAME: &str = "go-backend";
+const LEGACY_APP_PERSISTENCE_DIR_NAME: &str = "go-backend";
 
 #[derive(Default)]
 pub struct GoBackendSidecarState {
@@ -97,15 +98,10 @@ pub fn setup<R: Runtime>(app: &mut App<R>) -> Result<(), Box<dyn Error>> {
     }
 
     let binary_path = resolve_sidecar_binary_path(app.handle())?;
-    let cache_dir = app
-        .path()
-        .temp_dir()?
-        .join(TEMP_ROOT_DIR_NAME)
-        .join("cache");
-    let persistence_dir = app
-        .path()
-        .app_local_data_dir()?
-        .join(APP_PERSISTENCE_DIR_NAME);
+    let backend_root_dir = app.path().temp_dir()?.join(TEMP_ROOT_DIR_NAME);
+    let cache_dir = backend_root_dir.join("cache");
+    let persistence_dir = backend_root_dir.join("state");
+    migrate_legacy_catalog_if_needed(app, &persistence_dir);
     let mut command = Command::new(&binary_path);
     command
         .stdin(Stdio::null())
@@ -113,8 +109,7 @@ pub fn setup<R: Runtime>(app: &mut App<R>) -> Result<(), Box<dyn Error>> {
         .stderr(Stdio::piped())
         .env("XRAYVIEW_GO_BACKEND_HOST", &base_url.host)
         .env("XRAYVIEW_GO_BACKEND_PORT", base_url.port.to_string())
-        .env("XRAYVIEW_GO_BACKEND_CACHE_DIR", &cache_dir)
-        .env("XRAYVIEW_GO_BACKEND_PERSISTENCE_DIR", &persistence_dir);
+        .env("XRAYVIEW_GO_BACKEND_BASE_DIR", &backend_root_dir);
 
     let mut child = command.spawn().map_err(|error| {
         io::Error::other(format!(
@@ -127,8 +122,9 @@ pub fn setup<R: Runtime>(app: &mut App<R>) -> Result<(), Box<dyn Error>> {
 
     wait_for_sidecar_ready(&mut child, &base_url)?;
     eprintln!(
-        "[xrayview] go sidecar ready at {} (cache={}, persistence={})",
+        "[xrayview] go sidecar ready at {} (root={}, cache={}, persistence={})",
         base_url.raw,
+        backend_root_dir.display(),
         cache_dir.display(),
         persistence_dir.display()
     );
@@ -141,6 +137,38 @@ pub fn setup<R: Runtime>(app: &mut App<R>) -> Result<(), Box<dyn Error>> {
     *managed = Some(ManagedGoBackend { child, base_url });
 
     Ok(())
+}
+
+fn migrate_legacy_catalog_if_needed<R: Runtime>(app: &App<R>, persistence_dir: &PathBuf) {
+    let Ok(legacy_dir) = app.path().app_local_data_dir() else {
+        return;
+    };
+
+    let legacy_catalog_path = legacy_dir
+        .join(LEGACY_APP_PERSISTENCE_DIR_NAME)
+        .join("catalog.json");
+    let target_catalog_path = persistence_dir.join("catalog.json");
+    if !legacy_catalog_path.is_file() || target_catalog_path.exists() {
+        return;
+    }
+
+    if let Err(error) = fs::create_dir_all(persistence_dir)
+        .and_then(|_| fs::copy(&legacy_catalog_path, &target_catalog_path).map(|_| ()))
+    {
+        eprintln!(
+            "[xrayview] go sidecar: failed to migrate catalog from {} to {}: {}",
+            legacy_catalog_path.display(),
+            target_catalog_path.display(),
+            error
+        );
+        return;
+    }
+
+    eprintln!(
+        "[xrayview] go sidecar: migrated recent-study catalog from {} to {}",
+        legacy_catalog_path.display(),
+        target_catalog_path.display()
+    );
 }
 
 pub fn handle_run_event<R: Runtime>(app: &AppHandle<R>, event: &RunEvent) {

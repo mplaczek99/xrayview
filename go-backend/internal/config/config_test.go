@@ -2,6 +2,8 @@ package config
 
 import (
 	"log/slog"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -28,8 +30,16 @@ func TestDefaultConfigMatchesFrontendSidecarDefaults(t *testing.T) {
 		t.Fatalf("Level = %v, want %v", got, want)
 	}
 
-	if cfg.Paths.CacheDir == "" || cfg.Paths.PersistenceDir == "" {
-		t.Fatal("default paths should not be empty")
+	if got, want := cfg.Paths.BaseDir, filepath.Join(os.TempDir(), "xrayview"); got != want {
+		t.Fatalf("BaseDir = %q, want %q", got, want)
+	}
+
+	if got, want := cfg.Paths.CacheDir, filepath.Join(cfg.Paths.BaseDir, "cache"); got != want {
+		t.Fatalf("CacheDir = %q, want %q", got, want)
+	}
+
+	if got, want := cfg.Paths.PersistenceDir, filepath.Join(cfg.Paths.BaseDir, "state"); got != want {
+		t.Fatalf("PersistenceDir = %q, want %q", got, want)
 	}
 }
 
@@ -60,9 +70,36 @@ func TestLoadFromLookupAppliesOverrides(t *testing.T) {
 	if got, want := cfg.Paths.BaseDir, "/tmp/xrayview-go"; got != want {
 		t.Fatalf("BaseDir = %q, want %q", got, want)
 	}
+	if got, want := cfg.Paths.CacheDir, "/tmp/xrayview-go/cache"; got != want {
+		t.Fatalf("CacheDir = %q, want %q", got, want)
+	}
+	if got, want := cfg.Paths.PersistenceDir, "/tmp/xrayview-go/state"; got != want {
+		t.Fatalf("PersistenceDir = %q, want %q", got, want)
+	}
 
 	if got, want := cfg.Server.ShutdownTimeout, 9*time.Second; got != want {
 		t.Fatalf("ShutdownTimeout = %s, want %s", got, want)
+	}
+}
+
+func TestLoadFromLookupAllowsExplicitCacheAndPersistenceOverrides(t *testing.T) {
+	cfg, err := LoadFromLookup(lookupFromMap(map[string]string{
+		BaseDirEnvKey:        "/tmp/xrayview-go",
+		CacheDirEnvKey:       "/var/tmp/xrayview-cache",
+		PersistenceDirEnvKey: "/var/tmp/xrayview-state",
+	}))
+	if err != nil {
+		t.Fatalf("LoadFromLookup returned error: %v", err)
+	}
+
+	if got, want := cfg.Paths.BaseDir, "/tmp/xrayview-go"; got != want {
+		t.Fatalf("BaseDir = %q, want %q", got, want)
+	}
+	if got, want := cfg.Paths.CacheDir, "/var/tmp/xrayview-cache"; got != want {
+		t.Fatalf("CacheDir = %q, want %q", got, want)
+	}
+	if got, want := cfg.Paths.PersistenceDir, "/var/tmp/xrayview-state"; got != want {
+		t.Fatalf("PersistenceDir = %q, want %q", got, want)
 	}
 }
 

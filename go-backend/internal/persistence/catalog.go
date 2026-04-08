@@ -37,11 +37,15 @@ type Catalog struct {
 }
 
 func New(rootDir string) *Catalog {
-	cleanRoot := filepath.Clean(rootDir)
+	return NewAtPath(filepath.Join(filepath.Clean(rootDir), "catalog.json"))
+}
+
+func NewAtPath(path string) *Catalog {
+	cleanPath := filepath.Clean(path)
 
 	return &Catalog{
-		rootDir: cleanRoot,
-		path:    filepath.Join(cleanRoot, "catalog.json"),
+		rootDir: filepath.Dir(cleanPath),
+		path:    cleanPath,
 		now: func() time.Time {
 			return time.Now().UTC()
 		},
@@ -50,6 +54,10 @@ func New(rootDir string) *Catalog {
 
 func (catalog *Catalog) RootDir() string {
 	return catalog.rootDir
+}
+
+func (catalog *Catalog) Path() string {
+	return catalog.path
 }
 
 func (catalog *Catalog) Ensure() error {

@@ -30,11 +30,14 @@ import (
 func testDependencies(t *testing.T) Dependencies {
 	t.Helper()
 
+	rootDir := filepath.Join(t.TempDir(), "xrayview")
+	cacheStore := cache.NewWithRoot(rootDir)
+
 	return Dependencies{
 		Config:      config.Default(),
 		Logger:      slog.New(slog.NewTextHandler(io.Discard, nil)),
-		Cache:       cache.New(t.TempDir()),
-		Persistence: persistence.New(t.TempDir()),
+		Cache:       cacheStore,
+		Persistence: persistence.New(cacheStore.PersistenceDir()),
 		Studies:     studies.New(),
 		StartedAt:   time.Date(2026, time.January, 2, 3, 4, 5, 0, time.UTC),
 	}

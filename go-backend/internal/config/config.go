@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"xrayview/go-backend/internal/cache"
 	"xrayview/go-backend/internal/contracts"
 )
 
@@ -49,7 +50,7 @@ type PathsConfig struct {
 type lookupEnvFunc func(string) (string, bool)
 
 func Default() Config {
-	baseDir := filepath.Join(os.TempDir(), "xrayview-go-backend")
+	baseDir := cache.DefaultRootDir()
 
 	return Config{
 		ServiceName: contracts.ServiceName,
@@ -64,7 +65,7 @@ func Default() Config {
 		Paths: PathsConfig{
 			BaseDir:        baseDir,
 			CacheDir:       filepath.Join(baseDir, "cache"),
-			PersistenceDir: filepath.Join(baseDir, "persistence"),
+			PersistenceDir: filepath.Join(baseDir, "state"),
 		},
 	}
 }
@@ -99,7 +100,7 @@ func LoadFromLookup(lookup lookupEnvFunc) (Config, error) {
 	if value, ok := lookup(BaseDirEnvKey); ok && value != "" {
 		cfg.Paths.BaseDir = filepath.Clean(value)
 		cfg.Paths.CacheDir = filepath.Join(cfg.Paths.BaseDir, "cache")
-		cfg.Paths.PersistenceDir = filepath.Join(cfg.Paths.BaseDir, "persistence")
+		cfg.Paths.PersistenceDir = filepath.Join(cfg.Paths.BaseDir, "state")
 	}
 
 	if value, ok := lookup(CacheDirEnvKey); ok && value != "" {

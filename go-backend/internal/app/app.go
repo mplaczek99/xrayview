@@ -33,8 +33,12 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 		logger = logging.New(cfg.ServiceName, cfg.Logging.Level)
 	}
 
-	cacheStore := cache.New(cfg.Paths.CacheDir)
-	persistenceCatalog := persistence.New(cfg.Paths.PersistenceDir)
+	cacheStore := cache.NewWithPaths(cfg.Paths.CacheDir, cfg.Paths.PersistenceDir)
+	catalogPath, err := cacheStore.PersistencePath("catalog.json")
+	if err != nil {
+		return nil, err
+	}
+	persistenceCatalog := persistence.NewAtPath(catalogPath)
 	studyRegistry := studies.New()
 	jobService := jobs.New(cacheStore, studyRegistry, logger)
 	startedAt := time.Now().UTC()
