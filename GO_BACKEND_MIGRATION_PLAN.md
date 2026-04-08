@@ -2111,6 +2111,10 @@ Yes.
 
 Make the Tauri+Go sidecar desktop app releasable.
 
+### Status
+
+Completed. See [GO_BACKEND_PHASE37_INTRODUCE_GO_FIRST_PACKAGING_FLOW_UNDER_TAURI.md](GO_BACKEND_PHASE37_INTRODUCE_GO_FIRST_PACKAGING_FLOW_UNDER_TAURI.md).
+
 ### Why this phase exists
 
 Migration is not real until release flow works.
