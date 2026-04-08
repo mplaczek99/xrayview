@@ -1576,6 +1576,10 @@ Yes.
 
 Move the transformation from analysis result to editable annotations.
 
+### Status
+
+Completed. See [GO_BACKEND_PHASE26_PORT_ANNOTATION_SUGGESTION_MAPPING_TO_GO.md](GO_BACKEND_PHASE26_PORT_ANNOTATION_SUGGESTION_MAPPING_TO_GO.md).
+
 ### Why this phase exists
 
 This reduces coupling between analysis core and frontend annotations.

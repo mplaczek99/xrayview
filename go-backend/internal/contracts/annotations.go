@@ -28,6 +28,23 @@ type LineAnnotation struct {
 	Measurement *LineMeasurement `json:"measurement,omitempty"`
 }
 
+type RectangleAnnotation struct {
+	ID         string           `json:"id"`
+	Label      string           `json:"label"`
+	Source     AnnotationSource `json:"source"`
+	X          float64          `json:"x"`
+	Y          float64          `json:"y"`
+	Width      float64          `json:"width"`
+	Height     float64          `json:"height"`
+	Editable   bool             `json:"editable"`
+	Confidence *float64         `json:"confidence,omitempty"`
+}
+
+type AnnotationBundle struct {
+	Lines      []LineAnnotation      `json:"lines"`
+	Rectangles []RectangleAnnotation `json:"rectangles"`
+}
+
 type MeasureLineAnnotationCommand struct {
 	StudyID    string         `json:"studyId"`
 	Annotation LineAnnotation `json:"annotation"`
