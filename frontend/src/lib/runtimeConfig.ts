@@ -1,7 +1,6 @@
 import type { RuntimeMode } from "./types";
 
 const BACKEND_RUNTIME_ENV_KEY = "VITE_XRAYVIEW_BACKEND_RUNTIME";
-const LEGACY_DESKTOP_RUNTIME_ALIAS = "go-sidecar";
 
 export interface RuntimeConfiguration {
   mode: RuntimeMode;
@@ -16,10 +15,6 @@ function isRuntimeMode(value: string): value is RuntimeMode {
 function normalizeRuntimeMode(value: string): RuntimeMode | null {
   if (isRuntimeMode(value)) {
     return value;
-  }
-
-  if (value === LEGACY_DESKTOP_RUNTIME_ALIAS) {
-    return "desktop";
   }
 
   return null;
@@ -51,12 +46,6 @@ export function resolveRuntimeConfiguration(
       );
       mode = "mock";
     } else {
-      if (normalizedMode === LEGACY_DESKTOP_RUNTIME_ALIAS) {
-        warnings.push(
-          `${BACKEND_RUNTIME_ENV_KEY}=${LEGACY_DESKTOP_RUNTIME_ALIAS} is deprecated for the frontend; use desktop instead.`,
-        );
-      }
-
       mode = modeOverride;
     }
   }

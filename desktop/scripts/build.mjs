@@ -6,7 +6,7 @@ import { applyFrontendRuntimeEnv } from "../../frontend/scripts/runtime-env.mjs"
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, "..", "..");
-const desktopDir = path.join(repoRoot, "wails-prototype");
+const desktopDir = path.join(repoRoot, "desktop");
 const buildBinDir = path.join(desktopDir, "build", "bin");
 const defaultGoPath = process.env.HOME
   ? path.join(process.env.HOME, "go")

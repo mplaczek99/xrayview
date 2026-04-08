@@ -5,10 +5,10 @@ import { applyFrontendRuntimeEnv } from "../../frontend/scripts/runtime-env.mjs"
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, "..", "..");
-const buildScript = path.join(repoRoot, "wails-prototype", "scripts", "build.mjs");
+const buildScript = path.join(repoRoot, "desktop", "scripts", "build.mjs");
 const binaryPath = path.join(
   repoRoot,
-  "wails-prototype",
+  "desktop",
   "build",
   "bin",
   process.platform === "win32" ? "xrayview.exe" : "xrayview",

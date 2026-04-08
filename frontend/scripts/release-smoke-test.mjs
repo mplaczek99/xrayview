@@ -16,14 +16,14 @@ const goTmpDir = path.join("/tmp", "xrayview-go-tmp");
 const goPathDir = path.join("/tmp", "xrayview-go-path");
 const releaseBinary = path.join(
   workspaceRoot,
-  "wails-prototype",
+  "desktop",
   "build",
   "bin",
   process.platform === "win32" ? "xrayview.exe" : "xrayview",
 );
 const sidecarBinary = path.join(
   workspaceRoot,
-  "wails-prototype",
+  "desktop",
   "build",
   "bin",
   process.platform === "win32" ? "xrayview-go-backend.exe" : "xrayview-go-backend",

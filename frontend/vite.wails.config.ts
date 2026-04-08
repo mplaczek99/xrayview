@@ -6,7 +6,7 @@ export default mergeConfig(
   baseConfig,
   defineConfig({
     build: {
-      outDir: fileURLToPath(new URL("../wails-prototype/build/frontend/dist", import.meta.url)),
+      outDir: fileURLToPath(new URL("../desktop/build/frontend/dist", import.meta.url)),
       emptyOutDir: true,
       rollupOptions: {
         input: fileURLToPath(new URL("./index.html", import.meta.url)),

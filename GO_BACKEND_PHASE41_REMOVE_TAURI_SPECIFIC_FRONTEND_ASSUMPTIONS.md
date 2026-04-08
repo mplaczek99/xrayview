@@ -2,6 +2,8 @@
 
 This document completes phase 41 from [GO_BACKEND_MIGRATION_PLAN.md](GO_BACKEND_MIGRATION_PLAN.md). The React frontend no longer exposes the live desktop path through the migration-era `go-sidecar` label or a shell-shaped preview URL adapter. Instead, the frontend now treats the supported live path as a generic `desktop` runtime, keeps mock mode intact, and leaves the Wails-specific details behind a lower-level binding layer.
 
+Historical note: phase 41 kept a temporary `go-sidecar` compatibility alias for existing automation. Phase 44 later removed that alias so the final repo now accepts only `mock` and `desktop`.
+
 Primary implementation references:
 
 - [frontend/src/lib/runtime.ts](frontend/src/lib/runtime.ts)
@@ -21,7 +23,7 @@ Phase 41 removes that frontend-facing leak:
 
 - frontend runtime types now use `desktop` instead of `go-sidecar`
 - runtime selection now defaults to `desktop` inside the live shell and `mock` in browser-only Vite mode
-- the legacy `go-sidecar` value is still accepted as a compatibility alias so existing automation does not break immediately
+- the temporary `go-sidecar` alias was left in place in phase 41 and later removed in phase 44
 
 That makes the frontend runtime model describe the user-visible execution environment again instead of the current backend transport detail.
 
@@ -53,9 +55,9 @@ The low-level Wails binding module remains as an implementation detail, which is
 
 This phase also aligns the frontend-owned scripts and documentation with the simplified runtime naming:
 
-- frontend env handling now accepts `mock`, `desktop`, and the legacy `go-sidecar` alias
+- frontend env handling now accepts `mock` and `desktop`
 - frontend builds always receive the canonical `desktop` runtime name when the live path is selected
-- desktop launch smoke still passes the shell-compatible `go-sidecar` value to the Wails binary while treating that as the frontend's internal `desktop` mode
+- phase 41 preserved the shell-compatible `go-sidecar` alias temporarily, but the final repo now passes `desktop` end to end
 - the main README now documents `desktop` as the supported live frontend runtime name
 
 That preserves the existing shell/runtime wiring while removing migration-specific terminology from the frontend-facing contract.
@@ -66,7 +68,7 @@ Validated with:
 
 ```bash
 npm --prefix frontend run build
-GOCACHE=/tmp/xrayview-go-build-cache GOTMPDIR=/tmp/xrayview-go-tmp go -C wails-prototype test ./...
+GOCACHE=/tmp/xrayview-go-build-cache GOTMPDIR=/tmp/xrayview-go-tmp go -C desktop test ./...
 npm run wails:build
 npm run release:smoke
 ```

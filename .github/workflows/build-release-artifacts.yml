@@ -56,8 +56,8 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: wails-prototype/go.mod
-          cache-dependency-path: wails-prototype/go.mod
+          go-version-file: desktop/go.mod
+          cache-dependency-path: desktop/go.mod
 
       - name: Install frontend dependencies
         run: npm ci
@@ -72,12 +72,12 @@ jobs:
           if [ "${{ runner.os }}" = "Linux" ]; then
             arch="$(uname -m)"
             archive_name="xrayview-v${version}-${{ matrix.archive_platform }}-${arch}.${{ matrix.archive_extension }}"
-            tar -C wails-prototype/build/bin -czf "$RUNNER_TEMP/$archive_name" \
+            tar -C desktop/build/bin -czf "$RUNNER_TEMP/$archive_name" \
               "${{ matrix.shell_binary }}" \
               "${{ matrix.sidecar_binary }}"
           else
             archive_name="xrayview-v${version}-${{ matrix.archive_platform }}-x64.${{ matrix.archive_extension }}"
-            tar -a -C wails-prototype/build/bin -cf "$RUNNER_TEMP/$archive_name" \
+            tar -a -C desktop/build/bin -cf "$RUNNER_TEMP/$archive_name" \
               "${{ matrix.shell_binary }}" \
               "${{ matrix.sidecar_binary }}"
           fi

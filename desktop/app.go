@@ -102,7 +102,7 @@ func (app *DesktopApp) InvokeBackendCommand(
 	if !app.sidecar.Enabled() {
 		return errorResponse(
 			http.StatusServiceUnavailable,
-			"go-sidecar backend is disabled while the desktop shell is running in mock mode",
+			"desktop backend is disabled while the desktop shell is running in mock mode",
 			true,
 		)
 	}
@@ -240,7 +240,7 @@ func frontendDistCandidates() []string {
 	if cwd, err := os.Getwd(); err == nil {
 		paths = append(paths,
 			filepath.Join(cwd, "build", "frontend", "dist"),
-			filepath.Join(cwd, "wails-prototype", "build", "frontend", "dist"),
+			filepath.Join(cwd, "desktop", "build", "frontend", "dist"),
 		)
 	}
 

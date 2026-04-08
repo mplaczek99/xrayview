@@ -14,9 +14,8 @@ const PROBE_INTERVAL_MS = 200;
 const SUPPORTED_BACKEND_RUNTIMES = new Set([
   "mock",
   "desktop",
-  "go-sidecar",
 ]);
-const DESKTOP_RUNTIMES_REQUIRING_SIDECAR = new Set(["desktop", "go-sidecar"]);
+const DESKTOP_RUNTIMES_REQUIRING_SIDECAR = new Set(["desktop"]);
 
 function pickEnvValue(env, plainKey, viteKey) {
   const value = env[plainKey] ?? env[viteKey];
@@ -90,7 +89,7 @@ export function resolveDesktopRuntimeConfig(env = process.env) {
   const mode = rawMode === "" ? DEFAULT_DESKTOP_RUNTIME : rawMode.toLowerCase();
   if (!SUPPORTED_BACKEND_RUNTIMES.has(mode)) {
     throw new Error(
-      "XRAYVIEW_BACKEND_RUNTIME must be one of mock, desktop, or go-sidecar.",
+      "XRAYVIEW_BACKEND_RUNTIME must be one of mock or desktop.",
     );
   }
 
@@ -101,7 +100,7 @@ export function resolveDesktopRuntimeConfig(env = process.env) {
   );
 
   return {
-    mode: mode === "go-sidecar" ? "desktop" : mode,
+    mode,
     goSidecarBaseUrl: normalizeSidecarBaseUrl(rawUrl),
   };
 }

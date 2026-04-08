@@ -1,4 +1,4 @@
-module xrayview/wails-prototype
+module xrayview/desktop
 
 go 1.26.0
 

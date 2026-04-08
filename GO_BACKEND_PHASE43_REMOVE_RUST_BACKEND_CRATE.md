@@ -6,8 +6,8 @@ Primary implementation references:
 
 - [README.md](README.md)
 - [go-backend/README.md](go-backend/README.md)
-- [wails-prototype/scripts/build.mjs](wails-prototype/scripts/build.mjs)
-- [wails-prototype/README.md](wails-prototype/README.md)
+- [desktop/scripts/build.mjs](desktop/scripts/build.mjs)
+- [desktop/README.md](desktop/README.md)
 - [frontend/package.json](frontend/package.json)
 - [.github/workflows/build-release-artifacts.yml](.github/workflows/build-release-artifacts.yml)
 - [.github/workflows/publish-release.yml](.github/workflows/publish-release.yml)
@@ -36,7 +36,7 @@ Phase 43 also updates the release path so it matches the supported runtime:
 
 - GitHub Actions no longer install Rust or cache Rust build outputs
 - release jobs now build and smoke-test the Wails desktop app
-- release artifacts are archives of `wails-prototype/build/bin/`, which contains the desktop shell binary plus the Go backend sidecar
+- release artifacts are archives of `desktop/build/bin/`, which contains the desktop shell binary plus the Go backend sidecar
 - the Wails build script no longer forces `GOPROXY=off`, which keeps clean-checkout builds compatible with normal Go module resolution
 
 That aligns the repository with the real shipping surface instead of the removed Tauri/AppImage/MSI flow.
@@ -49,7 +49,7 @@ Validated with:
 npm run contracts:check
 npm run go:backend:test
 npm --prefix frontend run build
-go -C wails-prototype test ./...
+go -C desktop test ./...
 npm run release:smoke
 ```
 

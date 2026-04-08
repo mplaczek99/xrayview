@@ -41,8 +41,8 @@ var errSidecarUnavailable = errors.New("go backend is not reachable")
 type runtimeMode string
 
 const (
-	runtimeModeMock      runtimeMode = "mock"
-	runtimeModeGoSidecar runtimeMode = "go-sidecar"
+	runtimeModeMock    runtimeMode = "mock"
+	runtimeModeDesktop runtimeMode = "desktop"
 )
 
 type backendHealth struct {
@@ -76,7 +76,7 @@ func NewSidecarController() *SidecarController {
 
 	baseDir := strings.TrimSpace(os.Getenv(sidecarBaseDirEnvKey))
 	if baseDir == "" {
-		baseDir = filepath.Join(os.TempDir(), "xrayview", "wails")
+		baseDir = filepath.Join(os.TempDir(), "xrayview", "desktop")
 	}
 
 	return &SidecarController{
@@ -93,7 +93,7 @@ func NewSidecarController() *SidecarController {
 }
 
 func (controller *SidecarController) Enabled() bool {
-	return controller.mode == runtimeModeGoSidecar
+	return controller.mode == runtimeModeDesktop
 }
 
 func (controller *SidecarController) BaseURL() string {
@@ -295,12 +295,12 @@ func (controller *SidecarController) probeHealthLocked() (*backendHealth, error)
 func resolveRuntimeMode() runtimeMode {
 	raw := strings.TrimSpace(os.Getenv(sidecarRuntimeEnvKey))
 	switch strings.ToLower(raw) {
-	case "", string(runtimeModeGoSidecar):
-		return runtimeModeGoSidecar
+	case "", string(runtimeModeDesktop):
+		return runtimeModeDesktop
 	case string(runtimeModeMock):
 		return runtimeModeMock
 	default:
-		return runtimeModeGoSidecar
+		return runtimeModeDesktop
 	}
 }
 
@@ -327,7 +327,7 @@ func sidecarBinaryCandidates() []string {
 	if cwd, err := os.Getwd(); err == nil {
 		paths = append(paths,
 			filepath.Join(cwd, "build", "bin", binaryName),
-			filepath.Join(cwd, "wails-prototype", "build", "bin", binaryName),
+			filepath.Join(cwd, "desktop", "build", "bin", binaryName),
 		)
 	}
 

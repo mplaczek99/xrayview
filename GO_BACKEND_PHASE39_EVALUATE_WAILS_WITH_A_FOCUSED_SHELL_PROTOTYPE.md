@@ -1,21 +1,21 @@
 # Phase 39 Evaluate Wails with a Focused Shell Prototype
 
-This document completes phase 39 from [GO_BACKEND_MIGRATION_PLAN.md](GO_BACKEND_MIGRATION_PLAN.md). Instead of starting a full shell rewrite, phase 39 introduced a narrow `wails-prototype/` application that reused the existing React/Vite toolchain and proved the shell concerns that phase 39 explicitly called out: application launch, native open/save dialogs, preview artifact access, and one live backend call path.
+This document completes phase 39 from [GO_BACKEND_MIGRATION_PLAN.md](GO_BACKEND_MIGRATION_PLAN.md). Instead of starting a full shell rewrite, phase 39 introduced a narrow Wails shell application, now located in `desktop/`, that reused the existing React/Vite toolchain and proved the shell concerns that phase 39 explicitly called out: application launch, native open/save dialogs, preview artifact access, and one live backend call path.
 
 Historical note: phase 40 later promoted that prototype into the supported desktop shell, so the prototype-only frontend entry files that existed during phase 39 are no longer present in the current tree.
 
 Primary implementation references:
 
-- [wails-prototype/main.go](wails-prototype/main.go)
-- [wails-prototype/app.go](wails-prototype/app.go)
-- [wails-prototype/sidecar.go](wails-prototype/sidecar.go)
-- [wails-prototype/README.md](wails-prototype/README.md)
+- [desktop/main.go](desktop/main.go)
+- [desktop/app.go](desktop/app.go)
+- [desktop/sidecar.go](desktop/sidecar.go)
+- [desktop/README.md](desktop/README.md)
 - [frontend/scripts/wails-build.mjs](frontend/scripts/wails-build.mjs)
 - [frontend/vite.wails.config.ts](frontend/vite.wails.config.ts)
 
 ## 1. The Repository Now Has A Narrow Wails Shell Evaluation Path
 
-Phase 39 exists to answer whether Wails is actually a good final shell, not to assume it. The new `wails-prototype/` application keeps that scope tight:
+Phase 39 exists to answer whether Wails is actually a good final shell, not to assume it. The new Wails shell application keeps that scope tight:
 
 - it is separate from the production `frontend/src-tauri/` shell
 - it uses the existing React frontend toolchain instead of introducing a second web stack
@@ -38,7 +38,7 @@ Preview access is handled through a dedicated Wails asset-handler route at `/pre
 
 ## 3. One Real Backend Call Path Is Routed Through The Prototype
 
-The prototype does not embed backend logic. It starts the existing Go sidecar from `wails-prototype/build/bin/xrayview-go-backend`, waits for `/healthz`, and then uses the same local HTTP command boundary the migration has already standardized on.
+The prototype does not embed backend logic. It starts the existing Go sidecar from `desktop/build/bin/xrayview-go-backend`, waits for `/healthz`, and then uses the same local HTTP command boundary the migration has already standardized on.
 
 The UI drives a live `openStudy` request and displays the resulting study payload plus round-trip timing. That confirms the critical Wails question for this phase: the shell can host the frontend, own native shell responsibilities, and still communicate cleanly with the current Go backend boundary.
 
@@ -47,8 +47,8 @@ The UI drives a live `openStudy` request and displays the resulting study payloa
 The prototype adds a repo-owned build path:
 
 ```bash
-npm run wails:prototype:build
-npm run wails:prototype:run
+npm run wails:build
+npm run wails:run
 ```
 
 Key findings from this prototype:
