@@ -1,8 +1,8 @@
 # xrayview
 
-`xrayview` is a DICOM X-ray visualization and analysis workstation built with Tauri (React/TypeScript frontend, Rust backend). The repository now also includes a phase 34 Go backend sidecar path with shell-managed startup/shutdown, Go-backed study registration/render/process/analyze command support, Go-owned recent-study persistence, and default desktop `openStudy`, `processStudy`, `analyzeStudy`, and `measureLineAnnotation` flows that now run through Go.
+`xrayview` is a DICOM X-ray visualization and analysis workstation built with Tauri (React/TypeScript frontend, Rust backend). The repository now also includes a phase 35 Go backend sidecar path with shell-managed startup/shutdown, Go-backed study registration/render/process/analyze command support, Go-owned recent-study persistence, supported headless CLI workflows that now run through Go, and default desktop `openStudy`, `processStudy`, `analyzeStudy`, and `measureLineAnnotation` flows that now run through Go.
 
-The desktop UI lives in `frontend/`. The Rust backend in `backend/` still powers the in-process desktop bridge and the remaining default render flow, while the Go sidecar in `go-backend/` now owns the default desktop open/process/analyze/measurement paths and the broader migration target. The Rust backend remains library-first — Tauri calls it directly in-process (no subprocess) — and the CLI binary stays available for headless DICOM workflows.
+The desktop UI lives in `frontend/`. The Rust backend in `backend/` still powers the in-process desktop bridge and the remaining default render flow, while the Go sidecar in `go-backend/` now owns the default desktop open/process/analyze/measurement paths, the supported headless CLI workflows, and the broader migration target. The Rust backend remains library-first — Tauri calls it directly in-process (no subprocess) — while the supported CLI surface now lives under `go-backend/cmd/xrayview-cli`.
 
 ## What It Does
 
@@ -56,6 +56,9 @@ cargo build --release
 npm run go:backend:test
 npm run go:backend:build
 npm run go:backend:serve
+go -C go-backend run ./cmd/xrayview-cli -- --describe-presets
+go -C go-backend run ./cmd/xrayview-cli -- --input ../images/sample-dental-radiograph.dcm --describe-study
+go -C go-backend run ./cmd/xrayview-cli -- --input ../images/sample-dental-radiograph.dcm --preview-output /tmp/xrayview-preview.png
 go -C go-backend run ./cmd/xrayview-cli inspect-decode ../images/sample-dental-radiograph.dcm
 ```
 
@@ -81,11 +84,12 @@ Current Go command behavior:
 - `start_analyze_job` runs the Go analysis pipeline and returns suggested annotations
 - `get_job` and `cancel_job` work for Go-owned render/process/analyze jobs
 - `measure_line_annotation` recomputes pixel and calibrated lengths in Go
+- the supported headless CLI workflows now use `go -C go-backend run ./cmd/xrayview-cli -- ...` with the existing Rust-compatible flag surface
 - `inspect-decode` reports decode-relevant DICOM metadata for migration planning
 - `render-preview` exercises the phase 16 decode-to-preview pipeline from the Go CLI
 - the sidecar still depends on the narrow Rust decode helper until a future phase proves pure-Go decode is warranted
 
-See [GO_BACKEND_PHASE7_DEFINE_LOCAL_BACKEND_TRANSPORT.md](GO_BACKEND_PHASE7_DEFINE_LOCAL_BACKEND_TRANSPORT.md), [GO_BACKEND_PHASE8_ADD_TAURI_GO_PROCESS_MANAGEMENT.md](GO_BACKEND_PHASE8_ADD_TAURI_GO_PROCESS_MANAGEMENT.md), [GO_BACKEND_PHASE9_IMPLEMENT_GO_PROCESSING_MANIFEST_ENDPOINT.md](GO_BACKEND_PHASE9_IMPLEMENT_GO_PROCESSING_MANIFEST_ENDPOINT.md), [GO_BACKEND_PHASE10_IMPLEMENT_GO_STUDY_REGISTRY_AND_OPEN_STUDY.md](GO_BACKEND_PHASE10_IMPLEMENT_GO_STUDY_REGISTRY_AND_OPEN_STUDY.md), [GO_BACKEND_PHASE11_PROTOTYPE_GO_DICOM_METADATA_READER.md](GO_BACKEND_PHASE11_PROTOTYPE_GO_DICOM_METADATA_READER.md), [GO_BACKEND_PHASE12_DECIDE_DICOM_DECODE_STRATEGY.md](GO_BACKEND_PHASE12_DECIDE_DICOM_DECODE_STRATEGY.md), [GO_BACKEND_PHASE13_BUILD_TEMPORARY_RUST_DECODE_HELPER.md](GO_BACKEND_PHASE13_BUILD_TEMPORARY_RUST_DECODE_HELPER.md), [GO_BACKEND_PHASE14_IMPLEMENT_GO_PREVIEW_IMAGE_MODEL.md](GO_BACKEND_PHASE14_IMPLEMENT_GO_PREVIEW_IMAGE_MODEL.md), [GO_BACKEND_PHASE15_PORT_WINDOWING_LOGIC_TO_GO.md](GO_BACKEND_PHASE15_PORT_WINDOWING_LOGIC_TO_GO.md), [GO_BACKEND_PHASE16_PORT_BASE_RENDER_PIPELINE_TO_GO.md](GO_BACKEND_PHASE16_PORT_BASE_RENDER_PIPELINE_TO_GO.md), [GO_BACKEND_PHASE17_CUT_RENDER_STUDY_TO_GO.md](GO_BACKEND_PHASE17_CUT_RENDER_STUDY_TO_GO.md), [GO_BACKEND_PHASE28_IMPLEMENT_GO_ANALYZE_JOB.md](GO_BACKEND_PHASE28_IMPLEMENT_GO_ANALYZE_JOB.md), [GO_BACKEND_PHASE30_ADD_TEMPORARY_RUST_EXPORT_HELPER_IF_NEEDED.md](GO_BACKEND_PHASE30_ADD_TEMPORARY_RUST_EXPORT_HELPER_IF_NEEDED.md), [GO_BACKEND_PHASE31_CUT_PROCESS_STUDY_FULLY_TO_GO.md](GO_BACKEND_PHASE31_CUT_PROCESS_STUDY_FULLY_TO_GO.md), [GO_BACKEND_PHASE32_CUT_MEASURE_LINE_ANNOTATION_TO_GO.md](GO_BACKEND_PHASE32_CUT_MEASURE_LINE_ANNOTATION_TO_GO.md), [GO_BACKEND_PHASE33_CUT_OPEN_STUDY_TO_GO_IN_LIVE_DESKTOP_FLOW.md](GO_BACKEND_PHASE33_CUT_OPEN_STUDY_TO_GO_IN_LIVE_DESKTOP_FLOW.md), and [GO_BACKEND_PHASE34_CUT_ANALYZE_STUDY_TO_GO_IN_LIVE_DESKTOP_FLOW.md](GO_BACKEND_PHASE34_CUT_ANALYZE_STUDY_TO_GO_IN_LIVE_DESKTOP_FLOW.md).
+See [GO_BACKEND_PHASE7_DEFINE_LOCAL_BACKEND_TRANSPORT.md](GO_BACKEND_PHASE7_DEFINE_LOCAL_BACKEND_TRANSPORT.md), [GO_BACKEND_PHASE8_ADD_TAURI_GO_PROCESS_MANAGEMENT.md](GO_BACKEND_PHASE8_ADD_TAURI_GO_PROCESS_MANAGEMENT.md), [GO_BACKEND_PHASE9_IMPLEMENT_GO_PROCESSING_MANIFEST_ENDPOINT.md](GO_BACKEND_PHASE9_IMPLEMENT_GO_PROCESSING_MANIFEST_ENDPOINT.md), [GO_BACKEND_PHASE10_IMPLEMENT_GO_STUDY_REGISTRY_AND_OPEN_STUDY.md](GO_BACKEND_PHASE10_IMPLEMENT_GO_STUDY_REGISTRY_AND_OPEN_STUDY.md), [GO_BACKEND_PHASE11_PROTOTYPE_GO_DICOM_METADATA_READER.md](GO_BACKEND_PHASE11_PROTOTYPE_GO_DICOM_METADATA_READER.md), [GO_BACKEND_PHASE12_DECIDE_DICOM_DECODE_STRATEGY.md](GO_BACKEND_PHASE12_DECIDE_DICOM_DECODE_STRATEGY.md), [GO_BACKEND_PHASE13_BUILD_TEMPORARY_RUST_DECODE_HELPER.md](GO_BACKEND_PHASE13_BUILD_TEMPORARY_RUST_DECODE_HELPER.md), [GO_BACKEND_PHASE14_IMPLEMENT_GO_PREVIEW_IMAGE_MODEL.md](GO_BACKEND_PHASE14_IMPLEMENT_GO_PREVIEW_IMAGE_MODEL.md), [GO_BACKEND_PHASE15_PORT_WINDOWING_LOGIC_TO_GO.md](GO_BACKEND_PHASE15_PORT_WINDOWING_LOGIC_TO_GO.md), [GO_BACKEND_PHASE16_PORT_BASE_RENDER_PIPELINE_TO_GO.md](GO_BACKEND_PHASE16_PORT_BASE_RENDER_PIPELINE_TO_GO.md), [GO_BACKEND_PHASE17_CUT_RENDER_STUDY_TO_GO.md](GO_BACKEND_PHASE17_CUT_RENDER_STUDY_TO_GO.md), [GO_BACKEND_PHASE28_IMPLEMENT_GO_ANALYZE_JOB.md](GO_BACKEND_PHASE28_IMPLEMENT_GO_ANALYZE_JOB.md), [GO_BACKEND_PHASE30_ADD_TEMPORARY_RUST_EXPORT_HELPER_IF_NEEDED.md](GO_BACKEND_PHASE30_ADD_TEMPORARY_RUST_EXPORT_HELPER_IF_NEEDED.md), [GO_BACKEND_PHASE31_CUT_PROCESS_STUDY_FULLY_TO_GO.md](GO_BACKEND_PHASE31_CUT_PROCESS_STUDY_FULLY_TO_GO.md), [GO_BACKEND_PHASE32_CUT_MEASURE_LINE_ANNOTATION_TO_GO.md](GO_BACKEND_PHASE32_CUT_MEASURE_LINE_ANNOTATION_TO_GO.md), [GO_BACKEND_PHASE33_CUT_OPEN_STUDY_TO_GO_IN_LIVE_DESKTOP_FLOW.md](GO_BACKEND_PHASE33_CUT_OPEN_STUDY_TO_GO_IN_LIVE_DESKTOP_FLOW.md), [GO_BACKEND_PHASE34_CUT_ANALYZE_STUDY_TO_GO_IN_LIVE_DESKTOP_FLOW.md](GO_BACKEND_PHASE34_CUT_ANALYZE_STUDY_TO_GO_IN_LIVE_DESKTOP_FLOW.md), and [GO_BACKEND_PHASE35_MOVE_CLI_OWNERSHIP_TO_GO.md](GO_BACKEND_PHASE35_MOVE_CLI_OWNERSHIP_TO_GO.md).
 
 ### Desktop app
 
@@ -164,7 +168,7 @@ desktop command surface runs through that same bundled Go backend.
 The repository includes a public dental radiograph sample at `images/sample-dental-radiograph.dcm`. This DICOM file is derived from the Wikimedia Commons panoramic image `Dental Panorama X-ray.jpg` (CC BY 4.0). See `images/README.md` for provenance details.
 
 ```bash
-cargo run --manifest-path backend/Cargo.toml -- --input images/sample-dental-radiograph.dcm
+go -C go-backend run ./cmd/xrayview-cli -- --input ../images/sample-dental-radiograph.dcm
 ```
 
 If `--output` is omitted, the tool writes a file next to the input using this pattern:
@@ -210,35 +214,35 @@ If `--output` is omitted, the tool writes a file next to the input using this pa
 
 - `--describe-presets` — Outputs a JSON manifest of all processing presets
 - `--describe-study` — Outputs JSON study metadata (dimensions, measurement scale, calibration info)
-- `--analyze-tooth` — Runs auto-tooth detection and outputs results as JSON (requires `--preview-output`)
+- `--analyze-tooth` — Runs auto-tooth detection and outputs results as JSON (optionally writes a preview PNG via `--preview-output`)
 
 ## CLI Examples
 
 ```bash
 # Basic processing (output auto-named input_processed.dcm)
-cargo run --manifest-path backend/Cargo.toml -- --input images/sample-dental-radiograph.dcm
+go -C go-backend run ./cmd/xrayview-cli -- --input ../images/sample-dental-radiograph.dcm
 
 # Explicit output path
-cargo run --manifest-path backend/Cargo.toml -- --input images/sample-dental-radiograph.dcm --output images/output.dcm
+go -C go-backend run ./cmd/xrayview-cli -- --input ../images/sample-dental-radiograph.dcm --output /tmp/output.dcm
 
 # Tone adjustments
-cargo run --manifest-path backend/Cargo.toml -- --input images/sample-dental-radiograph.dcm --invert --brightness 15
-cargo run --manifest-path backend/Cargo.toml -- --input images/sample-dental-radiograph.dcm --contrast 1.6 --equalize
+go -C go-backend run ./cmd/xrayview-cli -- --input ../images/sample-dental-radiograph.dcm --invert --brightness 15
+go -C go-backend run ./cmd/xrayview-cli -- --input ../images/sample-dental-radiograph.dcm --contrast 1.6 --equalize
 
 # Preset with override
-cargo run --manifest-path backend/Cargo.toml -- --input images/sample-dental-radiograph.dcm --preset xray --brightness 5
+go -C go-backend run ./cmd/xrayview-cli -- --input ../images/sample-dental-radiograph.dcm --preset xray --brightness 5
 
 # Pseudocolor
-cargo run --manifest-path backend/Cargo.toml -- --input images/sample-dental-radiograph.dcm --palette hot
+go -C go-backend run ./cmd/xrayview-cli -- --input ../images/sample-dental-radiograph.dcm --palette hot
 
 # Side-by-side comparison
-cargo run --manifest-path backend/Cargo.toml -- --input images/sample-dental-radiograph.dcm --preset xray --compare
+go -C go-backend run ./cmd/xrayview-cli -- --input ../images/sample-dental-radiograph.dcm --preset xray --compare
 
 # Describe study metadata
-cargo run --manifest-path backend/Cargo.toml -- --input images/sample-dental-radiograph.dcm --describe-study
+go -C go-backend run ./cmd/xrayview-cli -- --input ../images/sample-dental-radiograph.dcm --describe-study
 
 # Auto-tooth analysis
-cargo run --manifest-path backend/Cargo.toml -- --input images/sample-dental-radiograph.dcm --analyze-tooth --preview-output /tmp/preview.png
+go -C go-backend run ./cmd/xrayview-cli -- --input ../images/sample-dental-radiograph.dcm --analyze-tooth --preview-output /tmp/preview.png
 ```
 
 ## Validation Rules
@@ -252,7 +256,7 @@ cargo run --manifest-path backend/Cargo.toml -- --input images/sample-dental-rad
 
 ### Transitional Workspace Layout
 
-- **`backend/`** — Library-first crate with modular layout: `api/`, `app/`, `study/`, `render/`, `processing/`, `analysis/`, `annotations/`, `export/`, `jobs/`, `cache/`, `persistence/`. Also provides a thin CLI binary.
+- **`backend/`** — Library-first crate with modular layout: `api/`, `app/`, `study/`, `render/`, `processing/`, `analysis/`, `annotations/`, `export/`, `jobs/`, `cache/`, `persistence/`. Still provides helper binaries for the migration path, but the supported headless CLI workflows now live in `go-backend/cmd/xrayview-cli`.
 - **`frontend/src-tauri/`** — Tauri desktop shell. Depends on the backend as a library (direct in-process calls, no subprocess).
 - **`go-backend/`** — Phase 6 Go backend module with the initial sidecar process skeleton.
 - **`go/contracts/`** — Go module for generated contract bindings owned by the language-neutral schema.

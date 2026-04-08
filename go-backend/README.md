@@ -1,6 +1,6 @@
 # xrayview Go Backend
 
-This module is the current Go sidecar backend for the migration path. Phase 7 established the local HTTP transport, phase 8 let the Tauri shell manage this process automatically for the `go-sidecar` runtime, phase 9 moved the processing manifest endpoint into Go, phase 10 moved `open_study` registration into Go, phase 11 proved metadata reading in Go, phase 12 locked the pixel-decode strategy around a narrow Rust helper instead of a premature pure-Go commitment, phase 13 added the temporary Rust decode helper plus a Go invocation layer, phase 14 introduced the shared Go-native imaging model, phase 15 ported the core Rust grayscale windowing semantics, phase 16 rendered grayscale PNG previews fully in Go on top of that decode boundary, phase 17 exposed live Go-owned render jobs over the sidecar HTTP command surface, phase 18 ported the grayscale processing controls into reusable Go code, phase 19 completed the preview-side processing pipeline with palette and compare support, phase 20 exposed live Go-owned process jobs, phase 21 moved the memory cache into Go, phase 22 aligned the disk path policy, phase 23 extracted the Go job registry, phase 24 completed recent-study persistence, phase 25 moved `measure_line_annotation` to Go, phase 26 moved annotation suggestion mapping to Go, phase 27 ported the reusable tooth-analysis primitives into Go, phase 28 exposed live Go-owned analyze jobs, phase 29 proved pure-Go Secondary Capture export, phase 30 added an optional narrow Rust export helper fallback without changing Go ownership of the workflow, phase 31 made the default desktop `processStudy` path Go-owned even while the broader desktop runtime remains Rust-first, phase 32 routed the default desktop `measureLineAnnotation` path through Go as well, phase 33 made the default desktop `openStudy` path Go-owned too, and phase 34 now makes the default desktop `analyzeStudy` path Go-owned as well.
+This module is the current Go sidecar backend for the migration path. Phase 7 established the local HTTP transport, phase 8 let the Tauri shell manage this process automatically for the `go-sidecar` runtime, phase 9 moved the processing manifest endpoint into Go, phase 10 moved `open_study` registration into Go, phase 11 proved metadata reading in Go, phase 12 locked the pixel-decode strategy around a narrow Rust helper instead of a premature pure-Go commitment, phase 13 added the temporary Rust decode helper plus a Go invocation layer, phase 14 introduced the shared Go-native imaging model, phase 15 ported the core Rust grayscale windowing semantics, phase 16 rendered grayscale PNG previews fully in Go on top of that decode boundary, phase 17 exposed live Go-owned render jobs over the sidecar HTTP command surface, phase 18 ported the grayscale processing controls into reusable Go code, phase 19 completed the preview-side processing pipeline with palette and compare support, phase 20 exposed live Go-owned process jobs, phase 21 moved the memory cache into Go, phase 22 aligned the disk path policy, phase 23 extracted the Go job registry, phase 24 completed recent-study persistence, phase 25 moved `measure_line_annotation` to Go, phase 26 moved annotation suggestion mapping to Go, phase 27 ported the reusable tooth-analysis primitives into Go, phase 28 exposed live Go-owned analyze jobs, phase 29 proved pure-Go Secondary Capture export, phase 30 added an optional narrow Rust export helper fallback without changing Go ownership of the workflow, phase 31 made the default desktop `processStudy` path Go-owned even while the broader desktop runtime remains Rust-first, phase 32 routed the default desktop `measureLineAnnotation` path through Go as well, phase 33 made the default desktop `openStudy` path Go-owned too, phase 34 made the default desktop `analyzeStudy` path Go-owned as well, and phase 35 now moves the supported headless CLI workflows onto the Go CLI while preserving the existing flag surface.
 
 Current scope:
 
@@ -40,6 +40,7 @@ Current scope:
 - run reusable tooth-analysis primitives in Go over grayscale previews: normalization, toothness, morphology, candidate scoring, geometry extraction, and measurement bundling
 - execute full tooth analysis in Go and return suggested annotations
 - own recent-study catalog persistence on study open, including duplicate-path collapse, 10-entry truncation, and corrupted-catalog recovery
+- own the supported headless CLI workflow surface previously exposed by the Rust CLI
 - publish health/runtime metadata
 - reserve the command namespace expected by the frontend `go-sidecar` adapter
 - enforce local-only host/origin rules for the sidecar transport
@@ -54,6 +55,13 @@ Current non-goals:
 
 ```bash
 go run ./cmd/xrayviewd
+go run ./cmd/xrayview-cli -- --describe-presets
+go run ./cmd/xrayview-cli -- --input ../images/sample-dental-radiograph.dcm --describe-study
+go run ./cmd/xrayview-cli -- --input ../images/sample-dental-radiograph.dcm --preview-output /tmp/xrayview-preview.png
+go run ./cmd/xrayview-cli -- --input ../images/sample-dental-radiograph.dcm --output /tmp/xrayview-output.dcm --preset xray
+go run ./cmd/xrayview-cli -- --input ../images/sample-dental-radiograph.dcm --analyze-tooth --preview-output /tmp/xrayview-analysis.png
+
+# Migration utility subcommands
 go run ./cmd/xrayview-cli print-config
 go run ./cmd/xrayview-cli inspect-decode ../images/sample-dental-radiograph.dcm
 go run ./cmd/xrayview-cli decode-source ../images/sample-dental-radiograph.dcm
@@ -65,6 +73,8 @@ go run ./cmd/xrayview-cli process-preview ../images/sample-dental-radiograph.dcm
 go run ./cmd/xrayview-cli export-secondary-capture ../images/sample-dental-radiograph.dcm /tmp/xrayview-exported.dcm --brightness 10 --contrast 1.4 --equalize
 go run ./cmd/xrayview-cli list-commands
 ```
+
+The supported headless DICOM workflow now uses the top-level flag interface shown above. The older subcommands remain available for migration-specific decode, render, and transport inspection work.
 
 When you run the desktop app through `npm run tauri:dev` or
 `npm run tauri:build`, the shell now prepares and launches this binary for any

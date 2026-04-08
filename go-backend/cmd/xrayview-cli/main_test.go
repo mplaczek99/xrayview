@@ -1,8 +1,15 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 
+	"xrayview/go-backend/internal/contracts"
 	"xrayview/go-backend/internal/processing"
 	"xrayview/go-backend/internal/render"
 )
@@ -58,4 +65,217 @@ func TestParseProcessPreviewArgsRejectsUnknownPalette(t *testing.T) {
 	if err == nil {
 		t.Fatal("parseProcessPreviewArgs returned nil error for unknown palette")
 	}
+}
+
+func TestLegacyCLIDescribeCommandsReturnJSON(t *testing.T) {
+	samplePath := sampleDicomPath(t)
+
+	manifestStdout, manifestStderr, err := runLegacyCommand(
+		"--describe-presets",
+	)
+	if err != nil {
+		t.Fatalf("describe-presets returned error: %v\nstderr:\n%s", err, manifestStderr)
+	}
+
+	var manifest struct {
+		DefaultPresetID string `json:"defaultPresetId"`
+		Presets         []struct {
+			ID string `json:"id"`
+		} `json:"presets"`
+	}
+	if err := json.Unmarshal([]byte(manifestStdout), &manifest); err != nil {
+		t.Fatalf("parse manifest stdout: %v\nstdout:\n%s", err, manifestStdout)
+	}
+	if got, want := manifest.DefaultPresetID, contracts.DefaultProcessingPresetID; got != want {
+		t.Fatalf("DefaultPresetID = %q, want %q", got, want)
+	}
+	if got, want := len(manifest.Presets), 3; got != want {
+		t.Fatalf("len(Presets) = %d, want %d", got, want)
+	}
+
+	studyStdout, studyStderr, err := runLegacyCommand(
+		"--input", samplePath,
+		"--describe-study",
+	)
+	if err != nil {
+		t.Fatalf("describe-study returned error: %v\nstderr:\n%s", err, studyStderr)
+	}
+
+	var study map[string]any
+	if err := json.Unmarshal([]byte(studyStdout), &study); err != nil {
+		t.Fatalf("parse study stdout: %v\nstdout:\n%s", err, studyStdout)
+	}
+}
+
+func TestLegacyCLIAllowsLeadingArgumentSeparator(t *testing.T) {
+	stdout, stderr, err := runLegacyCommand(
+		"--",
+		"--describe-presets",
+	)
+	if err != nil {
+		t.Fatalf("leading separator command returned error: %v\nstderr:\n%s", err, stderr)
+	}
+	if !strings.Contains(stdout, `"defaultPresetId":"default"`) {
+		t.Fatalf("stdout missing manifest payload:\n%s", stdout)
+	}
+}
+
+func TestLegacyCLIPreviewAndProcessWriteExpectedArtifacts(t *testing.T) {
+	samplePath := sampleDicomPath(t)
+	tempDir := t.TempDir()
+	previewPath := filepath.Join(tempDir, "preview.png")
+	processedPreviewPath := filepath.Join(tempDir, "processed-preview.png")
+	outputPath := filepath.Join(tempDir, "processed.dcm")
+
+	previewStdout, previewStderr, err := runLegacyCommand(
+		"--input", samplePath,
+		"--preview-output", previewPath,
+	)
+	if err != nil {
+		t.Fatalf("preview command returned error: %v\nstderr:\n%s", err, previewStderr)
+	}
+	if _, err := os.Stat(previewPath); err != nil {
+		t.Fatalf("preview output missing: %v", err)
+	}
+	if !strings.Contains(previewStdout, "loaded dicom image:") {
+		t.Fatalf("preview stdout missing load summary:\n%s", previewStdout)
+	}
+	if !strings.Contains(previewStdout, "saved grayscale preview image:") {
+		t.Fatalf("preview stdout missing preview summary:\n%s", previewStdout)
+	}
+
+	processStdout, processStderr, err := runLegacyCommand(
+		"--input", samplePath,
+		"--preview-output", processedPreviewPath,
+		"--output", outputPath,
+		"--preset", "xray",
+	)
+	if err != nil {
+		t.Fatalf("process command returned error: %v\nstderr:\n%s", err, processStderr)
+	}
+	if _, err := os.Stat(processedPreviewPath); err != nil {
+		t.Fatalf("processed preview output missing: %v", err)
+	}
+	if _, err := os.Stat(outputPath); err != nil {
+		t.Fatalf("processed dicom output missing: %v", err)
+	}
+	if !strings.Contains(processStdout, "loaded dicom image:") {
+		t.Fatalf("process stdout missing load summary:\n%s", processStdout)
+	}
+	if !strings.Contains(processStdout, "preview image:") {
+		t.Fatalf("process stdout missing preview summary:\n%s", processStdout)
+	}
+	if !strings.Contains(processStdout, "dicom image:") {
+		t.Fatalf("process stdout missing dicom summary:\n%s", processStdout)
+	}
+}
+
+func TestLegacyCLIAnalyzeToothReturnsJSONAndPreview(t *testing.T) {
+	samplePath := sampleDicomPath(t)
+	tempDir := t.TempDir()
+	previewPath := filepath.Join(tempDir, "analysis-preview.png")
+
+	stdout, stderr, err := runLegacyCommand(
+		"--input", samplePath,
+		"--preview-output", previewPath,
+		"--analyze-tooth",
+	)
+	if err != nil {
+		t.Fatalf("analyze-tooth returned error: %v\nstderr:\n%s", err, stderr)
+	}
+	if _, err := os.Stat(previewPath); err != nil {
+		t.Fatalf("analysis preview output missing: %v", err)
+	}
+
+	var analysisPayload map[string]any
+	if err := json.Unmarshal([]byte(stdout), &analysisPayload); err != nil {
+		t.Fatalf("parse analyze stdout: %v\nstdout:\n%s", err, stdout)
+	}
+
+	imagePayload, ok := analysisPayload["image"].(map[string]any)
+	if !ok {
+		t.Fatalf("image payload = %T, want map[string]any", analysisPayload["image"])
+	}
+	if _, ok := imagePayload["width"].(float64); !ok {
+		t.Fatalf("image.width = %#v, want number", imagePayload["width"])
+	}
+	if _, ok := imagePayload["height"].(float64); !ok {
+		t.Fatalf("image.height = %#v, want number", imagePayload["height"])
+	}
+	if _, ok := analysisPayload["warnings"].([]any); !ok {
+		t.Fatalf("warnings = %#v, want array", analysisPayload["warnings"])
+	}
+	if _, ok := analysisPayload["teeth"]; !ok {
+		t.Fatalf("analysis payload missing teeth field: %#v", analysisPayload)
+	}
+	if _, ok := analysisPayload["tooth"]; !ok {
+		t.Fatalf("analysis payload missing tooth field: %#v", analysisPayload)
+	}
+}
+
+func TestLegacyCLIUsesDefaultOutputPathWhenNoOutputsProvided(t *testing.T) {
+	sourcePath := sampleDicomPath(t)
+	sourceBytes, err := os.ReadFile(sourcePath)
+	if err != nil {
+		t.Fatalf("read sample source: %v", err)
+	}
+
+	tempDir := t.TempDir()
+	inputPath := filepath.Join(tempDir, "study.dcm")
+	if err := os.WriteFile(inputPath, sourceBytes, 0o644); err != nil {
+		t.Fatalf("write copied study: %v", err)
+	}
+
+	stdout, stderr, err := runLegacyCommand(
+		"--input", inputPath,
+	)
+	if err != nil {
+		t.Fatalf("default-output process command returned error: %v\nstderr:\n%s", err, stderr)
+	}
+
+	defaultOutputPath := filepath.Join(tempDir, "study_processed.dcm")
+	if _, err := os.Stat(defaultOutputPath); err != nil {
+		t.Fatalf("default processed output missing: %v", err)
+	}
+	if !strings.Contains(stdout, defaultOutputPath) {
+		t.Fatalf("stdout missing default output path %q:\n%s", defaultOutputPath, stdout)
+	}
+}
+
+func TestNormalizeLegacyToothAnalysisPreservesNullAndEmptyShapes(t *testing.T) {
+	raw, err := json.Marshal(normalizeLegacyToothAnalysis(contracts.ToothAnalysis{}))
+	if err != nil {
+		t.Fatalf("marshal normalized analysis: %v", err)
+	}
+
+	encoded := string(raw)
+	if !strings.Contains(encoded, `"tooth":null`) {
+		t.Fatalf("normalized analysis missing null tooth field: %s", encoded)
+	}
+	if !strings.Contains(encoded, `"teeth":[]`) {
+		t.Fatalf("normalized analysis missing empty teeth field: %s", encoded)
+	}
+	if !strings.Contains(encoded, `"warnings":[]`) {
+		t.Fatalf("normalized analysis missing empty warnings field: %s", encoded)
+	}
+}
+
+func runLegacyCommand(args ...string) (string, string, error) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	err := runWithIO(args, &stdout, &stderr)
+	return stdout.String(), stderr.String(), err
+}
+
+func sampleDicomPath(t *testing.T) string {
+	t.Helper()
+
+	_, currentFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("resolve current file path")
+	}
+
+	return filepath.Clean(
+		filepath.Join(filepath.Dir(currentFile), "..", "..", "..", "images", "sample-dental-radiograph.dcm"),
+	)
 }

@@ -2019,6 +2019,10 @@ Yes.
 
 Replace the Rust CLI with a Go CLI.
 
+### Status
+
+Completed. See [GO_BACKEND_PHASE35_MOVE_CLI_OWNERSHIP_TO_GO.md](GO_BACKEND_PHASE35_MOVE_CLI_OWNERSHIP_TO_GO.md).
+
 ### Why this phase exists
 
 CLI is part of backend ownership and a valuable validation harness.

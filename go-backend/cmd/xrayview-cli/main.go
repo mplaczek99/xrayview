@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/signal"
@@ -29,9 +30,21 @@ func main() {
 }
 
 func run(args []string) error {
+	return runWithIO(args, os.Stdout, os.Stderr)
+}
+
+func runWithIO(args []string, stdout, stderr io.Writer) error {
+	for len(args) > 0 && args[0] == "--" {
+		args = args[1:]
+	}
+
 	if len(args) == 0 {
-		printUsage(os.Stderr)
-		return fmt.Errorf("expected a subcommand")
+		printUsage(stderr)
+		return fmt.Errorf("expected workflow flags or a subcommand")
+	}
+
+	if strings.HasPrefix(args[0], "-") {
+		return runLegacyCLI(args, stdout, stderr)
 	}
 
 	switch args[0] {
@@ -55,13 +68,13 @@ func run(args []string) error {
 		}
 		return nil
 	case "version":
-		fmt.Printf("%s contract-v%d\n", contracts.ServiceName, contracts.BackendContractVersion)
+		fmt.Fprintf(stdout, "%s contract-v%d\n", contracts.ServiceName, contracts.BackendContractVersion)
 		return nil
 	case "help", "-h", "--help":
-		printUsage(os.Stdout)
+		printUsage(stdout)
 		return nil
 	default:
-		printUsage(os.Stderr)
+		printUsage(stderr)
 		return fmt.Errorf("unknown subcommand: %s", args[0])
 	}
 }
@@ -433,10 +446,18 @@ func windowModeLabel(mode render.WindowMode) string {
 	}
 }
 
-func printUsage(stream *os.File) {
-	fmt.Fprintln(stream, "usage: xrayview-cli <subcommand>")
+func printUsage(stream io.Writer) {
+	fmt.Fprintln(stream, "usage: xrayview-cli [workflow flags]")
+	fmt.Fprintln(stream, "       xrayview-cli <subcommand>")
 	fmt.Fprintln(stream, "")
-	fmt.Fprintln(stream, "subcommands:")
+	fmt.Fprintln(stream, "workflow flags:")
+	fmt.Fprintln(stream, "  --describe-presets                          print processing preset metadata as JSON")
+	fmt.Fprintln(stream, "  --input <study.dcm> --describe-study       print study metadata as JSON")
+	fmt.Fprintln(stream, "  --input <study.dcm> --analyze-tooth        print automatic tooth analysis as JSON")
+	fmt.Fprintln(stream, "  --input <study.dcm> --preview-output <png> render a grayscale preview PNG")
+	fmt.Fprintln(stream, "  --input <study.dcm> [processing flags]     write processed preview/DICOM output")
+	fmt.Fprintln(stream, "")
+	fmt.Fprintln(stream, "utility subcommands:")
 	fmt.Fprintln(stream, "  serve         run the phase 7 local HTTP backend")
 	fmt.Fprintln(stream, "  print-config  print resolved backend configuration as JSON")
 	fmt.Fprintln(stream, "  inspect-decode inspect decode-relevant DICOM metadata as JSON")
