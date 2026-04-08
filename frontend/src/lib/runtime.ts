@@ -389,7 +389,7 @@ export function getRuntimeAdapter(): RuntimeAdapter {
         configuration.mode === "go-sidecar"
           ? `${configuration.mode} (${configuration.goSidecarBaseUrl})`
           : configuration.mode === "legacy-rust"
-            ? `${configuration.mode} + go-sidecar(openStudy+processStudy+analyzeStudy+measureLineAnnotation @ ${configuration.goSidecarBaseUrl})`
+            ? `${configuration.mode} fallback + go-sidecar(openStudy+processStudy+analyzeStudy+measureLineAnnotation @ ${configuration.goSidecarBaseUrl})`
             : configuration.mode;
       console.info(
         `[xrayview] backend runtime: ${description} (${configuration.selectionSource})`,

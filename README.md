@@ -1,8 +1,8 @@
 # xrayview
 
-`xrayview` is a DICOM X-ray visualization and analysis workstation built with Tauri (React/TypeScript frontend, Rust backend). The repository now also includes a phase 35 Go backend sidecar path with shell-managed startup/shutdown, Go-backed study registration/render/process/analyze command support, Go-owned recent-study persistence, supported headless CLI workflows that now run through Go, and default desktop `openStudy`, `processStudy`, `analyzeStudy`, and `measureLineAnnotation` flows that now run through Go.
+`xrayview` is a DICOM X-ray visualization and analysis workstation built with Tauri (React/TypeScript frontend, Go-first desktop backend, Rust compatibility layer). The repository now includes a phase 38 Go backend sidecar path with shell-managed startup/shutdown, Go-backed study registration/render/process/analyze command support, Go-owned recent-study persistence, supported headless CLI workflows that run through Go, and a default desktop runtime that now stays on the Go sidecar by default.
 
-The desktop UI lives in `frontend/`. The Rust backend in `backend/` still powers the in-process desktop bridge and the remaining default render flow, while the Go sidecar in `go-backend/` now owns the default desktop open/process/analyze/measurement paths, the supported headless CLI workflows, and the broader migration target. The Rust backend remains library-first — Tauri calls it directly in-process (no subprocess) — while the supported CLI surface now lives under `go-backend/cmd/xrayview-cli`.
+The desktop UI lives in `frontend/`. The Go sidecar in `go-backend/` now owns the default desktop runtime and the supported CLI surface under `go-backend/cmd/xrayview-cli`, while the Rust backend in `backend/` remains available only as the temporary `legacy-rust` desktop fallback plus the narrow helper functionality that still has not been retired. The Rust backend remains library-first — Tauri calls it directly in-process (no subprocess) — but it is no longer the normal desktop execution path.
 
 ## What It Does
 
@@ -148,18 +148,19 @@ The frontend now supports three backend runtime modes:
 Defaults:
 
 - browser/Vite only: `mock`
-- Tauri desktop: `legacy-rust`
+- Tauri desktop: `go-sidecar`
 
 You can override the backend runtime with:
 
 ```bash
 XRAYVIEW_BACKEND_RUNTIME=mock npm run dev
+npm run tauri:dev
 XRAYVIEW_BACKEND_RUNTIME=legacy-rust npm run tauri:dev
 XRAYVIEW_BACKEND_RUNTIME=go-sidecar XRAYVIEW_GO_BACKEND_URL=http://127.0.0.1:38181 npm run tauri:dev
 ```
 
 `XRAYVIEW_GO_BACKEND_URL` configures the local Go sidecar for desktop runtimes that use it and must be a loopback `http://` URL such as `http://127.0.0.1:38181`. The frontend entry scripts also accept the Vite-prefixed forms `VITE_XRAYVIEW_BACKEND_RUNTIME` and `VITE_XRAYVIEW_GO_BACKEND_URL`.
-The Tauri shell now starts and stops the local Go backend automatically for desktop runtimes that need it. In the default `legacy-rust` desktop runtime, `openStudy`, `processStudy`, `analyzeStudy`, `measureLineAnnotation`, and the `get_job` and `cancel_job` polling path for Go-owned jobs now run through Go by default while `renderStudy` remains Rust-first. The `go-sidecar` runtime still routes the broader backend command surface through Go for migration testing.
+The Tauri shell now starts and stops the local Go backend automatically for desktop runtimes that need it. The default desktop runtime is now `go-sidecar`, so `openStudy`, `renderStudy`, `processStudy`, `analyzeStudy`, `measureLineAnnotation`, and the normal job polling/cancellation path all run through the bundled Go backend by default. `legacy-rust` remains available only as a temporary fallback flag; in that mode `renderStudy` still uses the Rust bridge while the already-migrated commands continue through Go.
 Phase 12 explicitly keeps full pixel decode off the Go side for now and routes the next migration step through a narrow Rust helper until a broader study corpus proves pure-Go decode is justified.
 
 ## Releases
@@ -169,11 +170,10 @@ Prebuilt desktop packages are published on GitHub Releases.
 - Linux: download the `.AppImage`, run `chmod +x <asset>.AppImage`, then run it
 - Windows: download the `.msi` installer and run it
 
-The desktop packages still default to the Rust-first desktop runtime, but that
-runtime now bundles and launches the Go sidecar as well because `openStudy`,
-`processStudy`, `analyzeStudy`, and `measureLineAnnotation` are Go-owned by
-default. When the app is built for `go-sidecar`, more of the
-desktop command surface runs through that same bundled Go backend.
+The desktop packages now default to the Go-first `go-sidecar` runtime. Build
+with `XRAYVIEW_BACKEND_RUNTIME=legacy-rust` only when you need the temporary
+Rust fallback for regression comparison; otherwise the packaged app launches
+the bundled Go backend and keeps the normal desktop command surface there.
 
 ## Basic Usage
 

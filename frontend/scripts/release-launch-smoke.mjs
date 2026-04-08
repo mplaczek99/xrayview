@@ -2,7 +2,7 @@ import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
-const DEFAULT_DESKTOP_RUNTIME = "legacy-rust";
+const DEFAULT_DESKTOP_RUNTIME = "go-sidecar";
 const DEFAULT_GO_SIDECAR_BASE_URL = "http://127.0.0.1:38181";
 const EXPECTED_SERVICE_NAME = "xrayview-go-backend";
 const EXPECTED_TRANSPORT_KIND = "local-http-json";

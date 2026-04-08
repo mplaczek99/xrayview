@@ -2161,6 +2161,10 @@ Partially.
 
 Remove Rust from the default desktop runtime path.
 
+### Status
+
+Completed. See [GO_BACKEND_PHASE38_RETIRE_LIVE_RUST_BACKEND_PATH.md](GO_BACKEND_PHASE38_RETIRE_LIVE_RUST_BACKEND_PATH.md).
+
 ### Why this phase exists
 
 By now, Rust should only remain as an optional helper, if at all.

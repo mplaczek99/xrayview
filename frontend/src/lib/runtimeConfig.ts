@@ -84,7 +84,7 @@ export function resolveRuntimeConfiguration(
   isTauriRuntime: boolean,
 ): RuntimeConfiguration {
   const warnings: string[] = [];
-  const defaultMode: RuntimeMode = isTauriRuntime ? "legacy-rust" : "mock";
+  const defaultMode: RuntimeMode = isTauriRuntime ? "go-sidecar" : "mock";
   const rawMode =
     typeof import.meta.env[BACKEND_RUNTIME_ENV_KEY] === "string"
       ? import.meta.env[BACKEND_RUNTIME_ENV_KEY]
@@ -107,6 +107,11 @@ export function resolveRuntimeConfiguration(
       mode = "mock";
     } else {
       mode = normalizedMode;
+      if (normalizedMode === "legacy-rust") {
+        warnings.push(
+          "legacy-rust is deprecated and remains available only as a temporary desktop fallback.",
+        );
+      }
     }
   }
 

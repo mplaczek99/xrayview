@@ -130,7 +130,10 @@ pub fn setup<R: Runtime>(app: &mut App<R>) -> Result<(), Box<dyn Error>> {
     wait_for_sidecar_ready(&mut child, &base_url)?;
     if runtime_mode == RuntimeMode::LegacyRust {
         eprintln!(
-            "[xrayview] go sidecar enabled for Go-owned openStudy, processStudy, analyzeStudy, and manual line measurement while the desktop runtime remains legacy-rust"
+            "[xrayview] legacy-rust desktop runtime is deprecated and remains available only as a temporary fallback"
+        );
+        eprintln!(
+            "[xrayview] go sidecar enabled for Go-owned openStudy, processStudy, analyzeStudy, and manual line measurement while legacy-rust remains selected"
         );
     }
     eprintln!(
@@ -207,8 +210,9 @@ fn resolve_runtime_mode() -> RuntimeMode {
 fn runtime_mode_from_raw(value: &str) -> RuntimeMode {
     match value.trim().to_ascii_lowercase().as_str() {
         "mock" => RuntimeMode::Mock,
+        "legacy-rust" => RuntimeMode::LegacyRust,
         "go-sidecar" => RuntimeMode::GoSidecar,
-        _ => RuntimeMode::LegacyRust,
+        _ => RuntimeMode::GoSidecar,
     }
 }
 
@@ -525,13 +529,19 @@ mod tests {
     }
 
     #[test]
-    fn go_sidecar_runtime_mode_is_detected() {
+    fn explicit_runtime_modes_are_detected() {
         assert_eq!(runtime_mode_from_raw("go-sidecar"), RuntimeMode::GoSidecar);
         assert_eq!(
             runtime_mode_from_raw("legacy-rust"),
             RuntimeMode::LegacyRust
         );
         assert_eq!(runtime_mode_from_raw("mock"), RuntimeMode::Mock);
+    }
+
+    #[test]
+    fn go_sidecar_is_the_default_runtime_mode() {
+        assert_eq!(runtime_mode_from_raw(""), RuntimeMode::GoSidecar);
+        assert_eq!(runtime_mode_from_raw("unknown"), RuntimeMode::GoSidecar);
     }
 
     #[test]

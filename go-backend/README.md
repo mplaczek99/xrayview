@@ -1,12 +1,13 @@
 # xrayview Go Backend
 
-This module is the current Go sidecar backend for the migration path. Phase 7 established the local HTTP transport, phase 8 let the Tauri shell manage this process automatically for the `go-sidecar` runtime, phase 9 moved the processing manifest endpoint into Go, phase 10 moved `open_study` registration into Go, phase 11 proved metadata reading in Go, phase 12 locked the pixel-decode strategy around a narrow Rust helper instead of a premature pure-Go commitment, phase 13 added the temporary Rust decode helper plus a Go invocation layer, phase 14 introduced the shared Go-native imaging model, phase 15 ported the core Rust grayscale windowing semantics, phase 16 rendered grayscale PNG previews fully in Go on top of that decode boundary, phase 17 exposed live Go-owned render jobs over the sidecar HTTP command surface, phase 18 ported the grayscale processing controls into reusable Go code, phase 19 completed the preview-side processing pipeline with palette and compare support, phase 20 exposed live Go-owned process jobs, phase 21 moved the memory cache into Go, phase 22 aligned the disk path policy, phase 23 extracted the Go job registry, phase 24 completed recent-study persistence, phase 25 moved `measure_line_annotation` to Go, phase 26 moved annotation suggestion mapping to Go, phase 27 ported the reusable tooth-analysis primitives into Go, phase 28 exposed live Go-owned analyze jobs, phase 29 proved pure-Go Secondary Capture export, phase 30 added an optional narrow Rust export helper fallback without changing Go ownership of the workflow, phase 31 made the default desktop `processStudy` path Go-owned even while the broader desktop runtime remains Rust-first, phase 32 routed the default desktop `measureLineAnnotation` path through Go as well, phase 33 made the default desktop `openStudy` path Go-owned too, phase 34 made the default desktop `analyzeStudy` path Go-owned as well, phase 35 moved the supported headless CLI workflows onto the Go CLI while preserving the existing flag surface, and phase 37 hardens the Tauri release path so packaged desktop builds and release smoke tests now verify that this bundled sidecar actually launches.
+This module is the current Go sidecar backend for the migration path. Phase 7 established the local HTTP transport, phase 8 let the Tauri shell manage this process automatically for the `go-sidecar` runtime, phase 9 moved the processing manifest endpoint into Go, phase 10 moved `open_study` registration into Go, phase 11 proved metadata reading in Go, phase 12 locked the pixel-decode strategy around a narrow Rust helper instead of a premature pure-Go commitment, phase 13 added the temporary Rust decode helper plus a Go invocation layer, phase 14 introduced the shared Go-native imaging model, phase 15 ported the core Rust grayscale windowing semantics, phase 16 rendered grayscale PNG previews fully in Go on top of that decode boundary, phase 17 exposed live Go-owned render jobs over the sidecar HTTP command surface, phase 18 ported the grayscale processing controls into reusable Go code, phase 19 completed the preview-side processing pipeline with palette and compare support, phase 20 exposed live Go-owned process jobs, phase 21 moved the memory cache into Go, phase 22 aligned the disk path policy, phase 23 extracted the Go job registry, phase 24 completed recent-study persistence, phase 25 moved `measure_line_annotation` to Go, phase 26 moved annotation suggestion mapping to Go, phase 27 ported the reusable tooth-analysis primitives into Go, phase 28 exposed live Go-owned analyze jobs, phase 29 proved pure-Go Secondary Capture export, phase 30 added an optional narrow Rust export helper fallback without changing Go ownership of the workflow, phase 31 made the default desktop `processStudy` path Go-owned even while the broader desktop runtime remains Rust-first, phase 32 routed the default desktop `measureLineAnnotation` path through Go as well, phase 33 made the default desktop `openStudy` path Go-owned too, phase 34 made the default desktop `analyzeStudy` path Go-owned as well, phase 35 moved the supported headless CLI workflows onto the Go CLI while preserving the existing flag surface, phase 37 hardened the Tauri release path so packaged desktop builds and release smoke tests now verify that this bundled sidecar actually launches, and phase 38 retires the live Rust backend from the default desktop runtime so packaged desktop builds now come up in `go-sidecar` mode unless `legacy-rust` is explicitly requested.
 
 Current scope:
 
 - load config from environment
 - initialize Rust-compatible cache and state roots under a shared disk layout
 - expose a local loopback HTTP/JSON server
+- own the default Tauri desktop runtime in `go-sidecar` mode while keeping `legacy-rust` available only as a temporary fallback
 - return the frozen processing manifest for `get_processing_manifest`
 - validate DICOM metadata and register studies for `open_study`
 - serve the default desktop `openStudy` flow even when the selected frontend runtime is `legacy-rust`
@@ -78,12 +79,13 @@ The supported headless DICOM workflow now uses the top-level flag interface show
 
 When you run the desktop app through `npm run tauri:dev` or
 `npm run tauri:build`, the shell now prepares and launches this binary for any
-desktop runtime that needs Go-backed behavior. In the default `legacy-rust`
-runtime that currently means `openStudy`, `processStudy`, `analyzeStudy`, and
-`measureLineAnnotation`; only `renderStudy` still uses the Rust bridge after
-lazily registering a matching Rust-side study record. In
-`go-sidecar` mode, more of the desktop command surface is routed through this
-binary. Manual
+desktop runtime that needs Go-backed behavior. The default desktop runtime is
+now `go-sidecar`, so the full open/render/process/analyze/measurement and
+job-command surface runs through this binary by default. If you explicitly
+select `legacy-rust`, the old in-process bridge remains available as a
+temporary fallback; in that mode `openStudy`, `processStudy`, `analyzeStudy`,
+and `measureLineAnnotation` still resolve through Go while `renderStudy` stays
+on the Rust bridge. Manual
 `go run ./cmd/xrayviewd` is mainly useful for direct transport inspection during
 migration work.
 
