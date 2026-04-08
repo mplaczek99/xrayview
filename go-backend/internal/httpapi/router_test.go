@@ -21,6 +21,7 @@ import (
 	"xrayview/go-backend/internal/cache"
 	"xrayview/go-backend/internal/config"
 	"xrayview/go-backend/internal/contracts"
+	"xrayview/go-backend/internal/dicommeta"
 	"xrayview/go-backend/internal/jobs"
 	"xrayview/go-backend/internal/persistence"
 	"xrayview/go-backend/internal/rustdecode"
@@ -755,6 +756,16 @@ func TestProcessJobEndpointCompletesPreview(t *testing.T) {
 			}
 			if got, want := dicomPath, outputPath; got != want {
 				t.Fatalf("dicomPath = %q, want %q", got, want)
+			}
+			if info, err := os.Stat(dicomPath); err != nil || info.IsDir() {
+				t.Fatalf("dicom artifact missing or invalid: %v", err)
+			}
+			metadata, err := dicommeta.ReadFile(dicomPath)
+			if err != nil {
+				t.Fatalf("ReadFile returned error: %v", err)
+			}
+			if got, want := metadata.TransferSyntaxUID, "1.2.840.10008.1.2.1"; got != want {
+				t.Fatalf("TransferSyntaxUID = %q, want %q", got, want)
 			}
 			return
 		}

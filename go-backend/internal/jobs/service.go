@@ -16,6 +16,7 @@ import (
 	"xrayview/go-backend/internal/annotations"
 	"xrayview/go-backend/internal/cache"
 	"xrayview/go-backend/internal/contracts"
+	dicomexport "xrayview/go-backend/internal/export"
 	"xrayview/go-backend/internal/processing"
 	"xrayview/go-backend/internal/render"
 	"xrayview/go-backend/internal/rustdecode"
@@ -579,6 +580,7 @@ func (service *Service) executeProcessJob(
 	}
 
 	if err := render.SavePreviewPNG(previewPath, output.Preview); err != nil {
+		cleanupPaths(previewPath, dicomPath)
 		service.failJob(jobID, contracts.Internal(fmt.Sprintf("write preview PNG: %v", err)))
 		return
 	}
@@ -590,13 +592,19 @@ func (service *Service) executeProcessJob(
 		jobID,
 		contracts.JobStateRunning,
 		95,
-		"resolvingOutputPath",
-		"Reserving processed DICOM path",
+		"writingDicom",
+		"Writing processed DICOM",
 	); err != nil {
 		service.failJob(jobID, err)
 		return
 	}
-	if service.finishCancelledIfRequested(ctx, jobID, "resolvingOutputPath", previewPath) {
+	if err := dicomexport.WriteSecondaryCapture(dicomPath, output.Preview, sourceStudy.Metadata); err != nil {
+		cleanupPaths(previewPath, dicomPath)
+		service.failJob(jobID, contracts.Internal(fmt.Sprintf("write processed DICOM: %v", err)))
+		return
+	}
+	if service.finishCancelledIfRequested(ctx, jobID, "writingDicom", previewPath) {
+		cleanupPaths(dicomPath)
 		return
 	}
 
@@ -790,7 +798,7 @@ func (service *Service) completeProcessJob(
 		return
 	}
 	if snapshot.State == contracts.JobStateCancelled {
-		_ = os.Remove(result.PreviewPath)
+		cleanupPaths(result.PreviewPath, result.DicomPath)
 		return
 	}
 	service.memoryCache.StoreProcess(fingerprint, result)
@@ -1012,4 +1020,13 @@ func cloneMeasurementScale(
 
 	value := *scale
 	return &value
+}
+
+func cleanupPaths(paths ...string) {
+	for _, path := range paths {
+		if strings.TrimSpace(path) == "" {
+			continue
+		}
+		_ = os.Remove(path)
+	}
 }

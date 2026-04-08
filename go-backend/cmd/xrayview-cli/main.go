@@ -15,6 +15,7 @@ import (
 	"xrayview/go-backend/internal/config"
 	"xrayview/go-backend/internal/contracts"
 	"xrayview/go-backend/internal/dicommeta"
+	dicomexport "xrayview/go-backend/internal/export"
 	"xrayview/go-backend/internal/imaging"
 	"xrayview/go-backend/internal/processing"
 	"xrayview/go-backend/internal/render"
@@ -46,6 +47,8 @@ func run(args []string) error {
 		return renderPreview(args[1:])
 	case "process-preview":
 		return processPreview(args[1:])
+	case "export-secondary-capture":
+		return exportSecondaryCapture(args[1:])
 	case "list-commands":
 		for _, command := range contracts.SupportedCommandStrings() {
 			fmt.Println(command)
@@ -240,6 +243,57 @@ func processPreview(args []string) error {
 	return encoder.Encode(summary)
 }
 
+func exportSecondaryCapture(args []string) error {
+	plan, controls, palette, compare, inputPath, outputPath, err := parseProcessPreviewArgs(args)
+	if err != nil {
+		return err
+	}
+
+	helper, err := rustdecode.NewFromEnvironment()
+	if err != nil {
+		return err
+	}
+
+	study, err := helper.DecodeStudy(context.Background(), inputPath)
+	if err != nil {
+		return err
+	}
+
+	processed, err := processing.ProcessSourceImage(study.Image, plan, controls, palette, compare)
+	if err != nil {
+		return err
+	}
+	if err := dicomexport.WriteSecondaryCapture(outputPath, processed.Preview, study.Metadata); err != nil {
+		return err
+	}
+
+	summary := struct {
+		DicomOutput       string                      `json:"dicomOutput"`
+		LoadedWidth       uint32                      `json:"loadedWidth"`
+		LoadedHeight      uint32                      `json:"loadedHeight"`
+		WindowMode        string                      `json:"windowMode"`
+		Mode              string                      `json:"mode"`
+		Palette           string                      `json:"palette"`
+		Compare           bool                        `json:"compare"`
+		MeasurementScale  *contracts.MeasurementScale `json:"measurementScale,omitempty"`
+		RenderedByteCount int                         `json:"renderedByteCount"`
+	}{
+		DicomOutput:       outputPath,
+		LoadedWidth:       study.Image.Width,
+		LoadedHeight:      study.Image.Height,
+		WindowMode:        windowModeLabel(plan.Window),
+		Mode:              processed.Mode,
+		Palette:           palette,
+		Compare:           compare,
+		MeasurementScale:  study.MeasurementScale,
+		RenderedByteCount: len(processed.Preview.Pixels),
+	}
+
+	encoder := json.NewEncoder(os.Stdout)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(summary)
+}
+
 func parseRenderPreviewArgs(args []string) (render.RenderPlan, string, string, error) {
 	plan := render.DefaultRenderPlan()
 	positional := make([]string, 0, 2)
@@ -379,6 +433,7 @@ func printUsage(stream *os.File) {
 	fmt.Fprintln(stream, "  decode-source decode source pixels through the phase 13 Rust helper")
 	fmt.Fprintln(stream, "  render-preview render a grayscale PNG preview through the phase 16 Go pipeline")
 	fmt.Fprintln(stream, "  process-preview render then run the phase 19 preview processing pipeline")
+	fmt.Fprintln(stream, "  export-secondary-capture render, process, and write a phase 29 Go DICOM export")
 	fmt.Fprintln(stream, "  list-commands print supported command names")
 	fmt.Fprintln(stream, "  version       print service and contract version")
 }

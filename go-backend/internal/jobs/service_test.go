@@ -10,6 +10,7 @@ import (
 
 	"xrayview/go-backend/internal/cache"
 	"xrayview/go-backend/internal/contracts"
+	"xrayview/go-backend/internal/dicommeta"
 	"xrayview/go-backend/internal/imaging"
 	"xrayview/go-backend/internal/rustdecode"
 	"xrayview/go-backend/internal/studies"
@@ -64,6 +65,9 @@ func TestStartRenderJobWritesPreviewAndServesCachedSnapshot(t *testing.T) {
 			RowSpacingMM:    0.25,
 			ColumnSpacingMM: 0.40,
 			Source:          "PixelSpacing",
+		},
+		Metadata: rustdecode.SourceMetadata{
+			StudyInstanceUID: "1.2.3.4.5",
 		},
 	}
 	service := newService(
@@ -362,8 +366,22 @@ func TestStartProcessJobWritesPreviewAndServesCachedSnapshot(t *testing.T) {
 	if info, err := os.Stat(result.PreviewPath); err != nil || info.IsDir() {
 		t.Fatalf("preview artifact missing or invalid: %v", err)
 	}
-	if err := os.WriteFile(result.DicomPath, []byte("dcm"), 0o644); err != nil {
-		t.Fatalf("WriteFile DICOM returned error: %v", err)
+	if info, err := os.Stat(result.DicomPath); err != nil || info.IsDir() {
+		t.Fatalf("dicom artifact missing or invalid: %v", err)
+	}
+
+	metadata, err := dicommeta.ReadFile(result.DicomPath)
+	if err != nil {
+		t.Fatalf("ReadFile returned error: %v", err)
+	}
+	if got, want := metadata.TransferSyntaxUID, "1.2.840.10008.1.2.1"; got != want {
+		t.Fatalf("TransferSyntaxUID = %q, want %q", got, want)
+	}
+	if got, want := metadata.PhotometricInterpretation, "RGB"; got != want {
+		t.Fatalf("PhotometricInterpretation = %q, want %q", got, want)
+	}
+	if got, want := metadata.SamplesPerPixel, uint16(3); got != want {
+		t.Fatalf("SamplesPerPixel = %d, want %d", got, want)
 	}
 
 	cachedStarted, err := service.StartProcessJob(contracts.ProcessStudyCommand{

@@ -1759,6 +1759,17 @@ Prototype writing:
 
 - pure-Go export is judged viable or not
 
+### Implementation note
+
+Implemented in the Go backend:
+
+- `go-backend/internal/export/secondary_capture.go` writes explicit-VR little-endian Part 10 Secondary Capture output from grayscale and RGBA previews
+- `go-backend/internal/jobs/service.go` now writes the processed `.dcm` artifact through the Go exporter instead of only reserving an output path
+- `go-backend/cmd/xrayview-cli/main.go` exposes `export-secondary-capture` for manual validation outside the desktop flow
+- Go tests validate preserved tags, generated UIDs, metadata/pixel encoding, process-job integration, and Rust-helper round-trip decode
+
+Current judgment: viable.
+
 ### Reversible
 
 Yes.
