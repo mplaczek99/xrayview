@@ -11,7 +11,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 
 	"xrayview/go-backend/internal/cache"
 	"xrayview/go-backend/internal/contracts"
@@ -28,23 +27,13 @@ type studyDecoder interface {
 type decodeHelperFactory func() (studyDecoder, error)
 type idGenerator func() (string, error)
 
-type jobEntry struct {
-	fingerprint string
-	snapshot    contracts.JobSnapshot
-	cancel      context.CancelFunc
-}
-
 type Service struct {
-	mu                 sync.RWMutex
-	supportedKinds     []contracts.JobKind
-	cache              *cache.Store
-	studies            *studies.Registry
-	logger             *slog.Logger
-	newDecoder         decodeHelperFactory
-	newJobID           idGenerator
-	memoryCache        *cache.Memory
-	jobs               map[string]*jobEntry
-	activeFingerprints map[string]string
+	supportedKinds []contracts.JobKind
+	cache          *cache.Store
+	studies        *studies.Registry
+	newDecoder     decodeHelperFactory
+	memoryCache    *cache.Memory
+	registry       *Registry
 }
 
 func New(cacheStore *cache.Store, studyRegistry *studies.Registry, logger *slog.Logger) *Service {
@@ -94,34 +83,27 @@ func (service *Service) StartRenderJob(
 		return contracts.StartedJob{JobID: snapshot.JobID}, nil
 	}
 
-	service.mu.Lock()
-	if existingJobID, ok := service.activeFingerprints[fingerprint]; ok {
-		if existing, exists := service.jobs[existingJobID]; exists && !isTerminalState(existing.snapshot.State) {
-			jobID := existing.snapshot.JobID
-			service.mu.Unlock()
-			return contracts.StartedJob{JobID: jobID}, nil
-		}
-		delete(service.activeFingerprints, fingerprint)
-	}
-
-	jobID, err := service.newJobID()
+	outcome, err := service.registry.StartJob(
+		contracts.JobKindRenderStudy,
+		study.StudyID,
+		fingerprint,
+	)
 	if err != nil {
-		service.mu.Unlock()
-		return contracts.StartedJob{}, contracts.Internal(fmt.Sprintf("generate job id: %v", err))
+		return contracts.StartedJob{}, err
+	}
+	if !outcome.Created {
+		return contracts.StartedJob{JobID: outcome.Snapshot.JobID}, nil
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	service.jobs[jobID] = &jobEntry{
-		fingerprint: fingerprint,
-		snapshot:    queuedJobSnapshot(jobID, contracts.JobKindRenderStudy, study.StudyID),
-		cancel:      cancel,
+	if err := service.registry.AttachCancel(outcome.Snapshot.JobID, cancel); err != nil {
+		cancel()
+		return contracts.StartedJob{}, err
 	}
-	service.activeFingerprints[fingerprint] = jobID
-	service.mu.Unlock()
 
-	go service.executeRenderJob(ctx, jobID, study, fingerprint)
+	go service.executeRenderJob(ctx, outcome.Snapshot.JobID, study, fingerprint)
 
-	return contracts.StartedJob{JobID: jobID}, nil
+	return contracts.StartedJob{JobID: outcome.Snapshot.JobID}, nil
 }
 
 func (service *Service) StartProcessJob(
@@ -165,34 +147,27 @@ func (service *Service) StartProcessJob(
 		return contracts.StartedJob{}, err
 	}
 
-	service.mu.Lock()
-	if existingJobID, ok := service.activeFingerprints[fingerprint]; ok {
-		if existing, exists := service.jobs[existingJobID]; exists && !isTerminalState(existing.snapshot.State) {
-			jobID := existing.snapshot.JobID
-			service.mu.Unlock()
-			return contracts.StartedJob{JobID: jobID}, nil
-		}
-		delete(service.activeFingerprints, fingerprint)
-	}
-
-	jobID, err := service.newJobID()
+	outcome, err := service.registry.StartJob(
+		contracts.JobKindProcessStudy,
+		study.StudyID,
+		fingerprint,
+	)
 	if err != nil {
-		service.mu.Unlock()
-		return contracts.StartedJob{}, contracts.Internal(fmt.Sprintf("generate job id: %v", err))
+		return contracts.StartedJob{}, err
+	}
+	if !outcome.Created {
+		return contracts.StartedJob{JobID: outcome.Snapshot.JobID}, nil
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	service.jobs[jobID] = &jobEntry{
-		fingerprint: fingerprint,
-		snapshot:    queuedJobSnapshot(jobID, contracts.JobKindProcessStudy, study.StudyID),
-		cancel:      cancel,
+	if err := service.registry.AttachCancel(outcome.Snapshot.JobID, cancel); err != nil {
+		cancel()
+		return contracts.StartedJob{}, err
 	}
-	service.activeFingerprints[fingerprint] = jobID
-	service.mu.Unlock()
 
 	go service.executeProcessJob(
 		ctx,
-		jobID,
+		outcome.Snapshot.JobID,
 		study,
 		resolved,
 		fingerprint,
@@ -200,7 +175,7 @@ func (service *Service) StartProcessJob(
 		dicomPath,
 	)
 
-	return contracts.StartedJob{JobID: jobID}, nil
+	return contracts.StartedJob{JobID: outcome.Snapshot.JobID}, nil
 }
 
 func (service *Service) GetJob(command contracts.JobCommand) (contracts.JobSnapshot, error) {
@@ -209,14 +184,7 @@ func (service *Service) GetJob(command contracts.JobCommand) (contracts.JobSnaps
 		return contracts.JobSnapshot{}, contracts.InvalidInput("jobId is required")
 	}
 
-	service.mu.RLock()
-	entry, ok := service.jobs[jobID]
-	service.mu.RUnlock()
-	if !ok {
-		return contracts.JobSnapshot{}, contracts.NotFound(fmt.Sprintf("job not found: %s", jobID))
-	}
-
-	return entry.snapshot, nil
+	return service.registry.Get(jobID)
 }
 
 func (service *Service) CancelJob(command contracts.JobCommand) (contracts.JobSnapshot, error) {
@@ -225,35 +193,7 @@ func (service *Service) CancelJob(command contracts.JobCommand) (contracts.JobSn
 		return contracts.JobSnapshot{}, contracts.InvalidInput("jobId is required")
 	}
 
-	service.mu.Lock()
-	defer service.mu.Unlock()
-
-	entry, ok := service.jobs[jobID]
-	if !ok {
-		return contracts.JobSnapshot{}, contracts.NotFound(fmt.Sprintf("job not found: %s", jobID))
-	}
-
-	switch entry.snapshot.State {
-	case contracts.JobStateQueued:
-		entry.snapshot.State = contracts.JobStateCancelled
-		entry.snapshot.Progress.Message = "Cancelled before start"
-		entry.snapshot.Error = nil
-		if entry.cancel != nil {
-			entry.cancel()
-			entry.cancel = nil
-		}
-		service.releaseFingerprintLocked(entry.fingerprint)
-	case contracts.JobStateRunning:
-		entry.snapshot.State = contracts.JobStateCancelling
-		entry.snapshot.Progress.Message = "Cancellation requested"
-		entry.snapshot.Error = nil
-		if entry.cancel != nil {
-			entry.cancel()
-		}
-	case contracts.JobStateCancelling, contracts.JobStateCompleted, contracts.JobStateFailed, contracts.JobStateCancelled:
-	}
-
-	return entry.snapshot, nil
+	return service.registry.Cancel(jobID)
 }
 
 func newService(
@@ -287,14 +227,11 @@ func newService(
 			contracts.JobKindProcessStudy,
 			contracts.JobKindAnalyzeStudy,
 		},
-		cache:              cacheStore,
-		studies:            studyRegistry,
-		logger:             logger,
-		newDecoder:         decoderFactory,
-		newJobID:           jobIDFactory,
-		memoryCache:        cache.NewMemory(logger),
-		jobs:               make(map[string]*jobEntry),
-		activeFingerprints: make(map[string]string),
+		cache:       cacheStore,
+		studies:     studyRegistry,
+		newDecoder:  decoderFactory,
+		memoryCache: cache.NewMemory(logger),
+		registry:    NewRegistry(jobIDFactory),
 	}
 }
 
@@ -302,30 +239,22 @@ func (service *Service) cachedRenderSnapshot(
 	fingerprint string,
 	studyID string,
 ) (contracts.JobSnapshot, bool, error) {
-	service.mu.Lock()
-	defer service.mu.Unlock()
-
 	cached, ok := service.memoryCache.LoadRender(fingerprint)
 	if !ok {
 		return contracts.JobSnapshot{}, false, nil
 	}
 
-	jobID, err := service.newJobID()
-	if err != nil {
-		return contracts.JobSnapshot{}, false, contracts.Internal(fmt.Sprintf("generate job id: %v", err))
-	}
-
-	snapshot := completedJobSnapshot(
-		jobID,
+	snapshot, err := service.registry.CreateCachedJob(
 		contracts.JobKindRenderStudy,
 		studyID,
-		true,
 		contracts.JobResult{
 			Kind:    contracts.JobKindRenderStudy,
 			Payload: cached,
 		},
 	)
-	service.jobs[jobID] = &jobEntry{snapshot: snapshot}
+	if err != nil {
+		return contracts.JobSnapshot{}, false, err
+	}
 
 	return snapshot, true, nil
 }
@@ -334,30 +263,22 @@ func (service *Service) cachedProcessSnapshot(
 	fingerprint string,
 	studyID string,
 ) (contracts.JobSnapshot, bool, error) {
-	service.mu.Lock()
-	defer service.mu.Unlock()
-
 	cached, ok := service.memoryCache.LoadProcess(fingerprint)
 	if !ok {
 		return contracts.JobSnapshot{}, false, nil
 	}
 
-	jobID, err := service.newJobID()
-	if err != nil {
-		return contracts.JobSnapshot{}, false, contracts.Internal(fmt.Sprintf("generate job id: %v", err))
-	}
-
-	snapshot := completedJobSnapshot(
-		jobID,
+	snapshot, err := service.registry.CreateCachedJob(
 		contracts.JobKindProcessStudy,
 		studyID,
-		true,
 		contracts.JobResult{
 			Kind:    contracts.JobKindProcessStudy,
 			Payload: cached,
 		},
 	)
-	service.jobs[jobID] = &jobEntry{snapshot: snapshot}
+	if err != nil {
+		return contracts.JobSnapshot{}, false, err
+	}
 
 	return snapshot, true, nil
 }
@@ -621,26 +542,8 @@ func (service *Service) transitionJob(
 	stage string,
 	message string,
 ) error {
-	service.mu.Lock()
-	defer service.mu.Unlock()
-
-	entry, ok := service.jobs[jobID]
-	if !ok {
-		return contracts.NotFound(fmt.Sprintf("job not found: %s", jobID))
-	}
-	if isTerminalState(entry.snapshot.State) || entry.snapshot.State == contracts.JobStateCancelling {
-		return nil
-	}
-
-	entry.snapshot.State = state
-	entry.snapshot.Progress = contracts.JobProgress{
-		Percent: percent,
-		Stage:   stage,
-		Message: message,
-	}
-	entry.snapshot.Error = nil
-
-	return nil
+	_, err := service.registry.UpdateProgress(jobID, state, percent, stage, message)
+	return err
 }
 
 func (service *Service) finishCancelledIfRequested(
@@ -649,14 +552,18 @@ func (service *Service) finishCancelledIfRequested(
 	stage string,
 	previewPath string,
 ) bool {
-	if ctx.Err() == nil {
+	cancelled, err := service.registry.IsCancellationRequested(jobID)
+	if err != nil {
+		return false
+	}
+	if !cancelled && ctx.Err() == nil {
 		return false
 	}
 
 	if previewPath != "" {
 		_ = os.Remove(previewPath)
 	}
-	service.markCancelled(jobID, stage, "Cancelled by user")
+	_, _ = service.registry.MarkCancelled(jobID, stage, "Cancelled by user")
 	return true
 }
 
@@ -665,39 +572,17 @@ func (service *Service) completeRenderJob(
 	fingerprint string,
 	result contracts.RenderStudyCommandResult,
 ) {
-	service.mu.Lock()
-	defer service.mu.Unlock()
-
-	entry, ok := service.jobs[jobID]
-	if !ok {
-		return
-	}
-
-	if entry.snapshot.State == contracts.JobStateCancelling || entry.snapshot.State == contracts.JobStateCancelled {
-		_ = os.Remove(result.PreviewPath)
-		entry.snapshot.State = contracts.JobStateCancelled
-		entry.snapshot.Progress.Message = "Cancelled by user"
-		entry.snapshot.Error = nil
-		entry.snapshot.Result = nil
-		entry.cancel = nil
-		service.releaseFingerprintLocked(fingerprint)
-		return
-	}
-
-	entry.snapshot.State = contracts.JobStateCompleted
-	entry.snapshot.Progress = contracts.JobProgress{
-		Percent: 100,
-		Stage:   "completed",
-		Message: "Completed",
-	}
-	entry.snapshot.FromCache = false
-	entry.snapshot.Result = &contracts.JobResult{
+	snapshot, err := service.registry.Complete(jobID, contracts.JobResult{
 		Kind:    contracts.JobKindRenderStudy,
 		Payload: result,
+	})
+	if err != nil {
+		return
 	}
-	entry.snapshot.Error = nil
-	entry.cancel = nil
-	service.releaseFingerprintLocked(fingerprint)
+	if snapshot.State == contracts.JobStateCancelled {
+		_ = os.Remove(result.PreviewPath)
+		return
+	}
 	service.memoryCache.StoreRender(fingerprint, result)
 }
 
@@ -706,39 +591,17 @@ func (service *Service) completeProcessJob(
 	fingerprint string,
 	result contracts.ProcessStudyCommandResult,
 ) {
-	service.mu.Lock()
-	defer service.mu.Unlock()
-
-	entry, ok := service.jobs[jobID]
-	if !ok {
-		return
-	}
-
-	if entry.snapshot.State == contracts.JobStateCancelling || entry.snapshot.State == contracts.JobStateCancelled {
-		_ = os.Remove(result.PreviewPath)
-		entry.snapshot.State = contracts.JobStateCancelled
-		entry.snapshot.Progress.Message = "Cancelled by user"
-		entry.snapshot.Error = nil
-		entry.snapshot.Result = nil
-		entry.cancel = nil
-		service.releaseFingerprintLocked(fingerprint)
-		return
-	}
-
-	entry.snapshot.State = contracts.JobStateCompleted
-	entry.snapshot.Progress = contracts.JobProgress{
-		Percent: 100,
-		Stage:   "completed",
-		Message: "Completed",
-	}
-	entry.snapshot.FromCache = false
-	entry.snapshot.Result = &contracts.JobResult{
+	snapshot, err := service.registry.Complete(jobID, contracts.JobResult{
 		Kind:    contracts.JobKindProcessStudy,
 		Payload: result,
+	})
+	if err != nil {
+		return
 	}
-	entry.snapshot.Error = nil
-	entry.cancel = nil
-	service.releaseFingerprintLocked(fingerprint)
+	if snapshot.State == contracts.JobStateCancelled {
+		_ = os.Remove(result.PreviewPath)
+		return
+	}
 	service.memoryCache.StoreProcess(fingerprint, result)
 }
 
@@ -748,60 +611,7 @@ func (service *Service) failJob(jobID string, err error) {
 		backendErr = contracts.Internal(err.Error())
 	}
 
-	service.mu.Lock()
-	defer service.mu.Unlock()
-
-	entry, ok := service.jobs[jobID]
-	if !ok {
-		return
-	}
-
-	if entry.snapshot.State == contracts.JobStateCancelling || entry.snapshot.State == contracts.JobStateCancelled {
-		entry.snapshot.State = contracts.JobStateCancelled
-		entry.snapshot.Progress.Message = "Cancelled by user"
-		entry.snapshot.Error = nil
-		entry.snapshot.Result = nil
-		entry.cancel = nil
-		service.releaseFingerprintLocked(entry.fingerprint)
-		return
-	}
-
-	entry.snapshot.State = contracts.JobStateFailed
-	entry.snapshot.Progress.Message = "Failed"
-	entry.snapshot.Error = &backendErr
-	entry.snapshot.Result = nil
-	entry.cancel = nil
-	service.releaseFingerprintLocked(entry.fingerprint)
-}
-
-func (service *Service) markCancelled(jobID string, stage string, message string) {
-	service.mu.Lock()
-	defer service.mu.Unlock()
-
-	entry, ok := service.jobs[jobID]
-	if !ok {
-		return
-	}
-
-	entry.snapshot.State = contracts.JobStateCancelled
-	if stage != "" {
-		entry.snapshot.Progress.Stage = stage
-	}
-	if message != "" {
-		entry.snapshot.Progress.Message = message
-	}
-	entry.snapshot.Error = nil
-	entry.snapshot.Result = nil
-	entry.cancel = nil
-	service.releaseFingerprintLocked(entry.fingerprint)
-}
-
-func (service *Service) releaseFingerprintLocked(fingerprint string) {
-	if fingerprint == "" {
-		return
-	}
-
-	delete(service.activeFingerprints, fingerprint)
+	_, _ = service.registry.Fail(jobID, backendErr)
 }
 
 func queuedJobSnapshot(
