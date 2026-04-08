@@ -190,7 +190,7 @@ func renderPreview(args []string) error {
 }
 
 func processPreview(args []string) error {
-	plan, controls, inputPath, outputPath, err := parseProcessPreviewArgs(args)
+	plan, controls, palette, compare, inputPath, outputPath, err := parseProcessPreviewArgs(args)
 	if err != nil {
 		return err
 	}
@@ -205,12 +205,11 @@ func processPreview(args []string) error {
 		return err
 	}
 
-	preview := render.RenderSourceImage(study.Image, plan)
-	processed, mode, err := processing.ProcessPreviewImage(preview, controls)
+	processed, err := processing.ProcessSourceImage(study.Image, plan, controls, palette, compare)
 	if err != nil {
 		return err
 	}
-	if err := render.SavePreviewPNG(outputPath, processed); err != nil {
+	if err := render.SavePreviewPNG(outputPath, processed.Preview); err != nil {
 		return err
 	}
 
@@ -220,6 +219,8 @@ func processPreview(args []string) error {
 		LoadedHeight      uint32                      `json:"loadedHeight"`
 		WindowMode        string                      `json:"windowMode"`
 		Mode              string                      `json:"mode"`
+		Palette           string                      `json:"palette"`
+		Compare           bool                        `json:"compare"`
 		MeasurementScale  *contracts.MeasurementScale `json:"measurementScale,omitempty"`
 		RenderedByteCount int                         `json:"renderedByteCount"`
 	}{
@@ -227,9 +228,11 @@ func processPreview(args []string) error {
 		LoadedWidth:       study.Image.Width,
 		LoadedHeight:      study.Image.Height,
 		WindowMode:        windowModeLabel(plan.Window),
-		Mode:              mode,
+		Mode:              processed.Mode,
+		Palette:           palette,
+		Compare:           compare,
 		MeasurementScale:  study.MeasurementScale,
-		RenderedByteCount: len(processed.Pixels),
+		RenderedByteCount: len(processed.Preview.Pixels),
 	}
 
 	encoder := json.NewEncoder(os.Stdout)
@@ -264,9 +267,11 @@ func parseRenderPreviewArgs(args []string) (render.RenderPlan, string, string, e
 
 func parseProcessPreviewArgs(
 	args []string,
-) (render.RenderPlan, processing.GrayscaleControls, string, string, error) {
+) (render.RenderPlan, processing.GrayscaleControls, string, bool, string, string, error) {
 	plan := render.DefaultRenderPlan()
 	controls := processing.GrayscaleControls{Contrast: 1.0}
+	palette := processing.PaletteNone
+	compare := false
 	positional := make([]string, 0, 2)
 
 	for index := 0; index < len(args); index++ {
@@ -279,9 +284,11 @@ func parseProcessPreviewArgs(
 			controls.Invert = true
 		case "--equalize":
 			controls.Equalize = true
+		case "--compare":
+			compare = true
 		case "--brightness":
 			if index+1 >= len(args) {
-				return render.RenderPlan{}, processing.GrayscaleControls{}, "", "", fmt.Errorf(
+				return render.RenderPlan{}, processing.GrayscaleControls{}, "", false, "", "", fmt.Errorf(
 					"process-preview flag %s requires a value",
 					arg,
 				)
@@ -290,7 +297,7 @@ func parseProcessPreviewArgs(
 			index += 1
 			value, err := strconv.Atoi(args[index])
 			if err != nil {
-				return render.RenderPlan{}, processing.GrayscaleControls{}, "", "", fmt.Errorf(
+				return render.RenderPlan{}, processing.GrayscaleControls{}, "", false, "", "", fmt.Errorf(
 					"parse process-preview brightness %q: %w",
 					args[index],
 					err,
@@ -299,7 +306,7 @@ func parseProcessPreviewArgs(
 			controls.Brightness = value
 		case "--contrast":
 			if index+1 >= len(args) {
-				return render.RenderPlan{}, processing.GrayscaleControls{}, "", "", fmt.Errorf(
+				return render.RenderPlan{}, processing.GrayscaleControls{}, "", false, "", "", fmt.Errorf(
 					"process-preview flag %s requires a value",
 					arg,
 				)
@@ -308,16 +315,30 @@ func parseProcessPreviewArgs(
 			index += 1
 			value, err := strconv.ParseFloat(args[index], 64)
 			if err != nil {
-				return render.RenderPlan{}, processing.GrayscaleControls{}, "", "", fmt.Errorf(
+				return render.RenderPlan{}, processing.GrayscaleControls{}, "", false, "", "", fmt.Errorf(
 					"parse process-preview contrast %q: %w",
 					args[index],
 					err,
 				)
 			}
 			controls.Contrast = value
+		case "--palette":
+			if index+1 >= len(args) {
+				return render.RenderPlan{}, processing.GrayscaleControls{}, "", false, "", "", fmt.Errorf(
+					"process-preview flag %s requires a value",
+					arg,
+				)
+			}
+
+			index += 1
+			normalized, err := processing.NormalizePaletteName(args[index])
+			if err != nil {
+				return render.RenderPlan{}, processing.GrayscaleControls{}, "", false, "", "", err
+			}
+			palette = normalized
 		default:
 			if strings.HasPrefix(arg, "-") {
-				return render.RenderPlan{}, processing.GrayscaleControls{}, "", "", fmt.Errorf(
+				return render.RenderPlan{}, processing.GrayscaleControls{}, "", false, "", "", fmt.Errorf(
 					"unknown process-preview flag: %s",
 					arg,
 				)
@@ -327,12 +348,12 @@ func parseProcessPreviewArgs(
 	}
 
 	if len(positional) != 2 {
-		return render.RenderPlan{}, processing.GrayscaleControls{}, "", "", fmt.Errorf(
-			"process-preview requires INPUT_DCM OUTPUT_PNG and accepts optional --full-range, --invert, --brightness, --contrast, and --equalize",
+		return render.RenderPlan{}, processing.GrayscaleControls{}, "", false, "", "", fmt.Errorf(
+			"process-preview requires INPUT_DCM OUTPUT_PNG and accepts optional --full-range, --invert, --brightness, --contrast, --equalize, --palette, and --compare",
 		)
 	}
 
-	return plan, controls, positional[0], positional[1], nil
+	return plan, controls, palette, compare, positional[0], positional[1], nil
 }
 
 func windowModeLabel(mode render.WindowMode) string {
@@ -357,7 +378,7 @@ func printUsage(stream *os.File) {
 	fmt.Fprintln(stream, "  inspect-decode inspect decode-relevant DICOM metadata as JSON")
 	fmt.Fprintln(stream, "  decode-source decode source pixels through the phase 13 Rust helper")
 	fmt.Fprintln(stream, "  render-preview render a grayscale PNG preview through the phase 16 Go pipeline")
-	fmt.Fprintln(stream, "  process-preview render then apply phase 18 grayscale processing controls")
+	fmt.Fprintln(stream, "  process-preview render then run the phase 19 preview processing pipeline")
 	fmt.Fprintln(stream, "  list-commands print supported command names")
 	fmt.Fprintln(stream, "  version       print service and contract version")
 }
