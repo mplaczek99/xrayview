@@ -2206,6 +2206,10 @@ Yes, briefly.
 
 Confirm Wails is actually the right final shell in practice.
 
+### Status
+
+Completed. See [GO_BACKEND_PHASE39_EVALUATE_WAILS_WITH_A_FOCUSED_SHELL_PROTOTYPE.md](GO_BACKEND_PHASE39_EVALUATE_WAILS_WITH_A_FOCUSED_SHELL_PROTOTYPE.md).
+
 ### Why this phase exists
 
 This should be proven, not assumed.

@@ -9,6 +9,8 @@ frontend/.vite/
 frontend/*.tsbuildinfo
 frontend/vite.config.js
 frontend/vite.config.d.ts
+wails-prototype/build/
+wails-prototype/frontend/dist/
 
 # Tauri generated files
 frontend/src-tauri/binaries/
