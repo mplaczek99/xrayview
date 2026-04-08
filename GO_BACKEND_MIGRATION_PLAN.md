@@ -1887,6 +1887,10 @@ Yes.
 
 Remove one more live Rust dependency.
 
+### Status
+
+Completed. See [GO_BACKEND_PHASE32_CUT_MEASURE_LINE_ANNOTATION_TO_GO.md](GO_BACKEND_PHASE32_CUT_MEASURE_LINE_ANNOTATION_TO_GO.md).
+
 ### Why this phase exists
 
 This is easy cleanup with visible user impact.

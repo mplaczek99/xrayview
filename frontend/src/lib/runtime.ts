@@ -314,8 +314,10 @@ function createLegacyDesktopRuntimeAdapter(
 
       return rustBackend.cancelJob(jobId);
     },
-    measureLineAnnotation: (studyId, annotation) =>
-      rustBackend.measureLineAnnotation(studyId, annotation),
+    measureLineAnnotation: async (studyId, annotation) => {
+      const goStudyId = await ensureGoStudyId(studyId);
+      return goBackend.measureLineAnnotation(goStudyId, annotation);
+    },
   };
 
   return {
@@ -391,7 +393,7 @@ export function getRuntimeAdapter(): RuntimeAdapter {
         configuration.mode === "go-sidecar"
           ? `${configuration.mode} (${configuration.goSidecarBaseUrl})`
           : configuration.mode === "legacy-rust"
-            ? `${configuration.mode} + go-sidecar(processStudy @ ${configuration.goSidecarBaseUrl})`
+            ? `${configuration.mode} + go-sidecar(processStudy+measureLineAnnotation @ ${configuration.goSidecarBaseUrl})`
             : configuration.mode;
       console.info(
         `[xrayview] backend runtime: ${description} (${configuration.selectionSource})`,
