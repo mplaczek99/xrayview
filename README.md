@@ -1,40 +1,58 @@
-# xrayview
+<h1 align="center">xrayview</h1>
 
-`xrayview` is a DICOM X-ray visualization and analysis workstation built with a
-Wails desktop shell, a React/TypeScript frontend, and a Go backend.
+<p align="center">
+  A DICOM X-ray visualization and analysis workstation<br>
+  built with a <strong>Wails</strong> desktop shell, a <strong>React/TypeScript</strong> frontend, and a <strong>Go</strong> backend.
+</p>
 
-## Important Notice
+> [!CAUTION]
+> This tool is for **image visualization only**.
+> It is not a medical device and must not be used for medical diagnosis,
+> clinical decisions, or treatment planning.
 
-This tool is for image visualization only.
+---
 
-It is not a medical device and must not be used for medical diagnosis,
-clinical decisions, or treatment planning.
-
-## Repository Layout
-
-- `frontend/` - React workstation UI and frontend build/test scripts
-- `desktop/` - supported Wails desktop shell
-- `backend/` - supported Go backend service and CLI
-- `contracts/` - language-neutral backend contract schema, scripts, and generated Go bindings
-- `images/` - sample DICOM assets used for development and smoke validation
-
-## What The App Does
+## Features
 
 - Open local DICOM studies (`.dcm`, `.dicom`)
 - Render PNG previews for the workstation viewer
-- Apply grayscale processing, palettes, and compare output
+- Apply grayscale processing, palettes, and side-by-side comparison
 - Export processed results as DICOM Secondary Capture files
 - Run background render, process, and analyze jobs with cancellation
-- Measure line annotations with calibration-aware distances when spacing metadata is available
+- Measure line annotations with calibration-aware distances when pixel spacing metadata is available
 - Suggest tooth annotations from the Go analysis pipeline
 - Persist a recent-studies catalog
 
-The user-facing workflow is DICOM in and DICOM out. PNG previews are an
-internal display artifact for the desktop UI.
+> The user-facing workflow is **DICOM in, DICOM out**. PNG previews are an
+> internal display artifact for the desktop UI.
 
-## Developer Onboarding
+---
 
-Install dependencies and verify the core repo paths:
+## Repository Layout
+
+```
+xrayview/
+├── frontend/    React/TypeScript workstation UI (Vite, strict mode)
+├── desktop/     Wails desktop shell (Go module)
+├── backend/     Go backend service & headless CLI (Go module)
+│   ├── cmd/xrayviewd       HTTP server entrypoint
+│   ├── cmd/xrayview-cli    headless CLI
+│   └── internal/           domain packages
+├── contracts/   shared JSON schema + generated TS & Go bindings (Go module)
+└── images/      sample DICOM assets for dev & smoke testing
+```
+
+---
+
+## Getting Started
+
+### Prerequisites
+
+- [Go](https://go.dev/) 1.22+
+- [Node.js](https://nodejs.org/) 20+
+- [Wails](https://wails.io/) v2 (for desktop builds)
+
+### Install & verify
 
 ```bash
 npm install
@@ -43,138 +61,169 @@ npm run backend:test
 go -C desktop test ./...
 ```
 
-### Browser Mock Mode
+### Browser mock mode
 
-Use the React app without the live desktop shell:
+Run the React UI with synthetic data — no backend needed:
 
 ```bash
 npm run dev
 ```
 
-Browser/Vite runs default to `mock` mode.
+### Desktop app
 
-### Desktop App
-
-Build and launch the supported Wails shell:
+Build and launch the Wails shell with the live Go backend:
 
 ```bash
-npm run wails:run
+npm run wails:run          # dev launch
+npm run wails:build        # release-style binaries
 ```
 
-Build release-style binaries without launching:
+<details>
+<summary>Build outputs</summary>
 
-```bash
-npm run wails:build
-```
+| Artifact | Path |
+|---|---|
+| Frontend assets | `desktop/build/frontend/dist/` |
+| Desktop shell binary | `desktop/build/bin/xrayview` |
+| Backend sidecar | `desktop/build/bin/xrayview-backend` |
 
-Build outputs:
+</details>
 
-- frontend assets: `desktop/build/frontend/dist/`
-- desktop shell binary: `desktop/build/bin/xrayview`
-- bundled backend sidecar: `desktop/build/bin/xrayview-backend`
-
-### Release Smoke
-
-Validate the supported release path end to end:
+### Release smoke test
 
 ```bash
 npm run release:smoke
 ```
 
-That flow checks contract drift, runs the Go backend test suite, builds the
-frontend and Wails shell, and launches the desktop binary long enough to confirm
-the bundled backend sidecar comes up when the environment supports GUI launch
-smoke.
+Checks contract drift, runs backend tests, builds frontend + Wails shell, and
+confirms the bundled sidecar starts up.
+
+---
 
 ## Runtime Modes
 
-Supported runtime modes:
+| Mode | Default in | Description |
+|---|---|---|
+| `mock` | Browser / Vite | Synthetic data, no backend |
+| `desktop` | Wails shell | Live Go backend over loopback HTTP |
 
-- `mock`
-- `desktop`
-
-Defaults:
-
-- browser/Vite: `mock`
-- Wails desktop shell: `desktop`
-
-Overrides:
+Override with environment variables:
 
 ```bash
 XRAYVIEW_BACKEND_RUNTIME=mock npm run dev
-XRAYVIEW_BACKEND_RUNTIME=mock npm run wails:run
 XRAYVIEW_BACKEND_RUNTIME=desktop XRAYVIEW_BACKEND_URL=http://127.0.0.1:38181 npm run wails:run
 ```
 
-`XRAYVIEW_BACKEND_URL` must be an absolute loopback `http://` URL such as
-`http://127.0.0.1:38181`.
+---
 
 ## Go Backend
 
-The Go backend sidecar binds to `127.0.0.1:38181` by default and exposes:
+The backend sidecar binds to `127.0.0.1:38181` by default. The transport is
+**intentionally local-only** — it only binds to loopback and is never exposed
+in mock mode.
 
-- `GET /healthz`
-- `GET /api/v1/runtime`
-- `GET /api/v1/commands`
-- `POST /api/v1/commands/{command}`
+### HTTP endpoints
 
-The transport is intentionally local-only:
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/healthz` | Health check |
+| `GET` | `/api/v1/runtime` | Runtime info & supported commands |
+| `GET` | `/api/v1/commands` | List available commands |
+| `POST` | `/api/v1/commands/{command}` | Execute a command |
 
-- the backend binds only to loopback hosts
-- the Wails shell talks to the Go backend over loopback HTTP
-- browser/mock mode does not expose the live backend transport
+### Command surface
 
-Current Go-owned command surface:
+| Command | Purpose |
+|---|---|
+| `get_processing_manifest` | Available processing presets |
+| `open_study` | Open a DICOM study |
+| `start_render_job` | Render a preview |
+| `start_process_job` | Run processing pipeline |
+| `start_analyze_job` | Run analysis pipeline |
+| `get_job` | Poll job state |
+| `cancel_job` | Cancel a running job |
+| `measure_line_annotation` | Calibration-aware line measurement |
 
-- `get_processing_manifest`
-- `open_study`
-- `start_render_job`
-- `start_process_job`
-- `start_analyze_job`
-- `get_job`
-- `cancel_job`
-- `measure_line_annotation`
+---
 
 ## CLI
 
-The supported headless CLI lives at `backend/cmd/xrayview-cli`.
+The headless CLI lives at `backend/cmd/xrayview-cli` and supports **utility
+subcommands** and **legacy workflow flags**.
 
-Examples:
+### Utility subcommands
+
+```bash
+# Server & info
+go -C backend run ./cmd/xrayview-cli serve            # start the HTTP backend
+go -C backend run ./cmd/xrayview-cli print-config      # resolved config as JSON
+go -C backend run ./cmd/xrayview-cli version           # service + contract version
+go -C backend run ./cmd/xrayview-cli list-commands     # supported backend commands
+
+# DICOM inspection
+go -C backend run ./cmd/xrayview-cli inspect-decode ../images/sample-dental-radiograph.dcm
+go -C backend run ./cmd/xrayview-cli decode-source  ../images/sample-dental-radiograph.dcm
+
+# Render & process
+go -C backend run ./cmd/xrayview-cli render-preview ../images/sample-dental-radiograph.dcm /tmp/preview.png
+go -C backend run ./cmd/xrayview-cli render-preview --full-range ../images/sample-dental-radiograph.dcm /tmp/preview.png
+go -C backend run ./cmd/xrayview-cli process-preview --invert --equalize ../images/sample-dental-radiograph.dcm /tmp/processed.png
+
+# Export
+go -C backend run ./cmd/xrayview-cli export-secondary-capture --palette hot ../images/sample-dental-radiograph.dcm /tmp/export.dcm
+```
+
+<details>
+<summary>Legacy workflow flags</summary>
 
 ```bash
 go -C backend run ./cmd/xrayview-cli -- --describe-presets
-go -C backend run ./cmd/xrayview-cli -- --input ../images/sample-dental-radiograph.dcm
 go -C backend run ./cmd/xrayview-cli -- --input ../images/sample-dental-radiograph.dcm --describe-study
-go -C backend run ./cmd/xrayview-cli -- --input ../images/sample-dental-radiograph.dcm --preview-output /tmp/xrayview-preview.png
-go -C backend run ./cmd/xrayview-cli inspect-decode ../images/sample-dental-radiograph.dcm
+go -C backend run ./cmd/xrayview-cli -- --input ../images/sample-dental-radiograph.dcm --analyze-tooth
+go -C backend run ./cmd/xrayview-cli -- --input ../images/sample-dental-radiograph.dcm --preview-output /tmp/preview.png
 ```
 
-The repository includes a public dental radiograph sample at
-`images/sample-dental-radiograph.dcm`. See `images/README.md` for provenance
-details.
+</details>
+
+> A public dental radiograph sample is included at
+> `images/sample-dental-radiograph.dcm`. See `images/README.md` for provenance.
+
+---
 
 ## Contracts
 
-The contract source of truth lives in
-`contracts/backend-contract-v1.schema.json`.
-
-Generate bindings:
+The single source of truth is `contracts/backend-contract-v1.schema.json`.
 
 ```bash
-npm run contracts:generate
+npm run contracts:generate    # regenerate bindings
+npm run contracts:check       # verify bindings are up to date
 ```
 
-This regenerates:
+Generated files (do not edit manually):
 
 - `frontend/src/lib/generated/contracts.ts`
 - `contracts/contractv1/bindings.go`
 
-## Architecture Notes
+---
 
-- `frontend/` owns the workstation UI and mock-mode behavior.
-- `desktop/` owns native shell concerns: window lifecycle, dialogs, preview
-  asset serving, and backend sidecar lifecycle management.
-- `backend/` owns the supported backend runtime: decode, render, process,
-  analyze, export, jobs, cache, and persistence.
-- `contracts/` keeps the frontend and backend on the same command payload
-  shapes.
+## Architecture
+
+The project is a monorepo with **three independent Go modules** and a
+React/TypeScript frontend. There is no Go workspace file; modules use `replace`
+directives for local dependencies.
+
+| Module | Responsibility |
+|---|---|
+| `frontend/` | Workstation UI and mock-mode behavior |
+| `desktop/` | Native shell: window lifecycle, dialogs, preview serving, sidecar management |
+| `backend/` | DICOM decode, render, processing, analysis, annotations, export, jobs, cache, persistence |
+| `contracts/` | Shared command payload shapes via JSON schema |
+
+```
+┌─────────────┐     Wails binding     ┌─────────────┐    loopback HTTP    ┌─────────────┐
+│  React UI   │ ◄──────────────────► │   Desktop   │ ◄──────────────────► │ Go Backend  │
+│  (frontend) │                       │   (desktop) │                      │  (backend)  │
+└─────────────┘                       └─────────────┘                      └─────────────┘
+                                              ▲                                    ▲
+                                              └────────── contracts ───────────────┘
+```
