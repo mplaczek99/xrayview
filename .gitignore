@@ -25,3 +25,7 @@ AGENTS.md
 CLAUDE.md
 .DS_Store
 *.log
+
+# My personal images
+images/BMP/
+images/TIF/
