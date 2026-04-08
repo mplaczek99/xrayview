@@ -1,6 +1,6 @@
 # xrayview Go Backend
 
-This module is the current Go sidecar backend for the migration path. Phase 7 established the local HTTP transport, phase 8 let the Tauri shell manage this process automatically for the `go-sidecar` runtime, phase 9 moved the processing manifest endpoint into Go, phase 10 moved `open_study` registration into Go, phase 11 proved metadata reading in Go, phase 12 locked the pixel-decode strategy around a narrow Rust helper instead of a premature pure-Go commitment, phase 13 added the temporary Rust decode helper plus a Go invocation layer, phase 14 introduced the shared Go-native imaging model, phase 15 ported the core Rust grayscale windowing semantics, and phase 16 now renders grayscale PNG previews fully in Go on top of that decode boundary.
+This module is the current Go sidecar backend for the migration path. Phase 7 established the local HTTP transport, phase 8 let the Tauri shell manage this process automatically for the `go-sidecar` runtime, phase 9 moved the processing manifest endpoint into Go, phase 10 moved `open_study` registration into Go, phase 11 proved metadata reading in Go, phase 12 locked the pixel-decode strategy around a narrow Rust helper instead of a premature pure-Go commitment, phase 13 added the temporary Rust decode helper plus a Go invocation layer, phase 14 introduced the shared Go-native imaging model, phase 15 ported the core Rust grayscale windowing semantics, phase 16 rendered grayscale PNG previews fully in Go on top of that decode boundary, and phase 17 now exposes live Go-owned render jobs over the sidecar HTTP command surface.
 
 Current scope:
 
@@ -17,6 +17,9 @@ Current scope:
 - resolve embedded, manual, and full-range grayscale window modes with Rust-equivalent mapping behavior
 - render grayscale preview pixels from decoded source studies in Go
 - encode rendered preview buffers as PNG output
+- execute `start_render_job` in Go and store preview artifacts under the cache tree
+- return live `get_job` snapshots for render jobs
+- support render-job cancellation and cache hits in the Go job registry
 - populate `measurementScale` when spacing tags are present
 - write the recent-study catalog hook on study open
 - publish health/runtime metadata
@@ -27,10 +30,9 @@ Current non-goals:
 
 - no Go pixel decode yet
 - phase 12 intentionally does not claim pure-Go decode readiness from the current narrow sample corpus
-- no HTTP command uses the Rust decode helper yet
 - no Go DICOM export yet
-- no job execution yet
-- no live HTTP render/process/analyze execution yet beyond the internal render-preview CLI and reusable phase 16 render package
+- no live Go process/analyze job execution yet
+- `measure_line_annotation` still remains for a later migration phase
 
 ## Commands
 
@@ -66,8 +68,9 @@ Current command behavior:
 
 - `get_processing_manifest` returns the frozen processing manifest payload
 - `open_study` validates DICOM metadata, returns a Go-generated `StudyRecord`, and records the recent-study catalog hook
-- other command routes still return structured not-implemented backend errors
-- the phase 16 render pipeline currently exists as internal Go code plus the `render-preview` CLI path; the HTTP job endpoints remain for phase 17
+- `start_render_job` runs the phase 17 render pipeline through the Go job service
+- `get_job` and `cancel_job` now work for Go-owned render jobs
+- process/analyze/measurement command routes still return structured not-implemented backend errors
 
 Current metadata-reader limits:
 

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -21,6 +22,7 @@ import (
 	"xrayview/go-backend/internal/contracts"
 	"xrayview/go-backend/internal/jobs"
 	"xrayview/go-backend/internal/persistence"
+	"xrayview/go-backend/internal/rustdecode"
 	"xrayview/go-backend/internal/studies"
 )
 
@@ -32,16 +34,20 @@ func testDependencies(t *testing.T) Dependencies {
 		Logger:      slog.New(slog.NewTextHandler(io.Discard, nil)),
 		Cache:       cache.New(t.TempDir()),
 		Persistence: persistence.New(t.TempDir()),
-		Jobs:        jobs.New(),
 		Studies:     studies.New(),
 		StartedAt:   time.Date(2026, time.January, 2, 3, 4, 5, 0, time.UTC),
 	}
 }
 
+func withJobService(deps Dependencies) Dependencies {
+	deps.Jobs = jobs.New(deps.Cache, deps.Studies, deps.Logger)
+	return deps
+}
+
 func testRouter(t *testing.T) http.Handler {
 	t.Helper()
 
-	return NewRouter(testDependencies(t))
+	return NewRouter(withJobService(testDependencies(t)))
 }
 
 func TestHealthzIncludesContractMetadata(t *testing.T) {
@@ -326,12 +332,117 @@ func TestOpenStudyReturnsNotFoundForMissingInput(t *testing.T) {
 	}
 }
 
+func TestRenderJobEndpointsCompletePreview(t *testing.T) {
+	command := rustdecode.CommandFromEnvironment()
+	if len(command) == 0 {
+		t.Skip("no rust decode helper command is configured")
+	}
+	if command[0] == "cargo" {
+		if _, err := exec.LookPath("cargo"); err != nil {
+			t.Skip("cargo is not available and no prebuilt decode helper binary was configured")
+		}
+	}
+
+	deps := withJobService(testDependencies(t))
+	handler := NewRouter(deps)
+	inputPath := sampleDicomPath(t)
+
+	openRecorder := httptest.NewRecorder()
+	openRequest := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/commands/open_study",
+		strings.NewReader(`{"inputPath":"`+inputPath+`"}`),
+	)
+	openRequest.Header.Set("content-type", "application/json")
+	handler.ServeHTTP(openRecorder, openRequest)
+
+	if openRecorder.Code != http.StatusOK {
+		t.Fatalf("open status = %d, want %d", openRecorder.Code, http.StatusOK)
+	}
+
+	var opened contracts.OpenStudyCommandResult
+	if err := json.NewDecoder(openRecorder.Body).Decode(&opened); err != nil {
+		t.Fatalf("decode open payload failed: %v", err)
+	}
+
+	startRecorder := httptest.NewRecorder()
+	startRequest := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/commands/start_render_job",
+		strings.NewReader(`{"studyId":"`+opened.Study.StudyID+`"}`),
+	)
+	startRequest.Header.Set("content-type", "application/json")
+	handler.ServeHTTP(startRecorder, startRequest)
+
+	if startRecorder.Code != http.StatusOK {
+		t.Fatalf("start_render_job status = %d, want %d", startRecorder.Code, http.StatusOK)
+	}
+
+	var started contracts.StartedJob
+	if err := json.NewDecoder(startRecorder.Body).Decode(&started); err != nil {
+		t.Fatalf("decode started job failed: %v", err)
+	}
+
+	deadline := time.Now().Add(2 * time.Minute)
+	for time.Now().Before(deadline) {
+		getRecorder := httptest.NewRecorder()
+		getRequest := httptest.NewRequest(
+			http.MethodPost,
+			"/api/v1/commands/get_job",
+			strings.NewReader(`{"jobId":"`+started.JobID+`"}`),
+		)
+		getRequest.Header.Set("content-type", "application/json")
+		handler.ServeHTTP(getRecorder, getRequest)
+
+		if getRecorder.Code != http.StatusOK {
+			t.Fatalf("get_job status = %d, want %d", getRecorder.Code, http.StatusOK)
+		}
+
+		var snapshot contracts.JobSnapshot
+		if err := json.NewDecoder(getRecorder.Body).Decode(&snapshot); err != nil {
+			t.Fatalf("decode job snapshot failed: %v", err)
+		}
+
+		switch snapshot.State {
+		case contracts.JobStateQueued, contracts.JobStateRunning, contracts.JobStateCancelling:
+			time.Sleep(25 * time.Millisecond)
+		case contracts.JobStateFailed:
+			t.Fatalf("render job failed: %#v", snapshot.Error)
+		case contracts.JobStateCancelled:
+			t.Fatal("render job was cancelled unexpectedly")
+		case contracts.JobStateCompleted:
+			if snapshot.Result == nil {
+				t.Fatal("completed render job returned nil result")
+			}
+			if got, want := snapshot.Result.Kind, contracts.JobKindRenderStudy; got != want {
+				t.Fatalf("result kind = %q, want %q", got, want)
+			}
+
+			payload, ok := snapshot.Result.Payload.(map[string]any)
+			if !ok {
+				t.Fatalf("result payload type = %T, want map[string]any", snapshot.Result.Payload)
+			}
+
+			previewPath, ok := payload["previewPath"].(string)
+			if !ok || previewPath == "" {
+				t.Fatalf("previewPath = %#v, want non-empty string", payload["previewPath"])
+			}
+			if info, err := os.Stat(previewPath); err != nil || info.IsDir() {
+				t.Fatalf("preview artifact missing or invalid: %v", err)
+			}
+			return
+		}
+	}
+
+	t.Fatal("render job did not complete before timeout")
+}
+
 func TestUnimplementedCommandReturnsBackendError(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(
 		http.MethodPost,
-		"/api/v1/commands/start_render_job",
-		strings.NewReader(`{"studyId":"study-1"}`),
+		"/api/v1/commands/start_process_job",
+		strings.NewReader(`{"studyId":"study-1","presetId":"default","invert":false,"equalize":false,"compare":false}`),
 	)
 	request.Header.Set("content-type", "application/json")
 	testRouter(t).ServeHTTP(recorder, request)

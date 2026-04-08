@@ -101,6 +101,12 @@ func NewRouter(deps Dependencies) http.Handler {
 			writeJSON(writer, http.StatusOK, contracts.DefaultProcessingManifest())
 		case contracts.CommandOpenStudy:
 			handleOpenStudy(writer, request, deps)
+		case contracts.CommandStartRenderJob:
+			handleStartRenderJob(writer, request, deps)
+		case contracts.CommandGetJob:
+			handleGetJob(writer, request, deps)
+		case contracts.CommandCancelJob:
+			handleCancelJob(writer, request, deps)
 		default:
 			deps.Logger.Info("go backend command not implemented", slog.String("command", commandName))
 			writeJSON(writer, http.StatusNotImplemented, contracts.BackendError{
@@ -221,6 +227,54 @@ func handleOpenStudy(writer http.ResponseWriter, request *http.Request, deps Dep
 	}
 
 	writeJSON(writer, http.StatusOK, contracts.OpenStudyCommandResult{Study: study})
+}
+
+func handleStartRenderJob(writer http.ResponseWriter, request *http.Request, deps Dependencies) {
+	var command contracts.RenderStudyCommand
+	if err := decodeJSONRequest(request, &command); err != nil {
+		writeBackendError(writer, err)
+		return
+	}
+
+	started, err := deps.Jobs.StartRenderJob(command)
+	if err != nil {
+		writeBackendError(writer, err)
+		return
+	}
+
+	writeJSON(writer, http.StatusOK, started)
+}
+
+func handleGetJob(writer http.ResponseWriter, request *http.Request, deps Dependencies) {
+	var command contracts.JobCommand
+	if err := decodeJSONRequest(request, &command); err != nil {
+		writeBackendError(writer, err)
+		return
+	}
+
+	snapshot, err := deps.Jobs.GetJob(command)
+	if err != nil {
+		writeBackendError(writer, err)
+		return
+	}
+
+	writeJSON(writer, http.StatusOK, snapshot)
+}
+
+func handleCancelJob(writer http.ResponseWriter, request *http.Request, deps Dependencies) {
+	var command contracts.JobCommand
+	if err := decodeJSONRequest(request, &command); err != nil {
+		writeBackendError(writer, err)
+		return
+	}
+
+	snapshot, err := deps.Jobs.CancelJob(command)
+	if err != nil {
+		writeBackendError(writer, err)
+		return
+	}
+
+	writeJSON(writer, http.StatusOK, snapshot)
 }
 
 func decodeJSONRequest(request *http.Request, payload any) error {

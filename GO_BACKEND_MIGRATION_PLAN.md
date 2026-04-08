@@ -1164,6 +1164,10 @@ Yes.
 
 Make preview rendering the first real user-facing Go backend feature.
 
+### Status
+
+Completed. See [GO_BACKEND_PHASE17_CUT_RENDER_STUDY_TO_GO.md](GO_BACKEND_PHASE17_CUT_RENDER_STUDY_TO_GO.md).
+
 ### Why this phase exists
 
 This is the first meaningful cutover.

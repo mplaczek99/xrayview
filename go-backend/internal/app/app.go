@@ -35,8 +35,8 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 
 	cacheStore := cache.New(cfg.Paths.CacheDir)
 	persistenceCatalog := persistence.New(cfg.Paths.PersistenceDir)
-	jobService := jobs.New()
 	studyRegistry := studies.New()
+	jobService := jobs.New(cacheStore, studyRegistry, logger)
 	startedAt := time.Now().UTC()
 	router := httpapi.NewRouter(httpapi.Dependencies{
 		Config:      cfg,
