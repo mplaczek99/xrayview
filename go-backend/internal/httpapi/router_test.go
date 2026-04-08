@@ -259,6 +259,85 @@ func TestOpenStudyIncludesMeasurementScaleWhenSpacingMetadataExists(t *testing.T
 	}
 }
 
+func TestOpenStudyReordersExistingRecentStudyWithoutDuplicate(t *testing.T) {
+	deps := testDependencies(t)
+	handler := NewRouter(deps)
+	firstPath := copySampleDicom(t, "first-open.dcm")
+	secondPath := copySampleDicom(t, "second-open.dcm")
+
+	for _, inputPath := range []string{firstPath, secondPath, firstPath} {
+		openStudyViaRouter(t, handler, inputPath)
+	}
+
+	catalog, err := deps.Persistence.Load()
+	if err != nil {
+		t.Fatalf("catalog load failed: %v", err)
+	}
+
+	if got, want := len(catalog.RecentStudies), 2; got != want {
+		t.Fatalf("recent study count = %d, want %d", got, want)
+	}
+	if got, want := catalog.RecentStudies[0].InputPath, firstPath; got != want {
+		t.Fatalf("first recent study path = %q, want %q", got, want)
+	}
+	if got, want := catalog.RecentStudies[1].InputPath, secondPath; got != want {
+		t.Fatalf("second recent study path = %q, want %q", got, want)
+	}
+}
+
+func TestOpenStudyTruncatesRecentStudyCatalogToTenEntries(t *testing.T) {
+	deps := testDependencies(t)
+	handler := NewRouter(deps)
+
+	openedPaths := make([]string, 0, 12)
+	for index := 0; index < 12; index++ {
+		inputPath := copySampleDicom(t, fmt.Sprintf("study-%02d.dcm", index))
+		openedPaths = append(openedPaths, inputPath)
+		openStudyViaRouter(t, handler, inputPath)
+	}
+
+	catalog, err := deps.Persistence.Load()
+	if err != nil {
+		t.Fatalf("catalog load failed: %v", err)
+	}
+
+	if got, want := len(catalog.RecentStudies), 10; got != want {
+		t.Fatalf("recent study count = %d, want %d", got, want)
+	}
+	if got, want := catalog.RecentStudies[0].InputPath, openedPaths[11]; got != want {
+		t.Fatalf("first recent study path = %q, want %q", got, want)
+	}
+	if got, want := catalog.RecentStudies[9].InputPath, openedPaths[2]; got != want {
+		t.Fatalf("last retained recent study path = %q, want %q", got, want)
+	}
+}
+
+func TestOpenStudyRenamesCorruptedCatalogAndContinues(t *testing.T) {
+	deps := testDependencies(t)
+	handler := NewRouter(deps)
+	catalogPath := deps.Persistence.Path()
+	if err := os.MkdirAll(filepath.Dir(catalogPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll returned error: %v", err)
+	}
+	if err := os.WriteFile(catalogPath, []byte("{ not json"), 0o644); err != nil {
+		t.Fatalf("WriteFile returned error: %v", err)
+	}
+
+	openStudyViaRouter(t, handler, sampleDicomPath(t))
+
+	if _, err := os.Stat(filepath.Join(deps.Persistence.RootDir(), "catalog.corrupt.json")); err != nil {
+		t.Fatalf("corrupt catalog was not renamed: %v", err)
+	}
+
+	catalog, err := deps.Persistence.Load()
+	if err != nil {
+		t.Fatalf("catalog load failed: %v", err)
+	}
+	if got, want := len(catalog.RecentStudies), 1; got != want {
+		t.Fatalf("recent study count = %d, want %d", got, want)
+	}
+}
+
 func TestOpenStudyRejectsNonDicomInput(t *testing.T) {
 	inputPath := filepath.Join(t.TempDir(), "not-a-dicom.dcm")
 	if err := os.WriteFile(inputPath, []byte("dicom"), 0o644); err != nil {
@@ -572,6 +651,46 @@ func sampleDicomPath(t *testing.T) string {
 	return filepath.Clean(
 		filepath.Join(filepath.Dir(currentFile), "..", "..", "..", "images", "sample-dental-radiograph.dcm"),
 	)
+}
+
+func copySampleDicom(t *testing.T, name string) string {
+	t.Helper()
+
+	contents, err := os.ReadFile(sampleDicomPath(t))
+	if err != nil {
+		t.Fatalf("ReadFile returned error: %v", err)
+	}
+
+	targetPath := filepath.Join(t.TempDir(), name)
+	if err := os.WriteFile(targetPath, contents, 0o644); err != nil {
+		t.Fatalf("WriteFile returned error: %v", err)
+	}
+
+	return targetPath
+}
+
+func openStudyViaRouter(t *testing.T, handler http.Handler, inputPath string) contracts.OpenStudyCommandResult {
+	t.Helper()
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/commands/open_study",
+		strings.NewReader(`{"inputPath":"`+inputPath+`"}`),
+	)
+	request.Header.Set("content-type", "application/json")
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("open_study status = %d, want %d, body = %s", recorder.Code, http.StatusOK, recorder.Body.String())
+	}
+
+	var payload contracts.OpenStudyCommandResult
+	if err := json.NewDecoder(recorder.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode failed: %v", err)
+	}
+
+	return payload
 }
 
 func buildScaledDicomFixture() []byte {

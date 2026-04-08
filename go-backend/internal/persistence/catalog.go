@@ -16,7 +16,7 @@ const recentStudyLimit = 10
 type RecentStudyEntry struct {
 	InputPath        string                     `json:"inputPath"`
 	InputName        string                     `json:"inputName"`
-	MeasurementScale *PersistedMeasurementScale `json:"measurementScale,omitempty"`
+	MeasurementScale *PersistedMeasurementScale `json:"measurementScale"`
 	LastOpenedAt     string                     `json:"lastOpenedAt"`
 }
 
@@ -67,15 +67,18 @@ func (catalog *Catalog) Ensure() error {
 func (catalog *Catalog) Load() (StudyCatalog, error) {
 	contents, err := os.ReadFile(catalog.path)
 	if err != nil {
-		return StudyCatalog{}, nil
+		return emptyStudyCatalog(), nil
 	}
 
 	var value StudyCatalog
 	if err := json.Unmarshal(contents, &value); err != nil {
 		_ = os.Rename(catalog.path, catalog.corruptPath())
-		return StudyCatalog{}, contracts.CacheCorrupted(
+		return emptyStudyCatalog(), contracts.CacheCorrupted(
 			fmt.Sprintf("study catalog at %s is invalid JSON: %v", catalog.path, err),
 		)
+	}
+	if value.RecentStudies == nil {
+		value.RecentStudies = []RecentStudyEntry{}
 	}
 
 	return value, nil
@@ -107,13 +110,17 @@ func (catalog *Catalog) RecordOpenedStudy(study contracts.StudyRecord) error {
 func (catalog *Catalog) loadOrDefault() StudyCatalog {
 	value, err := catalog.Load()
 	if err != nil {
-		return StudyCatalog{}
+		return emptyStudyCatalog()
 	}
 
 	return value
 }
 
 func (catalog *Catalog) save(value StudyCatalog) error {
+	if value.RecentStudies == nil {
+		value.RecentStudies = []RecentStudyEntry{}
+	}
+
 	if err := os.MkdirAll(catalog.rootDir, 0o755); err != nil {
 		return contracts.Internal(
 			fmt.Sprintf("failed to create catalog directory %s: %v", catalog.rootDir, err),
@@ -154,5 +161,11 @@ func persistedMeasurementScale(
 		RowSpacingMM:    scale.RowSpacingMM,
 		ColumnSpacingMM: scale.ColumnSpacingMM,
 		Source:          scale.Source,
+	}
+}
+
+func emptyStudyCatalog() StudyCatalog {
+	return StudyCatalog{
+		RecentStudies: []RecentStudyEntry{},
 	}
 }

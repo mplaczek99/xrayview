@@ -1,6 +1,6 @@
 # xrayview Go Backend
 
-This module is the current Go sidecar backend for the migration path. Phase 7 established the local HTTP transport, phase 8 let the Tauri shell manage this process automatically for the `go-sidecar` runtime, phase 9 moved the processing manifest endpoint into Go, phase 10 moved `open_study` registration into Go, phase 11 proved metadata reading in Go, phase 12 locked the pixel-decode strategy around a narrow Rust helper instead of a premature pure-Go commitment, phase 13 added the temporary Rust decode helper plus a Go invocation layer, phase 14 introduced the shared Go-native imaging model, phase 15 ported the core Rust grayscale windowing semantics, phase 16 rendered grayscale PNG previews fully in Go on top of that decode boundary, phase 17 exposed live Go-owned render jobs over the sidecar HTTP command surface, phase 18 ported the grayscale processing controls into reusable Go code, phase 19 completed the preview-side processing pipeline with palette and compare support, and phase 20 now exposes live Go-owned process jobs.
+This module is the current Go sidecar backend for the migration path. Phase 7 established the local HTTP transport, phase 8 let the Tauri shell manage this process automatically for the `go-sidecar` runtime, phase 9 moved the processing manifest endpoint into Go, phase 10 moved `open_study` registration into Go, phase 11 proved metadata reading in Go, phase 12 locked the pixel-decode strategy around a narrow Rust helper instead of a premature pure-Go commitment, phase 13 added the temporary Rust decode helper plus a Go invocation layer, phase 14 introduced the shared Go-native imaging model, phase 15 ported the core Rust grayscale windowing semantics, phase 16 rendered grayscale PNG previews fully in Go on top of that decode boundary, phase 17 exposed live Go-owned render jobs over the sidecar HTTP command surface, phase 18 ported the grayscale processing controls into reusable Go code, phase 19 completed the preview-side processing pipeline with palette and compare support, phase 20 exposed live Go-owned process jobs, phase 21 moved the memory cache into Go, phase 22 aligned the disk path policy, phase 23 extracted the Go job registry, and phase 24 completed recent-study persistence.
 
 Current scope:
 
@@ -26,7 +26,7 @@ Current scope:
 - return live `get_job` snapshots for process jobs
 - support render/process job cancellation, dedupe, and cache hits in the Go job registry
 - populate `measurementScale` when spacing tags are present
-- write the recent-study catalog hook on study open
+- own recent-study catalog persistence on study open, including duplicate-path collapse, 10-entry truncation, and corrupted-catalog recovery
 - publish health/runtime metadata
 - reserve the command namespace expected by the frontend `go-sidecar` adapter
 - enforce local-only host/origin rules for the sidecar transport
@@ -76,7 +76,7 @@ Exposed routes:
 Current command behavior:
 
 - `get_processing_manifest` returns the frozen processing manifest payload
-- `open_study` validates DICOM metadata, returns a Go-generated `StudyRecord`, and records the recent-study catalog hook
+- `open_study` validates DICOM metadata, returns a Go-generated `StudyRecord`, and updates the Go-owned recent-study catalog
 - `start_render_job` runs the phase 17 render pipeline through the Go job service
 - `start_process_job` runs the phase 20 preview-processing pipeline through the Go job service and returns the resolved processed-output path even though Go export is still deferred
 - `get_job` and `cancel_job` now work for Go-owned render and process jobs

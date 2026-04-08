@@ -1487,6 +1487,10 @@ Yes.
 
 Move simple persistence logic to Go.
 
+### Status
+
+Completed. See [GO_BACKEND_PHASE24_PORT_RECENT_STUDY_PERSISTENCE_TO_GO.md](GO_BACKEND_PHASE24_PORT_RECENT_STUDY_PERSISTENCE_TO_GO.md).
+
 ### Why this phase exists
 
 This is easy, visible, and reduces Rust surface area.

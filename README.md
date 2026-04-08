@@ -1,6 +1,6 @@
 # xrayview
 
-`xrayview` is a DICOM X-ray visualization and analysis workstation built with Tauri (React/TypeScript frontend, Rust backend). The repository now also includes a phase 17 Go backend sidecar path with shell-managed startup/shutdown, a live processing-manifest endpoint, Go-backed `open_study` registration, a temporary Rust decode helper owned by Go, and a live Go render-job path for preview generation.
+`xrayview` is a DICOM X-ray visualization and analysis workstation built with Tauri (React/TypeScript frontend, Rust backend). The repository now also includes a phase 24 Go backend sidecar path with shell-managed startup/shutdown, a live processing-manifest endpoint, Go-backed `open_study` registration, a temporary Rust decode helper owned by Go, live Go render/process job paths, and Go-owned recent-study persistence.
 
 The desktop UI lives in `frontend/`. The Rust backend in `backend/` powers all DICOM decoding, image processing, rendering, measurement, and export. The backend is library-first — Tauri calls Rust directly in-process (no subprocess). The CLI binary remains available for headless DICOM workflows.
 
@@ -75,7 +75,7 @@ The transport is intentionally local-only:
 Current Go command behavior:
 
 - `get_processing_manifest` returns the frozen processing manifest payload
-- `open_study` validates and registers studies in Go and records the recent-study catalog hook
+- `open_study` validates and registers studies in Go and updates the Go-owned recent-study catalog
 - `start_render_job`, `get_job`, and `cancel_job` are live for Go-owned preview rendering
 - `inspect-decode` reports decode-relevant DICOM metadata for migration planning
 - `render-preview` exercises the phase 16 decode-to-preview pipeline from the Go CLI
