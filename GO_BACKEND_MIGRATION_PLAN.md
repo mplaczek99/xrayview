@@ -1621,6 +1621,10 @@ Yes.
 
 Break the tooth-analysis port into manageable pieces.
 
+### Status
+
+Completed. See [GO_BACKEND_PHASE27_PORT_TOOTH_ANALYSIS_PRIMITIVES_TO_GO.md](GO_BACKEND_PHASE27_PORT_TOOTH_ANALYSIS_PRIMITIVES_TO_GO.md).
+
 ### Why this phase exists
 
 The current plan needs more granularity here. This is not one phase.
