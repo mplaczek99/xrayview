@@ -150,7 +150,7 @@ interface JobRoute {
 
 interface StudyRoute {
   inputPath: string;
-  goStudyId: string | null;
+  rustStudyId: string | null;
 }
 
 function createNotFoundError(message: string): BackendError {
@@ -162,7 +162,7 @@ function createNotFoundError(message: string): BackendError {
   };
 }
 
-function remapGoJobResult(
+function remapJobResult(
   result: JobResult,
   frontendStudyId: string | null,
 ): JobResult {
@@ -202,8 +202,7 @@ function createLegacyDesktopRuntimeAdapter(
   const rustBackend = createLegacyRustBackendAPI();
   const goBackend = createGoSidecarBackendAPI(configuration.goSidecarBaseUrl);
   const studyRoutes = new Map<string, StudyRoute>();
-  const goStudyToFrontendStudyId = new Map<string, string>();
-  const pendingGoStudyRegistrations = new Map<string, Promise<string>>();
+  const pendingRustStudyRegistrations = new Map<string, Promise<string>>();
   const jobRoutes = new Map<string, JobRoute>();
 
   function trackJob(
@@ -214,55 +213,51 @@ function createLegacyDesktopRuntimeAdapter(
     jobRoutes.set(jobId, { owner, frontendStudyId });
   }
 
-  async function ensureGoStudyId(frontendStudyId: string): Promise<string> {
+  async function ensureRustStudyId(frontendStudyId: string): Promise<string> {
     const route = studyRoutes.get(frontendStudyId);
     if (!route) {
       throw createNotFoundError(`study not found: ${frontendStudyId}`);
     }
 
-    if (route.goStudyId) {
-      return route.goStudyId;
+    if (route.rustStudyId) {
+      return route.rustStudyId;
     }
 
-    const pending = pendingGoStudyRegistrations.get(frontendStudyId);
+    const pending = pendingRustStudyRegistrations.get(frontendStudyId);
     if (pending) {
       return pending;
     }
 
     const registration = (async () => {
-      const payload = await goBackend.openStudy(route.inputPath);
-      const goStudyId = payload.study.studyId;
+      const payload = await rustBackend.openStudy(route.inputPath);
+      const rustStudyId = payload.study.studyId;
       studyRoutes.set(frontendStudyId, {
         ...route,
-        goStudyId,
+        rustStudyId,
       });
-      goStudyToFrontendStudyId.set(goStudyId, frontendStudyId);
-      return goStudyId;
+      return rustStudyId;
     })();
 
-    pendingGoStudyRegistrations.set(frontendStudyId, registration);
+    pendingRustStudyRegistrations.set(frontendStudyId, registration);
 
     try {
       return await registration;
     } finally {
-      pendingGoStudyRegistrations.delete(frontendStudyId);
+      pendingRustStudyRegistrations.delete(frontendStudyId);
     }
   }
 
-  function remapGoJobSnapshot(
+  function remapJobSnapshot(
     snapshot: ContractJobSnapshot,
     frontendStudyId: string | null,
   ): ContractJobSnapshot {
-    const mappedStudyId =
-      (snapshot.studyId
-        ? goStudyToFrontendStudyId.get(snapshot.studyId) ?? null
-        : null) ?? frontendStudyId;
+    const mappedStudyId = frontendStudyId ?? snapshot.studyId ?? null;
 
     return {
       ...snapshot,
       studyId: mappedStudyId,
       result: snapshot.result
-        ? remapGoJobResult(snapshot.result, mappedStudyId)
+        ? remapJobResult(snapshot.result, mappedStudyId)
         : null,
     };
   }
@@ -275,49 +270,51 @@ function createLegacyDesktopRuntimeAdapter(
     mode,
     loadProcessingManifest: () => rustBackend.loadProcessingManifest(),
     openStudy: async (inputPath) => {
-      const payload = await rustBackend.openStudy(inputPath);
+      const payload = await goBackend.openStudy(inputPath);
       studyRoutes.set(payload.study.studyId, {
         inputPath: payload.study.inputPath,
-        goStudyId: null,
+        rustStudyId: null,
       });
       return payload;
     },
     startRenderStudyJob: async (studyId) => {
-      const started = await rustBackend.startRenderStudyJob(studyId);
+      const rustStudyId = await ensureRustStudyId(studyId);
+      const started = await rustBackend.startRenderStudyJob(rustStudyId);
       trackJob(started.jobId, "legacy-rust", studyId);
       return started;
     },
     startProcessStudyJob: async (studyId, request) => {
-      const goStudyId = await ensureGoStudyId(studyId);
-      const started = await goBackend.startProcessStudyJob(goStudyId, request);
+      const started = await goBackend.startProcessStudyJob(studyId, request);
       trackJob(started.jobId, "go-sidecar", studyId);
       return started;
     },
     startAnalyzeStudyJob: async (studyId) => {
-      const started = await rustBackend.startAnalyzeStudyJob(studyId);
+      const rustStudyId = await ensureRustStudyId(studyId);
+      const started = await rustBackend.startAnalyzeStudyJob(rustStudyId);
       trackJob(started.jobId, "legacy-rust", studyId);
       return started;
     },
     getJob: async (jobId) => {
       const route = jobRoutes.get(jobId);
       if (route?.owner === "go-sidecar") {
-        return remapGoJobSnapshot(await goBackend.getJob(jobId), route.frontendStudyId);
+        return remapJobSnapshot(await goBackend.getJob(jobId), route.frontendStudyId);
       }
 
-      return rustBackend.getJob(jobId);
+      return remapJobSnapshot(await rustBackend.getJob(jobId), route?.frontendStudyId ?? null);
     },
     cancelJob: async (jobId) => {
       const route = jobRoutes.get(jobId);
       if (route?.owner === "go-sidecar") {
-        return remapGoJobSnapshot(await goBackend.cancelJob(jobId), route.frontendStudyId);
+        return remapJobSnapshot(await goBackend.cancelJob(jobId), route.frontendStudyId);
       }
 
-      return rustBackend.cancelJob(jobId);
+      return remapJobSnapshot(
+        await rustBackend.cancelJob(jobId),
+        route?.frontendStudyId ?? null,
+      );
     },
-    measureLineAnnotation: async (studyId, annotation) => {
-      const goStudyId = await ensureGoStudyId(studyId);
-      return goBackend.measureLineAnnotation(goStudyId, annotation);
-    },
+    measureLineAnnotation: async (studyId, annotation) =>
+      goBackend.measureLineAnnotation(studyId, annotation),
   };
 
   return {
@@ -393,7 +390,7 @@ export function getRuntimeAdapter(): RuntimeAdapter {
         configuration.mode === "go-sidecar"
           ? `${configuration.mode} (${configuration.goSidecarBaseUrl})`
           : configuration.mode === "legacy-rust"
-            ? `${configuration.mode} + go-sidecar(processStudy+measureLineAnnotation @ ${configuration.goSidecarBaseUrl})`
+            ? `${configuration.mode} + go-sidecar(openStudy+processStudy+measureLineAnnotation @ ${configuration.goSidecarBaseUrl})`
             : configuration.mode;
       console.info(
         `[xrayview] backend runtime: ${description} (${configuration.selectionSource})`,

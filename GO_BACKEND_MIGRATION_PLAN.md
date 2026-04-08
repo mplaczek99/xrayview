@@ -1930,6 +1930,10 @@ Yes.
 
 Make the initial study-open flow run through Go by default.
 
+### Status
+
+Completed. See [GO_BACKEND_PHASE33_CUT_OPEN_STUDY_TO_GO_IN_LIVE_DESKTOP_FLOW.md](GO_BACKEND_PHASE33_CUT_OPEN_STUDY_TO_GO_IN_LIVE_DESKTOP_FLOW.md).
+
 ### Why this phase exists
 
 This removes the shell's live dependency on Rust backend business logic.
