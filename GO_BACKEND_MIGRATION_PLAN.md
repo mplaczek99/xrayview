@@ -2353,6 +2353,10 @@ Yes.
 
 Finish the backend language migration.
 
+### Status
+
+Completed. See [GO_BACKEND_PHASE42_REMOVE_TEMPORARY_RUST_DECODE_EXPORT_HELPERS_IF_PRESENT.md](GO_BACKEND_PHASE42_REMOVE_TEMPORARY_RUST_DECODE_EXPORT_HELPERS_IF_PRESENT.md).
+
 ### Why this phase exists
 
 A serious Go migration should not end with accidental permanent Rust helpers unless they are explicitly justified.

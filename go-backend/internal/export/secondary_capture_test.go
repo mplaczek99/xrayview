@@ -2,27 +2,24 @@ package export
 
 import (
 	"bytes"
-	"context"
 	"encoding/binary"
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"strings"
 	"testing"
 	"time"
 
 	"xrayview/go-backend/internal/dicommeta"
 	"xrayview/go-backend/internal/imaging"
-	"xrayview/go-backend/internal/rustdecode"
 )
 
 func TestEncodeSecondaryCapturePreservesMetadataAndEncodesGrayscalePixels(t *testing.T) {
 	payload, err := encodeSecondaryCapture(
 		imaging.GrayPreview(3, 1, []uint8{0, 127, 255}),
-		rustdecode.SourceMetadata{
+		dicommeta.SourceMetadata{
 			StudyInstanceUID: "1.2.3.4.5",
-			PreservedElements: []rustdecode.PreservedElement{
+			PreservedElements: []dicommeta.PreservedElement{
 				{
 					TagGroup:   0x0010,
 					TagElement: 0x0010,
@@ -106,7 +103,7 @@ func TestEncodeSecondaryCapturePreservesMetadataAndEncodesGrayscalePixels(t *tes
 func TestEncodeSecondaryCaptureEncodesRGBAAsRGB(t *testing.T) {
 	payload, err := encodeSecondaryCapture(
 		imaging.RGBAPreview(2, 1, []uint8{10, 20, 30, 255, 40, 50, 60, 128}),
-		rustdecode.SourceMetadata{StudyInstanceUID: "1.2.3.4.5"},
+		dicommeta.SourceMetadata{StudyInstanceUID: "1.2.3.4.5"},
 		time.Date(2026, time.April, 8, 12, 34, 56, 0, time.UTC),
 		fixedUIDs("2.25.300", "2.25.400"),
 	)
@@ -152,9 +149,9 @@ func TestEncodeSecondaryCaptureEncodesRGBAAsRGB(t *testing.T) {
 func TestEncodeSecondaryCaptureRejectsUnsupportedPreservedVR(t *testing.T) {
 	_, err := encodeSecondaryCapture(
 		imaging.GrayPreview(1, 1, []uint8{128}),
-		rustdecode.SourceMetadata{
+		dicommeta.SourceMetadata{
 			StudyInstanceUID: "1.2.3.4.5",
-			PreservedElements: []rustdecode.PreservedElement{
+			PreservedElements: []dicommeta.PreservedElement{
 				{
 					TagGroup:   0x0028,
 					TagElement: 0x0100,
@@ -174,22 +171,12 @@ func TestEncodeSecondaryCaptureRejectsUnsupportedPreservedVR(t *testing.T) {
 	}
 }
 
-func TestEncodeSecondaryCaptureRoundTripsThroughRustDecodeHelper(t *testing.T) {
-	command := rustdecode.CommandFromEnvironment()
-	if len(command) == 0 {
-		t.Skip("no rust decode helper command is configured")
-	}
-	if command[0] == "cargo" {
-		if _, err := exec.LookPath("cargo"); err != nil {
-			t.Skip("cargo is not available and no prebuilt decode helper binary was configured")
-		}
-	}
-
+func TestEncodeSecondaryCaptureRoundTripsThroughGoDecode(t *testing.T) {
 	payload, err := encodeSecondaryCapture(
 		imaging.GrayPreview(2, 2, []uint8{0, 64, 128, 255}),
-		rustdecode.SourceMetadata{
+		dicommeta.SourceMetadata{
 			StudyInstanceUID: "1.2.3.4.5",
-			PreservedElements: []rustdecode.PreservedElement{
+			PreservedElements: []dicommeta.PreservedElement{
 				{
 					TagGroup:   0x0010,
 					TagElement: 0x0010,
@@ -212,14 +199,9 @@ func TestEncodeSecondaryCaptureRoundTripsThroughRustDecodeHelper(t *testing.T) {
 	}
 
 	outputPath := writePayload(t, payload)
-	helper, err := rustdecode.NewFromEnvironment()
+	study, err := dicommeta.DecodeFile(outputPath)
 	if err != nil {
-		t.Fatalf("NewFromEnvironment returned error: %v", err)
-	}
-
-	study, err := helper.DecodeStudy(context.Background(), outputPath)
-	if err != nil {
-		t.Fatalf("DecodeStudy returned error: %v", err)
+		t.Fatalf("DecodeFile returned error: %v", err)
 	}
 
 	if got, want := study.Image.Width, uint32(2); got != want {

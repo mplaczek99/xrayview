@@ -18,7 +18,6 @@ import (
 	dicomexport "xrayview/go-backend/internal/export"
 	"xrayview/go-backend/internal/processing"
 	"xrayview/go-backend/internal/render"
-	"xrayview/go-backend/internal/rustdecode"
 )
 
 type legacyCLIOptions struct {
@@ -356,13 +355,8 @@ func processLegacyStudy(
 	return nil
 }
 
-func decodeLegacyStudy(inputPath string) (rustdecode.SourceStudy, error) {
-	helper, err := rustdecode.NewFromEnvironment()
-	if err != nil {
-		return rustdecode.SourceStudy{}, err
-	}
-
-	return helper.DecodeStudy(context.Background(), inputPath)
+func decodeLegacyStudy(inputPath string) (dicommeta.SourceStudy, error) {
+	return dicommeta.DecodeFile(inputPath)
 }
 
 func defaultLegacyOutputPath(inputPath string) string {

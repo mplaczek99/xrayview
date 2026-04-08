@@ -1,20 +1,17 @@
 package processing
 
 import (
-	"context"
 	"image"
 	"image/color"
 	"image/png"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"testing"
-	"time"
 
+	"xrayview/go-backend/internal/dicommeta"
 	"xrayview/go-backend/internal/imaging"
 	"xrayview/go-backend/internal/render"
-	"xrayview/go-backend/internal/rustdecode"
 )
 
 func TestProcessGrayscalePixelsFixedOrderAppliesInvertBeforeBrightnessAndContrast(t *testing.T) {
@@ -113,23 +110,9 @@ func TestProcessPreviewImageRequiresGrayPreviewInput(t *testing.T) {
 }
 
 func TestProcessPreviewImageMatchesRustGrayscaleFixture(t *testing.T) {
-	if rustdecode.DefaultDevCommand()[0] == "cargo" {
-		if _, err := exec.LookPath("cargo"); err != nil {
-			t.Skip("cargo is not available and no prebuilt decode helper binary was found")
-		}
-	}
-
-	helper, err := rustdecode.New(rustdecode.DefaultDevCommand())
+	study, err := dicommeta.DecodeFile(sampleDicomPath(t))
 	if err != nil {
-		t.Fatalf("New returned error: %v", err)
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-	defer cancel()
-
-	study, err := helper.DecodeStudy(ctx, sampleDicomPath(t))
-	if err != nil {
-		t.Fatalf("DecodeStudy returned error: %v", err)
+		t.Fatalf("DecodeFile returned error: %v", err)
 	}
 
 	preview := render.RenderSourceImage(study.Image, render.DefaultRenderPlan())

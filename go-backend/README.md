@@ -1,6 +1,6 @@
 # xrayview Go Backend
 
-This module is the current Go sidecar backend for the migration path. Phase 7 established the local HTTP transport, phase 8 let the Tauri shell manage this process automatically for the `go-sidecar` runtime, phase 9 moved the processing manifest endpoint into Go, phase 10 moved `open_study` registration into Go, phase 11 proved metadata reading in Go, phase 12 locked the pixel-decode strategy around a narrow Rust helper instead of a premature pure-Go commitment, phase 13 added the temporary Rust decode helper plus a Go invocation layer, phase 14 introduced the shared Go-native imaging model, phase 15 ported the core Rust grayscale windowing semantics, phase 16 rendered grayscale PNG previews fully in Go on top of that decode boundary, phase 17 exposed live Go-owned render jobs over the sidecar HTTP command surface, phase 18 ported the grayscale processing controls into reusable Go code, phase 19 completed the preview-side processing pipeline with palette and compare support, phase 20 exposed live Go-owned process jobs, phase 21 moved the memory cache into Go, phase 22 aligned the disk path policy, phase 23 extracted the Go job registry, phase 24 completed recent-study persistence, phase 25 moved `measure_line_annotation` to Go, phase 26 moved annotation suggestion mapping to Go, phase 27 ported the reusable tooth-analysis primitives into Go, phase 28 exposed live Go-owned analyze jobs, phase 29 proved pure-Go Secondary Capture export, phase 30 added an optional narrow Rust export helper fallback without changing Go ownership of the workflow, phase 31 made the default desktop `processStudy` path Go-owned even while the broader desktop runtime remains Rust-first, phase 32 routed the default desktop `measureLineAnnotation` path through Go as well, phase 33 made the default desktop `openStudy` path Go-owned too, phase 34 made the default desktop `analyzeStudy` path Go-owned as well, phase 35 moved the supported headless CLI workflows onto the Go CLI while preserving the existing flag surface, phase 37 hardened the Tauri release path so packaged desktop builds and release smoke tests now verify that this bundled sidecar actually launches, and phase 38 retires the live Rust backend from the default desktop runtime so packaged desktop builds now come up in `go-sidecar` mode unless `legacy-rust` is explicitly requested.
+This module is the current Go sidecar backend for the migration path. Phase 7 established the local HTTP transport, phase 8 let the Tauri shell manage this process automatically for the `go-sidecar` runtime, phase 9 moved the processing manifest endpoint into Go, phase 10 moved `open_study` registration into Go, phase 11 proved metadata reading in Go, phase 12 locked the initial decode strategy conservatively, phase 14 introduced the shared Go-native imaging model, phase 15 ported the core Rust grayscale windowing semantics, phase 16 rendered grayscale PNG previews fully in Go, phase 17 exposed live Go-owned render jobs over the sidecar HTTP command surface, phase 18 ported the grayscale processing controls into reusable Go code, phase 19 completed the preview-side processing pipeline with palette and compare support, phase 20 exposed live Go-owned process jobs, phase 21 moved the memory cache into Go, phase 22 aligned the disk path policy, phase 23 extracted the Go job registry, phase 24 completed recent-study persistence, phase 25 moved `measure_line_annotation` to Go, phase 26 moved annotation suggestion mapping to Go, phase 27 ported the reusable tooth-analysis primitives into Go, phase 28 exposed live Go-owned analyze jobs, phase 29 proved pure-Go Secondary Capture export, phase 31 made the default desktop `processStudy` path Go-owned even while the broader desktop runtime remained Rust-first, phase 32 routed the default desktop `measureLineAnnotation` path through Go as well, phase 33 made the default desktop `openStudy` path Go-owned too, phase 34 made the default desktop `analyzeStudy` path Go-owned as well, phase 35 moved the supported headless CLI workflows onto the Go CLI while preserving the existing flag surface, phase 37 hardened the Tauri release path so packaged desktop builds and release smoke tests now verify that this bundled sidecar actually launches, phase 38 retired the live Rust backend from the default desktop runtime, and phase 42 removed the temporary Rust decode/export helpers so the supported desktop and CLI DICOM flows now execute directly in Go.
 
 Current scope:
 
@@ -13,8 +13,7 @@ Current scope:
 - serve the default desktop `openStudy` flow even when the selected frontend runtime is `legacy-rust`
 - extract `open_study` metadata needed for migration parity: rows, columns, spacing tags, window defaults, photometric interpretation, and transfer syntax UID
 - inspect decode-relevant DICOM metadata for migration planning
-- invoke the temporary Rust decode helper from Go and validate its normalized source-study payload
-- normalize decoded source studies into a shared `internal/imaging` model with explicit image-format metadata
+- decode source studies directly in Go and normalize them into a shared `internal/imaging` model with explicit image-format metadata
 - validate source-image and preview-image buffer geometry before later render-pipeline work
 - resolve embedded, manual, and full-range grayscale window modes with Rust-equivalent mapping behavior
 - render grayscale preview pixels from decoded source studies in Go
@@ -23,7 +22,6 @@ Current scope:
 - compose side-by-side compare previews in Go
 - encode rendered preview buffers as PNG output
 - encode Secondary Capture DICOM output in Go
-- optionally route Secondary Capture writing through a narrow Rust helper when `XRAYVIEW_SECONDARY_CAPTURE_EXPORTER=rust-helper`
 - execute `start_render_job` in Go and store preview artifacts under the cache tree
 - execute `start_process_job` in Go and store processed preview artifacts under the cache tree
 - serve the default desktop `processStudy` flow even when the selected frontend runtime is `legacy-rust`
@@ -48,9 +46,9 @@ Current scope:
 
 Current non-goals:
 
-- no Go pixel decode yet
-- phase 12 intentionally does not claim pure-Go decode readiness from the current narrow sample corpus
-- the Rust export helper remains a temporary fallback rather than the primary export path
+- no claim that the committed sample corpus proves broad compressed-transfer-syntax parity
+- deflated transfer syntax is still rejected by the Go decoder
+- encapsulated multi-frame source decode is still unsupported
 
 ## Commands
 
@@ -107,18 +105,18 @@ Current command behavior:
 - `get_processing_manifest` returns the frozen processing manifest payload
 - `open_study` validates DICOM metadata, returns a Go-generated `StudyRecord`, updates the Go-owned recent-study catalog, and now backs the default desktop open flow
 - `start_render_job` runs the phase 17 render pipeline through the Go job service
-- `start_process_job` runs the Go preview-processing pipeline, writes the processed DICOM through the configured export writer, and returns the completed output path
+- `start_process_job` runs the Go preview-processing pipeline, writes the processed DICOM through the Go Secondary Capture writer, and returns the completed output path
 - `start_analyze_job` runs the Go analysis pipeline and returns suggested annotations through the normal job/result path
 - `get_job` and `cancel_job` now work for Go-owned render, process, and analyze jobs
 - `measure_line_annotation` recomputes pixel and calibrated lengths in Go using the registered study spacing metadata
 
 Current metadata-reader limits:
 
-- full pixel decode remains out of scope for this phase
-- deflated transfer syntax is still rejected in the prototype reader
+- deflated transfer syntax is still rejected in the Go reader
+- encapsulated multi-frame source decode is still unsupported
 - the committed sample corpus contains only native single-frame monochrome explicit-VR-little-endian studies
-- phase 12 therefore locks decode strategy to Go orchestration plus a narrow Rust decode helper for phase 13
-- the helper emits normalized source-study JSON for Go consumption while export and analyze work continue migrating behind it
+- the supported desktop and CLI workflows now decode directly in Go
+- broader compressed-transfer-syntax parity still needs evidence beyond the committed sample corpus
 
 Transport guarantees:
 
@@ -135,9 +133,6 @@ Transport guarantees:
 - `XRAYVIEW_GO_BACKEND_CACHE_DIR`
 - `XRAYVIEW_GO_BACKEND_PERSISTENCE_DIR`
 - `XRAYVIEW_GO_BACKEND_SHUTDOWN_TIMEOUT`
-- `XRAYVIEW_RUST_DECODE_HELPER_BIN`
-- `XRAYVIEW_SECONDARY_CAPTURE_EXPORTER`
-- `XRAYVIEW_RUST_EXPORT_HELPER_BIN`
 
 Default disk layout when only `XRAYVIEW_GO_BACKEND_BASE_DIR` is set or when no
 path overrides are provided:

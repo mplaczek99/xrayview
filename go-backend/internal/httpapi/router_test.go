@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -24,7 +23,6 @@ import (
 	"xrayview/go-backend/internal/dicommeta"
 	"xrayview/go-backend/internal/jobs"
 	"xrayview/go-backend/internal/persistence"
-	"xrayview/go-backend/internal/rustdecode"
 	"xrayview/go-backend/internal/studies"
 )
 
@@ -540,16 +538,6 @@ func TestMeasureLineAnnotationRejectsUnknownStudy(t *testing.T) {
 }
 
 func TestRenderJobEndpointsCompletePreview(t *testing.T) {
-	command := rustdecode.CommandFromEnvironment()
-	if len(command) == 0 {
-		t.Skip("no rust decode helper command is configured")
-	}
-	if command[0] == "cargo" {
-		if _, err := exec.LookPath("cargo"); err != nil {
-			t.Skip("cargo is not available and no prebuilt decode helper binary was configured")
-		}
-	}
-
 	deps := withJobService(testDependencies(t))
 	handler := NewRouter(deps)
 	inputPath := sampleDicomPath(t)
@@ -645,16 +633,6 @@ func TestRenderJobEndpointsCompletePreview(t *testing.T) {
 }
 
 func TestProcessJobEndpointCompletesPreview(t *testing.T) {
-	command := rustdecode.CommandFromEnvironment()
-	if len(command) == 0 {
-		t.Skip("no rust decode helper command is configured")
-	}
-	if command[0] == "cargo" {
-		if _, err := exec.LookPath("cargo"); err != nil {
-			t.Skip("cargo is not available and no prebuilt decode helper binary was configured")
-		}
-	}
-
 	deps := withJobService(testDependencies(t))
 	handler := NewRouter(deps)
 	inputPath := sampleDicomPath(t)
@@ -775,16 +753,6 @@ func TestProcessJobEndpointCompletesPreview(t *testing.T) {
 }
 
 func TestAnalyzeJobEndpointCompletesPreview(t *testing.T) {
-	command := rustdecode.CommandFromEnvironment()
-	if len(command) == 0 {
-		t.Skip("no rust decode helper command is configured")
-	}
-	if command[0] == "cargo" {
-		if _, err := exec.LookPath("cargo"); err != nil {
-			t.Skip("cargo is not available and no prebuilt decode helper binary was configured")
-		}
-	}
-
 	deps := withJobService(testDependencies(t))
 	handler := NewRouter(deps)
 	inputPath := sampleDicomPath(t)

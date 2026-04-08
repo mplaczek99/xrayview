@@ -20,7 +20,6 @@ import (
 	"xrayview/go-backend/internal/imaging"
 	"xrayview/go-backend/internal/processing"
 	"xrayview/go-backend/internal/render"
-	"xrayview/go-backend/internal/rustdecode"
 )
 
 func main() {
@@ -122,12 +121,7 @@ func decodeSource(args []string) error {
 		return fmt.Errorf("decode-source requires exactly one DICOM path")
 	}
 
-	helper, err := rustdecode.NewFromEnvironment()
-	if err != nil {
-		return err
-	}
-
-	study, err := helper.DecodeStudy(context.Background(), args[0])
+	study, err := dicommeta.DecodeFile(args[0])
 	if err != nil {
 		return err
 	}
@@ -169,12 +163,7 @@ func renderPreview(args []string) error {
 		return err
 	}
 
-	helper, err := rustdecode.NewFromEnvironment()
-	if err != nil {
-		return err
-	}
-
-	study, err := helper.DecodeStudy(context.Background(), inputPath)
+	study, err := dicommeta.DecodeFile(inputPath)
 	if err != nil {
 		return err
 	}
@@ -211,12 +200,7 @@ func processPreview(args []string) error {
 		return err
 	}
 
-	helper, err := rustdecode.NewFromEnvironment()
-	if err != nil {
-		return err
-	}
-
-	study, err := helper.DecodeStudy(context.Background(), inputPath)
+	study, err := dicommeta.DecodeFile(inputPath)
 	if err != nil {
 		return err
 	}
@@ -262,12 +246,7 @@ func exportSecondaryCapture(args []string) error {
 		return err
 	}
 
-	helper, err := rustdecode.NewFromEnvironment()
-	if err != nil {
-		return err
-	}
-
-	study, err := helper.DecodeStudy(context.Background(), inputPath)
+	study, err := dicommeta.DecodeFile(inputPath)
 	if err != nil {
 		return err
 	}
@@ -461,7 +440,7 @@ func printUsage(stream io.Writer) {
 	fmt.Fprintln(stream, "  serve         run the phase 7 local HTTP backend")
 	fmt.Fprintln(stream, "  print-config  print resolved backend configuration as JSON")
 	fmt.Fprintln(stream, "  inspect-decode inspect decode-relevant DICOM metadata as JSON")
-	fmt.Fprintln(stream, "  decode-source decode source pixels through the phase 13 Rust helper")
+	fmt.Fprintln(stream, "  decode-source decode source pixels directly in Go")
 	fmt.Fprintln(stream, "  render-preview render a grayscale PNG preview through the phase 16 Go pipeline")
 	fmt.Fprintln(stream, "  process-preview render then run the phase 19 preview processing pipeline")
 	fmt.Fprintln(stream, "  export-secondary-capture render, process, and write a phase 29 Go DICOM export")

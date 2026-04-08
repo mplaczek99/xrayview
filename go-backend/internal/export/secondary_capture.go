@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"xrayview/go-backend/internal/dicommeta"
 	"xrayview/go-backend/internal/imaging"
-	"xrayview/go-backend/internal/rustdecode"
 )
 
 const (
@@ -38,7 +38,7 @@ type element struct {
 func WriteSecondaryCapture(
 	path string,
 	preview imaging.PreviewImage,
-	sourceMeta rustdecode.SourceMetadata,
+	sourceMeta dicommeta.SourceMetadata,
 ) error {
 	payload, err := encodeSecondaryCapture(preview, sourceMeta, time.Now().UTC(), generateUID)
 	if err != nil {
@@ -54,7 +54,7 @@ func WriteSecondaryCapture(
 
 func encodeSecondaryCapture(
 	preview imaging.PreviewImage,
-	sourceMeta rustdecode.SourceMetadata,
+	sourceMeta dicommeta.SourceMetadata,
 	now time.Time,
 	newUID uidGenerator,
 ) ([]byte, error) {
@@ -176,7 +176,7 @@ func encodeSecondaryCapture(
 	return payload.Bytes(), nil
 }
 
-func preservedElement(source rustdecode.PreservedElement) (element, error) {
+func preservedElement(source dicommeta.PreservedElement) (element, error) {
 	vr := strings.ToUpper(strings.TrimSpace(source.VR))
 	if source.TagGroup == 0x0002 {
 		return element{}, fmt.Errorf(

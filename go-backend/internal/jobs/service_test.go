@@ -13,43 +13,42 @@ import (
 	"xrayview/go-backend/internal/dicommeta"
 	dicomexport "xrayview/go-backend/internal/export"
 	"xrayview/go-backend/internal/imaging"
-	"xrayview/go-backend/internal/rustdecode"
 	"xrayview/go-backend/internal/studies"
 )
 
 type staticDecoder struct {
-	study rustdecode.SourceStudy
+	study dicommeta.SourceStudy
 }
 
 func (decoder staticDecoder) DecodeStudy(
 	_ context.Context,
 	_ string,
-) (rustdecode.SourceStudy, error) {
+) (dicommeta.SourceStudy, error) {
 	return decoder.study, nil
 }
 
 type blockingDecoder struct {
-	study   rustdecode.SourceStudy
+	study   dicommeta.SourceStudy
 	started chan struct{}
 }
 
 func (decoder *blockingDecoder) DecodeStudy(
 	ctx context.Context,
 	_ string,
-) (rustdecode.SourceStudy, error) {
+) (dicommeta.SourceStudy, error) {
 	select {
 	case decoder.started <- struct{}{}:
 	default:
 	}
 
 	<-ctx.Done()
-	return rustdecode.SourceStudy{}, ctx.Err()
+	return dicommeta.SourceStudy{}, ctx.Err()
 }
 
 func TestStartRenderJobWritesPreviewAndServesCachedSnapshot(t *testing.T) {
 	studyRegistry, study := registerTestStudy(t)
 	cacheStore := cache.New(filepath.Join(t.TempDir(), "cache"))
-	sourceStudy := rustdecode.SourceStudy{
+	sourceStudy := dicommeta.SourceStudy{
 		Image: imaging.SourceImage{
 			Width:    2,
 			Height:   2,
@@ -67,7 +66,7 @@ func TestStartRenderJobWritesPreviewAndServesCachedSnapshot(t *testing.T) {
 			ColumnSpacingMM: 0.40,
 			Source:          "PixelSpacing",
 		},
-		Metadata: rustdecode.SourceMetadata{
+		Metadata: dicommeta.SourceMetadata{
 			StudyInstanceUID: "1.2.3.4.5",
 		},
 	}
@@ -170,7 +169,7 @@ func TestStartRenderJobReusesCachedResultAcrossStudyReopen(t *testing.T) {
 	}
 
 	cacheStore := cache.New(filepath.Join(t.TempDir(), "cache"))
-	sourceStudy := rustdecode.SourceStudy{
+	sourceStudy := dicommeta.SourceStudy{
 		Image: imaging.SourceImage{
 			Width:    2,
 			Height:   2,
@@ -290,7 +289,7 @@ func TestStartRenderJobDeduplicatesActiveStudyRender(t *testing.T) {
 func TestStartProcessJobWritesPreviewAndServesCachedSnapshot(t *testing.T) {
 	studyRegistry, study := registerTestStudy(t)
 	cacheStore := cache.New(filepath.Join(t.TempDir(), "cache"))
-	sourceStudy := rustdecode.SourceStudy{
+	sourceStudy := dicommeta.SourceStudy{
 		Image: imaging.SourceImage{
 			Width:    2,
 			Height:   2,
@@ -678,7 +677,7 @@ func stringsHasPathPrefix(path string, prefix string) bool {
 	return err == nil && relative != ".." && relative != "." && relative != ""
 }
 
-func syntheticAnalyzeSourceStudy() rustdecode.SourceStudy {
+func syntheticAnalyzeSourceStudy() dicommeta.SourceStudy {
 	const width = 240
 	const height = 160
 
@@ -697,7 +696,7 @@ func syntheticAnalyzeSourceStudy() rustdecode.SourceStudy {
 	fillSourceRect(pixels, width, 172, 56, 28, 32, 160)
 	fillSourceTriangleRoot(pixels, width, 172, 88, 50, 30, 160)
 
-	return rustdecode.SourceStudy{
+	return dicommeta.SourceStudy{
 		Image: imaging.SourceImage{
 			Width:    width,
 			Height:   height,

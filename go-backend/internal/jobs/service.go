@@ -16,15 +16,15 @@ import (
 	"xrayview/go-backend/internal/annotations"
 	"xrayview/go-backend/internal/cache"
 	"xrayview/go-backend/internal/contracts"
+	"xrayview/go-backend/internal/dicommeta"
 	dicomexport "xrayview/go-backend/internal/export"
 	"xrayview/go-backend/internal/processing"
 	"xrayview/go-backend/internal/render"
-	"xrayview/go-backend/internal/rustdecode"
 	"xrayview/go-backend/internal/studies"
 )
 
 type studyDecoder interface {
-	DecodeStudy(context.Context, string) (rustdecode.SourceStudy, error)
+	DecodeStudy(context.Context, string) (dicommeta.SourceStudy, error)
 }
 
 type decodeHelperFactory func() (studyDecoder, error)
@@ -47,7 +47,7 @@ func New(cacheStore *cache.Store, studyRegistry *studies.Registry, logger *slog.
 		logger,
 		dicomexport.GoWriter{},
 		func() (studyDecoder, error) {
-			return rustdecode.NewFromEnvironment()
+			return dicommeta.NewDecoder(), nil
 		},
 		generateJobID,
 	)
@@ -69,7 +69,7 @@ func NewFromEnvironment(
 		logger,
 		writer,
 		func() (studyDecoder, error) {
-			return rustdecode.NewFromEnvironment()
+			return dicommeta.NewDecoder(), nil
 		},
 		generateJobID,
 	), nil
@@ -296,7 +296,7 @@ func newService(
 	}
 	if decoderFactory == nil {
 		decoderFactory = func() (studyDecoder, error) {
-			return rustdecode.NewFromEnvironment()
+			return dicommeta.NewDecoder(), nil
 		}
 	}
 	if secondaryCaptureWriter == nil {
@@ -437,7 +437,7 @@ func (service *Service) executeRenderJob(
 	if err != nil {
 		service.failJob(
 			jobID,
-			contracts.Internal(fmt.Sprintf("configure rust decode helper: %v", err)),
+			contracts.Internal(fmt.Sprintf("configure DICOM decoder: %v", err)),
 		)
 		return
 	}
@@ -554,7 +554,7 @@ func (service *Service) executeProcessJob(
 	if err != nil {
 		service.failJob(
 			jobID,
-			contracts.Internal(fmt.Sprintf("configure rust decode helper: %v", err)),
+			contracts.Internal(fmt.Sprintf("configure DICOM decoder: %v", err)),
 		)
 		return
 	}
@@ -706,7 +706,7 @@ func (service *Service) executeAnalyzeJob(
 	if err != nil {
 		service.failJob(
 			jobID,
-			contracts.Internal(fmt.Sprintf("configure rust decode helper: %v", err)),
+			contracts.Internal(fmt.Sprintf("configure DICOM decoder: %v", err)),
 		)
 		return
 	}
