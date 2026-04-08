@@ -15,15 +15,18 @@ const workspaceRoot = path.resolve(frontendRoot, "..");
 const includeBundles = process.argv.includes("--bundle");
 const tauriConfigPath = path.join(tauriRoot, "tauri.conf.json");
 const capabilityPath = path.join(tauriRoot, "capabilities", "default.json");
+const goBuildCacheDir = path.join("/tmp", "xrayview-go-build-cache");
+const goTmpDir = path.join("/tmp", "xrayview-go-tmp");
+const goPathDir = path.join("/tmp", "xrayview-go-path");
 const releaseBinary = path.join(
   releaseDir,
   process.platform === "win32" ? "xrayview-frontend.exe" : "xrayview-frontend",
 );
 
-function run(command, args, cwd) {
+function run(command, args, cwd, envOverrides = {}) {
   const result = spawnSync(command, args, {
     cwd,
-    env: { ...process.env },
+    env: { ...process.env, ...envOverrides },
     stdio: "inherit",
     shell: process.platform === "win32",
   });
@@ -50,7 +53,15 @@ if ((defaultCapability.permissions ?? []).length !== 0) {
   throw new Error("Default desktop capability should not grant broad core permissions.");
 }
 
-run("cargo", ["test", "--manifest-path", "backend/Cargo.toml"], workspaceRoot);
+run("npm", ["run", "contracts:check"], workspaceRoot);
+fs.mkdirSync(goBuildCacheDir, { recursive: true });
+fs.mkdirSync(goTmpDir, { recursive: true });
+fs.mkdirSync(goPathDir, { recursive: true });
+run("npm", ["run", "go:backend:test"], workspaceRoot, {
+  GOCACHE: process.env.GOCACHE ?? goBuildCacheDir,
+  GOTMPDIR: process.env.GOTMPDIR ?? goTmpDir,
+  GOPATH: process.env.GOPATH ?? goPathDir,
+});
 run("npm", ["run", "build"], frontendRoot);
 
 const tauriArgs = ["./scripts/tauri-build.mjs", "--ci"];

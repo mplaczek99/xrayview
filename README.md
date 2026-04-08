@@ -257,18 +257,18 @@ go -C go-backend run ./cmd/xrayview-cli -- --input ../images/sample-dental-radio
 ### Transitional Workspace Layout
 
 - **`backend/`** — Library-first crate with modular layout: `api/`, `app/`, `study/`, `render/`, `processing/`, `analysis/`, `annotations/`, `export/`, `jobs/`, `cache/`, `persistence/`. Still provides helper binaries for the migration path, but the supported headless CLI workflows now live in `go-backend/cmd/xrayview-cli`.
-- **`frontend/src-tauri/`** — Tauri desktop shell. Depends on the backend as a library (direct in-process calls, no subprocess).
+- **`frontend/src-tauri/`** — Tauri desktop shell. Still links the legacy Rust backend crate during migration while also preparing and launching the Go sidecar for Go-owned command paths.
 - **`go-backend/`** — Phase 6 Go backend module with the initial sidecar process skeleton.
 - **`go/contracts/`** — Go module for generated contract bindings owned by the language-neutral schema.
 
 ### Contract generation
 
-The contract source of truth now lives in [contracts/backend-contract-v1.schema.json](contracts/backend-contract-v1.schema.json). Running `npm --prefix frontend run generate:contracts` regenerates:
+The contract source of truth now lives in [contracts/backend-contract-v1.schema.json](contracts/backend-contract-v1.schema.json). Running `npm run contracts:generate` regenerates:
 
 - [frontend/src/lib/generated/contracts.ts](frontend/src/lib/generated/contracts.ts)
 - [go/contracts/contractv1/bindings.go](go/contracts/contractv1/bindings.go)
 
-Phase 2 froze this surface as backend contract v1. Phase 3 moves generation out of Rust: `cargo test --manifest-path backend/Cargo.toml --test contracts` now checks that committed generated bindings match the schema and that representative Rust payloads still validate against that schema.
+Run `npm run contracts:check` to verify the committed generated bindings still match the schema without routing through the legacy Rust backend. Rust-side contract tests remain available as backend compatibility coverage while the Tauri shell still links the Rust crate, but they are no longer part of the frontend-owned contract generation path.
 
 ### Data flow
 
@@ -280,6 +280,9 @@ Phase 2 froze this surface as backend contract v1. Phase 3 moves generation out 
 ## Test
 
 ```bash
+# Shared contract binding drift check
+npm run contracts:check
+
 # Backend unit + integration tests
 cargo test --manifest-path backend/Cargo.toml
 

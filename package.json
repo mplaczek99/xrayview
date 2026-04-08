@@ -3,6 +3,8 @@
   "private": true,
   "version": "0.2.2",
   "scripts": {
+    "contracts:generate": "node ./contracts/scripts/generate-contract-bindings.mjs",
+    "contracts:check": "node ./contracts/scripts/generate-contract-bindings.mjs --check",
     "postinstall": "npm --prefix frontend install",
     "dev": "npm --prefix frontend run dev --",
     "go:backend:build": "go -C go-backend build ./cmd/xrayviewd ./cmd/xrayview-cli",

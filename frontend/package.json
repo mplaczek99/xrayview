@@ -4,7 +4,7 @@
   "version": "0.2.2",
   "type": "module",
   "scripts": {
-    "generate:contracts": "node ./scripts/generate-contracts.mjs",
+    "generate:contracts": "npm --prefix .. run contracts:generate --",
     "dev": "npm run generate:contracts && node ./scripts/vite-dev.mjs",
     "build": "npm run generate:contracts && tsc --noEmit && node ./scripts/vite-build.mjs",
     "preview": "vite preview",

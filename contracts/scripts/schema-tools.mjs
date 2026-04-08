@@ -206,7 +206,7 @@ export function renderTypeScriptContracts(
 ) {
   const sections = [
     `// This file is generated from \`${schemaRelativePath}\`.`,
-    "// Run `npm --prefix frontend run generate:contracts` after changing the schema.",
+    "// Run `npm run contracts:generate` after changing the schema.",
     `// Backend contract version: v${schema["x-contract-version"]}`,
     "",
     `export const BACKEND_CONTRACT_VERSION = ${schema["x-contract-version"]} as const;`,

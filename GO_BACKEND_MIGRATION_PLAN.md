@@ -2068,6 +2068,10 @@ Yes.
 
 Delete the Rust-specific build path from frontend contract generation.
 
+### Status
+
+Completed. See [GO_BACKEND_PHASE36_REMOVE_RUST_CONTRACT_GENERATION_AND_LEGACY_FRONTEND_BUILD_DEPENDENCY.md](GO_BACKEND_PHASE36_REMOVE_RUST_CONTRACT_GENERATION_AND_LEGACY_FRONTEND_BUILD_DEPENDENCY.md).
+
 ### Why this phase exists
 
 By now, Rust should not sit in the frontend build chain.

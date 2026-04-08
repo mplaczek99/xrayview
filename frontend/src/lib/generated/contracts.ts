@@ -1,5 +1,5 @@
 // This file is generated from `contracts/backend-contract-v1.schema.json`.
-// Run `npm --prefix frontend run generate:contracts` after changing the schema.
+// Run `npm run contracts:generate` after changing the schema.
 // Backend contract version: v1
 
 export const BACKEND_CONTRACT_VERSION = 1 as const;
