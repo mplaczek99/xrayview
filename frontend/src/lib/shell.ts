@@ -1,18 +1,6 @@
-import { convertFileSrc, invoke } from "@tauri-apps/api/core";
-import { normalizeBackendError } from "./backendErrors";
 import { buildMockPath, MOCK_DICOM_PATH, MOCK_EXPORT_DIRECTORY } from "./mockRuntime";
 import type { ShellAPI } from "./runtimeTypes";
-
-async function invokeWithShellError<T>(
-  command: string,
-  args?: Record<string, unknown>,
-): Promise<T> {
-  try {
-    return await invoke<T>(command, args);
-  } catch (error) {
-    throw normalizeBackendError(error);
-  }
-}
+import { pickWailsDicomFile, pickWailsSaveDicomPath } from "./wails";
 
 export function createMockShellAPI(): ShellAPI {
   return {
@@ -24,12 +12,15 @@ export function createMockShellAPI(): ShellAPI {
   };
 }
 
-export function createTauriShellAPI(): ShellAPI {
+function buildPreviewUrl(previewPath: string): string {
+  return `/preview?path=${encodeURIComponent(previewPath)}`;
+}
+
+export function createWailsShellAPI(): ShellAPI {
   return {
-    mode: "tauri",
-    pickDicomFile: () => invokeWithShellError<string | null>("pick_dicom_file"),
-    pickSaveDicomPath: (defaultName) =>
-      invokeWithShellError<string | null>("pick_save_dicom_path", { defaultName }),
-    resolvePreviewUrl: (previewPath) => convertFileSrc(previewPath),
+    mode: "wails",
+    pickDicomFile: () => pickWailsDicomFile(),
+    pickSaveDicomPath: (defaultName) => pickWailsSaveDicomPath(defaultName),
+    resolvePreviewUrl: (previewPath) => buildPreviewUrl(previewPath),
   };
 }

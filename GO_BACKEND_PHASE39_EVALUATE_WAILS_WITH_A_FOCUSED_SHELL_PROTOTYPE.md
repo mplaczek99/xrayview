@@ -1,6 +1,8 @@
 # Phase 39 Evaluate Wails with a Focused Shell Prototype
 
-This document completes phase 39 from [GO_BACKEND_MIGRATION_PLAN.md](GO_BACKEND_MIGRATION_PLAN.md). Instead of starting a full shell rewrite, the repository now contains a narrow `wails-prototype/` application that reuses the existing React/Vite toolchain and proves the shell concerns that phase 39 explicitly called out: application launch, native open/save dialogs, preview artifact access, and one live backend call path.
+This document completes phase 39 from [GO_BACKEND_MIGRATION_PLAN.md](GO_BACKEND_MIGRATION_PLAN.md). Instead of starting a full shell rewrite, phase 39 introduced a narrow `wails-prototype/` application that reused the existing React/Vite toolchain and proved the shell concerns that phase 39 explicitly called out: application launch, native open/save dialogs, preview artifact access, and one live backend call path.
+
+Historical note: phase 40 later promoted that prototype into the supported desktop shell, so the prototype-only frontend entry files that existed during phase 39 are no longer present in the current tree.
 
 Primary implementation references:
 
@@ -8,10 +10,8 @@ Primary implementation references:
 - [wails-prototype/app.go](wails-prototype/app.go)
 - [wails-prototype/sidecar.go](wails-prototype/sidecar.go)
 - [wails-prototype/README.md](wails-prototype/README.md)
-- [frontend/src/wailsPrototype/App.tsx](frontend/src/wailsPrototype/App.tsx)
-- [frontend/src/wailsPrototype/bindings.ts](frontend/src/wailsPrototype/bindings.ts)
-- [frontend/scripts/wails-prototype-build.mjs](frontend/scripts/wails-prototype-build.mjs)
-- [frontend/vite.wails-prototype.config.ts](frontend/vite.wails-prototype.config.ts)
+- [frontend/scripts/wails-build.mjs](frontend/scripts/wails-build.mjs)
+- [frontend/vite.wails.config.ts](frontend/vite.wails.config.ts)
 
 ## 1. The Repository Now Has A Narrow Wails Shell Evaluation Path
 

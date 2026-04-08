@@ -51,7 +51,7 @@ class RootErrorBoundary extends React.Component<
 }
 
 // StrictMode helps catch React-side effect mistakes before the same code runs
-// inside the packaged Tauri shell.
+// inside the packaged Wails shell.
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
     <RootErrorBoundary>

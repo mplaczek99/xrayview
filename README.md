@@ -1,8 +1,8 @@
 # xrayview
 
-`xrayview` is a DICOM X-ray visualization and analysis workstation built with Tauri (React/TypeScript frontend, Go-first desktop backend, Rust compatibility layer). The repository now includes a phase 38 Go backend sidecar path with shell-managed startup/shutdown, Go-backed study registration/render/process/analyze command support, Go-owned recent-study persistence, supported headless CLI workflows that run through Go, and a default desktop runtime that now stays on the Go sidecar by default.
+`xrayview` is a DICOM X-ray visualization and analysis workstation built with a Wails desktop shell, a React/TypeScript frontend, a Go-first desktop backend, and a narrow Rust compatibility layer that still exists only for helper functionality the migration has not retired yet.
 
-The desktop UI lives in `frontend/`. The Go sidecar in `go-backend/` now owns the default desktop runtime and the supported CLI surface under `go-backend/cmd/xrayview-cli`, while the Rust backend in `backend/` remains available only as the temporary `legacy-rust` desktop fallback plus the narrow helper functionality that still has not been retired. The Rust backend remains library-first — Tauri calls it directly in-process (no subprocess) — but it is no longer the normal desktop execution path.
+The desktop UI lives in `frontend/`, and the supported desktop shell now lives in `wails-prototype/`. The Go sidecar in `go-backend/` owns the desktop command surface and the supported CLI under `go-backend/cmd/xrayview-cli`. The Rust backend in `backend/` is no longer part of the live desktop runtime; it remains only where the migration still depends on temporary helper behavior.
 
 ## What It Does
 
@@ -72,8 +72,8 @@ The Go backend sidecar binds to `127.0.0.1:38181` by default and exposes:
 The transport is intentionally local-only:
 
 - the backend binds only to loopback hosts
-- the frontend accepts only loopback `http://` sidecar URLs
-- the server handles the CORS/preflight flow required by the Tauri webview
+- the Wails shell talks to the Go backend over loopback `http://`
+- browser/mock mode does not expose the live backend transport
 
 Current Go command behavior:
 
@@ -89,7 +89,7 @@ Current Go command behavior:
 - `render-preview` exercises the phase 16 decode-to-preview pipeline from the Go CLI
 - the sidecar still depends on the narrow Rust decode helper until a future phase proves pure-Go decode is warranted
 
-See [GO_BACKEND_PHASE7_DEFINE_LOCAL_BACKEND_TRANSPORT.md](GO_BACKEND_PHASE7_DEFINE_LOCAL_BACKEND_TRANSPORT.md), [GO_BACKEND_PHASE8_ADD_TAURI_GO_PROCESS_MANAGEMENT.md](GO_BACKEND_PHASE8_ADD_TAURI_GO_PROCESS_MANAGEMENT.md), [GO_BACKEND_PHASE9_IMPLEMENT_GO_PROCESSING_MANIFEST_ENDPOINT.md](GO_BACKEND_PHASE9_IMPLEMENT_GO_PROCESSING_MANIFEST_ENDPOINT.md), [GO_BACKEND_PHASE10_IMPLEMENT_GO_STUDY_REGISTRY_AND_OPEN_STUDY.md](GO_BACKEND_PHASE10_IMPLEMENT_GO_STUDY_REGISTRY_AND_OPEN_STUDY.md), [GO_BACKEND_PHASE11_PROTOTYPE_GO_DICOM_METADATA_READER.md](GO_BACKEND_PHASE11_PROTOTYPE_GO_DICOM_METADATA_READER.md), [GO_BACKEND_PHASE12_DECIDE_DICOM_DECODE_STRATEGY.md](GO_BACKEND_PHASE12_DECIDE_DICOM_DECODE_STRATEGY.md), [GO_BACKEND_PHASE13_BUILD_TEMPORARY_RUST_DECODE_HELPER.md](GO_BACKEND_PHASE13_BUILD_TEMPORARY_RUST_DECODE_HELPER.md), [GO_BACKEND_PHASE14_IMPLEMENT_GO_PREVIEW_IMAGE_MODEL.md](GO_BACKEND_PHASE14_IMPLEMENT_GO_PREVIEW_IMAGE_MODEL.md), [GO_BACKEND_PHASE15_PORT_WINDOWING_LOGIC_TO_GO.md](GO_BACKEND_PHASE15_PORT_WINDOWING_LOGIC_TO_GO.md), [GO_BACKEND_PHASE16_PORT_BASE_RENDER_PIPELINE_TO_GO.md](GO_BACKEND_PHASE16_PORT_BASE_RENDER_PIPELINE_TO_GO.md), [GO_BACKEND_PHASE17_CUT_RENDER_STUDY_TO_GO.md](GO_BACKEND_PHASE17_CUT_RENDER_STUDY_TO_GO.md), [GO_BACKEND_PHASE28_IMPLEMENT_GO_ANALYZE_JOB.md](GO_BACKEND_PHASE28_IMPLEMENT_GO_ANALYZE_JOB.md), [GO_BACKEND_PHASE30_ADD_TEMPORARY_RUST_EXPORT_HELPER_IF_NEEDED.md](GO_BACKEND_PHASE30_ADD_TEMPORARY_RUST_EXPORT_HELPER_IF_NEEDED.md), [GO_BACKEND_PHASE31_CUT_PROCESS_STUDY_FULLY_TO_GO.md](GO_BACKEND_PHASE31_CUT_PROCESS_STUDY_FULLY_TO_GO.md), [GO_BACKEND_PHASE32_CUT_MEASURE_LINE_ANNOTATION_TO_GO.md](GO_BACKEND_PHASE32_CUT_MEASURE_LINE_ANNOTATION_TO_GO.md), [GO_BACKEND_PHASE33_CUT_OPEN_STUDY_TO_GO_IN_LIVE_DESKTOP_FLOW.md](GO_BACKEND_PHASE33_CUT_OPEN_STUDY_TO_GO_IN_LIVE_DESKTOP_FLOW.md), [GO_BACKEND_PHASE34_CUT_ANALYZE_STUDY_TO_GO_IN_LIVE_DESKTOP_FLOW.md](GO_BACKEND_PHASE34_CUT_ANALYZE_STUDY_TO_GO_IN_LIVE_DESKTOP_FLOW.md), [GO_BACKEND_PHASE35_MOVE_CLI_OWNERSHIP_TO_GO.md](GO_BACKEND_PHASE35_MOVE_CLI_OWNERSHIP_TO_GO.md), and [GO_BACKEND_PHASE37_INTRODUCE_GO_FIRST_PACKAGING_FLOW_UNDER_TAURI.md](GO_BACKEND_PHASE37_INTRODUCE_GO_FIRST_PACKAGING_FLOW_UNDER_TAURI.md).
+See [GO_BACKEND_PHASE7_DEFINE_LOCAL_BACKEND_TRANSPORT.md](GO_BACKEND_PHASE7_DEFINE_LOCAL_BACKEND_TRANSPORT.md), [GO_BACKEND_PHASE8_ADD_TAURI_GO_PROCESS_MANAGEMENT.md](GO_BACKEND_PHASE8_ADD_TAURI_GO_PROCESS_MANAGEMENT.md), [GO_BACKEND_PHASE9_IMPLEMENT_GO_PROCESSING_MANIFEST_ENDPOINT.md](GO_BACKEND_PHASE9_IMPLEMENT_GO_PROCESSING_MANIFEST_ENDPOINT.md), [GO_BACKEND_PHASE10_IMPLEMENT_GO_STUDY_REGISTRY_AND_OPEN_STUDY.md](GO_BACKEND_PHASE10_IMPLEMENT_GO_STUDY_REGISTRY_AND_OPEN_STUDY.md), [GO_BACKEND_PHASE11_PROTOTYPE_GO_DICOM_METADATA_READER.md](GO_BACKEND_PHASE11_PROTOTYPE_GO_DICOM_METADATA_READER.md), [GO_BACKEND_PHASE12_DECIDE_DICOM_DECODE_STRATEGY.md](GO_BACKEND_PHASE12_DECIDE_DICOM_DECODE_STRATEGY.md), [GO_BACKEND_PHASE13_BUILD_TEMPORARY_RUST_DECODE_HELPER.md](GO_BACKEND_PHASE13_BUILD_TEMPORARY_RUST_DECODE_HELPER.md), [GO_BACKEND_PHASE14_IMPLEMENT_GO_PREVIEW_IMAGE_MODEL.md](GO_BACKEND_PHASE14_IMPLEMENT_GO_PREVIEW_IMAGE_MODEL.md), [GO_BACKEND_PHASE15_PORT_WINDOWING_LOGIC_TO_GO.md](GO_BACKEND_PHASE15_PORT_WINDOWING_LOGIC_TO_GO.md), [GO_BACKEND_PHASE16_PORT_BASE_RENDER_PIPELINE_TO_GO.md](GO_BACKEND_PHASE16_PORT_BASE_RENDER_PIPELINE_TO_GO.md), [GO_BACKEND_PHASE17_CUT_RENDER_STUDY_TO_GO.md](GO_BACKEND_PHASE17_CUT_RENDER_STUDY_TO_GO.md), [GO_BACKEND_PHASE28_IMPLEMENT_GO_ANALYZE_JOB.md](GO_BACKEND_PHASE28_IMPLEMENT_GO_ANALYZE_JOB.md), [GO_BACKEND_PHASE30_ADD_TEMPORARY_RUST_EXPORT_HELPER_IF_NEEDED.md](GO_BACKEND_PHASE30_ADD_TEMPORARY_RUST_EXPORT_HELPER_IF_NEEDED.md), [GO_BACKEND_PHASE31_CUT_PROCESS_STUDY_FULLY_TO_GO.md](GO_BACKEND_PHASE31_CUT_PROCESS_STUDY_FULLY_TO_GO.md), [GO_BACKEND_PHASE32_CUT_MEASURE_LINE_ANNOTATION_TO_GO.md](GO_BACKEND_PHASE32_CUT_MEASURE_LINE_ANNOTATION_TO_GO.md), [GO_BACKEND_PHASE33_CUT_OPEN_STUDY_TO_GO_IN_LIVE_DESKTOP_FLOW.md](GO_BACKEND_PHASE33_CUT_OPEN_STUDY_TO_GO_IN_LIVE_DESKTOP_FLOW.md), [GO_BACKEND_PHASE34_CUT_ANALYZE_STUDY_TO_GO_IN_LIVE_DESKTOP_FLOW.md](GO_BACKEND_PHASE34_CUT_ANALYZE_STUDY_TO_GO_IN_LIVE_DESKTOP_FLOW.md), [GO_BACKEND_PHASE35_MOVE_CLI_OWNERSHIP_TO_GO.md](GO_BACKEND_PHASE35_MOVE_CLI_OWNERSHIP_TO_GO.md), [GO_BACKEND_PHASE37_INTRODUCE_GO_FIRST_PACKAGING_FLOW_UNDER_TAURI.md](GO_BACKEND_PHASE37_INTRODUCE_GO_FIRST_PACKAGING_FLOW_UNDER_TAURI.md), and [GO_BACKEND_PHASE40_REPLACE_TAURI_SHELL_WITH_WAILS.md](GO_BACKEND_PHASE40_REPLACE_TAURI_SHELL_WITH_WAILS.md).
 
 ### Desktop app
 
@@ -97,41 +97,37 @@ See [GO_BACKEND_PHASE7_DEFINE_LOCAL_BACKEND_TRANSPORT.md](GO_BACKEND_PHASE7_DEFI
 # Install dependencies (root postinstall handles frontend/)
 npm install
 
-# Run the desktop app with hot-reload
-npm run tauri:dev
+# Build and launch the Wails desktop shell
+npm run wails:run
 
-# Build desktop bundles (Linux needs WebKitGTK, patchelf)
-npm run tauri:build
+# Build the desktop binary plus sidecar
+npm run wails:build
 ```
 
 If you do not choose a save destination, the app keeps the processed DICOM in a
 managed temporary path and shows that path after processing completes.
 
-The desktop build scripts now prepare the Go sidecar automatically for dev and
-release builds. Linux AppImage builds also reuse the runtime embedded in
-Tauri's cached AppImage tooling so packaging does not depend on a separate
-runtime download during bundling.
+The Wails build writes frontend assets under `wails-prototype/build/frontend/dist/`
+and writes the desktop shell plus Go sidecar binaries under
+`wails-prototype/build/bin/`.
 
 ### Release validation
 
 ```bash
-# Smoke test without generating installers
+# Smoke test the Wails desktop binary
 npm run release:smoke
 
-# With installer/AppImage verification
+# The flag is accepted, but current validation still targets the built binary
 npm run release:smoke -- --bundle
 ```
 
 The release smoke flow now checks contract drift, runs the Go backend test
-suite, builds the release binary, and launches the packaged desktop app long
-enough to confirm the Go sidecar comes up when the current environment can host
-GUI launch smoke. Linux CI now provisions `xvfb` so release workflows exercise
-that launch path even in headless runners, and Linux bundle smoke also launches
-the bundled AppImage when that artifact is requested.
+suite, builds the Wails desktop binary, and launches it long enough to confirm
+the Go sidecar comes up when the current environment can host GUI launch smoke.
 
 ### Browser-only mock mode
 
-Iterate on the UI without the Rust backend:
+Iterate on the UI without the live desktop shell:
 
 ```bash
 npm run dev
@@ -139,41 +135,34 @@ npm run dev
 
 ### Backend Runtime Selection
 
-The frontend now supports three backend runtime modes:
+The frontend now supports two backend runtime modes:
 
 - `mock`
-- `legacy-rust`
 - `go-sidecar`
 
 Defaults:
 
 - browser/Vite only: `mock`
-- Tauri desktop: `go-sidecar`
+- Wails desktop: `go-sidecar`
 
 You can override the backend runtime with:
 
 ```bash
 XRAYVIEW_BACKEND_RUNTIME=mock npm run dev
-npm run tauri:dev
-XRAYVIEW_BACKEND_RUNTIME=legacy-rust npm run tauri:dev
-XRAYVIEW_BACKEND_RUNTIME=go-sidecar XRAYVIEW_GO_BACKEND_URL=http://127.0.0.1:38181 npm run tauri:dev
+npm run wails:run
+XRAYVIEW_BACKEND_RUNTIME=mock npm run wails:run
+XRAYVIEW_BACKEND_RUNTIME=go-sidecar XRAYVIEW_GO_BACKEND_URL=http://127.0.0.1:38181 npm run wails:run
 ```
 
-`XRAYVIEW_GO_BACKEND_URL` configures the local Go sidecar for desktop runtimes that use it and must be a loopback `http://` URL such as `http://127.0.0.1:38181`. The frontend entry scripts also accept the Vite-prefixed forms `VITE_XRAYVIEW_BACKEND_RUNTIME` and `VITE_XRAYVIEW_GO_BACKEND_URL`.
-The Tauri shell now starts and stops the local Go backend automatically for desktop runtimes that need it. The default desktop runtime is now `go-sidecar`, so `openStudy`, `renderStudy`, `processStudy`, `analyzeStudy`, `measureLineAnnotation`, and the normal job polling/cancellation path all run through the bundled Go backend by default. `legacy-rust` remains available only as a temporary fallback flag; in that mode `renderStudy` still uses the Rust bridge while the already-migrated commands continue through Go.
-Phase 12 explicitly keeps full pixel decode off the Go side for now and routes the next migration step through a narrow Rust helper until a broader study corpus proves pure-Go decode is justified.
+`XRAYVIEW_GO_BACKEND_URL` configures the local Go sidecar for desktop runs and must be a loopback `http://` URL such as `http://127.0.0.1:38181`. The Wails run/build scripts also accept the Vite-prefixed forms `VITE_XRAYVIEW_BACKEND_RUNTIME` and `VITE_XRAYVIEW_GO_BACKEND_URL`.
+The Wails shell starts and stops the local Go backend automatically for `go-sidecar` runs. That means `openStudy`, `renderStudy`, `processStudy`, `analyzeStudy`, `measureLineAnnotation`, and the normal job polling/cancellation path now run through the bundled Go backend by default.
+Phase 12 still keeps full pixel decode off the Go side for now and routes that narrow responsibility through a temporary Rust helper until a broader study corpus proves pure-Go decode is justified.
 
 ## Releases
 
-Prebuilt desktop packages are published on GitHub Releases.
-
-- Linux: download the `.AppImage`, run `chmod +x <asset>.AppImage`, then run it
-- Windows: download the `.msi` installer and run it
-
-The desktop packages now default to the Go-first `go-sidecar` runtime. Build
-with `XRAYVIEW_BACKEND_RUNTIME=legacy-rust` only when you need the temporary
-Rust fallback for regression comparison; otherwise the packaged app launches
-the bundled Go backend and keeps the normal desktop command surface there.
+The supported repository release flow currently validates the built Wails
+desktop binary under `wails-prototype/build/bin/`. Installer/AppImage bundling
+has not been reintroduced yet in the Wails shell path.
 
 ## Basic Usage
 
@@ -269,7 +258,7 @@ go -C go-backend run ./cmd/xrayview-cli -- --input ../images/sample-dental-radio
 ### Transitional Workspace Layout
 
 - **`backend/`** — Library-first crate with modular layout: `api/`, `app/`, `study/`, `render/`, `processing/`, `analysis/`, `annotations/`, `export/`, `jobs/`, `cache/`, `persistence/`. Still provides helper binaries for the migration path, but the supported headless CLI workflows now live in `go-backend/cmd/xrayview-cli`.
-- **`frontend/src-tauri/`** — Tauri desktop shell. Still links the legacy Rust backend crate during migration while also preparing and launching the Go sidecar for Go-owned command paths.
+- **`wails-prototype/`** — Wails desktop shell. Hosts the live desktop window, native dialogs, preview-path serving, and the shell-to-sidecar command bridge.
 - **`go-backend/`** — Phase 6 Go backend module with the initial sidecar process skeleton.
 - **`go/contracts/`** — Go module for generated contract bindings owned by the language-neutral schema.
 
@@ -280,13 +269,13 @@ The contract source of truth now lives in [contracts/backend-contract-v1.schema.
 - [frontend/src/lib/generated/contracts.ts](frontend/src/lib/generated/contracts.ts)
 - [go/contracts/contractv1/bindings.go](go/contracts/contractv1/bindings.go)
 
-Run `npm run contracts:check` to verify the committed generated bindings still match the schema without routing through the legacy Rust backend. Rust-side contract tests remain available as backend compatibility coverage while the Tauri shell still links the Rust crate, but they are no longer part of the frontend-owned contract generation path.
+Run `npm run contracts:check` to verify the committed generated bindings still match the schema without routing through the legacy Rust backend. Rust-side contract tests remain available as backend compatibility coverage, but they are no longer part of the frontend-owned contract generation path.
 
 ### Data flow
 
-1. User opens a DICOM file -> `open_study` Tauri command -> backend registers study, decodes DICOM, returns metadata + study ID
-2. Render/process/analyze requests reference study by ID -> dispatched as async jobs -> progress emitted via Tauri events -> results cached as artifacts
-3. Frontend loads rendered PNG previews via Tauri's asset protocol
+1. User opens a DICOM file -> frontend asks the Wails shell for a native file dialog -> shell forwards `open_study` to the Go sidecar -> backend registers study, decodes DICOM metadata, and returns metadata plus study ID
+2. Render/process/analyze requests reference study by ID -> frontend sends command requests through the Wails shell -> Go sidecar executes jobs and returns typed job snapshots/results
+3. Frontend loads rendered PNG previews through the Wails `/preview` asset route
 4. Viewer renders on Canvas 2D with annotation overlay in image-space coordinates
 
 ## Test
@@ -301,6 +290,12 @@ cargo test --manifest-path backend/Cargo.toml
 # Go backend skeleton tests
 npm run go:backend:test
 
-# Frontend type-check
+# Wails shell tests
+GOCACHE=/tmp/xrayview-go-build-cache GOTMPDIR=/tmp/xrayview-go-tmp go -C wails-prototype test ./...
+
+# Frontend type-check + browser build
 npm --prefix frontend run build
+
+# Desktop shell build
+npm run wails:build
 ```

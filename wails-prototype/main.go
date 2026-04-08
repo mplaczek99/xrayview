@@ -12,25 +12,25 @@ import (
 )
 
 func main() {
-	app, err := NewPrototypeApp()
+	app, err := NewDesktopApp()
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	assetDir, err := resolveFrontendDistDir(app.repoRoot)
+	assetDir, err := resolveFrontendDistDir()
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	err = wails.Run(&options.App{
-		Title:     "XRayView Wails Prototype",
-		Width:     1200,
-		Height:    860,
+		Title:     "XRayView",
+		Width:     1280,
+		Height:    900,
 		MinWidth:  980,
 		MinHeight: 720,
 		AssetServer: &assetserver.Options{
 			Assets:  os.DirFS(assetDir),
-			Handler: http.HandlerFunc(app.ServePrototypeAsset),
+			Handler: http.HandlerFunc(app.ServeAsset),
 		},
 		OnStartup:  app.startup,
 		OnShutdown: app.shutdown,
@@ -39,6 +39,6 @@ func main() {
 		},
 	})
 	if err != nil {
-		log.Fatal(fmt.Errorf("wails prototype failed: %w", err))
+		log.Fatal(fmt.Errorf("xrayview wails shell failed: %w", err))
 	}
 }

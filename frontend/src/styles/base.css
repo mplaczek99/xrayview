@@ -1,4 +1,4 @@
-/* Core application layout shared by the browser mock and the Tauri shell. */
+/* Core application layout shared by the browser mock and the Wails shell. */
 * {
   box-sizing: border-box;
 }
@@ -1041,7 +1041,7 @@ button {
 
 /* touch-action: none is required so the browser doesn't intercept pointer
    events for native scroll/pinch while the custom pan/zoom handler is active.
-   Acceptable for the desktop-first Tauri use case. If mobile support is added,
+   Acceptable for the current desktop-first shell. If mobile support is added,
    consider touch-action: pinch-zoom to allow native pinch while capturing pan. */
 .viewer-canvas {
   position: relative;

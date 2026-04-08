@@ -1,6 +1,7 @@
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { applyFrontendRuntimeEnv } from "../../frontend/scripts/runtime-env.mjs";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, "..", "..");
@@ -10,12 +11,14 @@ const binaryPath = path.join(
   "wails-prototype",
   "build",
   "bin",
-  process.platform === "win32" ? "xrayview-wails-prototype.exe" : "xrayview-wails-prototype",
+  process.platform === "win32" ? "xrayview.exe" : "xrayview",
 );
+const launchEnv = applyFrontendRuntimeEnv(process.env);
 
-function run(command, args) {
+function run(command, args, env = launchEnv) {
   const result = spawnSync(command, args, {
     cwd: repoRoot,
+    env,
     stdio: "inherit",
     shell: process.platform === "win32",
   });

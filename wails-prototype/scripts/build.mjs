@@ -2,15 +2,28 @@ import { mkdirSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { applyFrontendRuntimeEnv } from "../../frontend/scripts/runtime-env.mjs";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, "..", "..");
-const prototypeDir = path.join(repoRoot, "wails-prototype");
-const buildBinDir = path.join(prototypeDir, "build", "bin");
+const desktopDir = path.join(repoRoot, "wails-prototype");
+const buildBinDir = path.join(desktopDir, "build", "bin");
+const defaultGoPath = process.env.HOME
+  ? path.join(process.env.HOME, "go")
+  : undefined;
+const buildEnv = {
+  ...applyFrontendRuntimeEnv(process.env),
+  GOCACHE: process.env.GOCACHE ?? path.join("/tmp", "xrayview-go-build-cache"),
+  GOMODCACHE:
+    process.env.GOMODCACHE ?? (defaultGoPath ? path.join(defaultGoPath, "pkg", "mod") : undefined),
+  GOTMPDIR: process.env.GOTMPDIR ?? path.join("/tmp", "xrayview-go-tmp"),
+  GOPROXY: process.env.GOPROXY ?? "off",
+};
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
     cwd: repoRoot,
+    env: buildEnv,
     stdio: "inherit",
     shell: process.platform === "win32",
     ...options,
@@ -45,8 +58,13 @@ function binaryName(baseName) {
 }
 
 mkdirSync(buildBinDir, { recursive: true });
+mkdirSync(buildEnv.GOCACHE, { recursive: true });
+if (buildEnv.GOMODCACHE) {
+  mkdirSync(buildEnv.GOMODCACHE, { recursive: true });
+}
+mkdirSync(buildEnv.GOTMPDIR, { recursive: true });
 
-run("npm", ["--prefix", "frontend", "run", "wails:prototype:build"]);
+run("npm", ["--prefix", "frontend", "run", "wails:build"]);
 run("go", [
   "-C",
   path.join(repoRoot, "go-backend"),
@@ -57,11 +75,11 @@ run("go", [
 ]);
 run("go", [
   "-C",
-  prototypeDir,
+  desktopDir,
   "build",
   "-tags",
   detectWailsTags(),
   "-o",
-  path.join(buildBinDir, binaryName("xrayview-wails-prototype")),
+  path.join(buildBinDir, binaryName("xrayview")),
   ".",
 ]);

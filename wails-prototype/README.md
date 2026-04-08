@@ -1,37 +1,27 @@
-# XRayView Wails Prototype
+# XRayView Wails Shell
 
-This directory holds the focused shell prototype for phase 39 of the Go backend migration plan.
+This directory now owns the supported desktop shell for `xrayview`.
 
-The prototype is intentionally narrow. It proves:
+The Wails shell:
 
-- Wails application launch against the existing React/Vite toolchain
-- native open-file and save-file dialogs without the Tauri bridge
-- local preview artifact loading through a Wails asset handler
-- one live backend call path via `openStudy` against the Go sidecar
+- launches the existing React workstation frontend
+- exposes native open/save dialogs to the frontend through Wails bindings
+- serves local preview artifacts back into the webview at `/preview`
+- manages the Go sidecar lifecycle for the live desktop workflow
+- forwards the frontend command surface to the Go backend over the existing local HTTP contract
 
 ## Commands
 
-Build the prototype frontend and both Go binaries:
+Build the frontend assets plus both Go binaries:
 
 ```bash
-npm run wails:prototype:build
+npm run wails:build
 ```
 
-Build and immediately launch the prototype:
+Build and immediately launch the desktop shell:
 
 ```bash
-npm run wails:prototype:run
+npm run wails:run
 ```
 
-The prototype expects its frontend assets under `wails-prototype/frontend/dist/`, which are produced by `npm --prefix frontend run wails:prototype:build`.
-
-## Scope
-
-This is not the phase 40 shell replacement. It is a decision aid for:
-
-- shell runtime fit
-- dialog API ergonomics
-- local artifact serving behavior
-- Wails build friction on the current Linux desktop stack
-
-The production Tauri shell remains unchanged in this phase.
+The frontend assets are written to `wails-prototype/build/frontend/dist/`, and the desktop app plus Go sidecar binaries are written to `wails-prototype/build/bin/`.

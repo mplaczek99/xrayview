@@ -2256,6 +2256,10 @@ Yes.
 
 Move to the final Go-first shell.
 
+### Status
+
+Completed. See [GO_BACKEND_PHASE40_REPLACE_TAURI_SHELL_WITH_WAILS.md](GO_BACKEND_PHASE40_REPLACE_TAURI_SHELL_WITH_WAILS.md).
+
 ### Why this phase exists
 
 This eliminates the long-term stack mismatch.

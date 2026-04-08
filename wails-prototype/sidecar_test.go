@@ -1,23 +1,19 @@
 package main
 
-import (
-	"path/filepath"
-	"testing"
-)
+import "testing"
 
-func TestFindRepoRoot(t *testing.T) {
-	repoRoot, err := resolveRepoRoot()
-	if err != nil {
-		t.Fatalf("resolveRepoRoot() error = %v", err)
+func TestResolveRuntimeModeDefaultsToGoSidecar(t *testing.T) {
+	t.Setenv(sidecarRuntimeEnvKey, "")
+
+	if got, want := resolveRuntimeMode(), runtimeModeGoSidecar; got != want {
+		t.Fatalf("resolveRuntimeMode() = %q, want %q", got, want)
 	}
+}
 
-	start := filepath.Join(repoRoot, "wails-prototype", "build", "bin")
-	found, ok := findRepoRoot(start)
-	if !ok {
-		t.Fatalf("findRepoRoot(%q) did not locate the repository root", start)
-	}
+func TestResolveRuntimeModeSupportsMock(t *testing.T) {
+	t.Setenv(sidecarRuntimeEnvKey, "mock")
 
-	if found != repoRoot {
-		t.Fatalf("findRepoRoot(%q) = %q, want %q", start, found, repoRoot)
+	if got, want := resolveRuntimeMode(), runtimeModeMock; got != want {
+		t.Fatalf("resolveRuntimeMode() = %q, want %q", got, want)
 	}
 }

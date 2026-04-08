@@ -21,10 +21,11 @@ import (
 const (
 	defaultBackendBaseURL  = "http://127.0.0.1:38181"
 	previewEndpointPath    = "/preview"
-	commandOpenStudyPath   = "/api/v1/commands/open_study"
-	sidecarBinaryEnvKey    = "XRAYVIEW_WAILS_PROTOTYPE_GO_BACKEND_BINARY"
-	sidecarBaseURLEnvKey   = "XRAYVIEW_WAILS_PROTOTYPE_GO_BACKEND_URL"
-	sidecarBaseDirEnvKey   = "XRAYVIEW_WAILS_PROTOTYPE_GO_BACKEND_BASE_DIR"
+	commandsPath           = "/api/v1/commands"
+	sidecarBinaryEnvKey    = "XRAYVIEW_WAILS_GO_BACKEND_BINARY"
+	sidecarBaseURLEnvKey   = "XRAYVIEW_GO_BACKEND_URL"
+	sidecarBaseDirEnvKey   = "XRAYVIEW_WAILS_GO_BACKEND_BASE_DIR"
+	sidecarRuntimeEnvKey   = "XRAYVIEW_BACKEND_RUNTIME"
 	expectedBackendService = "xrayview-go-backend"
 	expectedTransportKind  = "local-http-json"
 	sidecarStartupTimeout  = 10 * time.Second
@@ -37,8 +38,26 @@ const (
 
 var errSidecarUnavailable = errors.New("go backend is not reachable")
 
+type runtimeMode string
+
+const (
+	runtimeModeMock      runtimeMode = "mock"
+	runtimeModeGoSidecar runtimeMode = "go-sidecar"
+)
+
+type backendHealth struct {
+	Status         string `json:"status"`
+	Service        string `json:"service"`
+	Transport      string `json:"transport"`
+	ListenAddress  string `json:"listenAddress"`
+	CacheDir       string `json:"cacheDir"`
+	PersistenceDir string `json:"persistenceDir"`
+	StudyCount     int    `json:"studyCount"`
+	StartedAt      string `json:"startedAt"`
+}
+
 type SidecarController struct {
-	repoRoot    string
+	mode        runtimeMode
 	baseURL     string
 	baseDir     string
 	probeClient *http.Client
@@ -46,11 +65,10 @@ type SidecarController struct {
 	binaryPath  string
 	mu          sync.Mutex
 	child       *exec.Cmd
-	lastHealth  *backendHealth
 	lastManaged bool
 }
 
-func NewSidecarController(repoRoot string) *SidecarController {
+func NewSidecarController() *SidecarController {
 	baseURL := strings.TrimSpace(os.Getenv(sidecarBaseURLEnvKey))
 	if baseURL == "" {
 		baseURL = defaultBackendBaseURL
@@ -58,13 +76,13 @@ func NewSidecarController(repoRoot string) *SidecarController {
 
 	baseDir := strings.TrimSpace(os.Getenv(sidecarBaseDirEnvKey))
 	if baseDir == "" {
-		baseDir = filepath.Join(os.TempDir(), "xrayview", "wails-prototype")
+		baseDir = filepath.Join(os.TempDir(), "xrayview", "wails")
 	}
 
 	return &SidecarController{
-		repoRoot: repoRoot,
-		baseURL:  strings.TrimRight(baseURL, "/"),
-		baseDir:  baseDir,
+		mode:    resolveRuntimeMode(),
+		baseURL: strings.TrimRight(baseURL, "/"),
+		baseDir: baseDir,
 		probeClient: &http.Client{
 			Timeout: sidecarProbeTimeout,
 		},
@@ -72,6 +90,10 @@ func NewSidecarController(repoRoot string) *SidecarController {
 			Timeout: sidecarRequestTimeout,
 		},
 	}
+}
+
+func (controller *SidecarController) Enabled() bool {
+	return controller.mode == runtimeModeGoSidecar
 }
 
 func (controller *SidecarController) BaseURL() string {
@@ -87,44 +109,24 @@ func (controller *SidecarController) BinaryPath() string {
 		return controller.binaryPath
 	}
 
-	binaryName := sidecarBinaryNameBase
-	if runtime.GOOS == "windows" {
-		binaryName += ".exe"
+	for _, candidate := range sidecarBinaryCandidates() {
+		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+			return candidate
+		}
 	}
 
-	return filepath.Join(controller.repoRoot, "wails-prototype", "build", "bin", binaryName)
-}
-
-func (controller *SidecarController) Managed() bool {
-	controller.mu.Lock()
-	defer controller.mu.Unlock()
-	return controller.lastManaged
-}
-
-func (controller *SidecarController) Health() (*backendHealth, error) {
-	health, err := controller.probeHealth()
-	if err == nil {
-		controller.mu.Lock()
-		controller.lastHealth = health
-		controller.mu.Unlock()
-		return health, nil
-	}
-
-	controller.mu.Lock()
-	defer controller.mu.Unlock()
-	if controller.lastHealth != nil {
-		return controller.lastHealth, nil
-	}
-
-	return nil, err
+	return sidecarBinaryCandidates()[0]
 }
 
 func (controller *SidecarController) EnsureStarted() error {
+	if !controller.Enabled() {
+		return nil
+	}
+
 	controller.mu.Lock()
 	defer controller.mu.Unlock()
 
-	if health, err := controller.probeHealthLocked(); err == nil {
-		controller.lastHealth = health
+	if _, err := controller.probeHealthLocked(); err == nil {
 		controller.lastManaged = controller.child != nil
 		return nil
 	} else if !errors.Is(err, errSidecarUnavailable) {
@@ -135,7 +137,7 @@ func (controller *SidecarController) EnsureStarted() error {
 	if _, err := os.Stat(binaryPath); err != nil {
 		if os.IsNotExist(err) {
 			return fmt.Errorf(
-				"missing go backend sidecar binary at %s; build the prototype with `npm run wails:prototype:build` first",
+				"missing go backend sidecar binary at %s; build the desktop shell with `npm run wails:build` first",
 				binaryPath,
 			)
 		}
@@ -174,15 +176,12 @@ func (controller *SidecarController) EnsureStarted() error {
 
 	deadline := time.Now().Add(sidecarStartupTimeout)
 	for time.Now().Before(deadline) {
-		health, probeErr := controller.probeHealthLocked()
-		if probeErr == nil {
+		if _, probeErr := controller.probeHealthLocked(); probeErr == nil {
 			controller.child = command
 			controller.binaryPath = binaryPath
-			controller.lastHealth = health
 			controller.lastManaged = true
 			return nil
-		}
-		if !errors.Is(probeErr, errSidecarUnavailable) {
+		} else if !errors.Is(probeErr, errSidecarUnavailable) {
 			_ = terminateProcess(command)
 			controller.child = nil
 			controller.lastManaged = false
@@ -211,47 +210,44 @@ func (controller *SidecarController) Stop() {
 	controller.lastManaged = false
 }
 
-func (controller *SidecarController) PostJSON(path string, payload any, target any) error {
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return err
+func (controller *SidecarController) InvokeCommand(
+	command string,
+	payloadJSON string,
+) (backendCommandResponse, error) {
+	if err := controller.EnsureStarted(); err != nil {
+		return backendCommandResponse{}, err
 	}
 
-	request, err := http.NewRequest(http.MethodPost, controller.baseURL+path, bytes.NewReader(body))
+	requestURL := controller.baseURL + commandsPath + "/" + command
+	var bodyReader io.Reader
+	if strings.TrimSpace(payloadJSON) != "" {
+		bodyReader = bytes.NewBufferString(payloadJSON)
+	}
+
+	request, err := http.NewRequest(http.MethodPost, requestURL, bodyReader)
 	if err != nil {
-		return err
+		return backendCommandResponse{}, err
 	}
 	request.Header.Set("accept", "application/json")
-	request.Header.Set("content-type", "application/json")
+	if bodyReader != nil {
+		request.Header.Set("content-type", "application/json")
+	}
 
 	response, err := controller.httpClient.Do(request)
 	if err != nil {
-		return err
+		return backendCommandResponse{}, err
 	}
 	defer response.Body.Close()
 
-	if response.StatusCode >= http.StatusBadRequest {
-		var backendErr backendError
-		if decodeErr := decodeJSONResponse(response.Body, &backendErr); decodeErr == nil && backendErr.Message != "" {
-			return fmt.Errorf("%s (%s)", backendErr.Message, backendErr.Code)
-		}
-
-		responseBody, _ := io.ReadAll(response.Body)
-		return fmt.Errorf("go backend request failed with status %d: %s", response.StatusCode, strings.TrimSpace(string(responseBody)))
+	responseBody, err := io.ReadAll(response.Body)
+	if err != nil {
+		return backendCommandResponse{}, err
 	}
 
-	if target == nil {
-		io.Copy(io.Discard, response.Body)
-		return nil
-	}
-
-	return decodeJSONResponse(response.Body, target)
-}
-
-func (controller *SidecarController) probeHealth() (*backendHealth, error) {
-	controller.mu.Lock()
-	defer controller.mu.Unlock()
-	return controller.probeHealthLocked()
+	return backendCommandResponse{
+		Status: response.StatusCode,
+		Body:   string(responseBody),
+	}, nil
 }
 
 func (controller *SidecarController) probeHealthLocked() (*backendHealth, error) {
@@ -271,19 +267,91 @@ func (controller *SidecarController) probeHealthLocked() (*backendHealth, error)
 	}
 
 	var health backendHealth
-	if err := decodeJSONResponse(response.Body, &health); err != nil {
+	if err := json.NewDecoder(response.Body).Decode(&health); err != nil {
 		return nil, err
 	}
 
 	if health.Service != expectedBackendService {
-		return nil, fmt.Errorf("refusing to use %s because it is served by %q instead of %q", controller.baseURL, health.Service, expectedBackendService)
+		return nil, fmt.Errorf(
+			"refusing to use %s because it is served by %q instead of %q",
+			controller.baseURL,
+			health.Service,
+			expectedBackendService,
+		)
 	}
 
 	if health.Transport != expectedTransportKind {
-		return nil, fmt.Errorf("refusing to use %s because transport %q does not match %q", controller.baseURL, health.Transport, expectedTransportKind)
+		return nil, fmt.Errorf(
+			"refusing to use %s because transport %q does not match %q",
+			controller.baseURL,
+			health.Transport,
+			expectedTransportKind,
+		)
 	}
 
 	return &health, nil
+}
+
+func resolveRuntimeMode() runtimeMode {
+	raw := strings.TrimSpace(os.Getenv(sidecarRuntimeEnvKey))
+	switch strings.ToLower(raw) {
+	case "", string(runtimeModeGoSidecar):
+		return runtimeModeGoSidecar
+	case string(runtimeModeMock):
+		return runtimeModeMock
+	default:
+		return runtimeModeGoSidecar
+	}
+}
+
+func resolveExecutableDir() (string, error) {
+	executable, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+
+	return filepath.Dir(executable), nil
+}
+
+func sidecarBinaryCandidates() []string {
+	binaryName := sidecarBinaryNameBase
+	if runtime.GOOS == "windows" {
+		binaryName += ".exe"
+	}
+
+	paths := []string{}
+	if executableDir, err := resolveExecutableDir(); err == nil {
+		paths = append(paths, filepath.Join(executableDir, binaryName))
+	}
+
+	if cwd, err := os.Getwd(); err == nil {
+		paths = append(paths,
+			filepath.Join(cwd, "build", "bin", binaryName),
+			filepath.Join(cwd, "wails-prototype", "build", "bin", binaryName),
+		)
+	}
+
+	return uniquePaths(paths)
+}
+
+func uniquePaths(paths []string) []string {
+	seen := map[string]struct{}{}
+	result := make([]string, 0, len(paths))
+	for _, path := range paths {
+		if path == "" {
+			continue
+		}
+
+		cleaned := filepath.Clean(path)
+		if _, ok := seen[cleaned]; ok {
+			continue
+		}
+
+		seen[cleaned] = struct{}{}
+		result = append(result, cleaned)
+	}
+
+	return result
 }
 
 func terminateProcess(command *exec.Cmd) error {

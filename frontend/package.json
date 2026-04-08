@@ -7,13 +7,10 @@
     "generate:contracts": "npm --prefix .. run contracts:generate --",
     "dev": "npm run generate:contracts && node ./scripts/vite-dev.mjs",
     "build": "npm run generate:contracts && tsc --noEmit && node ./scripts/vite-build.mjs",
-    "wails:prototype:build": "npm run generate:contracts && tsc --noEmit && node ./scripts/wails-prototype-build.mjs",
+    "wails:build": "npm run generate:contracts && tsc --noEmit && node ./scripts/wails-build.mjs",
     "preview": "vite preview",
     "release:smoke": "node ./scripts/release-smoke-test.mjs",
-    "release:smoke:bundle": "node ./scripts/release-smoke-test.mjs --bundle",
-    "tauri": "tauri",
-    "tauri:dev": "node ./scripts/tauri-dev.mjs",
-    "tauri:build": "node ./scripts/tauri-build.mjs"
+    "release:smoke:bundle": "node ./scripts/release-smoke-test.mjs --bundle"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.8.0",
