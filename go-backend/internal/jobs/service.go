@@ -31,12 +31,13 @@ type decodeHelperFactory func() (studyDecoder, error)
 type idGenerator func() (string, error)
 
 type Service struct {
-	supportedKinds []contracts.JobKind
-	cache          *cache.Store
-	studies        *studies.Registry
-	newDecoder     decodeHelperFactory
-	memoryCache    *cache.Memory
-	registry       *Registry
+	supportedKinds         []contracts.JobKind
+	cache                  *cache.Store
+	studies                *studies.Registry
+	newDecoder             decodeHelperFactory
+	secondaryCaptureWriter dicomexport.Writer
+	memoryCache            *cache.Memory
+	registry               *Registry
 }
 
 func New(cacheStore *cache.Store, studyRegistry *studies.Registry, logger *slog.Logger) *Service {
@@ -44,11 +45,34 @@ func New(cacheStore *cache.Store, studyRegistry *studies.Registry, logger *slog.
 		cacheStore,
 		studyRegistry,
 		logger,
+		dicomexport.GoWriter{},
 		func() (studyDecoder, error) {
 			return rustdecode.NewFromEnvironment()
 		},
 		generateJobID,
 	)
+}
+
+func NewFromEnvironment(
+	cacheStore *cache.Store,
+	studyRegistry *studies.Registry,
+	logger *slog.Logger,
+) (*Service, error) {
+	writer, err := dicomexport.NewWriterFromEnvironment()
+	if err != nil {
+		return nil, err
+	}
+
+	return newService(
+		cacheStore,
+		studyRegistry,
+		logger,
+		writer,
+		func() (studyDecoder, error) {
+			return rustdecode.NewFromEnvironment()
+		},
+		generateJobID,
+	), nil
 }
 
 func (service *Service) SupportedKinds() []string {
@@ -257,6 +281,7 @@ func newService(
 	cacheStore *cache.Store,
 	studyRegistry *studies.Registry,
 	logger *slog.Logger,
+	secondaryCaptureWriter dicomexport.Writer,
 	decoderFactory decodeHelperFactory,
 	jobIDFactory idGenerator,
 ) *Service {
@@ -274,6 +299,9 @@ func newService(
 			return rustdecode.NewFromEnvironment()
 		}
 	}
+	if secondaryCaptureWriter == nil {
+		secondaryCaptureWriter = dicomexport.GoWriter{}
+	}
 	if jobIDFactory == nil {
 		jobIDFactory = generateJobID
 	}
@@ -284,11 +312,12 @@ func newService(
 			contracts.JobKindProcessStudy,
 			contracts.JobKindAnalyzeStudy,
 		},
-		cache:       cacheStore,
-		studies:     studyRegistry,
-		newDecoder:  decoderFactory,
-		memoryCache: cache.NewMemory(logger),
-		registry:    NewRegistry(jobIDFactory),
+		cache:                  cacheStore,
+		studies:                studyRegistry,
+		newDecoder:             decoderFactory,
+		secondaryCaptureWriter: secondaryCaptureWriter,
+		memoryCache:            cache.NewMemory(logger),
+		registry:               NewRegistry(jobIDFactory),
 	}
 }
 
@@ -598,7 +627,16 @@ func (service *Service) executeProcessJob(
 		service.failJob(jobID, err)
 		return
 	}
-	if err := dicomexport.WriteSecondaryCapture(dicomPath, output.Preview, sourceStudy.Metadata); err != nil {
+	if err := service.secondaryCaptureWriter.WriteSecondaryCapture(
+		ctx,
+		dicomPath,
+		output.Preview,
+		sourceStudy.Metadata,
+	); err != nil {
+		if service.finishCancelledIfRequested(ctx, jobID, "writingDicom", previewPath) {
+			cleanupPaths(dicomPath)
+			return
+		}
 		cleanupPaths(previewPath, dicomPath)
 		service.failJob(jobID, contracts.Internal(fmt.Sprintf("write processed DICOM: %v", err)))
 		return

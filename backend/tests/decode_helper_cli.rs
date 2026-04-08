@@ -46,6 +46,7 @@ struct DecodedElement {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(dead_code)]
 struct MeasurementScale {
     row_spacing_mm: f64,
     column_spacing_mm: f64,

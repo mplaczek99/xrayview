@@ -263,7 +263,17 @@ func exportSecondaryCapture(args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := dicomexport.WriteSecondaryCapture(outputPath, processed.Preview, study.Metadata); err != nil {
+	writer, err := dicomexport.NewWriterFromEnvironment()
+	if err != nil {
+		return err
+	}
+
+	if err := writer.WriteSecondaryCapture(
+		context.Background(),
+		outputPath,
+		processed.Preview,
+		study.Metadata,
+	); err != nil {
 		return err
 	}
 

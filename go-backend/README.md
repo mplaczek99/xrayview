@@ -1,6 +1,6 @@
 # xrayview Go Backend
 
-This module is the current Go sidecar backend for the migration path. Phase 7 established the local HTTP transport, phase 8 let the Tauri shell manage this process automatically for the `go-sidecar` runtime, phase 9 moved the processing manifest endpoint into Go, phase 10 moved `open_study` registration into Go, phase 11 proved metadata reading in Go, phase 12 locked the pixel-decode strategy around a narrow Rust helper instead of a premature pure-Go commitment, phase 13 added the temporary Rust decode helper plus a Go invocation layer, phase 14 introduced the shared Go-native imaging model, phase 15 ported the core Rust grayscale windowing semantics, phase 16 rendered grayscale PNG previews fully in Go on top of that decode boundary, phase 17 exposed live Go-owned render jobs over the sidecar HTTP command surface, phase 18 ported the grayscale processing controls into reusable Go code, phase 19 completed the preview-side processing pipeline with palette and compare support, phase 20 exposed live Go-owned process jobs, phase 21 moved the memory cache into Go, phase 22 aligned the disk path policy, phase 23 extracted the Go job registry, phase 24 completed recent-study persistence, phase 25 moved `measure_line_annotation` to Go, phase 26 moved annotation suggestion mapping to Go, and phase 27 ported the reusable tooth-analysis primitives into Go.
+This module is the current Go sidecar backend for the migration path. Phase 7 established the local HTTP transport, phase 8 let the Tauri shell manage this process automatically for the `go-sidecar` runtime, phase 9 moved the processing manifest endpoint into Go, phase 10 moved `open_study` registration into Go, phase 11 proved metadata reading in Go, phase 12 locked the pixel-decode strategy around a narrow Rust helper instead of a premature pure-Go commitment, phase 13 added the temporary Rust decode helper plus a Go invocation layer, phase 14 introduced the shared Go-native imaging model, phase 15 ported the core Rust grayscale windowing semantics, phase 16 rendered grayscale PNG previews fully in Go on top of that decode boundary, phase 17 exposed live Go-owned render jobs over the sidecar HTTP command surface, phase 18 ported the grayscale processing controls into reusable Go code, phase 19 completed the preview-side processing pipeline with palette and compare support, phase 20 exposed live Go-owned process jobs, phase 21 moved the memory cache into Go, phase 22 aligned the disk path policy, phase 23 extracted the Go job registry, phase 24 completed recent-study persistence, phase 25 moved `measure_line_annotation` to Go, phase 26 moved annotation suggestion mapping to Go, phase 27 ported the reusable tooth-analysis primitives into Go, phase 28 exposed live Go-owned analyze jobs, phase 29 proved pure-Go Secondary Capture export, and phase 30 added an optional narrow Rust export helper fallback without changing Go ownership of the workflow.
 
 Current scope:
 
@@ -20,15 +20,21 @@ Current scope:
 - apply `hot` and `bone` palettes in Go
 - compose side-by-side compare previews in Go
 - encode rendered preview buffers as PNG output
+- encode Secondary Capture DICOM output in Go
+- optionally route Secondary Capture writing through a narrow Rust helper when `XRAYVIEW_SECONDARY_CAPTURE_EXPORTER=rust-helper`
 - execute `start_render_job` in Go and store preview artifacts under the cache tree
 - execute `start_process_job` in Go and store processed preview artifacts under the cache tree
+- execute `start_analyze_job` in Go and store analysis preview artifacts under the cache tree
 - return live `get_job` snapshots for render jobs
 - return live `get_job` snapshots for process jobs
+- return live `get_job` snapshots for analyze jobs
 - support render/process job cancellation, dedupe, and cache hits in the Go job registry
+- support analyze-job cancellation, dedupe, and cache hits in the Go job registry
 - populate `measurementScale` when spacing tags are present
 - execute `measure_line_annotation` in Go with Rust-parity pixel and calibrated length rounding
 - map `ToothAnalysis` results into editable suggested annotations in Go
 - run reusable tooth-analysis primitives in Go over grayscale previews: normalization, toothness, morphology, candidate scoring, geometry extraction, and measurement bundling
+- execute full tooth analysis in Go and return suggested annotations
 - own recent-study catalog persistence on study open, including duplicate-path collapse, 10-entry truncation, and corrupted-catalog recovery
 - publish health/runtime metadata
 - reserve the command namespace expected by the frontend `go-sidecar` adapter
@@ -38,10 +44,7 @@ Current non-goals:
 
 - no Go pixel decode yet
 - phase 12 intentionally does not claim pure-Go decode readiness from the current narrow sample corpus
-- no Go DICOM export yet
-- processed DICOM output paths are resolved in Go, but actual Secondary Capture export still remains for later phases
-- no live Go analyze job execution yet
-- phase 27 stops at reusable tooth-analysis primitives and does not wire `start_analyze_job` yet
+- the Rust export helper remains a temporary fallback rather than the primary export path
 
 ## Commands
 
@@ -55,6 +58,7 @@ go run ./cmd/xrayview-cli render-preview --full-range ../images/sample-dental-ra
 go run ./cmd/xrayview-cli process-preview ../images/sample-dental-radiograph.dcm /tmp/xrayview-processed.png --brightness 10 --contrast 1.4 --equalize
 go run ./cmd/xrayview-cli process-preview ../images/sample-dental-radiograph.dcm /tmp/xrayview-processed-bone.png --brightness 10 --contrast 1.4 --equalize --palette bone
 go run ./cmd/xrayview-cli process-preview ../images/sample-dental-radiograph.dcm /tmp/xrayview-compare.png --brightness 10 --contrast 1.4 --equalize --palette bone --compare
+go run ./cmd/xrayview-cli export-secondary-capture ../images/sample-dental-radiograph.dcm /tmp/xrayview-exported.dcm --brightness 10 --contrast 1.4 --equalize
 go run ./cmd/xrayview-cli list-commands
 ```
 
@@ -81,10 +85,10 @@ Current command behavior:
 - `get_processing_manifest` returns the frozen processing manifest payload
 - `open_study` validates DICOM metadata, returns a Go-generated `StudyRecord`, and updates the Go-owned recent-study catalog
 - `start_render_job` runs the phase 17 render pipeline through the Go job service
-- `start_process_job` runs the phase 20 preview-processing pipeline through the Go job service and returns the resolved processed-output path even though Go export is still deferred
+- `start_process_job` runs the Go preview-processing pipeline, writes the processed DICOM through the configured export writer, and returns the completed output path
 - `get_job` and `cancel_job` now work for Go-owned render and process jobs
+- `start_analyze_job` runs the Go analysis pipeline and returns suggested annotations through the normal job/result path
 - `measure_line_annotation` recomputes pixel and calibrated lengths in Go using the registered study spacing metadata
-- `start_analyze_job` still returns a structured not-implemented backend error pending phase 28
 
 Current metadata-reader limits:
 
@@ -110,6 +114,8 @@ Transport guarantees:
 - `XRAYVIEW_GO_BACKEND_PERSISTENCE_DIR`
 - `XRAYVIEW_GO_BACKEND_SHUTDOWN_TIMEOUT`
 - `XRAYVIEW_RUST_DECODE_HELPER_BIN`
+- `XRAYVIEW_SECONDARY_CAPTURE_EXPORTER`
+- `XRAYVIEW_RUST_EXPORT_HELPER_BIN`
 
 Default disk layout when only `XRAYVIEW_GO_BACKEND_BASE_DIR` is set or when no
 path overrides are provided:

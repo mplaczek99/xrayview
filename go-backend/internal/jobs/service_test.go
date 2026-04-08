@@ -11,6 +11,7 @@ import (
 	"xrayview/go-backend/internal/cache"
 	"xrayview/go-backend/internal/contracts"
 	"xrayview/go-backend/internal/dicommeta"
+	dicomexport "xrayview/go-backend/internal/export"
 	"xrayview/go-backend/internal/imaging"
 	"xrayview/go-backend/internal/rustdecode"
 	"xrayview/go-backend/internal/studies"
@@ -74,6 +75,7 @@ func TestStartRenderJobWritesPreviewAndServesCachedSnapshot(t *testing.T) {
 		cacheStore,
 		studyRegistry,
 		nil,
+		dicomexport.GoWriter{},
 		func() (studyDecoder, error) { return staticDecoder{study: sourceStudy}, nil },
 		sequenceJobIDs("job-1", "job-2"),
 	)
@@ -186,6 +188,7 @@ func TestStartRenderJobReusesCachedResultAcrossStudyReopen(t *testing.T) {
 		cacheStore,
 		studyRegistry,
 		nil,
+		dicomexport.GoWriter{},
 		func() (studyDecoder, error) { return staticDecoder{study: sourceStudy}, nil },
 		sequenceJobIDs("job-1", "job-2"),
 	)
@@ -247,6 +250,7 @@ func TestStartRenderJobDeduplicatesActiveStudyRender(t *testing.T) {
 		cacheStore,
 		studyRegistry,
 		nil,
+		dicomexport.GoWriter{},
 		func() (studyDecoder, error) { return decoder, nil },
 		sequenceJobIDs("job-1"),
 	)
@@ -309,6 +313,7 @@ func TestStartProcessJobWritesPreviewAndServesCachedSnapshot(t *testing.T) {
 		cacheStore,
 		studyRegistry,
 		nil,
+		dicomexport.GoWriter{},
 		func() (studyDecoder, error) { return staticDecoder{study: sourceStudy}, nil },
 		sequenceJobIDs("job-1", "job-2"),
 	)
@@ -433,6 +438,7 @@ func TestStartProcessJobDeduplicatesActiveStudyProcessing(t *testing.T) {
 		cacheStore,
 		studyRegistry,
 		nil,
+		dicomexport.GoWriter{},
 		func() (studyDecoder, error) { return decoder, nil },
 		sequenceJobIDs("job-1"),
 	)
@@ -483,6 +489,7 @@ func TestStartAnalyzeJobWritesPreviewAndServesCachedSnapshot(t *testing.T) {
 		cacheStore,
 		studyRegistry,
 		nil,
+		dicomexport.GoWriter{},
 		func() (studyDecoder, error) { return staticDecoder{study: sourceStudy}, nil },
 		sequenceJobIDs("job-1", "job-2"),
 	)
@@ -579,6 +586,7 @@ func TestStartAnalyzeJobDeduplicatesActiveStudyAnalysis(t *testing.T) {
 		cacheStore,
 		studyRegistry,
 		nil,
+		dicomexport.GoWriter{},
 		func() (studyDecoder, error) { return decoder, nil },
 		sequenceJobIDs("job-1"),
 	)

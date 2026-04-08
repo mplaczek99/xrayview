@@ -1814,6 +1814,19 @@ A tiny Rust export helper that accepts:
 
 - process jobs can finish output path reliably while Go remains primary owner
 
+### Implementation note
+
+Implemented as an optional fallback path instead of a second backend:
+
+- `backend/src/export/helper.rs` reconstructs a narrow export request into `PreviewImage` plus preserved source metadata and writes Secondary Capture output through the existing Rust exporter
+- `backend/src/bin/xrayview-export-helper.rs` exposes that behavior as a tiny stdin-driven helper binary with only an `--output` flag
+- `go-backend/internal/rustexport/helper.go` owns Rust-helper command resolution, JSON request encoding, stderr propagation, and process invocation from Go
+- `go-backend/internal/export/writer.go` adds explicit export-strategy selection so Go stays the default writer and the Rust helper is only used when `XRAYVIEW_SECONDARY_CAPTURE_EXPORTER=rust-helper`
+- `go-backend/internal/jobs/service.go`, `go-backend/internal/app/app.go`, and `go-backend/cmd/xrayview-cli/main.go` now resolve the export writer once and keep the Go job/process flow as the system owner
+- Rust and Go tests cover helper request validation, CLI behavior, real helper invocation, and end-to-end process-job export output
+
+Current judgment: helper available, but optional.
+
 ### Reversible
 
 Yes.

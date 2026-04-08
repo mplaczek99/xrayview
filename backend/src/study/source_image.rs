@@ -92,6 +92,16 @@ impl SourceMetadata {
         }
     }
 
+    pub fn from_preserved_elements(
+        study_instance_uid: String,
+        preserved_elements: Vec<DataElement<InMemDicomObject>>,
+    ) -> Self {
+        Self {
+            study_instance_uid,
+            preserved_elements,
+        }
+    }
+
     pub fn study_instance_uid(&self) -> &str {
         &self.study_instance_uid
     }

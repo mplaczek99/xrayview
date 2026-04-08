@@ -29,18 +29,33 @@ type App struct {
 }
 
 func New(cfg config.Config, logger *slog.Logger) (*App, error) {
+	return newApp(cfg, logger, nil, nil, nil)
+}
+
+func newApp(
+	cfg config.Config,
+	logger *slog.Logger,
+	cacheStore *cache.Store,
+	studyRegistry *studies.Registry,
+	jobService *jobs.Service,
+) (*App, error) {
 	if logger == nil {
 		logger = logging.New(cfg.ServiceName, cfg.Logging.Level)
 	}
-
-	cacheStore := cache.NewWithPaths(cfg.Paths.CacheDir, cfg.Paths.PersistenceDir)
+	if cacheStore == nil {
+		cacheStore = cache.NewWithPaths(cfg.Paths.CacheDir, cfg.Paths.PersistenceDir)
+	}
 	catalogPath, err := cacheStore.PersistencePath("catalog.json")
 	if err != nil {
 		return nil, err
 	}
 	persistenceCatalog := persistence.NewAtPath(catalogPath)
-	studyRegistry := studies.New()
-	jobService := jobs.New(cacheStore, studyRegistry, logger)
+	if studyRegistry == nil {
+		studyRegistry = studies.New()
+	}
+	if jobService == nil {
+		jobService = jobs.New(cacheStore, studyRegistry, logger)
+	}
 	startedAt := time.Now().UTC()
 	router := httpapi.NewRouter(httpapi.Dependencies{
 		Config:      cfg,
@@ -74,7 +89,15 @@ func NewFromEnvironment() (*App, error) {
 		return nil, err
 	}
 
-	return New(cfg, logging.New(cfg.ServiceName, cfg.Logging.Level))
+	logger := logging.New(cfg.ServiceName, cfg.Logging.Level)
+	cacheStore := cache.NewWithPaths(cfg.Paths.CacheDir, cfg.Paths.PersistenceDir)
+	studyRegistry := studies.New()
+	jobService, err := jobs.NewFromEnvironment(cacheStore, studyRegistry, logger)
+	if err != nil {
+		return nil, err
+	}
+
+	return newApp(cfg, logger, cacheStore, studyRegistry, jobService)
 }
 
 func (app *App) Handler() http.Handler {
