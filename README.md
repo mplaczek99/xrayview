@@ -1,8 +1,8 @@
 # xrayview
 
-`xrayview` is a DICOM X-ray visualization and analysis workstation built with a Wails desktop shell, a React/TypeScript frontend, and a Go-first desktop backend.
+`xrayview` is a DICOM X-ray visualization and analysis workstation built with a Wails desktop shell, a React/TypeScript frontend, and a Go desktop backend.
 
-The desktop UI lives in `frontend/`, and the supported desktop shell now lives in `wails-prototype/`. The Go sidecar in `go-backend/` owns the desktop command surface and the supported CLI under `go-backend/cmd/xrayview-cli`. The Rust backend in `backend/` is no longer part of the live desktop runtime; it remains only as legacy code that has not been removed from the repository yet.
+The desktop UI lives in `frontend/`. The supported desktop shell lives in `wails-prototype/`. The Go backend in `go-backend/` owns the desktop command surface and the supported CLI under `go-backend/cmd/xrayview-cli`.
 
 ## What It Does
 
@@ -43,14 +43,7 @@ It is **not** a medical device and must **not** be used for medical diagnosis, c
 
 ## Build & Development
 
-### Backend only
-
-```bash
-cd backend
-cargo build --release
-```
-
-### Go backend transport
+### Go backend
 
 ```bash
 npm run go:backend:test
@@ -113,16 +106,13 @@ and writes the desktop shell plus Go sidecar binaries under
 ### Release validation
 
 ```bash
-# Smoke test the Wails desktop binary
 npm run release:smoke
-
-# The flag is accepted, but current validation still targets the built binary
-npm run release:smoke -- --bundle
 ```
 
-The release smoke flow now checks contract drift, runs the Go backend test
-suite, builds the Wails desktop binary, and launches it long enough to confirm
-the Go sidecar comes up when the current environment can host GUI launch smoke.
+The release smoke flow checks contract drift, runs the Go backend test suite,
+builds the Wails desktop binaries, and launches the desktop app long enough to
+confirm the bundled Go sidecar comes up when the current environment can host
+GUI launch smoke.
 
 ### Browser-only mock mode
 
@@ -159,9 +149,9 @@ The current decoder still has documented limits around broader compressed-transf
 
 ## Releases
 
-The supported repository release flow currently validates the built Wails
-desktop binary under `wails-prototype/build/bin/`. Installer/AppImage bundling
-has not been reintroduced yet in the Wails shell path.
+The supported repository release flow validates the built Wails desktop
+binaries under `wails-prototype/build/bin/` and archives that directory's
+desktop shell plus sidecar outputs for release publishing.
 
 ## Basic Usage
 
@@ -254,9 +244,8 @@ go -C go-backend run ./cmd/xrayview-cli -- --input ../images/sample-dental-radio
 
 ## Architecture
 
-### Transitional Workspace Layout
+### Workspace Layout
 
-- **`backend/`** — Library-first Rust crate with modular layout: `api/`, `app/`, `study/`, `render/`, `processing/`, `analysis/`, `annotations/`, `export/`, `jobs/`, `cache/`, `persistence/`. It is no longer part of the supported runtime path and remains only until phase 43 removes the legacy crate.
 - **`wails-prototype/`** — Wails desktop shell. Hosts the live desktop window, native dialogs, preview-path serving, and the shell-to-sidecar command bridge.
 - **`go-backend/`** — Go backend module that now owns the supported sidecar/CLI DICOM runtime, including decode, render, process, analyze, export, jobs, and persistence.
 - **`go/contracts/`** — Go module for generated contract bindings owned by the language-neutral schema.
@@ -268,7 +257,7 @@ The contract source of truth now lives in [contracts/backend-contract-v1.schema.
 - [frontend/src/lib/generated/contracts.ts](frontend/src/lib/generated/contracts.ts)
 - [go/contracts/contractv1/bindings.go](go/contracts/contractv1/bindings.go)
 
-Run `npm run contracts:check` to verify the committed generated bindings still match the schema without routing through the legacy Rust backend. Rust-side contract tests remain available as backend compatibility coverage, but they are no longer part of the frontend-owned contract generation path.
+Run `npm run contracts:check` to verify the committed generated bindings still match the schema.
 
 ### Data flow
 
@@ -283,10 +272,7 @@ Run `npm run contracts:check` to verify the committed generated bindings still m
 # Shared contract binding drift check
 npm run contracts:check
 
-# Backend unit + integration tests
-cargo test --manifest-path backend/Cargo.toml
-
-# Go backend skeleton tests
+# Go backend tests
 npm run go:backend:test
 
 # Wails shell tests

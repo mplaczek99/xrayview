@@ -1,5 +1,10 @@
 • # Bug Fix Roadmap
 
+  Historical note: this roadmap predates the phase 43 cleanup that removed the
+  legacy Rust backend and Tauri shell from the live repository layout. File
+  references under `backend/` and `frontend/src-tauri/` are retained here as
+  historical analysis only.
+
   ## Executive Summary
 
   - Current backend tests and the frontend production build pass, but the highest-risk defects are mostly workflow, data-

@@ -17,7 +17,6 @@ const buildEnv = {
   GOMODCACHE:
     process.env.GOMODCACHE ?? (defaultGoPath ? path.join(defaultGoPath, "pkg", "mod") : undefined),
   GOTMPDIR: process.env.GOTMPDIR ?? path.join("/tmp", "xrayview-go-tmp"),
-  GOPROXY: process.env.GOPROXY ?? "off",
 };
 
 function run(command, args, options = {}) {

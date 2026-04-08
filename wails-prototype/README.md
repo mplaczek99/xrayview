@@ -24,4 +24,4 @@ Build and immediately launch the desktop shell:
 npm run wails:run
 ```
 
-The frontend assets are written to `wails-prototype/build/frontend/dist/`, and the desktop app plus Go sidecar binaries are written to `wails-prototype/build/bin/`.
+The frontend assets are written to `wails-prototype/build/frontend/dist/`, and the desktop app plus Go sidecar binaries are written to `wails-prototype/build/bin/`. The supported desktop build no longer depends on a Rust backend or Tauri shell crate.

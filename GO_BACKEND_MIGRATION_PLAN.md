@@ -2398,6 +2398,10 @@ Yes.
 
 Delete the old backend once it no longer serves product runtime needs.
 
+### Status
+
+Completed. See [GO_BACKEND_PHASE43_REMOVE_RUST_BACKEND_CRATE.md](GO_BACKEND_PHASE43_REMOVE_RUST_BACKEND_CRATE.md).
+
 ### Why this phase exists
 
 This is the real migration completion point.

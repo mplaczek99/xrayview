@@ -1,48 +1,27 @@
 # xrayview Go Backend
 
-This module is the current Go sidecar backend for the migration path. Phase 7 established the local HTTP transport, phase 8 let the Tauri shell manage this process automatically for the `go-sidecar` runtime, phase 9 moved the processing manifest endpoint into Go, phase 10 moved `open_study` registration into Go, phase 11 proved metadata reading in Go, phase 12 locked the initial decode strategy conservatively, phase 14 introduced the shared Go-native imaging model, phase 15 ported the core Rust grayscale windowing semantics, phase 16 rendered grayscale PNG previews fully in Go, phase 17 exposed live Go-owned render jobs over the sidecar HTTP command surface, phase 18 ported the grayscale processing controls into reusable Go code, phase 19 completed the preview-side processing pipeline with palette and compare support, phase 20 exposed live Go-owned process jobs, phase 21 moved the memory cache into Go, phase 22 aligned the disk path policy, phase 23 extracted the Go job registry, phase 24 completed recent-study persistence, phase 25 moved `measure_line_annotation` to Go, phase 26 moved annotation suggestion mapping to Go, phase 27 ported the reusable tooth-analysis primitives into Go, phase 28 exposed live Go-owned analyze jobs, phase 29 proved pure-Go Secondary Capture export, phase 31 made the default desktop `processStudy` path Go-owned even while the broader desktop runtime remained Rust-first, phase 32 routed the default desktop `measureLineAnnotation` path through Go as well, phase 33 made the default desktop `openStudy` path Go-owned too, phase 34 made the default desktop `analyzeStudy` path Go-owned as well, phase 35 moved the supported headless CLI workflows onto the Go CLI while preserving the existing flag surface, phase 37 hardened the Tauri release path so packaged desktop builds and release smoke tests now verify that this bundled sidecar actually launches, phase 38 retired the live Rust backend from the default desktop runtime, and phase 42 removed the temporary Rust decode/export helpers so the supported desktop and CLI DICOM flows now execute directly in Go.
+This module now owns the supported `xrayview` backend runtime. The Wails shell
+starts `cmd/xrayviewd` for live desktop mode, and `cmd/xrayview-cli` exposes the
+supported headless workflow surface.
 
 Current scope:
 
 - load config from environment
-- initialize Rust-compatible cache and state roots under a shared disk layout
+- initialize cache and persistence roots under the shared disk layout
 - expose a local loopback HTTP/JSON server
-- own the default Tauri desktop runtime in `go-sidecar` mode while keeping `legacy-rust` available only as a temporary fallback
 - return the frozen processing manifest for `get_processing_manifest`
 - validate DICOM metadata and register studies for `open_study`
-- serve the default desktop `openStudy` flow even when the selected frontend runtime is `legacy-rust`
-- extract `open_study` metadata needed for migration parity: rows, columns, spacing tags, window defaults, photometric interpretation, and transfer syntax UID
-- inspect decode-relevant DICOM metadata for migration planning
-- decode source studies directly in Go and normalize them into a shared `internal/imaging` model with explicit image-format metadata
-- validate source-image and preview-image buffer geometry before later render-pipeline work
-- resolve embedded, manual, and full-range grayscale window modes with Rust-equivalent mapping behavior
-- render grayscale preview pixels from decoded source studies in Go
-- apply grayscale processing math in Go for invert, brightness, contrast, and histogram equalization
-- apply `hot` and `bone` palettes in Go
-- compose side-by-side compare previews in Go
-- encode rendered preview buffers as PNG output
-- encode Secondary Capture DICOM output in Go
-- execute `start_render_job` in Go and store preview artifacts under the cache tree
-- execute `start_process_job` in Go and store processed preview artifacts under the cache tree
-- serve the default desktop `processStudy` flow even when the selected frontend runtime is `legacy-rust`
-- execute `start_analyze_job` in Go and store analysis preview artifacts under the cache tree
-- serve the default desktop `analyzeStudy` flow even when the selected frontend runtime is `legacy-rust`
-- return live `get_job` snapshots for render jobs
-- return live `get_job` snapshots for process jobs
-- return live `get_job` snapshots for analyze jobs
-- support render/process job cancellation, dedupe, and cache hits in the Go job registry
-- support analyze-job cancellation, dedupe, and cache hits in the Go job registry
-- populate `measurementScale` when spacing tags are present
-- execute `measure_line_annotation` in Go with Rust-parity pixel and calibrated length rounding
-- serve the default desktop `measureLineAnnotation` flow even when the selected frontend runtime is `legacy-rust`
-- map `ToothAnalysis` results into editable suggested annotations in Go
-- run reusable tooth-analysis primitives in Go over grayscale previews: normalization, toothness, morphology, candidate scoring, geometry extraction, and measurement bundling
-- execute full tooth analysis in Go and return suggested annotations
-- own recent-study catalog persistence on study open, including duplicate-path collapse, 10-entry truncation, and corrupted-catalog recovery
-- own the supported headless CLI workflow surface previously exposed by the Rust CLI
-- publish health/runtime metadata
-- reserve the command namespace expected by the frontend `go-sidecar` adapter
-- enforce local-only host/origin rules for the sidecar transport
+- decode supported source studies directly in Go into the shared `internal/imaging` model
+- render grayscale previews in Go with embedded/manual/full-range window handling
+- apply grayscale processing, palettes, and compare output in Go
+- encode preview PNGs and Secondary Capture DICOM output in Go
+- execute render, process, and analyze jobs in Go with dedupe, cancellation, and cache hits
+- recompute manual line measurements in Go
+- generate suggested annotations from the Go tooth-analysis pipeline
+- own recent-study catalog persistence
+- expose the supported CLI surface that replaced the removed Rust CLI
+- publish health/runtime metadata for the desktop shell
+- enforce local-only host/origin rules for the transport
 
 Current non-goals:
 
@@ -73,19 +52,14 @@ go run ./cmd/xrayview-cli export-secondary-capture ../images/sample-dental-radio
 go run ./cmd/xrayview-cli list-commands
 ```
 
-The supported headless DICOM workflow now uses the top-level flag interface shown above. The older subcommands remain available for migration-specific decode, render, and transport inspection work.
+The supported headless DICOM workflow uses the top-level flag interface shown
+above. The older subcommands remain available for focused decode, render, and
+transport inspection work.
 
-When you run the desktop app through `npm run tauri:dev` or
-`npm run tauri:build`, the shell now prepares and launches this binary for any
-desktop runtime that needs Go-backed behavior. The default desktop runtime is
-now `go-sidecar`, so the full open/render/process/analyze/measurement and
-job-command surface runs through this binary by default. If you explicitly
-select `legacy-rust`, the old in-process bridge remains available as a
-temporary fallback; in that mode `openStudy`, `processStudy`, `analyzeStudy`,
-and `measureLineAnnotation` still resolve through Go while `renderStudy` stays
-on the Rust bridge. Manual
-`go run ./cmd/xrayviewd` is mainly useful for direct transport inspection during
-migration work.
+The supported desktop shell now lives in `../wails-prototype`. Use
+`npm run wails:build` to build the shell plus this backend, or `npm run
+wails:run` to build and launch the desktop app. Manual `go run ./cmd/xrayviewd`
+is mainly useful for direct transport inspection and backend-focused debugging.
 
 ## Transport
 
@@ -121,7 +95,7 @@ Current metadata-reader limits:
 Transport guarantees:
 
 - loopback-only backend bind addresses
-- CORS/preflight handling for Tauri/local dev origins
+- local desktop/dev origin handling
 - runtime metadata that identifies the transport as `local-http-json`
 
 ## Environment

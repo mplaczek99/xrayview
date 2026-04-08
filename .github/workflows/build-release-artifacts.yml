@@ -10,8 +10,8 @@ on:
       - main
 
 jobs:
-  build-desktop-package:
-    name: Build desktop package (${{ matrix.label }})
+  build-desktop-archive:
+    name: Build desktop archive (${{ matrix.label }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -19,14 +19,18 @@ jobs:
         include:
           - os: ubuntu-latest
             label: Linux
-            artifact_name: xrayview-linux-appimage
-            bundle: appimage
-            artifact_glob: frontend/src-tauri/target/release/bundle/appimage/*.AppImage
+            artifact_name: xrayview-linux-desktop-archive
+            archive_platform: linux
+            archive_extension: tar.gz
+            shell_binary: xrayview
+            sidecar_binary: xrayview-go-backend
           - os: windows-latest
             label: Windows
-            artifact_name: xrayview-windows-msi
-            bundle: msi
-            artifact_glob: frontend/src-tauri/target/release/bundle/msi/*.msi
+            artifact_name: xrayview-windows-desktop-archive
+            archive_platform: windows
+            archive_extension: zip
+            shell_binary: xrayview.exe
+            sidecar_binary: xrayview-go-backend.exe
 
     defaults:
       run:
@@ -52,48 +56,36 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: go-backend/go.mod
-          cache-dependency-path: go-backend/go.sum
-
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache Rust artifacts
-        uses: swatinem/rust-cache@v2
-        with:
-          workspaces: |
-            frontend/src-tauri -> target
-            backend -> target
+          go-version-file: wails-prototype/go.mod
+          cache-dependency-path: wails-prototype/go.mod
 
       - name: Install frontend dependencies
         run: npm ci
         working-directory: frontend
 
-      - name: Build and smoke-test desktop bundle
-        run: npm run release:smoke -- --bundle --bundles "${{ matrix.bundle }}"
+      - name: Build and smoke-test desktop release
+        run: npm run release:smoke
 
-      - name: Resolve bundle artifact
+      - name: Archive desktop binaries
         run: |
-          shopt -s nullglob
-          artifacts=( ${{ matrix.artifact_glob }} )
-          if [ "${#artifacts[@]}" -eq 0 ]; then
-            printf 'No bundle matched pattern: %s\n' "${{ matrix.artifact_glob }}" >&2
-            exit 1
+          version="$(grep -oP '"version":\s*"\K[^"]+' package.json)"
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            arch="$(uname -m)"
+            archive_name="xrayview-v${version}-${{ matrix.archive_platform }}-${arch}.${{ matrix.archive_extension }}"
+            tar -C wails-prototype/build/bin -czf "$RUNNER_TEMP/$archive_name" \
+              "${{ matrix.shell_binary }}" \
+              "${{ matrix.sidecar_binary }}"
+          else
+            archive_name="xrayview-v${version}-${{ matrix.archive_platform }}-x64.${{ matrix.archive_extension }}"
+            tar -a -C wails-prototype/build/bin -cf "$RUNNER_TEMP/$archive_name" \
+              "${{ matrix.shell_binary }}" \
+              "${{ matrix.sidecar_binary }}"
           fi
-          printf 'ARTIFACT_PATH=%s\n' "${artifacts[0]}" >> "$GITHUB_ENV"
+          printf 'ARCHIVE_PATH=%s\n' "$RUNNER_TEMP/$archive_name" >> "$GITHUB_ENV"
 
-      - name: Rename Linux AppImage
-        if: runner.os == 'Linux'
-        run: |
-          arch="$(uname -m)"
-          version="$(grep -oP '"version":\s*"\K[^"]+' frontend/src-tauri/tauri.conf.json)"
-          new_name="xrayview-v${version}-${arch}.AppImage"
-          mv "$ARTIFACT_PATH" "$(dirname "$ARTIFACT_PATH")/${new_name}"
-          printf 'ARTIFACT_PATH=%s\n' "$(dirname "$ARTIFACT_PATH")/${new_name}" >> "$GITHUB_ENV"
-
-      - name: Upload desktop package artifact
+      - name: Upload desktop archive artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact_name }}
-          path: ${{ env.ARTIFACT_PATH }}
+          path: ${{ env.ARCHIVE_PATH }}
           if-no-files-found: error

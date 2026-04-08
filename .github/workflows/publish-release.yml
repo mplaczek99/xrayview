@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   build-release-package:
-    name: Build release package (${{ matrix.label }})
+    name: Build release archive (${{ matrix.label }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -21,14 +21,18 @@ jobs:
         include:
           - os: ubuntu-latest
             label: Linux
-            bundle: appimage
             artifact_name: xrayview-linux-release-asset
-            artifact_glob: frontend/src-tauri/target/release/bundle/appimage/*.AppImage
+            archive_platform: linux
+            archive_extension: tar.gz
+            shell_binary: xrayview
+            sidecar_binary: xrayview-go-backend
           - os: windows-latest
             label: Windows
-            bundle: msi
             artifact_name: xrayview-windows-release-asset
-            artifact_glob: frontend/src-tauri/target/release/bundle/msi/*.msi
+            archive_platform: windows
+            archive_extension: zip
+            shell_binary: xrayview.exe
+            sidecar_binary: xrayview-go-backend.exe
 
     defaults:
       run:
@@ -54,43 +58,32 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: go-backend/go.mod
-          cache-dependency-path: go-backend/go.sum
-
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache Rust artifacts
-        uses: swatinem/rust-cache@v2
-        with:
-          workspaces: |
-            frontend/src-tauri -> target
-            backend -> target
+          go-version-file: wails-prototype/go.mod
+          cache-dependency-path: wails-prototype/go.mod
 
       - name: Install frontend dependencies
         run: npm ci
         working-directory: frontend
 
-      - name: Build and smoke-test release bundle
-        run: npm run release:smoke -- --bundle --bundles "${{ matrix.bundle }}"
+      - name: Build and smoke-test release archive
+        run: npm run release:smoke
 
-      - name: Resolve release asset
+      - name: Archive release binaries
         run: |
-          shopt -s nullglob
-          artifacts=( ${{ matrix.artifact_glob }} )
-          if [ "${#artifacts[@]}" -eq 0 ]; then
-            printf 'No release asset matched pattern: %s\n' "${{ matrix.artifact_glob }}" >&2
-            exit 1
+          version="${GITHUB_REF_NAME#v}"
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            arch="$(uname -m)"
+            archive_name="xrayview-v${version}-${{ matrix.archive_platform }}-${arch}.${{ matrix.archive_extension }}"
+            tar -C wails-prototype/build/bin -czf "$RUNNER_TEMP/$archive_name" \
+              "${{ matrix.shell_binary }}" \
+              "${{ matrix.sidecar_binary }}"
+          else
+            archive_name="xrayview-v${version}-${{ matrix.archive_platform }}-x64.${{ matrix.archive_extension }}"
+            tar -a -C wails-prototype/build/bin -cf "$RUNNER_TEMP/$archive_name" \
+              "${{ matrix.shell_binary }}" \
+              "${{ matrix.sidecar_binary }}"
           fi
-          printf 'ASSET_PATH=%s\n' "${artifacts[0]}" >> "$GITHUB_ENV"
-
-      - name: Rename Linux AppImage
-        if: runner.os == 'Linux'
-        run: |
-          arch="$(uname -m)"
-          new_name="xrayview-${GITHUB_REF_NAME}-${arch}.AppImage"
-          mv "$ASSET_PATH" "$(dirname "$ASSET_PATH")/${new_name}"
-          printf 'ASSET_PATH=%s\n' "$(dirname "$ASSET_PATH")/${new_name}" >> "$GITHUB_ENV"
+          printf 'ASSET_PATH=%s\n' "$RUNNER_TEMP/$archive_name" >> "$GITHUB_ENV"
 
       - name: Upload release asset artifact
         uses: actions/upload-artifact@v4
