@@ -1837,6 +1837,10 @@ Yes.
 
 Switch process jobs to Go in the live app.
 
+### Status
+
+Completed. See [GO_BACKEND_PHASE31_CUT_PROCESS_STUDY_FULLY_TO_GO.md](GO_BACKEND_PHASE31_CUT_PROCESS_STUDY_FULLY_TO_GO.md).
+
 ### Why this phase exists
 
 This is the most important workstation flow after rendering.

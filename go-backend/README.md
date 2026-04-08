@@ -1,6 +1,6 @@
 # xrayview Go Backend
 
-This module is the current Go sidecar backend for the migration path. Phase 7 established the local HTTP transport, phase 8 let the Tauri shell manage this process automatically for the `go-sidecar` runtime, phase 9 moved the processing manifest endpoint into Go, phase 10 moved `open_study` registration into Go, phase 11 proved metadata reading in Go, phase 12 locked the pixel-decode strategy around a narrow Rust helper instead of a premature pure-Go commitment, phase 13 added the temporary Rust decode helper plus a Go invocation layer, phase 14 introduced the shared Go-native imaging model, phase 15 ported the core Rust grayscale windowing semantics, phase 16 rendered grayscale PNG previews fully in Go on top of that decode boundary, phase 17 exposed live Go-owned render jobs over the sidecar HTTP command surface, phase 18 ported the grayscale processing controls into reusable Go code, phase 19 completed the preview-side processing pipeline with palette and compare support, phase 20 exposed live Go-owned process jobs, phase 21 moved the memory cache into Go, phase 22 aligned the disk path policy, phase 23 extracted the Go job registry, phase 24 completed recent-study persistence, phase 25 moved `measure_line_annotation` to Go, phase 26 moved annotation suggestion mapping to Go, phase 27 ported the reusable tooth-analysis primitives into Go, phase 28 exposed live Go-owned analyze jobs, phase 29 proved pure-Go Secondary Capture export, and phase 30 added an optional narrow Rust export helper fallback without changing Go ownership of the workflow.
+This module is the current Go sidecar backend for the migration path. Phase 7 established the local HTTP transport, phase 8 let the Tauri shell manage this process automatically for the `go-sidecar` runtime, phase 9 moved the processing manifest endpoint into Go, phase 10 moved `open_study` registration into Go, phase 11 proved metadata reading in Go, phase 12 locked the pixel-decode strategy around a narrow Rust helper instead of a premature pure-Go commitment, phase 13 added the temporary Rust decode helper plus a Go invocation layer, phase 14 introduced the shared Go-native imaging model, phase 15 ported the core Rust grayscale windowing semantics, phase 16 rendered grayscale PNG previews fully in Go on top of that decode boundary, phase 17 exposed live Go-owned render jobs over the sidecar HTTP command surface, phase 18 ported the grayscale processing controls into reusable Go code, phase 19 completed the preview-side processing pipeline with palette and compare support, phase 20 exposed live Go-owned process jobs, phase 21 moved the memory cache into Go, phase 22 aligned the disk path policy, phase 23 extracted the Go job registry, phase 24 completed recent-study persistence, phase 25 moved `measure_line_annotation` to Go, phase 26 moved annotation suggestion mapping to Go, phase 27 ported the reusable tooth-analysis primitives into Go, phase 28 exposed live Go-owned analyze jobs, phase 29 proved pure-Go Secondary Capture export, phase 30 added an optional narrow Rust export helper fallback without changing Go ownership of the workflow, and phase 31 made the default desktop `processStudy` path Go-owned even while the broader desktop runtime remains Rust-first.
 
 Current scope:
 
@@ -24,6 +24,7 @@ Current scope:
 - optionally route Secondary Capture writing through a narrow Rust helper when `XRAYVIEW_SECONDARY_CAPTURE_EXPORTER=rust-helper`
 - execute `start_render_job` in Go and store preview artifacts under the cache tree
 - execute `start_process_job` in Go and store processed preview artifacts under the cache tree
+- serve the default desktop `processStudy` flow even when the selected frontend runtime is `legacy-rust`
 - execute `start_analyze_job` in Go and store analysis preview artifacts under the cache tree
 - return live `get_job` snapshots for render jobs
 - return live `get_job` snapshots for process jobs
@@ -62,10 +63,13 @@ go run ./cmd/xrayview-cli export-secondary-capture ../images/sample-dental-radio
 go run ./cmd/xrayview-cli list-commands
 ```
 
-When you run the desktop app in `go-sidecar` mode through `npm run tauri:dev`
-or `npm run tauri:build`, the shell now prepares and launches this binary for
-you. Manual `go run ./cmd/xrayviewd` is mainly useful for direct transport
-inspection during migration work.
+When you run the desktop app through `npm run tauri:dev` or
+`npm run tauri:build`, the shell now prepares and launches this binary for any
+desktop runtime that needs Go-backed behavior. In the default `legacy-rust`
+runtime that currently means `processStudy`; in `go-sidecar` mode, more of the
+desktop command surface is routed through this binary. Manual
+`go run ./cmd/xrayviewd` is mainly useful for direct transport inspection during
+migration work.
 
 ## Transport
 
@@ -86,8 +90,8 @@ Current command behavior:
 - `open_study` validates DICOM metadata, returns a Go-generated `StudyRecord`, and updates the Go-owned recent-study catalog
 - `start_render_job` runs the phase 17 render pipeline through the Go job service
 - `start_process_job` runs the Go preview-processing pipeline, writes the processed DICOM through the configured export writer, and returns the completed output path
-- `get_job` and `cancel_job` now work for Go-owned render and process jobs
 - `start_analyze_job` runs the Go analysis pipeline and returns suggested annotations through the normal job/result path
+- `get_job` and `cancel_job` now work for Go-owned render, process, and analyze jobs
 - `measure_line_annotation` recomputes pixel and calibrated lengths in Go using the registered study spacing metadata
 
 Current metadata-reader limits:

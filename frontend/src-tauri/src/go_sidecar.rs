@@ -51,6 +51,12 @@ enum RuntimeMode {
     GoSidecar,
 }
 
+impl RuntimeMode {
+    fn requires_go_sidecar(self) -> bool {
+        matches!(self, Self::LegacyRust | Self::GoSidecar)
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ProbeResult {
     Unreachable,
@@ -70,7 +76,8 @@ impl fmt::Display for SidecarConfigWarning {
 impl Error for SidecarConfigWarning {}
 
 pub fn setup<R: Runtime>(app: &mut App<R>) -> Result<(), Box<dyn Error>> {
-    if resolve_runtime_mode() != RuntimeMode::GoSidecar {
+    let runtime_mode = resolve_runtime_mode();
+    if !runtime_mode.requires_go_sidecar() {
         return Ok(());
     }
 
@@ -121,6 +128,11 @@ pub fn setup<R: Runtime>(app: &mut App<R>) -> Result<(), Box<dyn Error>> {
     pipe_child_output(&mut child, "stderr");
 
     wait_for_sidecar_ready(&mut child, &base_url)?;
+    if runtime_mode == RuntimeMode::LegacyRust {
+        eprintln!(
+            "[xrayview] go sidecar enabled for Go-owned processStudy while the desktop runtime remains legacy-rust"
+        );
+    }
     eprintln!(
         "[xrayview] go sidecar ready at {} (root={}, cache={}, persistence={})",
         base_url.raw,
@@ -520,6 +532,13 @@ mod tests {
             RuntimeMode::LegacyRust
         );
         assert_eq!(runtime_mode_from_raw("mock"), RuntimeMode::Mock);
+    }
+
+    #[test]
+    fn desktop_runtime_modes_that_require_sidecar_are_explicit() {
+        assert!(RuntimeMode::LegacyRust.requires_go_sidecar());
+        assert!(RuntimeMode::GoSidecar.requires_go_sidecar());
+        assert!(!RuntimeMode::Mock.requires_go_sidecar());
     }
 
     #[test]
