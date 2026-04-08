@@ -1308,6 +1308,10 @@ Yes.
 
 Make `processStudy` fully Go-owned except export if export is still blocked.
 
+### Status
+
+Completed. See [GO_BACKEND_PHASE20_PORT_PROCESS_JOB_ORCHESTRATION_TO_GO.md](GO_BACKEND_PHASE20_PORT_PROCESS_JOB_ORCHESTRATION_TO_GO.md).
+
 ### Why this phase exists
 
 This is where Go starts owning the core workstation workflow.

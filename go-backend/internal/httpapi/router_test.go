@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -437,28 +438,124 @@ func TestRenderJobEndpointsCompletePreview(t *testing.T) {
 	t.Fatal("render job did not complete before timeout")
 }
 
-func TestUnimplementedCommandReturnsBackendError(t *testing.T) {
-	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(
+func TestProcessJobEndpointCompletesPreview(t *testing.T) {
+	command := rustdecode.CommandFromEnvironment()
+	if len(command) == 0 {
+		t.Skip("no rust decode helper command is configured")
+	}
+	if command[0] == "cargo" {
+		if _, err := exec.LookPath("cargo"); err != nil {
+			t.Skip("cargo is not available and no prebuilt decode helper binary was configured")
+		}
+	}
+
+	deps := withJobService(testDependencies(t))
+	handler := NewRouter(deps)
+	inputPath := sampleDicomPath(t)
+
+	openRecorder := httptest.NewRecorder()
+	openRequest := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/commands/open_study",
+		strings.NewReader(`{"inputPath":"`+inputPath+`"}`),
+	)
+	openRequest.Header.Set("content-type", "application/json")
+	handler.ServeHTTP(openRecorder, openRequest)
+
+	if openRecorder.Code != http.StatusOK {
+		t.Fatalf("open status = %d, want %d", openRecorder.Code, http.StatusOK)
+	}
+
+	var opened contracts.OpenStudyCommandResult
+	if err := json.NewDecoder(openRecorder.Body).Decode(&opened); err != nil {
+		t.Fatalf("decode open payload failed: %v", err)
+	}
+
+	outputPath := filepath.Join(t.TempDir(), "processed-output.dcm")
+	startRecorder := httptest.NewRecorder()
+	startRequest := httptest.NewRequest(
 		http.MethodPost,
 		"/api/v1/commands/start_process_job",
-		strings.NewReader(`{"studyId":"study-1","presetId":"default","invert":false,"equalize":false,"compare":false}`),
+		strings.NewReader(
+			fmt.Sprintf(
+				`{"studyId":%q,"outputPath":%q,"presetId":"xray","invert":false,"equalize":false,"compare":true}`,
+				opened.Study.StudyID,
+				outputPath,
+			),
+		),
 	)
-	request.Header.Set("content-type", "application/json")
-	testRouter(t).ServeHTTP(recorder, request)
+	startRequest.Header.Set("content-type", "application/json")
+	handler.ServeHTTP(startRecorder, startRequest)
 
-	if recorder.Code != http.StatusNotImplemented {
-		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusNotImplemented)
+	if startRecorder.Code != http.StatusOK {
+		t.Fatalf("start_process_job status = %d, want %d", startRecorder.Code, http.StatusOK)
 	}
 
-	var payload contracts.BackendError
-	if err := json.NewDecoder(recorder.Body).Decode(&payload); err != nil {
-		t.Fatalf("decode failed: %v", err)
+	var started contracts.StartedJob
+	if err := json.NewDecoder(startRecorder.Body).Decode(&started); err != nil {
+		t.Fatalf("decode started job failed: %v", err)
 	}
 
-	if payload.Code != contracts.BackendErrorCodeInternal {
-		t.Fatalf("code = %q, want %q", payload.Code, contracts.BackendErrorCodeInternal)
+	deadline := time.Now().Add(2 * time.Minute)
+	for time.Now().Before(deadline) {
+		getRecorder := httptest.NewRecorder()
+		getRequest := httptest.NewRequest(
+			http.MethodPost,
+			"/api/v1/commands/get_job",
+			strings.NewReader(`{"jobId":"`+started.JobID+`"}`),
+		)
+		getRequest.Header.Set("content-type", "application/json")
+		handler.ServeHTTP(getRecorder, getRequest)
+
+		if getRecorder.Code != http.StatusOK {
+			t.Fatalf("get_job status = %d, want %d", getRecorder.Code, http.StatusOK)
+		}
+
+		var snapshot contracts.JobSnapshot
+		if err := json.NewDecoder(getRecorder.Body).Decode(&snapshot); err != nil {
+			t.Fatalf("decode job snapshot failed: %v", err)
+		}
+
+		switch snapshot.State {
+		case contracts.JobStateQueued, contracts.JobStateRunning, contracts.JobStateCancelling:
+			time.Sleep(25 * time.Millisecond)
+		case contracts.JobStateFailed:
+			t.Fatalf("process job failed: %#v", snapshot.Error)
+		case contracts.JobStateCancelled:
+			t.Fatal("process job was cancelled unexpectedly")
+		case contracts.JobStateCompleted:
+			if snapshot.Result == nil {
+				t.Fatal("completed process job returned nil result")
+			}
+			if got, want := snapshot.Result.Kind, contracts.JobKindProcessStudy; got != want {
+				t.Fatalf("result kind = %q, want %q", got, want)
+			}
+
+			payload, ok := snapshot.Result.Payload.(map[string]any)
+			if !ok {
+				t.Fatalf("result payload type = %T, want map[string]any", snapshot.Result.Payload)
+			}
+
+			previewPath, ok := payload["previewPath"].(string)
+			if !ok || previewPath == "" {
+				t.Fatalf("previewPath = %#v, want non-empty string", payload["previewPath"])
+			}
+			if info, err := os.Stat(previewPath); err != nil || info.IsDir() {
+				t.Fatalf("preview artifact missing or invalid: %v", err)
+			}
+
+			dicomPath, ok := payload["dicomPath"].(string)
+			if !ok || dicomPath == "" {
+				t.Fatalf("dicomPath = %#v, want non-empty string", payload["dicomPath"])
+			}
+			if got, want := dicomPath, outputPath; got != want {
+				t.Fatalf("dicomPath = %q, want %q", got, want)
+			}
+			return
+		}
 	}
+
+	t.Fatal("process job did not complete before timeout")
 }
 
 func sampleDicomPath(t *testing.T) string {

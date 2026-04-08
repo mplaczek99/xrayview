@@ -45,6 +45,28 @@ type RenderStudyCommandResult struct {
 	MeasurementScale *MeasurementScale `json:"measurementScale,omitempty"`
 }
 
+type ProcessStudyCommand struct {
+	StudyID    string       `json:"studyId"`
+	OutputPath *string      `json:"outputPath,omitempty"`
+	PresetID   string       `json:"presetId"`
+	Invert     bool         `json:"invert"`
+	Brightness *int         `json:"brightness,omitempty"`
+	Contrast   *float64     `json:"contrast,omitempty"`
+	Equalize   bool         `json:"equalize"`
+	Compare    bool         `json:"compare"`
+	Palette    *PaletteName `json:"palette,omitempty"`
+}
+
+type ProcessStudyCommandResult struct {
+	StudyID          string            `json:"studyId"`
+	PreviewPath      string            `json:"previewPath"`
+	DicomPath        string            `json:"dicomPath"`
+	LoadedWidth      uint32            `json:"loadedWidth"`
+	LoadedHeight     uint32            `json:"loadedHeight"`
+	Mode             string            `json:"mode"`
+	MeasurementScale *MeasurementScale `json:"measurementScale,omitempty"`
+}
+
 type JobResult struct {
 	Kind    JobKind `json:"kind"`
 	Payload any     `json:"payload"`

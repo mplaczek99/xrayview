@@ -10,11 +10,13 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 
 	"xrayview/go-backend/internal/cache"
 	"xrayview/go-backend/internal/contracts"
+	"xrayview/go-backend/internal/processing"
 	"xrayview/go-backend/internal/render"
 	"xrayview/go-backend/internal/rustdecode"
 	"xrayview/go-backend/internal/studies"
@@ -34,6 +36,10 @@ type renderCacheEntry struct {
 	MeasurementScale *contracts.MeasurementScale
 }
 
+type processCacheEntry struct {
+	Result contracts.ProcessStudyCommandResult
+}
+
 type jobEntry struct {
 	fingerprint string
 	snapshot    contracts.JobSnapshot
@@ -51,6 +57,7 @@ type Service struct {
 	jobs               map[string]*jobEntry
 	activeFingerprints map[string]string
 	renderCache        map[string]renderCacheEntry
+	processCache       map[string]processCacheEntry
 }
 
 func New(cacheStore *cache.Store, studyRegistry *studies.Registry, logger *slog.Logger) *Service {
@@ -126,6 +133,85 @@ func (service *Service) StartRenderJob(
 	service.mu.Unlock()
 
 	go service.executeRenderJob(ctx, jobID, study, fingerprint)
+
+	return contracts.StartedJob{JobID: jobID}, nil
+}
+
+func (service *Service) StartProcessJob(
+	command contracts.ProcessStudyCommand,
+) (contracts.StartedJob, error) {
+	studyID := strings.TrimSpace(command.StudyID)
+	if studyID == "" {
+		return contracts.StartedJob{}, contracts.InvalidInput("studyId is required")
+	}
+
+	study, ok := service.studies.Get(studyID)
+	if !ok {
+		return contracts.StartedJob{}, contracts.NotFound(fmt.Sprintf("study not found: %s", studyID))
+	}
+
+	fingerprint, err := processFingerprint(study, command)
+	if err != nil {
+		return contracts.StartedJob{}, contracts.Internal(
+			fmt.Sprintf("serialize process job fingerprint: %v", err),
+		)
+	}
+
+	if snapshot, ok, err := service.cachedProcessSnapshot(fingerprint, study.StudyID); err != nil {
+		return contracts.StartedJob{}, err
+	} else if ok {
+		return contracts.StartedJob{JobID: snapshot.JobID}, nil
+	}
+
+	resolved, err := processing.ResolveProcessStudyCommand(command)
+	if err != nil {
+		return contracts.StartedJob{}, err
+	}
+
+	previewPath, err := service.cache.ArtifactPath("process", fingerprint, "png")
+	if err != nil {
+		return contracts.StartedJob{}, err
+	}
+
+	dicomPath, err := service.resolveProcessOutputPath(command.OutputPath, fingerprint)
+	if err != nil {
+		return contracts.StartedJob{}, err
+	}
+
+	service.mu.Lock()
+	if existingJobID, ok := service.activeFingerprints[fingerprint]; ok {
+		if existing, exists := service.jobs[existingJobID]; exists && !isTerminalState(existing.snapshot.State) {
+			jobID := existing.snapshot.JobID
+			service.mu.Unlock()
+			return contracts.StartedJob{JobID: jobID}, nil
+		}
+		delete(service.activeFingerprints, fingerprint)
+	}
+
+	jobID, err := service.newJobID()
+	if err != nil {
+		service.mu.Unlock()
+		return contracts.StartedJob{}, contracts.Internal(fmt.Sprintf("generate job id: %v", err))
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	service.jobs[jobID] = &jobEntry{
+		fingerprint: fingerprint,
+		snapshot:    queuedJobSnapshot(jobID, contracts.JobKindProcessStudy, study.StudyID),
+		cancel:      cancel,
+	}
+	service.activeFingerprints[fingerprint] = jobID
+	service.mu.Unlock()
+
+	go service.executeProcessJob(
+		ctx,
+		jobID,
+		study,
+		resolved,
+		fingerprint,
+		previewPath,
+		dicomPath,
+	)
 
 	return contracts.StartedJob{JobID: jobID}, nil
 }
@@ -222,6 +308,7 @@ func newService(
 		jobs:               make(map[string]*jobEntry),
 		activeFingerprints: make(map[string]string),
 		renderCache:        make(map[string]renderCacheEntry),
+		processCache:       make(map[string]processCacheEntry),
 	}
 }
 
@@ -258,6 +345,45 @@ func (service *Service) cachedRenderSnapshot(
 		true,
 		contracts.JobResult{
 			Kind:    contracts.JobKindRenderStudy,
+			Payload: result,
+		},
+	)
+	service.jobs[jobID] = &jobEntry{snapshot: snapshot}
+
+	return snapshot, true, nil
+}
+
+func (service *Service) cachedProcessSnapshot(
+	fingerprint string,
+	studyID string,
+) (contracts.JobSnapshot, bool, error) {
+	service.mu.Lock()
+	defer service.mu.Unlock()
+
+	cached, ok := service.processCache[fingerprint]
+	if !ok {
+		return contracts.JobSnapshot{}, false, nil
+	}
+
+	if !artifactExists(cached.Result.PreviewPath, service.logger, "discarding stale process cache entry") {
+		delete(service.processCache, fingerprint)
+		return contracts.JobSnapshot{}, false, nil
+	}
+
+	jobID, err := service.newJobID()
+	if err != nil {
+		return contracts.JobSnapshot{}, false, contracts.Internal(fmt.Sprintf("generate job id: %v", err))
+	}
+
+	result := cached.Result
+	result.StudyID = studyID
+	snapshot := completedJobSnapshot(
+		jobID,
+		contracts.JobKindProcessStudy,
+		studyID,
+		true,
+		contracts.JobResult{
+			Kind:    contracts.JobKindProcessStudy,
 			Payload: result,
 		},
 	)
@@ -380,6 +506,144 @@ func (service *Service) executeRenderJob(
 	)
 }
 
+func (service *Service) executeProcessJob(
+	ctx context.Context,
+	jobID string,
+	study contracts.StudyRecord,
+	resolved processing.ResolvedProcessStudy,
+	fingerprint string,
+	previewPath string,
+	dicomPath string,
+) {
+	if service.finishCancelledIfRequested(ctx, jobID, "queued", previewPath) {
+		return
+	}
+
+	if err := service.transitionJob(
+		jobID,
+		contracts.JobStateRunning,
+		10,
+		"validating",
+		"Validating processing request",
+	); err != nil {
+		service.failJob(jobID, err)
+		return
+	}
+
+	if err := validateInputFile(study.InputPath); err != nil {
+		service.failJob(jobID, err)
+		return
+	}
+	if service.finishCancelledIfRequested(ctx, jobID, "validating", previewPath) {
+		return
+	}
+
+	if err := service.transitionJob(
+		jobID,
+		contracts.JobStateRunning,
+		30,
+		"loadingStudy",
+		"Loading source pixels",
+	); err != nil {
+		service.failJob(jobID, err)
+		return
+	}
+
+	decoder, err := service.newDecoder()
+	if err != nil {
+		service.failJob(
+			jobID,
+			contracts.Internal(fmt.Sprintf("configure rust decode helper: %v", err)),
+		)
+		return
+	}
+
+	sourceStudy, err := decoder.DecodeStudy(ctx, study.InputPath)
+	if err != nil {
+		if service.finishCancelledIfRequested(ctx, jobID, "loadingStudy", previewPath) {
+			return
+		}
+		service.failJob(jobID, contracts.Internal(fmt.Sprintf("load source study: %v", err)))
+		return
+	}
+	if service.finishCancelledIfRequested(ctx, jobID, "loadingStudy", previewPath) {
+		return
+	}
+
+	if err := service.transitionJob(
+		jobID,
+		contracts.JobStateRunning,
+		65,
+		"processingPixels",
+		"Applying processing pipeline",
+	); err != nil {
+		service.failJob(jobID, err)
+		return
+	}
+
+	output, err := processing.ProcessSourceImage(
+		sourceStudy.Image,
+		render.DefaultRenderPlan(),
+		resolved.Controls,
+		resolved.Palette,
+		resolved.Compare,
+	)
+	if err != nil {
+		service.failJob(jobID, contracts.Internal(fmt.Sprintf("process source study: %v", err)))
+		return
+	}
+	if service.finishCancelledIfRequested(ctx, jobID, "processingPixels", previewPath) {
+		return
+	}
+
+	if err := service.transitionJob(
+		jobID,
+		contracts.JobStateRunning,
+		84,
+		"writingPreview",
+		"Writing processed preview",
+	); err != nil {
+		service.failJob(jobID, err)
+		return
+	}
+
+	if err := render.SavePreviewPNG(previewPath, output.Preview); err != nil {
+		service.failJob(jobID, contracts.Internal(fmt.Sprintf("write preview PNG: %v", err)))
+		return
+	}
+	if service.finishCancelledIfRequested(ctx, jobID, "writingPreview", previewPath) {
+		return
+	}
+
+	if err := service.transitionJob(
+		jobID,
+		contracts.JobStateRunning,
+		95,
+		"resolvingOutputPath",
+		"Reserving processed DICOM path",
+	); err != nil {
+		service.failJob(jobID, err)
+		return
+	}
+	if service.finishCancelledIfRequested(ctx, jobID, "resolvingOutputPath", previewPath) {
+		return
+	}
+
+	service.completeProcessJob(
+		jobID,
+		fingerprint,
+		contracts.ProcessStudyCommandResult{
+			StudyID:          study.StudyID,
+			PreviewPath:      previewPath,
+			DicomPath:        dicomPath,
+			LoadedWidth:      sourceStudy.Image.Width,
+			LoadedHeight:     sourceStudy.Image.Height,
+			Mode:             output.Mode,
+			MeasurementScale: cloneMeasurementScale(sourceStudy.MeasurementScale),
+		},
+	)
+}
+
 func (service *Service) transitionJob(
 	jobID string,
 	state contracts.JobState,
@@ -470,6 +734,47 @@ func (service *Service) completeRenderJob(
 		LoadedHeight:     result.LoadedHeight,
 		MeasurementScale: cloneMeasurementScale(result.MeasurementScale),
 	}
+}
+
+func (service *Service) completeProcessJob(
+	jobID string,
+	fingerprint string,
+	result contracts.ProcessStudyCommandResult,
+) {
+	service.mu.Lock()
+	defer service.mu.Unlock()
+
+	entry, ok := service.jobs[jobID]
+	if !ok {
+		return
+	}
+
+	if entry.snapshot.State == contracts.JobStateCancelling || entry.snapshot.State == contracts.JobStateCancelled {
+		_ = os.Remove(result.PreviewPath)
+		entry.snapshot.State = contracts.JobStateCancelled
+		entry.snapshot.Progress.Message = "Cancelled by user"
+		entry.snapshot.Error = nil
+		entry.snapshot.Result = nil
+		entry.cancel = nil
+		service.releaseFingerprintLocked(fingerprint)
+		return
+	}
+
+	entry.snapshot.State = contracts.JobStateCompleted
+	entry.snapshot.Progress = contracts.JobProgress{
+		Percent: 100,
+		Stage:   "completed",
+		Message: "Completed",
+	}
+	entry.snapshot.FromCache = false
+	entry.snapshot.Result = &contracts.JobResult{
+		Kind:    contracts.JobKindProcessStudy,
+		Payload: result,
+	}
+	entry.snapshot.Error = nil
+	entry.cancel = nil
+	service.releaseFingerprintLocked(fingerprint)
+	service.processCache[fingerprint] = processCacheEntry{Result: result}
 }
 
 func (service *Service) failJob(jobID string, err error) {
@@ -601,6 +906,73 @@ func renderFingerprint(study contracts.StudyRecord) (string, error) {
 	return hex.EncodeToString(sum[:]), nil
 }
 
+func processFingerprint(
+	study contracts.StudyRecord,
+	command contracts.ProcessStudyCommand,
+) (string, error) {
+	payload, err := json.Marshal(struct {
+		Namespace  string                 `json:"namespace"`
+		InputPath  string                 `json:"inputPath"`
+		OutputPath *string                `json:"outputPath"`
+		PresetID   string                 `json:"presetId"`
+		Invert     bool                   `json:"invert"`
+		Brightness *int                   `json:"brightness"`
+		Contrast   *float64               `json:"contrast"`
+		Equalize   bool                   `json:"equalize"`
+		Compare    bool                   `json:"compare"`
+		Palette    *contracts.PaletteName `json:"palette"`
+	}{
+		Namespace:  "process-study-v2",
+		InputPath:  study.InputPath,
+		OutputPath: command.OutputPath,
+		PresetID:   command.PresetID,
+		Invert:     command.Invert,
+		Brightness: command.Brightness,
+		Contrast:   command.Contrast,
+		Equalize:   command.Equalize,
+		Compare:    command.Compare,
+		Palette:    command.Palette,
+	})
+	if err != nil {
+		return "", err
+	}
+
+	sum := sha256.Sum256(payload)
+	return hex.EncodeToString(sum[:]), nil
+}
+
+func (service *Service) resolveProcessOutputPath(
+	outputPath *string,
+	fingerprint string,
+) (string, error) {
+	if outputPath == nil {
+		return service.cache.ArtifactPath("process", fingerprint, "dcm")
+	}
+
+	resolved := filepath.Clean(strings.TrimSpace(*outputPath))
+	if resolved == "" || resolved == "." {
+		return "", contracts.InvalidInput("outputPath is required when provided")
+	}
+
+	if info, err := os.Stat(resolved); err == nil && info.IsDir() {
+		return "", contracts.InvalidInput(fmt.Sprintf("output path must be a file: %s", resolved))
+	}
+
+	parent := filepath.Dir(resolved)
+	info, err := os.Stat(parent)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", contracts.NotFound(fmt.Sprintf("output directory does not exist: %s", parent))
+		}
+		return "", contracts.Internal(fmt.Sprintf("inspect output directory %s: %v", parent, err))
+	}
+	if !info.IsDir() {
+		return "", contracts.InvalidInput(fmt.Sprintf("output directory must be a directory: %s", parent))
+	}
+
+	return resolved, nil
+}
+
 func generateJobID() (string, error) {
 	var raw [16]byte
 	if _, err := rand.Read(raw[:]); err != nil {
@@ -651,4 +1023,17 @@ func (entry renderCacheEntry) renderResult(studyID string) contracts.RenderStudy
 		LoadedHeight:     entry.LoadedHeight,
 		MeasurementScale: cloneMeasurementScale(entry.MeasurementScale),
 	}
+}
+
+func artifactExists(path string, logger *slog.Logger, warningMessage string) bool {
+	info, err := os.Stat(path)
+	if err == nil {
+		return !info.IsDir()
+	}
+
+	if !errors.Is(err, os.ErrNotExist) && logger != nil {
+		logger.Warn(warningMessage, slog.String("artifact_path", path), slog.Any("error", err))
+	}
+
+	return false
 }

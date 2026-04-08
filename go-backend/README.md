@@ -1,6 +1,6 @@
 # xrayview Go Backend
 
-This module is the current Go sidecar backend for the migration path. Phase 7 established the local HTTP transport, phase 8 let the Tauri shell manage this process automatically for the `go-sidecar` runtime, phase 9 moved the processing manifest endpoint into Go, phase 10 moved `open_study` registration into Go, phase 11 proved metadata reading in Go, phase 12 locked the pixel-decode strategy around a narrow Rust helper instead of a premature pure-Go commitment, phase 13 added the temporary Rust decode helper plus a Go invocation layer, phase 14 introduced the shared Go-native imaging model, phase 15 ported the core Rust grayscale windowing semantics, phase 16 rendered grayscale PNG previews fully in Go on top of that decode boundary, phase 17 exposed live Go-owned render jobs over the sidecar HTTP command surface, phase 18 ported the grayscale processing controls into reusable Go code, and phase 19 now completes the preview-side processing pipeline with palette and compare support.
+This module is the current Go sidecar backend for the migration path. Phase 7 established the local HTTP transport, phase 8 let the Tauri shell manage this process automatically for the `go-sidecar` runtime, phase 9 moved the processing manifest endpoint into Go, phase 10 moved `open_study` registration into Go, phase 11 proved metadata reading in Go, phase 12 locked the pixel-decode strategy around a narrow Rust helper instead of a premature pure-Go commitment, phase 13 added the temporary Rust decode helper plus a Go invocation layer, phase 14 introduced the shared Go-native imaging model, phase 15 ported the core Rust grayscale windowing semantics, phase 16 rendered grayscale PNG previews fully in Go on top of that decode boundary, phase 17 exposed live Go-owned render jobs over the sidecar HTTP command surface, phase 18 ported the grayscale processing controls into reusable Go code, phase 19 completed the preview-side processing pipeline with palette and compare support, and phase 20 now exposes live Go-owned process jobs.
 
 Current scope:
 
@@ -21,8 +21,10 @@ Current scope:
 - compose side-by-side compare previews in Go
 - encode rendered preview buffers as PNG output
 - execute `start_render_job` in Go and store preview artifacts under the cache tree
+- execute `start_process_job` in Go and store processed preview artifacts under the cache tree
 - return live `get_job` snapshots for render jobs
-- support render-job cancellation and cache hits in the Go job registry
+- return live `get_job` snapshots for process jobs
+- support render/process job cancellation, dedupe, and cache hits in the Go job registry
 - populate `measurementScale` when spacing tags are present
 - write the recent-study catalog hook on study open
 - publish health/runtime metadata
@@ -34,7 +36,8 @@ Current non-goals:
 - no Go pixel decode yet
 - phase 12 intentionally does not claim pure-Go decode readiness from the current narrow sample corpus
 - no Go DICOM export yet
-- no live Go process/analyze job execution yet
+- processed DICOM output paths are resolved in Go, but actual Secondary Capture export still remains for later phases
+- no live Go analyze job execution yet
 - `measure_line_annotation` still remains for a later migration phase
 
 ## Commands
@@ -75,8 +78,9 @@ Current command behavior:
 - `get_processing_manifest` returns the frozen processing manifest payload
 - `open_study` validates DICOM metadata, returns a Go-generated `StudyRecord`, and records the recent-study catalog hook
 - `start_render_job` runs the phase 17 render pipeline through the Go job service
-- `get_job` and `cancel_job` now work for Go-owned render jobs
-- process/analyze/measurement command routes still return structured not-implemented backend errors
+- `start_process_job` runs the phase 20 preview-processing pipeline through the Go job service and returns the resolved processed-output path even though Go export is still deferred
+- `get_job` and `cancel_job` now work for Go-owned render and process jobs
+- analyze and measurement command routes still return structured not-implemented backend errors
 
 Current metadata-reader limits:
 
@@ -84,7 +88,7 @@ Current metadata-reader limits:
 - deflated transfer syntax is still rejected in the prototype reader
 - the committed sample corpus contains only native single-frame monochrome explicit-VR-little-endian studies
 - phase 12 therefore locks decode strategy to Go orchestration plus a narrow Rust decode helper for phase 13
-- the helper emits normalized source-study JSON for Go consumption, but render/process HTTP commands still remain for later phases
+- the helper emits normalized source-study JSON for Go consumption while export and analyze work continue migrating behind it
 
 Transport guarantees:
 

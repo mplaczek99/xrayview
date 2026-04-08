@@ -139,7 +139,7 @@ XRAYVIEW_BACKEND_RUNTIME=go-sidecar XRAYVIEW_GO_BACKEND_URL=http://127.0.0.1:381
 ```
 
 `XRAYVIEW_GO_BACKEND_URL` is only used for the `go-sidecar` runtime and must be a loopback `http://` URL such as `http://127.0.0.1:38181`. The frontend entry scripts also accept the Vite-prefixed forms `VITE_XRAYVIEW_BACKEND_RUNTIME` and `VITE_XRAYVIEW_GO_BACKEND_URL`.
-The `go-sidecar` adapter is part of the migration path; the Tauri shell now starts and stops that local backend automatically, `get_processing_manifest`, `open_study`, `start_render_job`, `get_job`, and `cancel_job` are live in Go for preview rendering, the rest of the command surface is still migrating, and it is not the default packaged runtime yet.
+The `go-sidecar` adapter is part of the migration path; the Tauri shell now starts and stops that local backend automatically, `get_processing_manifest`, `open_study`, `start_render_job`, `start_process_job`, `get_job`, and `cancel_job` are live in Go, process previews now render fully through the Go-owned pipeline, DICOM export is still deferred to later migration phases, and it is not the default packaged runtime yet.
 Phase 12 explicitly keeps full pixel decode off the Go side for now and routes the next migration step through a narrow Rust helper until a broader study corpus proves pure-Go decode is justified.
 
 ## Releases
