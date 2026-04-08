@@ -1,6 +1,6 @@
 # xrayview Go Backend
 
-This module is the current Go sidecar backend for the migration path. Phase 7 established the local HTTP transport, phase 8 let the Tauri shell manage this process automatically for the `go-sidecar` runtime, phase 9 moved the processing manifest endpoint into Go, phase 10 moved `open_study` registration into Go, phase 11 proved metadata reading in Go, phase 12 locked the pixel-decode strategy around a narrow Rust helper instead of a premature pure-Go commitment, phase 13 added the temporary Rust decode helper plus a Go invocation layer, phase 14 introduced the shared Go-native imaging model, and phase 15 ported the core Rust grayscale windowing semantics into a reusable Go render package.
+This module is the current Go sidecar backend for the migration path. Phase 7 established the local HTTP transport, phase 8 let the Tauri shell manage this process automatically for the `go-sidecar` runtime, phase 9 moved the processing manifest endpoint into Go, phase 10 moved `open_study` registration into Go, phase 11 proved metadata reading in Go, phase 12 locked the pixel-decode strategy around a narrow Rust helper instead of a premature pure-Go commitment, phase 13 added the temporary Rust decode helper plus a Go invocation layer, phase 14 introduced the shared Go-native imaging model, phase 15 ported the core Rust grayscale windowing semantics, and phase 16 now renders grayscale PNG previews fully in Go on top of that decode boundary.
 
 Current scope:
 
@@ -15,6 +15,8 @@ Current scope:
 - normalize decoded source studies into a shared `internal/imaging` model with explicit image-format metadata
 - validate source-image and preview-image buffer geometry before later render-pipeline work
 - resolve embedded, manual, and full-range grayscale window modes with Rust-equivalent mapping behavior
+- render grayscale preview pixels from decoded source studies in Go
+- encode rendered preview buffers as PNG output
 - populate `measurementScale` when spacing tags are present
 - write the recent-study catalog hook on study open
 - publish health/runtime metadata
@@ -28,7 +30,7 @@ Current non-goals:
 - no HTTP command uses the Rust decode helper yet
 - no Go DICOM export yet
 - no job execution yet
-- no render/process/analyze execution yet beyond the internal windowing primitives used for later phases
+- no live HTTP render/process/analyze execution yet beyond the internal render-preview CLI and reusable phase 16 render package
 
 ## Commands
 
@@ -37,6 +39,8 @@ go run ./cmd/xrayviewd
 go run ./cmd/xrayview-cli print-config
 go run ./cmd/xrayview-cli inspect-decode ../images/sample-dental-radiograph.dcm
 go run ./cmd/xrayview-cli decode-source ../images/sample-dental-radiograph.dcm
+go run ./cmd/xrayview-cli render-preview ../images/sample-dental-radiograph.dcm /tmp/xrayview-preview.png
+go run ./cmd/xrayview-cli render-preview --full-range ../images/sample-dental-radiograph.dcm /tmp/xrayview-preview-full-range.png
 go run ./cmd/xrayview-cli list-commands
 ```
 
@@ -63,6 +67,7 @@ Current command behavior:
 - `get_processing_manifest` returns the frozen processing manifest payload
 - `open_study` validates DICOM metadata, returns a Go-generated `StudyRecord`, and records the recent-study catalog hook
 - other command routes still return structured not-implemented backend errors
+- the phase 16 render pipeline currently exists as internal Go code plus the `render-preview` CLI path; the HTTP job endpoints remain for phase 17
 
 Current metadata-reader limits:
 

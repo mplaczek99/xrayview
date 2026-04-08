@@ -1074,6 +1074,10 @@ Yes.
 
 Recreate Rust window mapping behavior in Go.
 
+### Status
+
+Completed. See [GO_BACKEND_PHASE15_PORT_WINDOWING_LOGIC_TO_GO.md](GO_BACKEND_PHASE15_PORT_WINDOWING_LOGIC_TO_GO.md).
+
 ### Why this phase exists
 
 Window behavior is foundational to render parity.
@@ -1114,6 +1118,10 @@ Yes.
 ### Objective
 
 Render source image to grayscale preview in Go.
+
+### Status
+
+Completed. See [GO_BACKEND_PHASE16_PORT_BASE_RENDER_PIPELINE_TO_GO.md](GO_BACKEND_PHASE16_PORT_BASE_RENDER_PIPELINE_TO_GO.md).
 
 ### Why this phase exists
 

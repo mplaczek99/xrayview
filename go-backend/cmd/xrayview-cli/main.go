@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"xrayview/go-backend/internal/app"
@@ -14,6 +15,7 @@ import (
 	"xrayview/go-backend/internal/contracts"
 	"xrayview/go-backend/internal/dicommeta"
 	"xrayview/go-backend/internal/imaging"
+	"xrayview/go-backend/internal/render"
 	"xrayview/go-backend/internal/rustdecode"
 )
 
@@ -38,6 +40,8 @@ func run(args []string) error {
 		return inspectDecode(args[1:])
 	case "decode-source":
 		return decodeSource(args[1:])
+	case "render-preview":
+		return renderPreview(args[1:])
 	case "list-commands":
 		for _, command := range contracts.SupportedCommandStrings() {
 			fmt.Println(command)
@@ -139,6 +143,86 @@ func decodeSource(args []string) error {
 	return encoder.Encode(summary)
 }
 
+func renderPreview(args []string) error {
+	plan, inputPath, outputPath, err := parseRenderPreviewArgs(args)
+	if err != nil {
+		return err
+	}
+
+	helper, err := rustdecode.NewFromEnvironment()
+	if err != nil {
+		return err
+	}
+
+	study, err := helper.DecodeStudy(context.Background(), inputPath)
+	if err != nil {
+		return err
+	}
+
+	preview := render.RenderSourceImage(study.Image, plan)
+	if err := render.SavePreviewPNG(outputPath, preview); err != nil {
+		return err
+	}
+
+	summary := struct {
+		PreviewOutput     string                      `json:"previewOutput"`
+		LoadedWidth       uint32                      `json:"loadedWidth"`
+		LoadedHeight      uint32                      `json:"loadedHeight"`
+		WindowMode        string                      `json:"windowMode"`
+		MeasurementScale  *contracts.MeasurementScale `json:"measurementScale,omitempty"`
+		RenderedByteCount int                         `json:"renderedByteCount"`
+	}{
+		PreviewOutput:     outputPath,
+		LoadedWidth:       study.Image.Width,
+		LoadedHeight:      study.Image.Height,
+		WindowMode:        windowModeLabel(plan.Window),
+		MeasurementScale:  study.MeasurementScale,
+		RenderedByteCount: len(preview.Pixels),
+	}
+
+	encoder := json.NewEncoder(os.Stdout)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(summary)
+}
+
+func parseRenderPreviewArgs(args []string) (render.RenderPlan, string, string, error) {
+	plan := render.DefaultRenderPlan()
+	positional := make([]string, 0, 2)
+
+	for _, arg := range args {
+		switch arg {
+		case "--full-range":
+			plan.Window = render.FullRangeWindowMode()
+		default:
+			if strings.HasPrefix(arg, "-") {
+				return render.RenderPlan{}, "", "", fmt.Errorf("unknown render-preview flag: %s", arg)
+			}
+			positional = append(positional, arg)
+		}
+	}
+
+	if len(positional) != 2 {
+		return render.RenderPlan{}, "", "", fmt.Errorf(
+			"render-preview requires INPUT_DCM OUTPUT_PNG and accepts optional --full-range",
+		)
+	}
+
+	return plan, positional[0], positional[1], nil
+}
+
+func windowModeLabel(mode render.WindowMode) string {
+	switch mode.Kind {
+	case render.WindowModeDefault:
+		return "default"
+	case render.WindowModeFullRange:
+		return "full-range"
+	case render.WindowModeManual:
+		return "manual"
+	default:
+		return "unknown"
+	}
+}
+
 func printUsage(stream *os.File) {
 	fmt.Fprintln(stream, "usage: xrayview-cli <subcommand>")
 	fmt.Fprintln(stream, "")
@@ -147,6 +231,7 @@ func printUsage(stream *os.File) {
 	fmt.Fprintln(stream, "  print-config  print resolved backend configuration as JSON")
 	fmt.Fprintln(stream, "  inspect-decode inspect decode-relevant DICOM metadata as JSON")
 	fmt.Fprintln(stream, "  decode-source decode source pixels through the phase 13 Rust helper")
+	fmt.Fprintln(stream, "  render-preview render a grayscale PNG preview through the phase 16 Go pipeline")
 	fmt.Fprintln(stream, "  list-commands print supported command names")
 	fmt.Fprintln(stream, "  version       print service and contract version")
 }
