@@ -1975,6 +1975,10 @@ Yes.
 
 Make analysis run through Go by default.
 
+### Status
+
+Completed. See [GO_BACKEND_PHASE34_CUT_ANALYZE_STUDY_TO_GO_IN_LIVE_DESKTOP_FLOW.md](GO_BACKEND_PHASE34_CUT_ANALYZE_STUDY_TO_GO_IN_LIVE_DESKTOP_FLOW.md).
+
 ### Why this phase exists
 
 This removes another major Rust dependency from the interactive app.

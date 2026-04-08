@@ -130,7 +130,7 @@ pub fn setup<R: Runtime>(app: &mut App<R>) -> Result<(), Box<dyn Error>> {
     wait_for_sidecar_ready(&mut child, &base_url)?;
     if runtime_mode == RuntimeMode::LegacyRust {
         eprintln!(
-            "[xrayview] go sidecar enabled for Go-owned openStudy, processStudy, and manual line measurement while the desktop runtime remains legacy-rust"
+            "[xrayview] go sidecar enabled for Go-owned openStudy, processStudy, analyzeStudy, and manual line measurement while the desktop runtime remains legacy-rust"
         );
     }
     eprintln!(

@@ -1,8 +1,8 @@
 # xrayview
 
-`xrayview` is a DICOM X-ray visualization and analysis workstation built with Tauri (React/TypeScript frontend, Rust backend). The repository now also includes a phase 32 Go backend sidecar path with shell-managed startup/shutdown, Go-backed study registration/render/process/analyze command support, Go-owned recent-study persistence, a default desktop `processStudy` flow that runs through Go, and a default desktop `measureLineAnnotation` flow that now does the same.
+`xrayview` is a DICOM X-ray visualization and analysis workstation built with Tauri (React/TypeScript frontend, Rust backend). The repository now also includes a phase 34 Go backend sidecar path with shell-managed startup/shutdown, Go-backed study registration/render/process/analyze command support, Go-owned recent-study persistence, and default desktop `openStudy`, `processStudy`, `analyzeStudy`, and `measureLineAnnotation` flows that now run through Go.
 
-The desktop UI lives in `frontend/`. The Rust backend in `backend/` still powers the in-process desktop bridge and most default interactive flows, while the Go sidecar in `go-backend/` now owns the default desktop processing/export path and the broader migration target. The Rust backend remains library-first — Tauri calls it directly in-process (no subprocess) — and the CLI binary stays available for headless DICOM workflows.
+The desktop UI lives in `frontend/`. The Rust backend in `backend/` still powers the in-process desktop bridge and the remaining default render flow, while the Go sidecar in `go-backend/` now owns the default desktop open/process/analyze/measurement paths and the broader migration target. The Rust backend remains library-first — Tauri calls it directly in-process (no subprocess) — and the CLI binary stays available for headless DICOM workflows.
 
 ## What It Does
 
@@ -85,7 +85,7 @@ Current Go command behavior:
 - `render-preview` exercises the phase 16 decode-to-preview pipeline from the Go CLI
 - the sidecar still depends on the narrow Rust decode helper until a future phase proves pure-Go decode is warranted
 
-See [GO_BACKEND_PHASE7_DEFINE_LOCAL_BACKEND_TRANSPORT.md](GO_BACKEND_PHASE7_DEFINE_LOCAL_BACKEND_TRANSPORT.md), [GO_BACKEND_PHASE8_ADD_TAURI_GO_PROCESS_MANAGEMENT.md](GO_BACKEND_PHASE8_ADD_TAURI_GO_PROCESS_MANAGEMENT.md), [GO_BACKEND_PHASE9_IMPLEMENT_GO_PROCESSING_MANIFEST_ENDPOINT.md](GO_BACKEND_PHASE9_IMPLEMENT_GO_PROCESSING_MANIFEST_ENDPOINT.md), [GO_BACKEND_PHASE10_IMPLEMENT_GO_STUDY_REGISTRY_AND_OPEN_STUDY.md](GO_BACKEND_PHASE10_IMPLEMENT_GO_STUDY_REGISTRY_AND_OPEN_STUDY.md), [GO_BACKEND_PHASE11_PROTOTYPE_GO_DICOM_METADATA_READER.md](GO_BACKEND_PHASE11_PROTOTYPE_GO_DICOM_METADATA_READER.md), [GO_BACKEND_PHASE12_DECIDE_DICOM_DECODE_STRATEGY.md](GO_BACKEND_PHASE12_DECIDE_DICOM_DECODE_STRATEGY.md), [GO_BACKEND_PHASE13_BUILD_TEMPORARY_RUST_DECODE_HELPER.md](GO_BACKEND_PHASE13_BUILD_TEMPORARY_RUST_DECODE_HELPER.md), [GO_BACKEND_PHASE14_IMPLEMENT_GO_PREVIEW_IMAGE_MODEL.md](GO_BACKEND_PHASE14_IMPLEMENT_GO_PREVIEW_IMAGE_MODEL.md), [GO_BACKEND_PHASE15_PORT_WINDOWING_LOGIC_TO_GO.md](GO_BACKEND_PHASE15_PORT_WINDOWING_LOGIC_TO_GO.md), [GO_BACKEND_PHASE16_PORT_BASE_RENDER_PIPELINE_TO_GO.md](GO_BACKEND_PHASE16_PORT_BASE_RENDER_PIPELINE_TO_GO.md), [GO_BACKEND_PHASE17_CUT_RENDER_STUDY_TO_GO.md](GO_BACKEND_PHASE17_CUT_RENDER_STUDY_TO_GO.md), [GO_BACKEND_PHASE28_IMPLEMENT_GO_ANALYZE_JOB.md](GO_BACKEND_PHASE28_IMPLEMENT_GO_ANALYZE_JOB.md), [GO_BACKEND_PHASE30_ADD_TEMPORARY_RUST_EXPORT_HELPER_IF_NEEDED.md](GO_BACKEND_PHASE30_ADD_TEMPORARY_RUST_EXPORT_HELPER_IF_NEEDED.md), [GO_BACKEND_PHASE31_CUT_PROCESS_STUDY_FULLY_TO_GO.md](GO_BACKEND_PHASE31_CUT_PROCESS_STUDY_FULLY_TO_GO.md), and [GO_BACKEND_PHASE32_CUT_MEASURE_LINE_ANNOTATION_TO_GO.md](GO_BACKEND_PHASE32_CUT_MEASURE_LINE_ANNOTATION_TO_GO.md).
+See [GO_BACKEND_PHASE7_DEFINE_LOCAL_BACKEND_TRANSPORT.md](GO_BACKEND_PHASE7_DEFINE_LOCAL_BACKEND_TRANSPORT.md), [GO_BACKEND_PHASE8_ADD_TAURI_GO_PROCESS_MANAGEMENT.md](GO_BACKEND_PHASE8_ADD_TAURI_GO_PROCESS_MANAGEMENT.md), [GO_BACKEND_PHASE9_IMPLEMENT_GO_PROCESSING_MANIFEST_ENDPOINT.md](GO_BACKEND_PHASE9_IMPLEMENT_GO_PROCESSING_MANIFEST_ENDPOINT.md), [GO_BACKEND_PHASE10_IMPLEMENT_GO_STUDY_REGISTRY_AND_OPEN_STUDY.md](GO_BACKEND_PHASE10_IMPLEMENT_GO_STUDY_REGISTRY_AND_OPEN_STUDY.md), [GO_BACKEND_PHASE11_PROTOTYPE_GO_DICOM_METADATA_READER.md](GO_BACKEND_PHASE11_PROTOTYPE_GO_DICOM_METADATA_READER.md), [GO_BACKEND_PHASE12_DECIDE_DICOM_DECODE_STRATEGY.md](GO_BACKEND_PHASE12_DECIDE_DICOM_DECODE_STRATEGY.md), [GO_BACKEND_PHASE13_BUILD_TEMPORARY_RUST_DECODE_HELPER.md](GO_BACKEND_PHASE13_BUILD_TEMPORARY_RUST_DECODE_HELPER.md), [GO_BACKEND_PHASE14_IMPLEMENT_GO_PREVIEW_IMAGE_MODEL.md](GO_BACKEND_PHASE14_IMPLEMENT_GO_PREVIEW_IMAGE_MODEL.md), [GO_BACKEND_PHASE15_PORT_WINDOWING_LOGIC_TO_GO.md](GO_BACKEND_PHASE15_PORT_WINDOWING_LOGIC_TO_GO.md), [GO_BACKEND_PHASE16_PORT_BASE_RENDER_PIPELINE_TO_GO.md](GO_BACKEND_PHASE16_PORT_BASE_RENDER_PIPELINE_TO_GO.md), [GO_BACKEND_PHASE17_CUT_RENDER_STUDY_TO_GO.md](GO_BACKEND_PHASE17_CUT_RENDER_STUDY_TO_GO.md), [GO_BACKEND_PHASE28_IMPLEMENT_GO_ANALYZE_JOB.md](GO_BACKEND_PHASE28_IMPLEMENT_GO_ANALYZE_JOB.md), [GO_BACKEND_PHASE30_ADD_TEMPORARY_RUST_EXPORT_HELPER_IF_NEEDED.md](GO_BACKEND_PHASE30_ADD_TEMPORARY_RUST_EXPORT_HELPER_IF_NEEDED.md), [GO_BACKEND_PHASE31_CUT_PROCESS_STUDY_FULLY_TO_GO.md](GO_BACKEND_PHASE31_CUT_PROCESS_STUDY_FULLY_TO_GO.md), [GO_BACKEND_PHASE32_CUT_MEASURE_LINE_ANNOTATION_TO_GO.md](GO_BACKEND_PHASE32_CUT_MEASURE_LINE_ANNOTATION_TO_GO.md), [GO_BACKEND_PHASE33_CUT_OPEN_STUDY_TO_GO_IN_LIVE_DESKTOP_FLOW.md](GO_BACKEND_PHASE33_CUT_OPEN_STUDY_TO_GO_IN_LIVE_DESKTOP_FLOW.md), and [GO_BACKEND_PHASE34_CUT_ANALYZE_STUDY_TO_GO_IN_LIVE_DESKTOP_FLOW.md](GO_BACKEND_PHASE34_CUT_ANALYZE_STUDY_TO_GO_IN_LIVE_DESKTOP_FLOW.md).
 
 ### Desktop app
 
@@ -143,7 +143,7 @@ XRAYVIEW_BACKEND_RUNTIME=go-sidecar XRAYVIEW_GO_BACKEND_URL=http://127.0.0.1:381
 ```
 
 `XRAYVIEW_GO_BACKEND_URL` configures the local Go sidecar for desktop runtimes that use it and must be a loopback `http://` URL such as `http://127.0.0.1:38181`. The frontend entry scripts also accept the Vite-prefixed forms `VITE_XRAYVIEW_BACKEND_RUNTIME` and `VITE_XRAYVIEW_GO_BACKEND_URL`.
-The Tauri shell now starts and stops the local Go backend automatically for desktop runtimes that need it. In the default `legacy-rust` desktop runtime, `processStudy`, `measureLineAnnotation`, and the `get_job` and `cancel_job` polling path for Go-owned jobs now run through Go by default while the rest of the interactive command surface remains Rust-first. The `go-sidecar` runtime still routes the broader backend command surface through Go for migration testing.
+The Tauri shell now starts and stops the local Go backend automatically for desktop runtimes that need it. In the default `legacy-rust` desktop runtime, `openStudy`, `processStudy`, `analyzeStudy`, `measureLineAnnotation`, and the `get_job` and `cancel_job` polling path for Go-owned jobs now run through Go by default while `renderStudy` remains Rust-first. The `go-sidecar` runtime still routes the broader backend command surface through Go for migration testing.
 Phase 12 explicitly keeps full pixel decode off the Go side for now and routes the next migration step through a narrow Rust helper until a broader study corpus proves pure-Go decode is justified.
 
 ## Releases
@@ -154,8 +154,9 @@ Prebuilt desktop packages are published on GitHub Releases.
 - Windows: download the `.msi` installer and run it
 
 The desktop packages still default to the Rust-first desktop runtime, but that
-runtime now bundles and launches the Go sidecar as well because `processStudy`
-and `measureLineAnnotation` are Go-owned by default. When the app is built for `go-sidecar`, more of the
+runtime now bundles and launches the Go sidecar as well because `openStudy`,
+`processStudy`, `analyzeStudy`, and `measureLineAnnotation` are Go-owned by
+default. When the app is built for `go-sidecar`, more of the
 desktop command surface runs through that same bundled Go backend.
 
 ## Basic Usage
