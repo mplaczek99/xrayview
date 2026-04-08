@@ -1,6 +1,6 @@
 # xrayview Go Backend
 
-This module is the current Go sidecar backend for the migration path. Phase 7 established the local HTTP transport, phase 8 let the Tauri shell manage this process automatically for the `go-sidecar` runtime, phase 9 moved the processing manifest endpoint into Go, phase 10 moved `open_study` registration into Go, phase 11 proved metadata reading in Go, phase 12 locked the pixel-decode strategy around a narrow Rust helper instead of a premature pure-Go commitment, phase 13 added the temporary Rust decode helper plus a Go invocation layer, phase 14 introduced the shared Go-native imaging model, phase 15 ported the core Rust grayscale windowing semantics, phase 16 rendered grayscale PNG previews fully in Go on top of that decode boundary, and phase 17 now exposes live Go-owned render jobs over the sidecar HTTP command surface.
+This module is the current Go sidecar backend for the migration path. Phase 7 established the local HTTP transport, phase 8 let the Tauri shell manage this process automatically for the `go-sidecar` runtime, phase 9 moved the processing manifest endpoint into Go, phase 10 moved `open_study` registration into Go, phase 11 proved metadata reading in Go, phase 12 locked the pixel-decode strategy around a narrow Rust helper instead of a premature pure-Go commitment, phase 13 added the temporary Rust decode helper plus a Go invocation layer, phase 14 introduced the shared Go-native imaging model, phase 15 ported the core Rust grayscale windowing semantics, phase 16 rendered grayscale PNG previews fully in Go on top of that decode boundary, phase 17 exposed live Go-owned render jobs over the sidecar HTTP command surface, and phase 18 now ports the grayscale processing controls into reusable Go code.
 
 Current scope:
 
@@ -16,6 +16,7 @@ Current scope:
 - validate source-image and preview-image buffer geometry before later render-pipeline work
 - resolve embedded, manual, and full-range grayscale window modes with Rust-equivalent mapping behavior
 - render grayscale preview pixels from decoded source studies in Go
+- apply grayscale processing math in Go for invert, brightness, contrast, and histogram equalization
 - encode rendered preview buffers as PNG output
 - execute `start_render_job` in Go and store preview artifacts under the cache tree
 - return live `get_job` snapshots for render jobs
@@ -31,6 +32,7 @@ Current non-goals:
 - no Go pixel decode yet
 - phase 12 intentionally does not claim pure-Go decode readiness from the current narrow sample corpus
 - no Go DICOM export yet
+- no Go palette or compare processing yet
 - no live Go process/analyze job execution yet
 - `measure_line_annotation` still remains for a later migration phase
 
@@ -43,6 +45,7 @@ go run ./cmd/xrayview-cli inspect-decode ../images/sample-dental-radiograph.dcm
 go run ./cmd/xrayview-cli decode-source ../images/sample-dental-radiograph.dcm
 go run ./cmd/xrayview-cli render-preview ../images/sample-dental-radiograph.dcm /tmp/xrayview-preview.png
 go run ./cmd/xrayview-cli render-preview --full-range ../images/sample-dental-radiograph.dcm /tmp/xrayview-preview-full-range.png
+go run ./cmd/xrayview-cli process-preview ../images/sample-dental-radiograph.dcm /tmp/xrayview-processed.png --brightness 10 --contrast 1.4 --equalize
 go run ./cmd/xrayview-cli list-commands
 ```
 

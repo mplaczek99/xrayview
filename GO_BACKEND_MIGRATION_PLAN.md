@@ -1212,6 +1212,10 @@ Yes.
 
 Move core processing math to Go.
 
+### Status
+
+Completed. See [GO_BACKEND_PHASE18_PORT_GRAYSCALE_PROCESSING_CONTROLS.md](GO_BACKEND_PHASE18_PORT_GRAYSCALE_PROCESSING_CONTROLS.md).
+
 ### Why this phase exists
 
 The processing tab is a major product feature and is simpler than export or analysis.

@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 
@@ -15,6 +16,7 @@ import (
 	"xrayview/go-backend/internal/contracts"
 	"xrayview/go-backend/internal/dicommeta"
 	"xrayview/go-backend/internal/imaging"
+	"xrayview/go-backend/internal/processing"
 	"xrayview/go-backend/internal/render"
 	"xrayview/go-backend/internal/rustdecode"
 )
@@ -42,6 +44,8 @@ func run(args []string) error {
 		return decodeSource(args[1:])
 	case "render-preview":
 		return renderPreview(args[1:])
+	case "process-preview":
+		return processPreview(args[1:])
 	case "list-commands":
 		for _, command := range contracts.SupportedCommandStrings() {
 			fmt.Println(command)
@@ -185,6 +189,54 @@ func renderPreview(args []string) error {
 	return encoder.Encode(summary)
 }
 
+func processPreview(args []string) error {
+	plan, controls, inputPath, outputPath, err := parseProcessPreviewArgs(args)
+	if err != nil {
+		return err
+	}
+
+	helper, err := rustdecode.NewFromEnvironment()
+	if err != nil {
+		return err
+	}
+
+	study, err := helper.DecodeStudy(context.Background(), inputPath)
+	if err != nil {
+		return err
+	}
+
+	preview := render.RenderSourceImage(study.Image, plan)
+	processed, mode, err := processing.ProcessPreviewImage(preview, controls)
+	if err != nil {
+		return err
+	}
+	if err := render.SavePreviewPNG(outputPath, processed); err != nil {
+		return err
+	}
+
+	summary := struct {
+		PreviewOutput     string                      `json:"previewOutput"`
+		LoadedWidth       uint32                      `json:"loadedWidth"`
+		LoadedHeight      uint32                      `json:"loadedHeight"`
+		WindowMode        string                      `json:"windowMode"`
+		Mode              string                      `json:"mode"`
+		MeasurementScale  *contracts.MeasurementScale `json:"measurementScale,omitempty"`
+		RenderedByteCount int                         `json:"renderedByteCount"`
+	}{
+		PreviewOutput:     outputPath,
+		LoadedWidth:       study.Image.Width,
+		LoadedHeight:      study.Image.Height,
+		WindowMode:        windowModeLabel(plan.Window),
+		Mode:              mode,
+		MeasurementScale:  study.MeasurementScale,
+		RenderedByteCount: len(processed.Pixels),
+	}
+
+	encoder := json.NewEncoder(os.Stdout)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(summary)
+}
+
 func parseRenderPreviewArgs(args []string) (render.RenderPlan, string, string, error) {
 	plan := render.DefaultRenderPlan()
 	positional := make([]string, 0, 2)
@@ -210,6 +262,79 @@ func parseRenderPreviewArgs(args []string) (render.RenderPlan, string, string, e
 	return plan, positional[0], positional[1], nil
 }
 
+func parseProcessPreviewArgs(
+	args []string,
+) (render.RenderPlan, processing.GrayscaleControls, string, string, error) {
+	plan := render.DefaultRenderPlan()
+	controls := processing.GrayscaleControls{Contrast: 1.0}
+	positional := make([]string, 0, 2)
+
+	for index := 0; index < len(args); index++ {
+		arg := args[index]
+
+		switch arg {
+		case "--full-range":
+			plan.Window = render.FullRangeWindowMode()
+		case "--invert":
+			controls.Invert = true
+		case "--equalize":
+			controls.Equalize = true
+		case "--brightness":
+			if index+1 >= len(args) {
+				return render.RenderPlan{}, processing.GrayscaleControls{}, "", "", fmt.Errorf(
+					"process-preview flag %s requires a value",
+					arg,
+				)
+			}
+
+			index += 1
+			value, err := strconv.Atoi(args[index])
+			if err != nil {
+				return render.RenderPlan{}, processing.GrayscaleControls{}, "", "", fmt.Errorf(
+					"parse process-preview brightness %q: %w",
+					args[index],
+					err,
+				)
+			}
+			controls.Brightness = value
+		case "--contrast":
+			if index+1 >= len(args) {
+				return render.RenderPlan{}, processing.GrayscaleControls{}, "", "", fmt.Errorf(
+					"process-preview flag %s requires a value",
+					arg,
+				)
+			}
+
+			index += 1
+			value, err := strconv.ParseFloat(args[index], 64)
+			if err != nil {
+				return render.RenderPlan{}, processing.GrayscaleControls{}, "", "", fmt.Errorf(
+					"parse process-preview contrast %q: %w",
+					args[index],
+					err,
+				)
+			}
+			controls.Contrast = value
+		default:
+			if strings.HasPrefix(arg, "-") {
+				return render.RenderPlan{}, processing.GrayscaleControls{}, "", "", fmt.Errorf(
+					"unknown process-preview flag: %s",
+					arg,
+				)
+			}
+			positional = append(positional, arg)
+		}
+	}
+
+	if len(positional) != 2 {
+		return render.RenderPlan{}, processing.GrayscaleControls{}, "", "", fmt.Errorf(
+			"process-preview requires INPUT_DCM OUTPUT_PNG and accepts optional --full-range, --invert, --brightness, --contrast, and --equalize",
+		)
+	}
+
+	return plan, controls, positional[0], positional[1], nil
+}
+
 func windowModeLabel(mode render.WindowMode) string {
 	switch mode.Kind {
 	case render.WindowModeDefault:
@@ -232,6 +357,7 @@ func printUsage(stream *os.File) {
 	fmt.Fprintln(stream, "  inspect-decode inspect decode-relevant DICOM metadata as JSON")
 	fmt.Fprintln(stream, "  decode-source decode source pixels through the phase 13 Rust helper")
 	fmt.Fprintln(stream, "  render-preview render a grayscale PNG preview through the phase 16 Go pipeline")
+	fmt.Fprintln(stream, "  process-preview render then apply phase 18 grayscale processing controls")
 	fmt.Fprintln(stream, "  list-commands print supported command names")
 	fmt.Fprintln(stream, "  version       print service and contract version")
 }
