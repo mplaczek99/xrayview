@@ -1,4 +1,4 @@
-# Rust backend build output
+# Legacy Rust backend build output
 backend/target/
 
 # Frontend install/build artifacts

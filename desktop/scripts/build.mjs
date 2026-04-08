@@ -66,10 +66,10 @@ mkdirSync(buildEnv.GOTMPDIR, { recursive: true });
 run("npm", ["--prefix", "frontend", "run", "wails:build"]);
 run("go", [
   "-C",
-  path.join(repoRoot, "go-backend"),
+  path.join(repoRoot, "backend"),
   "build",
   "-o",
-  path.join(buildBinDir, binaryName("xrayview-go-backend")),
+  path.join(buildBinDir, binaryName("xrayview-backend")),
   "./cmd/xrayviewd",
 ]);
 run("go", [

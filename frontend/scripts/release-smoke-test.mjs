@@ -26,7 +26,7 @@ const sidecarBinary = path.join(
   "desktop",
   "build",
   "bin",
-  process.platform === "win32" ? "xrayview-go-backend.exe" : "xrayview-go-backend",
+  process.platform === "win32" ? "xrayview-backend.exe" : "xrayview-backend",
 );
 
 function run(command, args, cwd, envOverrides = {}) {
@@ -51,7 +51,7 @@ async function main() {
   fs.mkdirSync(goBuildCacheDir, { recursive: true });
   fs.mkdirSync(goTmpDir, { recursive: true });
   fs.mkdirSync(goPathDir, { recursive: true });
-  run("npm", ["run", "go:backend:test"], workspaceRoot, {
+  run("npm", ["run", "backend:test"], workspaceRoot, {
     GOCACHE: process.env.GOCACHE ?? goBuildCacheDir,
     GOTMPDIR: process.env.GOTMPDIR ?? goTmpDir,
     GOPATH: process.env.GOPATH ?? goPathDir,
@@ -68,7 +68,7 @@ async function main() {
   }
 
   if (!fs.existsSync(sidecarBinary)) {
-    throw new Error(`Expected Go sidecar binary at ${sidecarBinary}`);
+    throw new Error(`Expected backend sidecar binary at ${sidecarBinary}`);
   }
 
   const runtimeConfig = resolveDesktopRuntimeConfig(process.env);

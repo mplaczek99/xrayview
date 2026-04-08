@@ -23,14 +23,14 @@ jobs:
             archive_platform: linux
             archive_extension: tar.gz
             shell_binary: xrayview
-            sidecar_binary: xrayview-go-backend
+            sidecar_binary: xrayview-backend
           - os: windows-latest
             label: Windows
             artifact_name: xrayview-windows-desktop-archive
             archive_platform: windows
             archive_extension: zip
             shell_binary: xrayview.exe
-            sidecar_binary: xrayview-go-backend.exe
+            sidecar_binary: xrayview-backend.exe
 
     defaults:
       run:

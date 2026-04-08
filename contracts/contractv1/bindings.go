@@ -1,4 +1,13 @@
-{
+// Code generated from contracts/backend-contract-v1.schema.json. DO NOT EDIT.
+
+package contractv1
+
+const BackendContractVersion = 1
+
+const BackendContractSchemaID = "https://xrayview.local/contracts/backend-contract-v1.schema.json"
+
+// BackendContractSchemaJSON is the authoritative contract schema for future Go validation.
+const BackendContractSchemaJSON = `{
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://xrayview.local/contracts/backend-contract-v1.schema.json",
   "title": "XRayView Backend Contract v1",
@@ -568,4 +577,48 @@
       "required": ["jobId", "jobKind", "state", "progress", "fromCache"]
     }
   }
+}`
+
+var DefinitionRefs = map[string]string{
+	"PaletteName": "#/$defs/PaletteName",
+	"ProcessingControls": "#/$defs/ProcessingControls",
+	"ProcessingPreset": "#/$defs/ProcessingPreset",
+	"ProcessingManifest": "#/$defs/ProcessingManifest",
+	"MeasurementScale": "#/$defs/MeasurementScale",
+	"AnnotationSource": "#/$defs/AnnotationSource",
+	"AnnotationPoint": "#/$defs/AnnotationPoint",
+	"LineMeasurement": "#/$defs/LineMeasurement",
+	"LineAnnotation": "#/$defs/LineAnnotation",
+	"RectangleAnnotation": "#/$defs/RectangleAnnotation",
+	"AnnotationBundle": "#/$defs/AnnotationBundle",
+	"BackendErrorCode": "#/$defs/BackendErrorCode",
+	"BackendError": "#/$defs/BackendError",
+	"JobKind": "#/$defs/JobKind",
+	"JobState": "#/$defs/JobState",
+	"JobProgress": "#/$defs/JobProgress",
+	"StartedJob": "#/$defs/StartedJob",
+	"JobCommand": "#/$defs/JobCommand",
+	"OpenStudyCommand": "#/$defs/OpenStudyCommand",
+	"StudyRecord": "#/$defs/StudyRecord",
+	"OpenStudyCommandResult": "#/$defs/OpenStudyCommandResult",
+	"RenderStudyCommand": "#/$defs/RenderStudyCommand",
+	"RenderStudyCommandResult": "#/$defs/RenderStudyCommandResult",
+	"ProcessStudyCommand": "#/$defs/ProcessStudyCommand",
+	"ProcessStudyCommandResult": "#/$defs/ProcessStudyCommandResult",
+	"AnalyzeStudyCommand": "#/$defs/AnalyzeStudyCommand",
+	"MeasureLineAnnotationCommand": "#/$defs/MeasureLineAnnotationCommand",
+	"ToothAnalysis": "#/$defs/ToothAnalysis",
+	"ToothImageMetadata": "#/$defs/ToothImageMetadata",
+	"ToothCalibration": "#/$defs/ToothCalibration",
+	"ToothCandidate": "#/$defs/ToothCandidate",
+	"ToothMeasurementBundle": "#/$defs/ToothMeasurementBundle",
+	"ToothMeasurementValues": "#/$defs/ToothMeasurementValues",
+	"ToothGeometry": "#/$defs/ToothGeometry",
+	"BoundingBox": "#/$defs/BoundingBox",
+	"LineSegment": "#/$defs/LineSegment",
+	"Point": "#/$defs/Point",
+	"AnalyzeStudyCommandResult": "#/$defs/AnalyzeStudyCommandResult",
+	"MeasureLineAnnotationCommandResult": "#/$defs/MeasureLineAnnotationCommandResult",
+	"JobResult": "#/$defs/JobResult",
+	"JobSnapshot": "#/$defs/JobSnapshot",
 }

@@ -14,9 +14,8 @@ clinical decisions, or treatment planning.
 
 - `frontend/` - React workstation UI and frontend build/test scripts
 - `desktop/` - supported Wails desktop shell
-- `go-backend/` - supported Go backend service and CLI
-- `contracts/` - language-neutral backend contract schema
-- `go/contracts/` - generated Go contract bindings
+- `backend/` - supported Go backend service and CLI
+- `contracts/` - language-neutral backend contract schema, scripts, and generated Go bindings
 - `images/` - sample DICOM assets used for development and smoke validation
 
 ## What The App Does
@@ -40,7 +39,7 @@ Install dependencies and verify the core repo paths:
 ```bash
 npm install
 npm run contracts:check
-npm run go:backend:test
+npm run backend:test
 go -C desktop test ./...
 ```
 
@@ -72,7 +71,7 @@ Build outputs:
 
 - frontend assets: `desktop/build/frontend/dist/`
 - desktop shell binary: `desktop/build/bin/xrayview`
-- bundled Go backend sidecar: `desktop/build/bin/xrayview-go-backend`
+- bundled backend sidecar: `desktop/build/bin/xrayview-backend`
 
 ### Release Smoke
 
@@ -104,10 +103,10 @@ Overrides:
 ```bash
 XRAYVIEW_BACKEND_RUNTIME=mock npm run dev
 XRAYVIEW_BACKEND_RUNTIME=mock npm run wails:run
-XRAYVIEW_BACKEND_RUNTIME=desktop XRAYVIEW_GO_BACKEND_URL=http://127.0.0.1:38181 npm run wails:run
+XRAYVIEW_BACKEND_RUNTIME=desktop XRAYVIEW_BACKEND_URL=http://127.0.0.1:38181 npm run wails:run
 ```
 
-`XRAYVIEW_GO_BACKEND_URL` must be an absolute loopback `http://` URL such as
+`XRAYVIEW_BACKEND_URL` must be an absolute loopback `http://` URL such as
 `http://127.0.0.1:38181`.
 
 ## Go Backend
@@ -138,16 +137,16 @@ Current Go-owned command surface:
 
 ## CLI
 
-The supported headless CLI lives at `go-backend/cmd/xrayview-cli`.
+The supported headless CLI lives at `backend/cmd/xrayview-cli`.
 
 Examples:
 
 ```bash
-go -C go-backend run ./cmd/xrayview-cli -- --describe-presets
-go -C go-backend run ./cmd/xrayview-cli -- --input ../images/sample-dental-radiograph.dcm
-go -C go-backend run ./cmd/xrayview-cli -- --input ../images/sample-dental-radiograph.dcm --describe-study
-go -C go-backend run ./cmd/xrayview-cli -- --input ../images/sample-dental-radiograph.dcm --preview-output /tmp/xrayview-preview.png
-go -C go-backend run ./cmd/xrayview-cli inspect-decode ../images/sample-dental-radiograph.dcm
+go -C backend run ./cmd/xrayview-cli -- --describe-presets
+go -C backend run ./cmd/xrayview-cli -- --input ../images/sample-dental-radiograph.dcm
+go -C backend run ./cmd/xrayview-cli -- --input ../images/sample-dental-radiograph.dcm --describe-study
+go -C backend run ./cmd/xrayview-cli -- --input ../images/sample-dental-radiograph.dcm --preview-output /tmp/xrayview-preview.png
+go -C backend run ./cmd/xrayview-cli inspect-decode ../images/sample-dental-radiograph.dcm
 ```
 
 The repository includes a public dental radiograph sample at
@@ -168,14 +167,14 @@ npm run contracts:generate
 This regenerates:
 
 - `frontend/src/lib/generated/contracts.ts`
-- `go/contracts/contractv1/bindings.go`
+- `contracts/contractv1/bindings.go`
 
 ## Architecture Notes
 
 - `frontend/` owns the workstation UI and mock-mode behavior.
 - `desktop/` owns native shell concerns: window lifecycle, dialogs, preview
-  asset serving, and Go sidecar lifecycle management.
-- `go-backend/` owns the supported backend runtime: decode, render, process,
+  asset serving, and backend sidecar lifecycle management.
+- `backend/` owns the supported backend runtime: decode, render, process,
   analyze, export, jobs, cache, and persistence.
-- `contracts/` and `go/contracts/` keep the frontend and Go backend on the same
-  command payload shapes.
+- `contracts/` keeps the frontend and backend on the same command payload
+  shapes.

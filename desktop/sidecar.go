@@ -19,24 +19,33 @@ import (
 )
 
 const (
-	defaultBackendBaseURL  = "http://127.0.0.1:38181"
-	previewEndpointPath    = "/preview"
-	commandsPath           = "/api/v1/commands"
-	sidecarBinaryEnvKey    = "XRAYVIEW_WAILS_GO_BACKEND_BINARY"
-	sidecarBaseURLEnvKey   = "XRAYVIEW_GO_BACKEND_URL"
-	sidecarBaseDirEnvKey   = "XRAYVIEW_WAILS_GO_BACKEND_BASE_DIR"
-	sidecarRuntimeEnvKey   = "XRAYVIEW_BACKEND_RUNTIME"
-	expectedBackendService = "xrayview-go-backend"
-	expectedTransportKind  = "local-http-json"
-	sidecarStartupTimeout  = 10 * time.Second
-	sidecarPollInterval    = 125 * time.Millisecond
-	sidecarProbeTimeout    = 350 * time.Millisecond
-	sidecarRequestTimeout  = 15 * time.Second
-	sidecarShutdownTimeout = 4 * time.Second
-	sidecarBinaryNameBase  = "xrayview-go-backend"
+	defaultBackendBaseURL      = "http://127.0.0.1:38181"
+	previewEndpointPath        = "/preview"
+	commandsPath               = "/api/v1/commands"
+	sidecarBinaryEnvKey        = "XRAYVIEW_WAILS_BACKEND_BINARY"
+	legacySidecarBinaryEnvKey  = "XRAYVIEW_WAILS_GO_BACKEND_BINARY"
+	sidecarBaseURLEnvKey       = "XRAYVIEW_BACKEND_URL"
+	legacySidecarBaseURLEnvKey = "XRAYVIEW_GO_BACKEND_URL"
+	sidecarBaseDirEnvKey       = "XRAYVIEW_WAILS_BACKEND_BASE_DIR"
+	legacySidecarBaseDirEnvKey = "XRAYVIEW_WAILS_GO_BACKEND_BASE_DIR"
+	sidecarRuntimeEnvKey       = "XRAYVIEW_BACKEND_RUNTIME"
+	backendHostEnvKey          = "XRAYVIEW_BACKEND_HOST"
+	legacyBackendHostEnvKey    = "XRAYVIEW_GO_BACKEND_HOST"
+	backendPortEnvKey          = "XRAYVIEW_BACKEND_PORT"
+	legacyBackendPortEnvKey    = "XRAYVIEW_GO_BACKEND_PORT"
+	backendBaseDirEnvKey       = "XRAYVIEW_BACKEND_BASE_DIR"
+	legacyBackendBaseDirEnvKey = "XRAYVIEW_GO_BACKEND_BASE_DIR"
+	expectedBackendService     = "xrayview-backend"
+	expectedTransportKind      = "local-http-json"
+	sidecarStartupTimeout      = 10 * time.Second
+	sidecarPollInterval        = 125 * time.Millisecond
+	sidecarProbeTimeout        = 350 * time.Millisecond
+	sidecarRequestTimeout      = 15 * time.Second
+	sidecarShutdownTimeout     = 4 * time.Second
+	sidecarBinaryNameBase      = "xrayview-backend"
 )
 
-var errSidecarUnavailable = errors.New("go backend is not reachable")
+var errSidecarUnavailable = errors.New("backend is not reachable")
 
 type runtimeMode string
 
@@ -69,12 +78,12 @@ type SidecarController struct {
 }
 
 func NewSidecarController() *SidecarController {
-	baseURL := strings.TrimSpace(os.Getenv(sidecarBaseURLEnvKey))
+	baseURL := firstEnv(sidecarBaseURLEnvKey, legacySidecarBaseURLEnvKey)
 	if baseURL == "" {
 		baseURL = defaultBackendBaseURL
 	}
 
-	baseDir := strings.TrimSpace(os.Getenv(sidecarBaseDirEnvKey))
+	baseDir := firstEnv(sidecarBaseDirEnvKey, legacySidecarBaseDirEnvKey)
 	if baseDir == "" {
 		baseDir = filepath.Join(os.TempDir(), "xrayview", "desktop")
 	}
@@ -101,7 +110,7 @@ func (controller *SidecarController) BaseURL() string {
 }
 
 func (controller *SidecarController) BinaryPath() string {
-	if override := strings.TrimSpace(os.Getenv(sidecarBinaryEnvKey)); override != "" {
+	if override := firstEnv(sidecarBinaryEnvKey, legacySidecarBinaryEnvKey); override != "" {
 		return override
 	}
 
@@ -137,7 +146,7 @@ func (controller *SidecarController) EnsureStarted() error {
 	if _, err := os.Stat(binaryPath); err != nil {
 		if os.IsNotExist(err) {
 			return fmt.Errorf(
-				"missing go backend sidecar binary at %s; build the desktop shell with `npm run wails:build` first",
+				"missing backend sidecar binary at %s; build the desktop shell with `npm run wails:build` first",
 				binaryPath,
 			)
 		}
@@ -165,13 +174,16 @@ func (controller *SidecarController) EnsureStarted() error {
 	command.Stderr = os.Stderr
 	command.Env = append(
 		os.Environ(),
-		"XRAYVIEW_GO_BACKEND_HOST="+host,
-		"XRAYVIEW_GO_BACKEND_PORT="+port,
-		"XRAYVIEW_GO_BACKEND_BASE_DIR="+controller.baseDir,
+		backendHostEnvKey+"="+host,
+		legacyBackendHostEnvKey+"="+host,
+		backendPortEnvKey+"="+port,
+		legacyBackendPortEnvKey+"="+port,
+		backendBaseDirEnvKey+"="+controller.baseDir,
+		legacyBackendBaseDirEnvKey+"="+controller.baseDir,
 	)
 
 	if err := command.Start(); err != nil {
-		return fmt.Errorf("failed to start go backend sidecar: %w", err)
+		return fmt.Errorf("failed to start backend sidecar: %w", err)
 	}
 
 	deadline := time.Now().Add(sidecarStartupTimeout)
@@ -194,7 +206,7 @@ func (controller *SidecarController) EnsureStarted() error {
 	_ = terminateProcess(command)
 	controller.child = nil
 	controller.lastManaged = false
-	return fmt.Errorf("timed out waiting for go backend sidecar at %s", controller.baseURL)
+	return fmt.Errorf("timed out waiting for backend sidecar at %s", controller.baseURL)
 }
 
 func (controller *SidecarController) Stop() {
@@ -302,6 +314,16 @@ func resolveRuntimeMode() runtimeMode {
 	default:
 		return runtimeModeDesktop
 	}
+}
+
+func firstEnv(keys ...string) string {
+	for _, key := range keys {
+		if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+			return value
+		}
+	}
+
+	return ""
 }
 
 func resolveExecutableDir() (string, error) {

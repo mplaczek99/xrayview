@@ -4,8 +4,8 @@ import path from "node:path";
 import { applyFrontendRuntimeEnv } from "./runtime-env.mjs";
 
 const DEFAULT_DESKTOP_RUNTIME = "desktop";
-const DEFAULT_GO_SIDECAR_BASE_URL = "http://127.0.0.1:38181";
-const EXPECTED_SERVICE_NAME = "xrayview-go-backend";
+const DEFAULT_BACKEND_BASE_URL = "http://127.0.0.1:38181";
+const EXPECTED_SERVICE_NAME = "xrayview-backend";
 const EXPECTED_TRANSPORT_KIND = "local-http-json";
 const LAUNCH_TIMEOUT_MS = 20_000;
 const SHUTDOWN_TIMEOUT_MS = 8_000;
@@ -17,9 +17,20 @@ const SUPPORTED_BACKEND_RUNTIMES = new Set([
 ]);
 const DESKTOP_RUNTIMES_REQUIRING_SIDECAR = new Set(["desktop"]);
 
-function pickEnvValue(env, plainKey, viteKey) {
-  const value = env[plainKey] ?? env[viteKey];
-  return typeof value === "string" ? value.trim() : "";
+function pickEnvValue(env, plainKeys, viteKeys) {
+  const keys = [
+    ...(Array.isArray(plainKeys) ? plainKeys : [plainKeys]),
+    ...(Array.isArray(viteKeys) ? viteKeys : [viteKeys]),
+  ];
+
+  for (const key of keys) {
+    const value = env[key];
+    if (typeof value === "string" && value.trim() !== "") {
+      return value.trim();
+    }
+  }
+
+  return "";
 }
 
 function isLoopbackHostname(hostname) {
@@ -45,20 +56,20 @@ function commandExists(command) {
 
 function normalizeSidecarBaseUrl(rawValue) {
   if (!rawValue) {
-    return DEFAULT_GO_SIDECAR_BASE_URL;
+    return DEFAULT_BACKEND_BASE_URL;
   }
 
   const parsed = new URL(rawValue);
   if (parsed.protocol !== "http:") {
     throw new Error(
-      "XRAYVIEW_GO_BACKEND_URL must be an absolute loopback http URL " +
+      "XRAYVIEW_BACKEND_URL must be an absolute loopback http URL " +
         `(unsupported protocol: ${parsed.protocol})`,
     );
   }
 
   if (!isLoopbackHostname(parsed.hostname)) {
     throw new Error(
-      "XRAYVIEW_GO_BACKEND_URL must be an absolute loopback http URL " +
+      "XRAYVIEW_BACKEND_URL must be an absolute loopback http URL " +
         `(host must be localhost, 127.0.0.1, or [::1]: ${parsed.hostname})`,
     );
   }
@@ -71,7 +82,7 @@ function normalizeSidecarBaseUrl(rawValue) {
     parsed.password
   ) {
     throw new Error(
-      "XRAYVIEW_GO_BACKEND_URL must be an absolute loopback http URL " +
+      "XRAYVIEW_BACKEND_URL must be an absolute loopback http URL " +
         "(URL must not include a path, query, hash, or credentials)",
     );
   }
@@ -95,17 +106,17 @@ export function resolveDesktopRuntimeConfig(env = process.env) {
 
   const rawUrl = pickEnvValue(
     normalizedEnv,
-    "XRAYVIEW_GO_BACKEND_URL",
-    "VITE_XRAYVIEW_GO_BACKEND_URL",
+    ["XRAYVIEW_BACKEND_URL", "XRAYVIEW_GO_BACKEND_URL"],
+    ["VITE_XRAYVIEW_BACKEND_URL", "VITE_XRAYVIEW_GO_BACKEND_URL"],
   );
 
   return {
     mode,
-    goSidecarBaseUrl: normalizeSidecarBaseUrl(rawUrl),
+    backendBaseUrl: normalizeSidecarBaseUrl(rawUrl),
   };
 }
 
-export function runtimeRequiresGoSidecar(mode) {
+export function runtimeRequiresBackendSidecar(mode) {
   return DESKTOP_RUNTIMES_REQUIRING_SIDECAR.has(mode);
 }
 
@@ -235,7 +246,7 @@ async function waitForExpectedSidecar(baseUrl, child, logs, label) {
   while (Date.now() < deadline) {
     if (child.exitCode !== null || child.signalCode !== null) {
       throw new Error(
-        `${label} exited before the Go sidecar became ready.\n${childLogsSummary(logs)}`,
+        `${label} exited before the backend sidecar became ready.\n${childLogsSummary(logs)}`,
       );
     }
 
@@ -258,7 +269,7 @@ async function waitForExpectedSidecar(baseUrl, child, logs, label) {
   }
 
   throw new Error(
-    `${label} did not start the Go sidecar at ${baseUrl} within ${LAUNCH_TIMEOUT_MS}ms.\n` +
+    `${label} did not start the backend sidecar at ${baseUrl} within ${LAUNCH_TIMEOUT_MS}ms.\n` +
       childLogsSummary(logs),
   );
 }
@@ -273,7 +284,7 @@ async function waitForSidecarShutdown(baseUrl, label) {
     await sleep(PROBE_INTERVAL_MS);
   }
 
-  throw new Error(`${label} left a Go sidecar running at ${baseUrl} after shutdown.`);
+  throw new Error(`${label} left a backend sidecar running at ${baseUrl} after shutdown.`);
 }
 
 async function terminateProcessTree(child) {
@@ -333,12 +344,12 @@ export async function validateDesktopLaunch({
     };
   }
 
-  const expectSidecar = runtimeRequiresGoSidecar(runtimeConfig.mode);
+  const expectSidecar = runtimeRequiresBackendSidecar(runtimeConfig.mode);
   if (expectSidecar) {
-    const occupied = await probeSidecar(runtimeConfig.goSidecarBaseUrl);
+    const occupied = await probeSidecar(runtimeConfig.backendBaseUrl);
     if (occupied !== null) {
       throw new Error(
-        `${label} launch smoke requires ${runtimeConfig.goSidecarBaseUrl} to be free before startup.`,
+        `${label} launch smoke requires ${runtimeConfig.backendBaseUrl} to be free before startup.`,
       );
     }
   }
@@ -351,7 +362,7 @@ export async function validateDesktopLaunch({
     try {
       if (expectSidecar) {
         await waitForExpectedSidecar(
-          runtimeConfig.goSidecarBaseUrl,
+          runtimeConfig.backendBaseUrl,
           child,
           logs,
           label,
@@ -380,7 +391,7 @@ export async function validateDesktopLaunch({
   }
 
   if (expectSidecar) {
-    await waitForSidecarShutdown(runtimeConfig.goSidecarBaseUrl, label);
+    await waitForSidecarShutdown(runtimeConfig.backendBaseUrl, label);
   }
 
   return {

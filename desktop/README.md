@@ -34,7 +34,7 @@ Build outputs:
 
 - frontend assets: `desktop/build/frontend/dist/`
 - desktop binary: `desktop/build/bin/xrayview`
-- backend sidecar binary: `desktop/build/bin/xrayview-go-backend`
+- backend sidecar binary: `desktop/build/bin/xrayview-backend`
 
 Supported runtime modes for shell launches:
 

@@ -12,9 +12,20 @@ function isLoopbackHostname(hostname) {
   );
 }
 
-function pickEnvValue(env, plainKey, viteKey) {
-  const value = env[plainKey] ?? env[viteKey];
-  return typeof value === "string" ? value.trim() : "";
+function pickEnvValue(env, plainKeys, viteKeys) {
+  const keys = [
+    ...(Array.isArray(plainKeys) ? plainKeys : [plainKeys]),
+    ...(Array.isArray(viteKeys) ? viteKeys : [viteKeys]),
+  ];
+
+  for (const key of keys) {
+    const value = env[key];
+    if (typeof value === "string" && value.trim() !== "") {
+      return value.trim();
+    }
+  }
+
+  return "";
 }
 
 export function applyFrontendRuntimeEnv(env = process.env) {
@@ -39,8 +50,8 @@ export function applyFrontendRuntimeEnv(env = process.env) {
 
   const rawUrl = pickEnvValue(
     env,
-    "XRAYVIEW_GO_BACKEND_URL",
-    "VITE_XRAYVIEW_GO_BACKEND_URL",
+    ["XRAYVIEW_BACKEND_URL", "XRAYVIEW_GO_BACKEND_URL"],
+    ["VITE_XRAYVIEW_BACKEND_URL", "VITE_XRAYVIEW_GO_BACKEND_URL"],
   );
 
   if (rawUrl) {
@@ -70,13 +81,17 @@ export function applyFrontendRuntimeEnv(env = process.env) {
     } catch (error) {
       const reason = error instanceof Error ? error.message : "invalid URL value";
       throw new Error(
-        "XRAYVIEW_GO_BACKEND_URL must be an absolute loopback http URL " +
+        "XRAYVIEW_BACKEND_URL must be an absolute loopback http URL " +
           "(for example http://127.0.0.1:38181). " +
           `(${reason})`,
       );
     }
 
-    nextEnv.VITE_XRAYVIEW_GO_BACKEND_URL = rawUrl.replace(/\/+$/, "");
+    const normalizedUrl = rawUrl.replace(/\/+$/, "");
+    nextEnv.XRAYVIEW_BACKEND_URL = normalizedUrl;
+    nextEnv.XRAYVIEW_GO_BACKEND_URL = normalizedUrl;
+    nextEnv.VITE_XRAYVIEW_BACKEND_URL = normalizedUrl;
+    nextEnv.VITE_XRAYVIEW_GO_BACKEND_URL = normalizedUrl;
   }
 
   return nextEnv;
