@@ -80,6 +80,35 @@ func (memory *Memory) LoadProcess(
 	return cloneProcessResult(payload), true
 }
 
+func (memory *Memory) StoreAnalyze(
+	fingerprint string,
+	result contracts.AnalyzeStudyCommandResult,
+) {
+	memory.storeLocked(fingerprint, contracts.JobResult{
+		Kind:    contracts.JobKindAnalyzeStudy,
+		Payload: cloneAnalyzeResult(result),
+	})
+}
+
+func (memory *Memory) LoadAnalyze(
+	fingerprint string,
+) (contracts.AnalyzeStudyCommandResult, bool) {
+	var zero contracts.AnalyzeStudyCommandResult
+
+	result, ok := memory.loadLocked(fingerprint, contracts.JobKindAnalyzeStudy)
+	if !ok {
+		return zero, false
+	}
+
+	payload, ok := result.Payload.(contracts.AnalyzeStudyCommandResult)
+	if !ok {
+		memory.discardInvalidEntry(fingerprint, result.Kind, "analyze payload type mismatch")
+		return zero, false
+	}
+
+	return cloneAnalyzeResult(payload), true
+}
+
 func (memory *Memory) storeLocked(fingerprint string, result contracts.JobResult) {
 	memory.mu.Lock()
 	defer memory.mu.Unlock()
@@ -180,6 +209,14 @@ func resultArtifactsExist(
 
 		return artifactExists(logger, fingerprint, result.Kind, payload.PreviewPath) &&
 			artifactExists(logger, fingerprint, result.Kind, payload.DicomPath)
+	case contracts.JobKindAnalyzeStudy:
+		payload, ok := result.Payload.(contracts.AnalyzeStudyCommandResult)
+		if !ok {
+			warnPayloadTypeMismatch(logger, fingerprint, result.Kind)
+			return false
+		}
+
+		return artifactExists(logger, fingerprint, result.Kind, payload.PreviewPath)
 	default:
 		if logger != nil {
 			logger.Warn(
@@ -246,6 +283,14 @@ func cloneProcessResult(
 	return result
 }
 
+func cloneAnalyzeResult(
+	result contracts.AnalyzeStudyCommandResult,
+) contracts.AnalyzeStudyCommandResult {
+	result.Analysis = cloneToothAnalysis(result.Analysis)
+	result.SuggestedAnnotations = cloneAnnotationBundle(result.SuggestedAnnotations)
+	return result
+}
+
 func cloneMeasurementScale(
 	scale *contracts.MeasurementScale,
 ) *contracts.MeasurementScale {
@@ -255,4 +300,107 @@ func cloneMeasurementScale(
 
 	value := *scale
 	return &value
+}
+
+func cloneToothAnalysis(analysis contracts.ToothAnalysis) contracts.ToothAnalysis {
+	analysis.Calibration.MeasurementScale = cloneMeasurementScale(analysis.Calibration.MeasurementScale)
+	analysis.Tooth = cloneToothCandidatePointer(analysis.Tooth)
+	analysis.Teeth = cloneToothCandidates(analysis.Teeth)
+	analysis.Warnings = append([]string(nil), analysis.Warnings...)
+	return analysis
+}
+
+func cloneToothCandidatePointer(
+	candidate *contracts.ToothCandidate,
+) *contracts.ToothCandidate {
+	if candidate == nil {
+		return nil
+	}
+
+	value := cloneToothCandidate(*candidate)
+	return &value
+}
+
+func cloneToothCandidates(candidates []contracts.ToothCandidate) []contracts.ToothCandidate {
+	if candidates == nil {
+		return nil
+	}
+
+	cloned := make([]contracts.ToothCandidate, len(candidates))
+	for index, candidate := range candidates {
+		cloned[index] = cloneToothCandidate(candidate)
+	}
+
+	return cloned
+}
+
+func cloneToothCandidate(candidate contracts.ToothCandidate) contracts.ToothCandidate {
+	candidate.Measurements.Calibrated = cloneToothMeasurementValues(candidate.Measurements.Calibrated)
+	return candidate
+}
+
+func cloneToothMeasurementValues(
+	values *contracts.ToothMeasurementValues,
+) *contracts.ToothMeasurementValues {
+	if values == nil {
+		return nil
+	}
+
+	value := *values
+	return &value
+}
+
+func cloneAnnotationBundle(bundle contracts.AnnotationBundle) contracts.AnnotationBundle {
+	return contracts.AnnotationBundle{
+		Lines:      cloneLineAnnotations(bundle.Lines),
+		Rectangles: cloneRectangleAnnotations(bundle.Rectangles),
+	}
+}
+
+func cloneLineAnnotations(lines []contracts.LineAnnotation) []contracts.LineAnnotation {
+	if lines == nil {
+		return nil
+	}
+
+	cloned := make([]contracts.LineAnnotation, len(lines))
+	for index, line := range lines {
+		cloned[index] = line
+		cloned[index].Confidence = cloneFloat64Pointer(line.Confidence)
+		cloned[index].Measurement = cloneLineMeasurement(line.Measurement)
+	}
+
+	return cloned
+}
+
+func cloneRectangleAnnotations(rectangles []contracts.RectangleAnnotation) []contracts.RectangleAnnotation {
+	if rectangles == nil {
+		return nil
+	}
+
+	cloned := make([]contracts.RectangleAnnotation, len(rectangles))
+	for index, rectangle := range rectangles {
+		cloned[index] = rectangle
+		cloned[index].Confidence = cloneFloat64Pointer(rectangle.Confidence)
+	}
+
+	return cloned
+}
+
+func cloneLineMeasurement(measurement *contracts.LineMeasurement) *contracts.LineMeasurement {
+	if measurement == nil {
+		return nil
+	}
+
+	value := *measurement
+	value.CalibratedLengthMM = cloneFloat64Pointer(measurement.CalibratedLengthMM)
+	return &value
+}
+
+func cloneFloat64Pointer(value *float64) *float64 {
+	if value == nil {
+		return nil
+	}
+
+	cloned := *value
+	return &cloned
 }

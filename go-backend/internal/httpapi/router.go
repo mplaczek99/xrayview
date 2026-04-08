@@ -106,6 +106,8 @@ func NewRouter(deps Dependencies) http.Handler {
 			handleStartRenderJob(writer, request, deps)
 		case contracts.CommandStartProcessJob:
 			handleStartProcessJob(writer, request, deps)
+		case contracts.CommandStartAnalyzeJob:
+			handleStartAnalyzeJob(writer, request, deps)
 		case contracts.CommandGetJob:
 			handleGetJob(writer, request, deps)
 		case contracts.CommandCancelJob:
@@ -258,6 +260,22 @@ func handleStartProcessJob(writer http.ResponseWriter, request *http.Request, de
 	}
 
 	started, err := deps.Jobs.StartProcessJob(command)
+	if err != nil {
+		writeBackendError(writer, err)
+		return
+	}
+
+	writeJSON(writer, http.StatusOK, started)
+}
+
+func handleStartAnalyzeJob(writer http.ResponseWriter, request *http.Request, deps Dependencies) {
+	var command contracts.AnalyzeStudyCommand
+	if err := decodeJSONRequest(request, &command); err != nil {
+		writeBackendError(writer, err)
+		return
+	}
+
+	started, err := deps.Jobs.StartAnalyzeJob(command)
 	if err != nil {
 		writeBackendError(writer, err)
 		return

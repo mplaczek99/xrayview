@@ -457,6 +457,146 @@ func TestStartProcessJobDeduplicatesActiveStudyProcessing(t *testing.T) {
 	}
 }
 
+func TestStartAnalyzeJobWritesPreviewAndServesCachedSnapshot(t *testing.T) {
+	studyRegistry, study := registerTestStudy(t)
+	cacheStore := cache.New(filepath.Join(t.TempDir(), "cache"))
+	sourceStudy := syntheticAnalyzeSourceStudy()
+	service := newService(
+		cacheStore,
+		studyRegistry,
+		nil,
+		func() (studyDecoder, error) { return staticDecoder{study: sourceStudy}, nil },
+		sequenceJobIDs("job-1", "job-2"),
+	)
+
+	started, err := service.StartAnalyzeJob(contracts.AnalyzeStudyCommand{StudyID: study.StudyID})
+	if err != nil {
+		t.Fatalf("StartAnalyzeJob returned error: %v", err)
+	}
+
+	snapshot := waitForTerminalJob(t, service, started.JobID)
+	if got, want := snapshot.State, contracts.JobStateCompleted; got != want {
+		t.Fatalf("State = %q, want %q", got, want)
+	}
+	if snapshot.FromCache {
+		t.Fatal("FromCache = true, want false for first analyze job")
+	}
+	if snapshot.Result == nil {
+		t.Fatal("Result = nil, want completed analyze payload")
+	}
+	if got, want := snapshot.Result.Kind, contracts.JobKindAnalyzeStudy; got != want {
+		t.Fatalf("Result.Kind = %q, want %q", got, want)
+	}
+
+	result, ok := snapshot.Result.Payload.(contracts.AnalyzeStudyCommandResult)
+	if !ok {
+		t.Fatalf("Result.Payload type = %T, want contracts.AnalyzeStudyCommandResult", snapshot.Result.Payload)
+	}
+	if got, want := result.StudyID, study.StudyID; got != want {
+		t.Fatalf("Result.StudyID = %q, want %q", got, want)
+	}
+	if !stringsHasPathPrefix(result.PreviewPath, filepath.Join(cacheStore.RootDir(), "artifacts", "analyze")) {
+		t.Fatalf("PreviewPath = %q, want cache/artifacts/analyze prefix", result.PreviewPath)
+	}
+	if info, err := os.Stat(result.PreviewPath); err != nil || info.IsDir() {
+		t.Fatalf("preview artifact missing or invalid: %v", err)
+	}
+	if result.Analysis.Tooth == nil {
+		t.Fatal("Analysis.Tooth = nil, want detected synthetic candidate")
+	}
+	if len(result.Analysis.Teeth) == 0 {
+		t.Fatal("len(Analysis.Teeth) = 0, want detected teeth")
+	}
+	if result.Analysis.Calibration.MeasurementScale == nil {
+		t.Fatal("Analysis.Calibration.MeasurementScale = nil, want decoded scale")
+	}
+	if !result.Analysis.Calibration.RealWorldMeasurementsAvailable {
+		t.Fatal("Analysis.Calibration.RealWorldMeasurementsAvailable = false, want true")
+	}
+	if got, want := len(result.SuggestedAnnotations.Lines), len(result.Analysis.Teeth)*2; got != want {
+		t.Fatalf("len(SuggestedAnnotations.Lines) = %d, want %d", got, want)
+	}
+	if got, want := len(result.SuggestedAnnotations.Rectangles), len(result.Analysis.Teeth); got != want {
+		t.Fatalf("len(SuggestedAnnotations.Rectangles) = %d, want %d", got, want)
+	}
+
+	cachedStarted, err := service.StartAnalyzeJob(contracts.AnalyzeStudyCommand{StudyID: study.StudyID})
+	if err != nil {
+		t.Fatalf("cached StartAnalyzeJob returned error: %v", err)
+	}
+	if got, want := cachedStarted.JobID, "job-2"; got != want {
+		t.Fatalf("cached JobID = %q, want %q", got, want)
+	}
+
+	cachedSnapshot, err := service.GetJob(contracts.JobCommand{JobID: cachedStarted.JobID})
+	if err != nil {
+		t.Fatalf("GetJob returned error: %v", err)
+	}
+	if got, want := cachedSnapshot.State, contracts.JobStateCompleted; got != want {
+		t.Fatalf("cached State = %q, want %q", got, want)
+	}
+	if !cachedSnapshot.FromCache {
+		t.Fatal("cached FromCache = false, want true")
+	}
+
+	cachedResult, ok := cachedSnapshot.Result.Payload.(contracts.AnalyzeStudyCommandResult)
+	if !ok {
+		t.Fatalf("cached Result.Payload type = %T, want contracts.AnalyzeStudyCommandResult", cachedSnapshot.Result.Payload)
+	}
+	if got, want := cachedResult.PreviewPath, result.PreviewPath; got != want {
+		t.Fatalf("cached PreviewPath = %q, want %q", got, want)
+	}
+	if got, want := len(cachedResult.SuggestedAnnotations.Lines), len(result.SuggestedAnnotations.Lines); got != want {
+		t.Fatalf("cached len(SuggestedAnnotations.Lines) = %d, want %d", got, want)
+	}
+}
+
+func TestStartAnalyzeJobDeduplicatesActiveStudyAnalysis(t *testing.T) {
+	studyRegistry, study := registerTestStudy(t)
+	cacheStore := cache.New(filepath.Join(t.TempDir(), "cache"))
+	decoder := &blockingDecoder{
+		started: make(chan struct{}, 1),
+	}
+	service := newService(
+		cacheStore,
+		studyRegistry,
+		nil,
+		func() (studyDecoder, error) { return decoder, nil },
+		sequenceJobIDs("job-1"),
+	)
+
+	first, err := service.StartAnalyzeJob(contracts.AnalyzeStudyCommand{StudyID: study.StudyID})
+	if err != nil {
+		t.Fatalf("StartAnalyzeJob returned error: %v", err)
+	}
+	second, err := service.StartAnalyzeJob(contracts.AnalyzeStudyCommand{StudyID: study.StudyID})
+	if err != nil {
+		t.Fatalf("second StartAnalyzeJob returned error: %v", err)
+	}
+
+	if got, want := second.JobID, first.JobID; got != want {
+		t.Fatalf("second JobID = %q, want deduped %q", got, want)
+	}
+
+	<-decoder.started
+
+	cancelled, err := service.CancelJob(contracts.JobCommand{JobID: first.JobID})
+	if err != nil {
+		t.Fatalf("CancelJob returned error: %v", err)
+	}
+	if got, want := cancelled.State, contracts.JobStateCancelling; got != want {
+		t.Fatalf("CancelJob state = %q, want %q", got, want)
+	}
+
+	snapshot := waitForTerminalJob(t, service, first.JobID)
+	if got, want := snapshot.State, contracts.JobStateCancelled; got != want {
+		t.Fatalf("terminal State = %q, want %q", got, want)
+	}
+	if snapshot.Result != nil {
+		t.Fatalf("Result = %#v, want nil for cancelled job", snapshot.Result)
+	}
+}
+
 func registerTestStudy(t *testing.T) (*studies.Registry, contracts.StudyRecord) {
 	t.Helper()
 
@@ -510,4 +650,74 @@ func waitForTerminalJob(t *testing.T, service *Service, jobID string) contracts.
 func stringsHasPathPrefix(path string, prefix string) bool {
 	relative, err := filepath.Rel(prefix, path)
 	return err == nil && relative != ".." && relative != "." && relative != ""
+}
+
+func syntheticAnalyzeSourceStudy() rustdecode.SourceStudy {
+	const width = 240
+	const height = 160
+
+	pixels := make([]float32, width*height)
+	for index := range pixels {
+		pixels[index] = 24
+	}
+
+	fillSourceRect(pixels, width, 14, 24, 212, 106, 54)
+	fillSourceRect(pixels, width, 38, 54, 34, 34, 174)
+	fillSourceTriangleRoot(pixels, width, 38, 88, 62, 32, 174)
+
+	fillSourceRect(pixels, width, 100, 42, 42, 38, 236)
+	fillSourceTriangleRoot(pixels, width, 100, 80, 92, 54, 236)
+
+	fillSourceRect(pixels, width, 172, 56, 28, 32, 160)
+	fillSourceTriangleRoot(pixels, width, 172, 88, 50, 30, 160)
+
+	return rustdecode.SourceStudy{
+		Image: imaging.SourceImage{
+			Width:    width,
+			Height:   height,
+			Format:   imaging.FormatGrayFloat32,
+			Pixels:   pixels,
+			MinValue: 0,
+			MaxValue: 255,
+		},
+		MeasurementScale: &contracts.MeasurementScale{
+			RowSpacingMM:    0.2,
+			ColumnSpacingMM: 0.3,
+			Source:          "PixelSpacing",
+		},
+	}
+}
+
+func fillSourceRect(
+	pixels []float32,
+	width uint32,
+	x, y uint32,
+	rectWidth, rectHeight uint32,
+	value float32,
+) {
+	for yy := y; yy < y+rectHeight; yy++ {
+		for xx := x; xx < x+rectWidth; xx++ {
+			pixels[yy*width+xx] = value
+		}
+	}
+}
+
+func fillSourceTriangleRoot(
+	pixels []float32,
+	width uint32,
+	x, y uint32,
+	rootWidth, rootHeight uint32,
+	value float32,
+) {
+	centerX := x + rootWidth/2
+	for offset := uint32(0); offset < rootHeight; offset++ {
+		rowY := y + offset
+		span := rootWidth - (offset*rootWidth)/rootHeight
+		halfSpan := span / 2
+		startX := centerX - halfSpan
+		endX := centerX + halfSpan
+		for xx := startX; xx <= endX; xx++ {
+			pixels[rowY*width+xx] = value
+		}
+	}
 }
