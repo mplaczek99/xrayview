@@ -27,7 +27,9 @@ declare global {
 function requireBindings(): DesktopBindings {
   const bindings = window.go?.main?.DesktopApp;
   if (!bindings) {
-    throw new Error("Wails bindings are not available. Launch this entry inside the Wails desktop shell.");
+    throw new Error(
+      "Desktop bindings are not available. Launch this entry inside the supported desktop shell.",
+    );
   }
 
   return bindings;

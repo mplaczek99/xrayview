@@ -1,7 +1,10 @@
 const SUPPORTED_BACKEND_RUNTIMES = new Set([
   "mock",
+  "desktop",
   "go-sidecar",
 ]);
+const FRONTEND_DESKTOP_RUNTIME = "desktop";
+const SHELL_DESKTOP_RUNTIME = "go-sidecar";
 
 function isLoopbackHostname(hostname) {
   return (
@@ -29,11 +32,19 @@ export function applyFrontendRuntimeEnv(env = process.env) {
     const normalizedMode = rawMode.toLowerCase();
     if (!SUPPORTED_BACKEND_RUNTIMES.has(normalizedMode)) {
       throw new Error(
-        "XRAYVIEW_BACKEND_RUNTIME must be one of mock or go-sidecar.",
+        "XRAYVIEW_BACKEND_RUNTIME must be one of mock, desktop, or go-sidecar.",
       );
     }
 
-    nextEnv.VITE_XRAYVIEW_BACKEND_RUNTIME = normalizedMode;
+    const frontendMode =
+      normalizedMode === SHELL_DESKTOP_RUNTIME
+        ? FRONTEND_DESKTOP_RUNTIME
+        : normalizedMode;
+    nextEnv.VITE_XRAYVIEW_BACKEND_RUNTIME = frontendMode;
+    nextEnv.XRAYVIEW_BACKEND_RUNTIME =
+      frontendMode === FRONTEND_DESKTOP_RUNTIME
+        ? SHELL_DESKTOP_RUNTIME
+        : frontendMode;
   }
 
   const rawUrl = pickEnvValue(

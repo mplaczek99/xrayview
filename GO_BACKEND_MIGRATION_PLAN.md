@@ -2306,6 +2306,10 @@ Yes, but expensive.
 
 Clean frontend runtime assumptions that remain from Tauri.
 
+### Status
+
+Completed. See [GO_BACKEND_PHASE41_REMOVE_TAURI_SPECIFIC_FRONTEND_ASSUMPTIONS.md](GO_BACKEND_PHASE41_REMOVE_TAURI_SPECIFIC_FRONTEND_ASSUMPTIONS.md).
+
 ### Why this phase exists
 
 Even after shell replacement, old path logic may linger.

@@ -135,15 +135,15 @@ npm run dev
 
 ### Backend Runtime Selection
 
-The frontend now supports two backend runtime modes:
+The frontend now supports two runtime modes:
 
 - `mock`
-- `go-sidecar`
+- `desktop`
 
 Defaults:
 
 - browser/Vite only: `mock`
-- Wails desktop: `go-sidecar`
+- Wails desktop: `desktop`
 
 You can override the backend runtime with:
 
@@ -151,11 +151,11 @@ You can override the backend runtime with:
 XRAYVIEW_BACKEND_RUNTIME=mock npm run dev
 npm run wails:run
 XRAYVIEW_BACKEND_RUNTIME=mock npm run wails:run
-XRAYVIEW_BACKEND_RUNTIME=go-sidecar XRAYVIEW_GO_BACKEND_URL=http://127.0.0.1:38181 npm run wails:run
+XRAYVIEW_BACKEND_RUNTIME=desktop XRAYVIEW_GO_BACKEND_URL=http://127.0.0.1:38181 npm run wails:run
 ```
 
 `XRAYVIEW_GO_BACKEND_URL` configures the local Go sidecar for desktop runs and must be a loopback `http://` URL such as `http://127.0.0.1:38181`. The Wails run/build scripts also accept the Vite-prefixed forms `VITE_XRAYVIEW_BACKEND_RUNTIME` and `VITE_XRAYVIEW_GO_BACKEND_URL`.
-The Wails shell starts and stops the local Go backend automatically for `go-sidecar` runs. That means `openStudy`, `renderStudy`, `processStudy`, `analyzeStudy`, `measureLineAnnotation`, and the normal job polling/cancellation path now run through the bundled Go backend by default.
+The Wails shell starts and stops the local Go backend automatically for `desktop` runs. That means `openStudy`, `renderStudy`, `processStudy`, `analyzeStudy`, `measureLineAnnotation`, and the normal job polling/cancellation path now run through the bundled Go backend by default. The legacy `go-sidecar` value is still accepted as an alias for existing automation, but the frontend now treats that as the internal desktop path instead of a user-facing runtime name.
 Phase 12 still keeps full pixel decode off the Go side for now and routes that narrow responsibility through a temporary Rust helper until a broader study corpus proves pure-Go decode is justified.
 
 ## Releases

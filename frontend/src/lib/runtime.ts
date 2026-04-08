@@ -2,11 +2,12 @@ import type { JobResultPayload, JobSnapshot } from "../features/jobs/model";
 import {
   FALLBACK_PROCESSING_MANIFEST,
   buildOutputName,
+  createDesktopBackendAPI,
   createMockBackendAPI,
-  createWailsBackendAPI,
   ensureDicomExtension,
   paletteLabel,
 } from "./backend";
+import { buildDesktopPreviewUrl, isDesktopRuntime } from "./desktop";
 import type {
   AnalyzeStudyCommandResult,
   JobResult,
@@ -16,8 +17,8 @@ import type {
   RenderStudyCommandResult,
 } from "./generated/contracts";
 import { resolveRuntimeConfiguration } from "./runtimeConfig";
-import { createMockShellAPI, createWailsShellAPI } from "./shell";
-import type { BackendAPI, RuntimeAdapter, ShellAPI } from "./runtimeTypes";
+import { createDesktopShellAPI, createMockShellAPI } from "./shell";
+import type { BackendAPI, RuntimeAdapter } from "./runtimeTypes";
 import {
   buildMockPath,
   MOCK_DICOM_PATH,
@@ -31,7 +32,15 @@ import type {
   RuntimeMode,
   ToothAnalysisResult,
 } from "./types";
-import { isWailsRuntime } from "./wails";
+
+function resolvePreviewUrl(
+  previewPath: string,
+  runtime: RuntimeMode,
+): string {
+  return runtime === "desktop"
+    ? buildDesktopPreviewUrl(previewPath)
+    : previewPath;
+}
 
 function asOpenedStudy(
   payload: OpenStudyCommandResult,
@@ -49,11 +58,10 @@ function asOpenedStudy(
 function asPreviewResult(
   payload: RenderStudyCommandResult,
   runtime: RuntimeMode,
-  shell: ShellAPI,
 ): PreviewResult {
   return {
     studyId: payload.studyId,
-    previewUrl: shell.resolvePreviewUrl(payload.previewPath),
+    previewUrl: resolvePreviewUrl(payload.previewPath, runtime),
     imageSize: {
       width: payload.loadedWidth,
       height: payload.loadedHeight,
@@ -66,10 +74,9 @@ function asPreviewResult(
 function asProcessResult(
   payload: ProcessStudyCommandResult,
   runtime: RuntimeMode,
-  shell: ShellAPI,
 ): ProcessResult {
   return {
-    ...asPreviewResult(payload, runtime, shell),
+    ...asPreviewResult(payload, runtime),
     dicomPath: payload.dicomPath,
     mode: payload.mode,
   };
@@ -78,11 +85,10 @@ function asProcessResult(
 function asToothAnalysisResult(
   payload: AnalyzeStudyCommandResult,
   runtime: RuntimeMode,
-  shell: ShellAPI,
 ): ToothAnalysisResult {
   return {
     studyId: payload.studyId,
-    previewUrl: shell.resolvePreviewUrl(payload.previewPath),
+    previewUrl: resolvePreviewUrl(payload.previewPath, runtime),
     analysis: payload.analysis,
     suggestedAnnotations: payload.suggestedAnnotations,
     runtime,
@@ -92,23 +98,22 @@ function asToothAnalysisResult(
 function normalizeJobResultPayload(
   result: JobResult,
   runtime: RuntimeMode,
-  shell: ShellAPI,
 ): JobResultPayload {
   switch (result.kind) {
     case "renderStudy":
       return {
         kind: "renderStudy",
-        payload: asPreviewResult(result.payload, runtime, shell),
+        payload: asPreviewResult(result.payload, runtime),
       };
     case "processStudy":
       return {
         kind: "processStudy",
-        payload: asProcessResult(result.payload, runtime, shell),
+        payload: asProcessResult(result.payload, runtime),
       };
     case "analyzeStudy":
       return {
         kind: "analyzeStudy",
-        payload: asToothAnalysisResult(result.payload, runtime, shell),
+        payload: asToothAnalysisResult(result.payload, runtime),
       };
   }
 }
@@ -116,7 +121,6 @@ function normalizeJobResultPayload(
 function normalizeJobSnapshot(
   snapshot: ContractJobSnapshot,
   runtime: RuntimeMode,
-  shell: ShellAPI,
 ): JobSnapshot {
   return {
     jobId: snapshot.jobId,
@@ -126,7 +130,7 @@ function normalizeJobSnapshot(
     progress: snapshot.progress,
     fromCache: snapshot.fromCache,
     result: snapshot.result
-      ? normalizeJobResultPayload(snapshot.result, runtime, shell)
+      ? normalizeJobResultPayload(snapshot.result, runtime)
       : null,
     error: snapshot.error ?? null,
     timing: null,
@@ -137,11 +141,11 @@ function createRuntimeAdapter(
   configuration: ReturnType<typeof resolveRuntimeConfiguration>,
 ): RuntimeAdapter {
   const { mode } = configuration;
-  const shell = mode === "mock" ? createMockShellAPI() : createWailsShellAPI();
+  const shell = mode === "mock" ? createMockShellAPI() : createDesktopShellAPI();
   const backend: BackendAPI =
     mode === "mock"
       ? createMockBackendAPI()
-      : createWailsBackendAPI();
+      : createDesktopBackendAPI();
 
   return {
     mode,
@@ -157,9 +161,9 @@ function createRuntimeAdapter(
       backend.startProcessStudyJob(studyId, request),
     startAnalyzeStudyJob: (studyId) => backend.startAnalyzeStudyJob(studyId),
     getJob: async (jobId) =>
-      normalizeJobSnapshot(await backend.getJob(jobId), mode, shell),
+      normalizeJobSnapshot(await backend.getJob(jobId), mode),
     cancelJob: async (jobId) =>
-      normalizeJobSnapshot(await backend.cancelJob(jobId), mode, shell),
+      normalizeJobSnapshot(await backend.cancelJob(jobId), mode),
     measureLineAnnotation: (studyId, annotation) =>
       backend.measureLineAnnotation(studyId, annotation),
   };
@@ -170,7 +174,7 @@ let loggedRuntimeConfiguration = false;
 
 export function getRuntimeAdapter(): RuntimeAdapter {
   if (!activeRuntime) {
-    const configuration = resolveRuntimeConfiguration(isWailsRuntime());
+    const configuration = resolveRuntimeConfiguration(isDesktopRuntime());
     activeRuntime = createRuntimeAdapter(configuration);
 
     if (!loggedRuntimeConfiguration) {
@@ -178,12 +182,8 @@ export function getRuntimeAdapter(): RuntimeAdapter {
         console.warn("[xrayview] runtime configuration:", warning);
       }
 
-      const description =
-        configuration.mode === "go-sidecar"
-          ? `${configuration.mode} via Wails shell`
-          : configuration.mode;
       console.info(
-        `[xrayview] backend runtime: ${description} (${configuration.selectionSource})`,
+        `[xrayview] backend runtime: ${configuration.mode} (${configuration.selectionSource})`,
       );
       loggedRuntimeConfiguration = true;
     }

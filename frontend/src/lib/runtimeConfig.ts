@@ -1,6 +1,7 @@
 import type { RuntimeMode } from "./types";
 
 const BACKEND_RUNTIME_ENV_KEY = "VITE_XRAYVIEW_BACKEND_RUNTIME";
+const LEGACY_DESKTOP_RUNTIME_ALIAS = "go-sidecar";
 
 export interface RuntimeConfiguration {
   mode: RuntimeMode;
@@ -9,14 +10,26 @@ export interface RuntimeConfiguration {
 }
 
 function isRuntimeMode(value: string): value is RuntimeMode {
-  return value === "mock" || value === "go-sidecar";
+  return value === "mock" || value === "desktop";
+}
+
+function normalizeRuntimeMode(value: string): RuntimeMode | null {
+  if (isRuntimeMode(value)) {
+    return value;
+  }
+
+  if (value === LEGACY_DESKTOP_RUNTIME_ALIAS) {
+    return "desktop";
+  }
+
+  return null;
 }
 
 export function resolveRuntimeConfiguration(
   isDesktopRuntime: boolean,
 ): RuntimeConfiguration {
   const warnings: string[] = [];
-  const defaultMode: RuntimeMode = isDesktopRuntime ? "go-sidecar" : "mock";
+  const defaultMode: RuntimeMode = isDesktopRuntime ? "desktop" : "mock";
   const rawMode =
     typeof import.meta.env[BACKEND_RUNTIME_ENV_KEY] === "string"
       ? import.meta.env[BACKEND_RUNTIME_ENV_KEY]
@@ -27,17 +40,24 @@ export function resolveRuntimeConfiguration(
   if (rawMode?.trim()) {
     selectionSource = "env";
     const normalizedMode = rawMode.trim().toLowerCase();
-    if (!isRuntimeMode(normalizedMode)) {
+    const modeOverride = normalizeRuntimeMode(normalizedMode);
+    if (!modeOverride) {
       warnings.push(
-        `${BACKEND_RUNTIME_ENV_KEY} must be one of mock or go-sidecar. Falling back to ${defaultMode}.`,
+        `${BACKEND_RUNTIME_ENV_KEY} must be one of mock or desktop. Falling back to ${defaultMode}.`,
       );
-    } else if (!isDesktopRuntime && normalizedMode !== "mock") {
+    } else if (!isDesktopRuntime && modeOverride !== "mock") {
       warnings.push(
-        `${normalizedMode} requires the Wails desktop shell. Falling back to mock in browser mode.`,
+        `${modeOverride} requires the desktop shell. Falling back to mock in browser mode.`,
       );
       mode = "mock";
     } else {
-      mode = normalizedMode;
+      if (normalizedMode === LEGACY_DESKTOP_RUNTIME_ALIAS) {
+        warnings.push(
+          `${BACKEND_RUNTIME_ENV_KEY}=${LEGACY_DESKTOP_RUNTIME_ALIAS} is deprecated for the frontend; use desktop instead.`,
+        );
+      }
+
+      mode = modeOverride;
     }
   }
 

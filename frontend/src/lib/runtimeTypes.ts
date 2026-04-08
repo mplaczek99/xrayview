@@ -10,14 +10,11 @@ import type {
   OpenedStudy,
   ProcessingRequest,
   RuntimeMode,
-  ShellMode,
 } from "./types";
 
 export interface ShellAPI {
-  mode: ShellMode;
   pickDicomFile(): Promise<string | null>;
   pickSaveDicomPath(defaultName: string): Promise<string | null>;
-  resolvePreviewUrl(previewPath: string): string;
 }
 
 export interface BackendAPI {

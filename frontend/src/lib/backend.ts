@@ -17,6 +17,7 @@ import type {
   StartedJob,
 } from "./generated/contracts";
 import { normalizeBackendError } from "./backendErrors";
+import { invokeDesktopBackendCommand } from "./desktop";
 import { MOCK_PROCESSED_DICOM_PATH } from "./mockRuntime";
 import { MOCK_PROCESSING_MANIFEST } from "./mockProcessingManifest";
 import {
@@ -27,7 +28,6 @@ import {
 } from "./mockStudy";
 import type { BackendAPI } from "./runtimeTypes";
 import type { ProcessingRequest } from "./types";
-import { invokeWailsBackendCommand } from "./wails";
 
 const PALETTE_LABELS: Record<PaletteName, string> = {
   none: "Neutral",
@@ -211,7 +211,7 @@ async function invokeDesktopBackend<T>(
   command: string,
   payload?: unknown,
 ): Promise<T> {
-  const response = await invokeWailsBackendCommand(command, payload);
+  const response = await invokeDesktopBackendCommand(command, payload);
   const parsed = parseBackendResponseBody<T | BackendError>(command, response.body);
 
   if (response.status >= 400) {
@@ -345,9 +345,9 @@ export function createMockBackendAPI(): BackendAPI {
   };
 }
 
-export function createWailsBackendAPI(): BackendAPI {
+export function createDesktopBackendAPI(): BackendAPI {
   return {
-    mode: "go-sidecar",
+    mode: "desktop",
     loadProcessingManifest: () =>
       invokeDesktopBackend<ProcessingManifest>("get_processing_manifest"),
     openStudy: async (inputPath): Promise<OpenStudyCommandResult> => {

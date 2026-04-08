@@ -1,8 +1,9 @@
 import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { applyFrontendRuntimeEnv } from "./runtime-env.mjs";
 
-const DEFAULT_DESKTOP_RUNTIME = "go-sidecar";
+const DEFAULT_DESKTOP_RUNTIME = "desktop";
 const DEFAULT_GO_SIDECAR_BASE_URL = "http://127.0.0.1:38181";
 const EXPECTED_SERVICE_NAME = "xrayview-go-backend";
 const EXPECTED_TRANSPORT_KIND = "local-http-json";
@@ -12,9 +13,10 @@ const PROBE_TIMEOUT_MS = 400;
 const PROBE_INTERVAL_MS = 200;
 const SUPPORTED_BACKEND_RUNTIMES = new Set([
   "mock",
+  "desktop",
   "go-sidecar",
 ]);
-const DESKTOP_RUNTIMES_REQUIRING_SIDECAR = new Set(["go-sidecar"]);
+const DESKTOP_RUNTIMES_REQUIRING_SIDECAR = new Set(["desktop", "go-sidecar"]);
 
 function pickEnvValue(env, plainKey, viteKey) {
   const value = env[plainKey] ?? env[viteKey];
@@ -79,26 +81,27 @@ function normalizeSidecarBaseUrl(rawValue) {
 }
 
 export function resolveDesktopRuntimeConfig(env = process.env) {
+  const normalizedEnv = applyFrontendRuntimeEnv(env);
   const rawMode = pickEnvValue(
-    env,
+    normalizedEnv,
     "XRAYVIEW_BACKEND_RUNTIME",
     "VITE_XRAYVIEW_BACKEND_RUNTIME",
   );
   const mode = rawMode === "" ? DEFAULT_DESKTOP_RUNTIME : rawMode.toLowerCase();
   if (!SUPPORTED_BACKEND_RUNTIMES.has(mode)) {
     throw new Error(
-      "XRAYVIEW_BACKEND_RUNTIME must be one of mock or go-sidecar.",
+      "XRAYVIEW_BACKEND_RUNTIME must be one of mock, desktop, or go-sidecar.",
     );
   }
 
   const rawUrl = pickEnvValue(
-    env,
+    normalizedEnv,
     "XRAYVIEW_GO_BACKEND_URL",
     "VITE_XRAYVIEW_GO_BACKEND_URL",
   );
 
   return {
-    mode,
+    mode: mode === "go-sidecar" ? "desktop" : mode,
     goSidecarBaseUrl: normalizeSidecarBaseUrl(rawUrl),
   };
 }
@@ -341,7 +344,10 @@ export async function validateDesktopLaunch({
     }
   }
 
-  const { child, logs } = startLaunchProcess(executablePath, process.env);
+  const { child, logs } = startLaunchProcess(
+    executablePath,
+    applyFrontendRuntimeEnv(process.env),
+  );
   try {
     try {
       if (expectSidecar) {
