@@ -1357,6 +1357,10 @@ Yes.
 
 Move in-memory artifact/result caching into Go.
 
+### Status
+
+Completed. See [GO_BACKEND_PHASE21_PORT_MEMORY_CACHE_TO_GO.md](GO_BACKEND_PHASE21_PORT_MEMORY_CACHE_TO_GO.md).
+
 ### Why this phase exists
 
 Job reuse and responsiveness depend on it.

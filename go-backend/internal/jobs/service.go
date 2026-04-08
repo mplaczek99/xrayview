@@ -6,7 +6,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -29,17 +28,6 @@ type studyDecoder interface {
 type decodeHelperFactory func() (studyDecoder, error)
 type idGenerator func() (string, error)
 
-type renderCacheEntry struct {
-	PreviewPath      string
-	LoadedWidth      uint32
-	LoadedHeight     uint32
-	MeasurementScale *contracts.MeasurementScale
-}
-
-type processCacheEntry struct {
-	Result contracts.ProcessStudyCommandResult
-}
-
 type jobEntry struct {
 	fingerprint string
 	snapshot    contracts.JobSnapshot
@@ -54,10 +42,9 @@ type Service struct {
 	logger             *slog.Logger
 	newDecoder         decodeHelperFactory
 	newJobID           idGenerator
+	memoryCache        *cache.Memory
 	jobs               map[string]*jobEntry
 	activeFingerprints map[string]string
-	renderCache        map[string]renderCacheEntry
-	processCache       map[string]processCacheEntry
 }
 
 func New(cacheStore *cache.Store, studyRegistry *studies.Registry, logger *slog.Logger) *Service {
@@ -305,10 +292,9 @@ func newService(
 		logger:             logger,
 		newDecoder:         decoderFactory,
 		newJobID:           jobIDFactory,
+		memoryCache:        cache.NewMemory(logger),
 		jobs:               make(map[string]*jobEntry),
 		activeFingerprints: make(map[string]string),
-		renderCache:        make(map[string]renderCacheEntry),
-		processCache:       make(map[string]processCacheEntry),
 	}
 }
 
@@ -319,16 +305,8 @@ func (service *Service) cachedRenderSnapshot(
 	service.mu.Lock()
 	defer service.mu.Unlock()
 
-	cached, ok := service.renderCache[fingerprint]
+	cached, ok := service.memoryCache.LoadRender(fingerprint)
 	if !ok {
-		return contracts.JobSnapshot{}, false, nil
-	}
-
-	if info, err := os.Stat(cached.PreviewPath); err != nil || info.IsDir() {
-		delete(service.renderCache, fingerprint)
-		if err != nil && !errors.Is(err, os.ErrNotExist) && service.logger != nil {
-			service.logger.Warn("discarding stale render cache entry", slog.String("preview_path", cached.PreviewPath), slog.Any("error", err))
-		}
 		return contracts.JobSnapshot{}, false, nil
 	}
 
@@ -337,7 +315,6 @@ func (service *Service) cachedRenderSnapshot(
 		return contracts.JobSnapshot{}, false, contracts.Internal(fmt.Sprintf("generate job id: %v", err))
 	}
 
-	result := cached.renderResult(studyID)
 	snapshot := completedJobSnapshot(
 		jobID,
 		contracts.JobKindRenderStudy,
@@ -345,7 +322,7 @@ func (service *Service) cachedRenderSnapshot(
 		true,
 		contracts.JobResult{
 			Kind:    contracts.JobKindRenderStudy,
-			Payload: result,
+			Payload: cached,
 		},
 	)
 	service.jobs[jobID] = &jobEntry{snapshot: snapshot}
@@ -360,13 +337,8 @@ func (service *Service) cachedProcessSnapshot(
 	service.mu.Lock()
 	defer service.mu.Unlock()
 
-	cached, ok := service.processCache[fingerprint]
+	cached, ok := service.memoryCache.LoadProcess(fingerprint)
 	if !ok {
-		return contracts.JobSnapshot{}, false, nil
-	}
-
-	if !artifactExists(cached.Result.PreviewPath, service.logger, "discarding stale process cache entry") {
-		delete(service.processCache, fingerprint)
 		return contracts.JobSnapshot{}, false, nil
 	}
 
@@ -375,8 +347,6 @@ func (service *Service) cachedProcessSnapshot(
 		return contracts.JobSnapshot{}, false, contracts.Internal(fmt.Sprintf("generate job id: %v", err))
 	}
 
-	result := cached.Result
-	result.StudyID = studyID
 	snapshot := completedJobSnapshot(
 		jobID,
 		contracts.JobKindProcessStudy,
@@ -384,7 +354,7 @@ func (service *Service) cachedProcessSnapshot(
 		true,
 		contracts.JobResult{
 			Kind:    contracts.JobKindProcessStudy,
-			Payload: result,
+			Payload: cached,
 		},
 	)
 	service.jobs[jobID] = &jobEntry{snapshot: snapshot}
@@ -728,12 +698,7 @@ func (service *Service) completeRenderJob(
 	entry.snapshot.Error = nil
 	entry.cancel = nil
 	service.releaseFingerprintLocked(fingerprint)
-	service.renderCache[fingerprint] = renderCacheEntry{
-		PreviewPath:      result.PreviewPath,
-		LoadedWidth:      result.LoadedWidth,
-		LoadedHeight:     result.LoadedHeight,
-		MeasurementScale: cloneMeasurementScale(result.MeasurementScale),
-	}
+	service.memoryCache.StoreRender(fingerprint, result)
 }
 
 func (service *Service) completeProcessJob(
@@ -774,7 +739,7 @@ func (service *Service) completeProcessJob(
 	entry.snapshot.Error = nil
 	entry.cancel = nil
 	service.releaseFingerprintLocked(fingerprint)
-	service.processCache[fingerprint] = processCacheEntry{Result: result}
+	service.memoryCache.StoreProcess(fingerprint, result)
 }
 
 func (service *Service) failJob(jobID string, err error) {
@@ -891,11 +856,9 @@ func validateInputFile(inputPath string) error {
 func renderFingerprint(study contracts.StudyRecord) (string, error) {
 	payload, err := json.Marshal(struct {
 		Namespace string `json:"namespace"`
-		StudyID   string `json:"studyId"`
 		InputPath string `json:"inputPath"`
 	}{
 		Namespace: "render-study-v1",
-		StudyID:   study.StudyID,
 		InputPath: study.InputPath,
 	})
 	if err != nil {
@@ -1013,27 +976,4 @@ func cloneMeasurementScale(
 
 	value := *scale
 	return &value
-}
-
-func (entry renderCacheEntry) renderResult(studyID string) contracts.RenderStudyCommandResult {
-	return contracts.RenderStudyCommandResult{
-		StudyID:          studyID,
-		PreviewPath:      entry.PreviewPath,
-		LoadedWidth:      entry.LoadedWidth,
-		LoadedHeight:     entry.LoadedHeight,
-		MeasurementScale: cloneMeasurementScale(entry.MeasurementScale),
-	}
-}
-
-func artifactExists(path string, logger *slog.Logger, warningMessage string) bool {
-	info, err := os.Stat(path)
-	if err == nil {
-		return !info.IsDir()
-	}
-
-	if !errors.Is(err, os.ErrNotExist) && logger != nil {
-		logger.Warn(warningMessage, slog.String("artifact_path", path), slog.Any("error", err))
-	}
-
-	return false
 }

@@ -144,6 +144,95 @@ func TestStartRenderJobWritesPreviewAndServesCachedSnapshot(t *testing.T) {
 	}
 }
 
+func TestStartRenderJobReusesCachedResultAcrossStudyReopen(t *testing.T) {
+	inputPath := filepath.Join(t.TempDir(), "study.dcm")
+	if err := os.WriteFile(inputPath, []byte("dicom"), 0o644); err != nil {
+		t.Fatalf("WriteFile returned error: %v", err)
+	}
+
+	studyRegistry := studies.New()
+	firstStudy, err := studyRegistry.Register(inputPath, nil)
+	if err != nil {
+		t.Fatalf("first Register returned error: %v", err)
+	}
+	secondStudy, err := studyRegistry.Register(inputPath, nil)
+	if err != nil {
+		t.Fatalf("second Register returned error: %v", err)
+	}
+	if firstStudy.StudyID == secondStudy.StudyID {
+		t.Fatalf("StudyID = %q for both studies, want distinct registrations", firstStudy.StudyID)
+	}
+
+	cacheStore := cache.New(filepath.Join(t.TempDir(), "cache"))
+	sourceStudy := rustdecode.SourceStudy{
+		Image: imaging.SourceImage{
+			Width:    2,
+			Height:   2,
+			Format:   imaging.FormatGrayFloat32,
+			Pixels:   []float32{0, 32, 128, 255},
+			MinValue: 0,
+			MaxValue: 255,
+			DefaultWindow: &imaging.WindowLevel{
+				Center: 127.5,
+				Width:  255,
+			},
+		},
+	}
+	service := newService(
+		cacheStore,
+		studyRegistry,
+		nil,
+		func() (studyDecoder, error) { return staticDecoder{study: sourceStudy}, nil },
+		sequenceJobIDs("job-1", "job-2"),
+	)
+
+	firstStarted, err := service.StartRenderJob(contracts.RenderStudyCommand{StudyID: firstStudy.StudyID})
+	if err != nil {
+		t.Fatalf("first StartRenderJob returned error: %v", err)
+	}
+	firstSnapshot := waitForTerminalJob(t, service, firstStarted.JobID)
+	firstResult, ok := firstSnapshot.Result.Payload.(contracts.RenderStudyCommandResult)
+	if !ok {
+		t.Fatalf("first Result.Payload type = %T, want contracts.RenderStudyCommandResult", firstSnapshot.Result.Payload)
+	}
+
+	secondStarted, err := service.StartRenderJob(contracts.RenderStudyCommand{StudyID: secondStudy.StudyID})
+	if err != nil {
+		t.Fatalf("second StartRenderJob returned error: %v", err)
+	}
+	if got, want := secondStarted.JobID, "job-2"; got != want {
+		t.Fatalf("second JobID = %q, want %q", got, want)
+	}
+
+	secondSnapshot, err := service.GetJob(contracts.JobCommand{JobID: secondStarted.JobID})
+	if err != nil {
+		t.Fatalf("GetJob returned error: %v", err)
+	}
+	if !secondSnapshot.FromCache {
+		t.Fatal("second FromCache = false, want true")
+	}
+	if secondSnapshot.StudyID == nil {
+		t.Fatal("second StudyID = nil, want top-level study id")
+	}
+	if got, want := *secondSnapshot.StudyID, secondStudy.StudyID; got != want {
+		t.Fatalf("second top-level StudyID = %q, want %q", got, want)
+	}
+
+	secondResult, ok := secondSnapshot.Result.Payload.(contracts.RenderStudyCommandResult)
+	if !ok {
+		t.Fatalf("second Result.Payload type = %T, want contracts.RenderStudyCommandResult", secondSnapshot.Result.Payload)
+	}
+	if got, want := secondResult.PreviewPath, firstResult.PreviewPath; got != want {
+		t.Fatalf("second PreviewPath = %q, want reused %q", got, want)
+	}
+	if got, want := secondResult.StudyID, firstStudy.StudyID; got != want {
+		t.Fatalf("second payload StudyID = %q, want cached %q", got, want)
+	}
+	if secondResult.StudyID == *secondSnapshot.StudyID {
+		t.Fatal("second payload StudyID unexpectedly matched top-level cached study id")
+	}
+}
+
 func TestStartRenderJobDeduplicatesActiveStudyRender(t *testing.T) {
 	studyRegistry, study := registerTestStudy(t)
 	cacheStore := cache.New(filepath.Join(t.TempDir(), "cache"))
@@ -272,6 +361,9 @@ func TestStartProcessJobWritesPreviewAndServesCachedSnapshot(t *testing.T) {
 	}
 	if info, err := os.Stat(result.PreviewPath); err != nil || info.IsDir() {
 		t.Fatalf("preview artifact missing or invalid: %v", err)
+	}
+	if err := os.WriteFile(result.DicomPath, []byte("dcm"), 0o644); err != nil {
+		t.Fatalf("WriteFile DICOM returned error: %v", err)
 	}
 
 	cachedStarted, err := service.StartProcessJob(contracts.ProcessStudyCommand{
