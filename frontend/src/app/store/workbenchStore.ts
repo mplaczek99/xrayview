@@ -12,6 +12,7 @@ import type {
 } from "../../lib/generated/contracts";
 import type { ProcessingRequest } from "../../lib/types";
 import type { JobSnapshot, ProcessingRunState } from "../../features/jobs/model";
+import { recordJobSubmit } from "../../features/jobs/benchmarks";
 import { advanceJobProgressTiming } from "../../features/jobs/progressTiming";
 import {
   removeAnnotation,
@@ -388,6 +389,7 @@ class WorkbenchStore {
       }));
 
       const started = await runtime.startRenderStudyJob(study.studyId);
+      recordJobSubmit(started.jobId);
       this.receiveJobUpdate(
         createPendingJobSnapshot(
           started.jobId,
@@ -418,6 +420,7 @@ class WorkbenchStore {
 
     try {
       const started = await runtime.startAnalyzeStudyJob(study.studyId);
+      recordJobSubmit(started.jobId);
       this.receiveJobUpdate(
         createPendingJobSnapshot(
           started.jobId,
@@ -576,6 +579,7 @@ class WorkbenchStore {
 
     try {
       const started = await runtime.startProcessStudyJob(study.studyId, request);
+      recordJobSubmit(started.jobId);
       this.receiveJobUpdate(
         createPendingJobSnapshot(
           started.jobId,

@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"xrayview/backend/internal/analysis"
 	"xrayview/backend/internal/annotations"
@@ -34,10 +35,20 @@ type Service struct {
 	supportedKinds         []contracts.JobKind
 	cache                  *cache.Store
 	studies                *studies.Registry
+	logger                 *slog.Logger
 	newDecoder             decodeHelperFactory
 	secondaryCaptureWriter dicomexport.Writer
 	memoryCache            *cache.Memory
 	registry               *Registry
+}
+
+const decodeBenchmarkEnvKey = "XRAYVIEW_BENCH_LOG_DECODES"
+
+var decodeBenchmarkCounts = struct {
+	mu     sync.Mutex
+	counts map[string]int
+}{
+	counts: make(map[string]int),
 }
 
 func New(cacheStore *cache.Store, studyRegistry *studies.Registry, logger *slog.Logger) *Service {
@@ -314,11 +325,31 @@ func newService(
 		},
 		cache:                  cacheStore,
 		studies:                studyRegistry,
+		logger:                 logger,
 		newDecoder:             decoderFactory,
 		secondaryCaptureWriter: secondaryCaptureWriter,
 		memoryCache:            cache.NewMemory(logger),
 		registry:               NewRegistry(jobIDFactory),
 	}
+}
+
+func (service *Service) logDecodeStudyCall(jobKind contracts.JobKind, study contracts.StudyRecord) {
+	if strings.TrimSpace(os.Getenv(decodeBenchmarkEnvKey)) == "" {
+		return
+	}
+
+	decodeBenchmarkCounts.mu.Lock()
+	decodeBenchmarkCounts.counts[study.InputPath]++
+	count := decodeBenchmarkCounts.counts[study.InputPath]
+	decodeBenchmarkCounts.mu.Unlock()
+
+	service.logger.Info(
+		"[bench] DecodeStudy invocation",
+		slog.String("job_kind", string(jobKind)),
+		slog.String("study_id", study.StudyID),
+		slog.String("input_path", study.InputPath),
+		slog.Int("workflow_decode_count", count),
+	)
 }
 
 func (service *Service) cachedRenderSnapshot(
@@ -442,6 +473,7 @@ func (service *Service) executeRenderJob(
 		return
 	}
 
+	service.logDecodeStudyCall(contracts.JobKindRenderStudy, study)
 	sourceStudy, err := decoder.DecodeStudy(ctx, study.InputPath)
 	if err != nil {
 		if service.finishCancelledIfRequested(ctx, jobID, "loadingStudy", "") {
@@ -559,6 +591,7 @@ func (service *Service) executeProcessJob(
 		return
 	}
 
+	service.logDecodeStudyCall(contracts.JobKindProcessStudy, study)
 	sourceStudy, err := decoder.DecodeStudy(ctx, study.InputPath)
 	if err != nil {
 		if service.finishCancelledIfRequested(ctx, jobID, "loadingStudy", previewPath) {
@@ -711,6 +744,7 @@ func (service *Service) executeAnalyzeJob(
 		return
 	}
 
+	service.logDecodeStudyCall(contracts.JobKindAnalyzeStudy, study)
 	sourceStudy, err := decoder.DecodeStudy(ctx, study.InputPath)
 	if err != nil {
 		if service.finishCancelledIfRequested(ctx, jobID, "loadingStudy", previewPath) {

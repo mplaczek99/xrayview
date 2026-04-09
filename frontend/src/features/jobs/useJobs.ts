@@ -1,6 +1,10 @@
 import { useEffect } from "react";
 import { getRuntimeAdapter } from "../../lib/runtime";
 import { workbenchActions } from "../../app/store/workbenchStore";
+import {
+  clearJobSubmitTiming,
+  logCompletedJobVisibleTiming,
+} from "./benchmarks";
 
 const POLL_INTERVAL_MS = 1500;
 const runtime = getRuntimeAdapter();
@@ -25,6 +29,11 @@ export function useJobs() {
             const job = await runtime.getJob(jobId);
             if (!cancelled) {
               workbenchActions.receiveJobUpdate(job);
+              if (job.state === "completed") {
+                logCompletedJobVisibleTiming(jobId);
+              } else if (job.state === "failed" || job.state === "cancelled") {
+                clearJobSubmitTiming(jobId);
+              }
             }
           } catch {
             // Keep polling other jobs; individual fetch failures should not tear

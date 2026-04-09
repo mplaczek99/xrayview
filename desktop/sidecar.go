@@ -43,6 +43,7 @@ const (
 	sidecarRequestTimeout      = 15 * time.Second
 	sidecarShutdownTimeout     = 4 * time.Second
 	sidecarBinaryNameBase      = "xrayview-backend"
+	sidecarStartupBenchmarkEnv = "XRAYVIEW_BENCH_LOG_SIDECAR_STARTUP"
 )
 
 var errSidecarUnavailable = errors.New("backend is not reachable")
@@ -127,8 +128,23 @@ func (controller *SidecarController) BinaryPath() string {
 	return sidecarBinaryCandidates()[0]
 }
 
-func (controller *SidecarController) EnsureStarted() error {
+func (controller *SidecarController) EnsureStarted() (err error) {
+	startedAt := time.Now()
+	outcome := "started"
+	if sidecarStartupBenchmarkEnabled() {
+		defer func() {
+			fmt.Fprintf(
+				os.Stderr,
+				"[bench] sidecar EnsureStarted outcome=%s duration=%s base_url=%s\n",
+				outcome,
+				time.Since(startedAt).Round(time.Millisecond),
+				controller.baseURL,
+			)
+		}()
+	}
+
 	if !controller.Enabled() {
+		outcome = "disabled"
 		return nil
 	}
 
@@ -137,35 +153,42 @@ func (controller *SidecarController) EnsureStarted() error {
 
 	if _, err := controller.probeHealthLocked(); err == nil {
 		controller.lastManaged = controller.child != nil
+		outcome = "already_running"
 		return nil
 	} else if !errors.Is(err, errSidecarUnavailable) {
+		outcome = "probe_error"
 		return err
 	}
 
 	binaryPath := controller.BinaryPath()
 	if _, err := os.Stat(binaryPath); err != nil {
 		if os.IsNotExist(err) {
+			outcome = "binary_missing"
 			return fmt.Errorf(
 				"missing backend sidecar binary at %s; build the desktop shell with `npm run wails:build` first",
 				binaryPath,
 			)
 		}
 
+		outcome = "binary_error"
 		return err
 	}
 
 	if err := os.MkdirAll(controller.baseDir, 0o755); err != nil {
+		outcome = "mkdir_error"
 		return err
 	}
 
 	baseURL, err := url.Parse(controller.baseURL)
 	if err != nil {
+		outcome = "url_error"
 		return fmt.Errorf("invalid %s value %q: %w", sidecarBaseURLEnvKey, controller.baseURL, err)
 	}
 
 	host := baseURL.Hostname()
 	port := baseURL.Port()
 	if host == "" || port == "" {
+		outcome = "url_error"
 		return fmt.Errorf("backend base URL must include host and port: %s", controller.baseURL)
 	}
 
@@ -183,6 +206,7 @@ func (controller *SidecarController) EnsureStarted() error {
 	)
 
 	if err := command.Start(); err != nil {
+		outcome = "start_error"
 		return fmt.Errorf("failed to start backend sidecar: %w", err)
 	}
 
@@ -192,11 +216,13 @@ func (controller *SidecarController) EnsureStarted() error {
 			controller.child = command
 			controller.binaryPath = binaryPath
 			controller.lastManaged = true
+			outcome = "started"
 			return nil
 		} else if !errors.Is(probeErr, errSidecarUnavailable) {
 			_ = terminateProcess(command)
 			controller.child = nil
 			controller.lastManaged = false
+			outcome = "probe_error"
 			return probeErr
 		}
 
@@ -206,6 +232,7 @@ func (controller *SidecarController) EnsureStarted() error {
 	_ = terminateProcess(command)
 	controller.child = nil
 	controller.lastManaged = false
+	outcome = "timeout"
 	return fmt.Errorf("timed out waiting for backend sidecar at %s", controller.baseURL)
 }
 
@@ -314,6 +341,10 @@ func resolveRuntimeMode() runtimeMode {
 	default:
 		return runtimeModeDesktop
 	}
+}
+
+func sidecarStartupBenchmarkEnabled() bool {
+	return strings.TrimSpace(os.Getenv(sidecarStartupBenchmarkEnv)) != ""
 }
 
 func firstEnv(keys ...string) string {
