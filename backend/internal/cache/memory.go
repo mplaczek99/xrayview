@@ -7,18 +7,26 @@ import (
 	"sync"
 
 	"xrayview/backend/internal/contracts"
+	"xrayview/backend/internal/imaging"
+)
+
+const (
+	maxMemoryCacheEntries   = 32
+	maxSourcePreviewEntries = 32
 )
 
 type Memory struct {
-	mu      sync.Mutex
-	logger  *slog.Logger
-	entries map[string]contracts.JobResult
+	mu             sync.Mutex
+	logger         *slog.Logger
+	entries        map[string]contracts.JobResult
+	sourcePreviews map[string]imaging.PreviewImage
 }
 
 func NewMemory(logger *slog.Logger) *Memory {
 	return &Memory{
-		logger:  logger,
-		entries: make(map[string]contracts.JobResult),
+		logger:         logger,
+		entries:        make(map[string]contracts.JobResult),
+		sourcePreviews: make(map[string]imaging.PreviewImage),
 	}
 }
 
@@ -109,11 +117,32 @@ func (memory *Memory) LoadAnalyze(
 	return cloneAnalyzeResult(payload), true
 }
 
+func (memory *Memory) StoreSourcePreview(inputPath string, preview imaging.PreviewImage) {
+	memory.mu.Lock()
+	defer memory.mu.Unlock()
+
+	memory.sourcePreviews[inputPath] = clonePreviewImage(preview)
+	memory.evictSourcePreviewLocked(inputPath)
+}
+
+func (memory *Memory) LoadSourcePreview(inputPath string) (imaging.PreviewImage, bool) {
+	memory.mu.Lock()
+	defer memory.mu.Unlock()
+
+	preview, ok := memory.sourcePreviews[inputPath]
+	if !ok {
+		return imaging.PreviewImage{}, false
+	}
+
+	return clonePreviewImage(preview), true
+}
+
 func (memory *Memory) storeLocked(fingerprint string, result contracts.JobResult) {
 	memory.mu.Lock()
 	defer memory.mu.Unlock()
 
 	memory.entries[fingerprint] = result
+	memory.evictResultLocked(fingerprint)
 }
 
 func (memory *Memory) loadLocked(
@@ -269,6 +298,36 @@ func artifactExists(
 	return false
 }
 
+func (memory *Memory) evictResultLocked(keepFingerprint string) {
+	if len(memory.entries) <= maxMemoryCacheEntries {
+		return
+	}
+
+	for fingerprint := range memory.entries {
+		if fingerprint == keepFingerprint {
+			continue
+		}
+
+		delete(memory.entries, fingerprint)
+		return
+	}
+}
+
+func (memory *Memory) evictSourcePreviewLocked(keepInputPath string) {
+	if len(memory.sourcePreviews) <= maxSourcePreviewEntries {
+		return
+	}
+
+	for inputPath := range memory.sourcePreviews {
+		if inputPath == keepInputPath {
+			continue
+		}
+
+		delete(memory.sourcePreviews, inputPath)
+		return
+	}
+}
+
 func cloneRenderResult(
 	result contracts.RenderStudyCommandResult,
 ) contracts.RenderStudyCommandResult {
@@ -355,6 +414,11 @@ func cloneAnnotationBundle(bundle contracts.AnnotationBundle) contracts.Annotati
 		Lines:      cloneLineAnnotations(bundle.Lines),
 		Rectangles: cloneRectangleAnnotations(bundle.Rectangles),
 	}
+}
+
+func clonePreviewImage(preview imaging.PreviewImage) imaging.PreviewImage {
+	preview.Pixels = append([]uint8(nil), preview.Pixels...)
+	return preview
 }
 
 func cloneLineAnnotations(lines []contracts.LineAnnotation) []contracts.LineAnnotation {

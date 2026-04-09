@@ -753,6 +753,10 @@ export const selectStudies = (s: WorkbenchState) => s.studies;
 export const selectIsOpeningStudy = (s: WorkbenchState) => s.isOpeningStudy;
 export const selectWorkbenchStatus = (s: WorkbenchState) => s.workbenchStatus;
 export const selectManifest = (s: WorkbenchState) => s.manifest;
+export const selectPendingJobCount = (s: WorkbenchState) =>
+  Object.values(s.jobs).filter((job) =>
+    job.state === "queued" || job.state === "running" || job.state === "cancelling",
+  ).length;
 export const selectActiveStudy = (s: WorkbenchState) =>
   s.activeStudyId ? s.studies[s.activeStudyId] ?? null : null;
 

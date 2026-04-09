@@ -1,11 +1,13 @@
 package cache
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"xrayview/backend/internal/contracts"
+	"xrayview/backend/internal/imaging"
 )
 
 func TestMemoryLoadRenderInvalidatesMissingPreviewArtifact(t *testing.T) {
@@ -114,5 +116,59 @@ func TestMemoryTypedLoadInvalidatesMismatchedEntryKind(t *testing.T) {
 	}
 	if _, ok := memory.LoadProcess("shared:1"); ok {
 		t.Fatal("LoadProcess = hit after mismatched typed read, want invalidated miss")
+	}
+}
+
+func TestMemorySourcePreviewRoundTripClonesPixels(t *testing.T) {
+	memory := NewMemory(nil)
+
+	memory.StoreSourcePreview(
+		"/tmp/study.dcm",
+		imaging.GrayPreview(2, 2, []uint8{1, 2, 3, 4}),
+	)
+
+	preview, ok := memory.LoadSourcePreview("/tmp/study.dcm")
+	if !ok {
+		t.Fatal("LoadSourcePreview = miss, want cache hit")
+	}
+
+	preview.Pixels[0] = 99
+
+	cachedAgain, ok := memory.LoadSourcePreview("/tmp/study.dcm")
+	if !ok {
+		t.Fatal("second LoadSourcePreview = miss, want cache hit")
+	}
+	if got, want := cachedAgain.Pixels[0], uint8(1); got != want {
+		t.Fatalf("cachedAgain.Pixels[0] = %d, want %d", got, want)
+	}
+}
+
+func TestMemoryStoreBoundsResultEntries(t *testing.T) {
+	memory := NewMemory(nil)
+
+	for index := 0; index < maxMemoryCacheEntries+8; index++ {
+		memory.StoreRender(
+			fmt.Sprintf("render:%03d", index),
+			contracts.RenderStudyCommandResult{StudyID: "study-1"},
+		)
+	}
+
+	if got, want := len(memory.entries), maxMemoryCacheEntries; got != want {
+		t.Fatalf("len(entries) = %d, want %d", got, want)
+	}
+}
+
+func TestMemoryStoreBoundsSourcePreviewEntries(t *testing.T) {
+	memory := NewMemory(nil)
+
+	for index := 0; index < maxSourcePreviewEntries+8; index++ {
+		memory.StoreSourcePreview(
+			fmt.Sprintf("/tmp/study-%03d.dcm", index),
+			imaging.GrayPreview(1, 1, []uint8{uint8(index)}),
+		)
+	}
+
+	if got, want := len(memory.sourcePreviews), maxSourcePreviewEntries; got != want {
+		t.Fatalf("len(sourcePreviews) = %d, want %d", got, want)
 	}
 }

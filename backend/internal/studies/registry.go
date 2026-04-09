@@ -18,6 +18,8 @@ type Registry struct {
 	studies map[string]contracts.StudyRecord
 }
 
+const maxRegisteredStudies = 32
+
 func New() *Registry {
 	return newRegistryWithIDGenerator(generateStudyID)
 }
@@ -48,6 +50,7 @@ func (registry *Registry) Register(
 		MeasurementScale: measurementScale,
 	}
 	registry.studies[record.StudyID] = record
+	registry.evictOldestLocked(record.StudyID)
 
 	return record, nil
 }
@@ -65,6 +68,21 @@ func (registry *Registry) Count() int {
 	defer registry.mu.RUnlock()
 
 	return len(registry.studies)
+}
+
+func (registry *Registry) evictOldestLocked(keepStudyID string) {
+	if len(registry.studies) <= maxRegisteredStudies {
+		return
+	}
+
+	for studyID := range registry.studies {
+		if studyID == keepStudyID {
+			continue
+		}
+
+		delete(registry.studies, studyID)
+		return
+	}
 }
 
 func inputNameFromPath(inputPath string) string {

@@ -1,17 +1,26 @@
 import { useEffect } from "react";
 import { getRuntimeAdapter } from "../../lib/runtime";
-import { workbenchActions } from "../../app/store/workbenchStore";
+import {
+  selectPendingJobCount,
+  useWorkbenchStore,
+  workbenchActions,
+} from "../../app/store/workbenchStore";
 import {
   clearJobSubmitTiming,
   logCompletedJobVisibleTiming,
 } from "./benchmarks";
 
-const POLL_INTERVAL_MS = 1500;
+const FAST_POLL_MS = 200;
+const SLOW_POLL_MS = 2000;
+const IDLE_POLL_MS = 0;
 const runtime = getRuntimeAdapter();
 
 export function useJobs() {
+  const pendingJobCount = useWorkbenchStore(selectPendingJobCount);
+
   useEffect(() => {
     let cancelled = false;
+    let timer: number | undefined;
 
     async function pollPendingJobs() {
       const state = workbenchActions.getState();
@@ -22,6 +31,11 @@ export function useJobs() {
           job.state === "cancelling",
         )
         .map((job) => job.jobId);
+
+      if (pendingIds.length === 0) {
+        scheduleNext(IDLE_POLL_MS);
+        return;
+      }
 
       await Promise.all(
         pendingIds.map(async (jobId) => {
@@ -41,16 +55,43 @@ export function useJobs() {
           }
         }),
       );
+
+      const stillPending = Object.values(workbenchActions.getState().jobs).some(
+        (job) =>
+          job.state === "queued" ||
+          job.state === "running" ||
+          job.state === "cancelling",
+      );
+      scheduleNext(stillPending ? FAST_POLL_MS : SLOW_POLL_MS);
     }
 
-    void pollPendingJobs();
-    const timer = window.setInterval(() => {
+    function scheduleNext(intervalMs: number) {
+      if (cancelled) {
+        return;
+      }
+
+      if (timer !== undefined) {
+        window.clearTimeout(timer);
+      }
+
+      if (intervalMs <= 0) {
+        return;
+      }
+
+      timer = window.setTimeout(() => {
+        void pollPendingJobs();
+      }, intervalMs);
+    }
+
+    if (pendingJobCount > 0) {
       void pollPendingJobs();
-    }, POLL_INTERVAL_MS);
+    }
 
     return () => {
       cancelled = true;
-      window.clearInterval(timer);
+      if (timer !== undefined) {
+        window.clearTimeout(timer);
+      }
     };
-  }, []);
+  }, [pendingJobCount]);
 }

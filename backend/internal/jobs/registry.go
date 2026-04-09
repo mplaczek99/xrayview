@@ -20,6 +20,8 @@ type Registry struct {
 	activeFingerprints map[string]string
 }
 
+const maxTerminalJobs = 64
+
 type registryEntry struct {
 	fingerprint           string
 	cancellationRequested bool
@@ -109,6 +111,7 @@ func (registry *Registry) CreateCachedJob(
 
 	snapshot := completedJobSnapshot(jobID, jobKind, studyID, true, result)
 	registry.jobs[jobID] = &registryEntry{snapshot: snapshot}
+	registry.evictOldTerminalJobsLocked(jobID)
 
 	return cloneJobSnapshot(snapshot), nil
 }
@@ -189,6 +192,7 @@ func (registry *Registry) Complete(
 	entry.cancellationRequested = false
 	entry.cancel = nil
 	registry.releaseFingerprintLocked(entry)
+	registry.evictOldTerminalJobsLocked(jobID)
 
 	return cloneJobSnapshot(entry.snapshot), nil
 }
@@ -221,6 +225,7 @@ func (registry *Registry) Fail(jobID string, err error) (contracts.JobSnapshot, 
 	entry.snapshot.Error = &backendErr
 	entry.cancel = nil
 	registry.releaseFingerprintLocked(entry)
+	registry.evictOldTerminalJobsLocked(jobID)
 
 	return cloneJobSnapshot(entry.snapshot), nil
 }
@@ -246,6 +251,7 @@ func (registry *Registry) Cancel(jobID string) (contracts.JobSnapshot, error) {
 		}
 		entry.cancel = nil
 		registry.releaseFingerprintLocked(entry)
+		registry.evictOldTerminalJobsLocked(jobID)
 	case contracts.JobStateRunning, contracts.JobStateCancelling:
 		entry.cancellationRequested = true
 		entry.snapshot.State = contracts.JobStateCancelling
@@ -315,6 +321,7 @@ func (registry *Registry) markCancelledLocked(
 	entry.snapshot.Error = nil
 	entry.cancel = nil
 	registry.releaseFingerprintLocked(entry)
+	registry.evictOldTerminalJobsLocked(entry.snapshot.JobID)
 }
 
 func (registry *Registry) releaseFingerprintLocked(entry *registryEntry) {
@@ -324,6 +331,28 @@ func (registry *Registry) releaseFingerprintLocked(entry *registryEntry) {
 
 	delete(registry.activeFingerprints, entry.fingerprint)
 	entry.fingerprint = ""
+}
+
+func (registry *Registry) evictOldTerminalJobsLocked(keepJobID string) {
+	if len(registry.jobs) <= maxTerminalJobs {
+		return
+	}
+
+	terminalJobIDs := make([]string, 0, len(registry.jobs)-maxTerminalJobs)
+	for jobID, entry := range registry.jobs {
+		if jobID != keepJobID && isTerminalState(entry.snapshot.State) {
+			terminalJobIDs = append(terminalJobIDs, jobID)
+		}
+	}
+
+	excess := len(registry.jobs) - maxTerminalJobs
+	if excess > len(terminalJobIDs) {
+		excess = len(terminalJobIDs)
+	}
+
+	for index := 0; index < excess; index++ {
+		delete(registry.jobs, terminalJobIDs[index])
+	}
 }
 
 func cloneJobSnapshot(snapshot contracts.JobSnapshot) contracts.JobSnapshot {

@@ -2,6 +2,7 @@ package jobs
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"xrayview/backend/internal/contracts"
@@ -279,5 +280,37 @@ func TestRegistryFailDuringCancellationMarksCancelled(t *testing.T) {
 	}
 	if final.Error != nil {
 		t.Fatalf("Error = %#v, want nil", final.Error)
+	}
+}
+
+func TestRegistryBoundsRetainedTerminalJobs(t *testing.T) {
+	nextID := 0
+	registry := NewRegistry(func() (string, error) {
+		nextID++
+		return fmt.Sprintf("job-%03d", nextID), nil
+	})
+
+	for index := 0; index < maxTerminalJobs+16; index++ {
+		snapshot, err := registry.CreateCachedJob(
+			contracts.JobKindRenderStudy,
+			"study-1",
+			contracts.JobResult{
+				Kind: contracts.JobKindRenderStudy,
+				Payload: contracts.RenderStudyCommandResult{
+					StudyID:     "study-1",
+					PreviewPath: fmt.Sprintf("/tmp/preview-%03d.png", index),
+				},
+			},
+		)
+		if err != nil {
+			t.Fatalf("CreateCachedJob returned error: %v", err)
+		}
+		if got, want := snapshot.State, contracts.JobStateCompleted; got != want {
+			t.Fatalf("snapshot.State = %q, want %q", got, want)
+		}
+	}
+
+	if got, want := len(registry.jobs), maxTerminalJobs; got != want {
+		t.Fatalf("len(jobs) = %d, want %d", got, want)
 	}
 }

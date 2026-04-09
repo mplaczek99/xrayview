@@ -19,6 +19,7 @@ import (
 	"xrayview/backend/internal/contracts"
 	"xrayview/backend/internal/dicommeta"
 	dicomexport "xrayview/backend/internal/export"
+	"xrayview/backend/internal/imaging"
 	"xrayview/backend/internal/processing"
 	"xrayview/backend/internal/render"
 	"xrayview/backend/internal/studies"
@@ -30,6 +31,7 @@ type studyDecoder interface {
 
 type decodeHelperFactory func() (studyDecoder, error)
 type idGenerator func() (string, error)
+type renderSourcePreviewFunc func(imaging.SourceImage, render.RenderPlan) imaging.PreviewImage
 
 type Service struct {
 	supportedKinds         []contracts.JobKind
@@ -40,9 +42,13 @@ type Service struct {
 	secondaryCaptureWriter dicomexport.Writer
 	memoryCache            *cache.Memory
 	registry               *Registry
+	decodeCache            *studies.DecodeCache
+	concurrencyLimit       chan struct{}
+	renderSourcePreview    renderSourcePreviewFunc
 }
 
 const decodeBenchmarkEnvKey = "XRAYVIEW_BENCH_LOG_DECODES"
+const maxConcurrentJobs = 3
 
 var decodeBenchmarkCounts = struct {
 	mu     sync.Mutex
@@ -139,7 +145,9 @@ func (service *Service) StartRenderJob(
 		return contracts.StartedJob{}, err
 	}
 
-	go service.executeRenderJob(ctx, outcome.Snapshot.JobID, study, fingerprint)
+	service.launchJob(ctx, func() {
+		service.executeRenderJob(ctx, outcome.Snapshot.JobID, study, fingerprint)
+	})
 
 	return contracts.StartedJob{JobID: outcome.Snapshot.JobID}, nil
 }
@@ -203,15 +211,17 @@ func (service *Service) StartProcessJob(
 		return contracts.StartedJob{}, err
 	}
 
-	go service.executeProcessJob(
-		ctx,
-		outcome.Snapshot.JobID,
-		study,
-		resolved,
-		fingerprint,
-		previewPath,
-		dicomPath,
-	)
+	service.launchJob(ctx, func() {
+		service.executeProcessJob(
+			ctx,
+			outcome.Snapshot.JobID,
+			study,
+			resolved,
+			fingerprint,
+			previewPath,
+			dicomPath,
+		)
+	})
 
 	return contracts.StartedJob{JobID: outcome.Snapshot.JobID}, nil
 }
@@ -265,7 +275,9 @@ func (service *Service) StartAnalyzeJob(
 		return contracts.StartedJob{}, err
 	}
 
-	go service.executeAnalyzeJob(ctx, outcome.Snapshot.JobID, study, fingerprint, previewPath)
+	service.launchJob(ctx, func() {
+		service.executeAnalyzeJob(ctx, outcome.Snapshot.JobID, study, fingerprint, previewPath)
+	})
 
 	return contracts.StartedJob{JobID: outcome.Snapshot.JobID}, nil
 }
@@ -330,6 +342,9 @@ func newService(
 		secondaryCaptureWriter: secondaryCaptureWriter,
 		memoryCache:            cache.NewMemory(logger),
 		registry:               NewRegistry(jobIDFactory),
+		decodeCache:            studies.NewDecodeCache(0),
+		concurrencyLimit:       make(chan struct{}, maxConcurrentJobs),
+		renderSourcePreview:    render.RenderSourceImage,
 	}
 }
 
@@ -350,6 +365,23 @@ func (service *Service) logDecodeStudyCall(jobKind contracts.JobKind, study cont
 		slog.String("input_path", study.InputPath),
 		slog.Int("workflow_decode_count", count),
 	)
+}
+
+func (service *Service) launchJob(ctx context.Context, run func()) {
+	go func() {
+		acquired := false
+		select {
+		case service.concurrencyLimit <- struct{}{}:
+			acquired = true
+		case <-ctx.Done():
+		}
+
+		if acquired {
+			defer func() { <-service.concurrencyLimit }()
+		}
+
+		run()
+	}()
 }
 
 func (service *Service) cachedRenderSnapshot(
@@ -464,22 +496,12 @@ func (service *Service) executeRenderJob(
 		return
 	}
 
-	decoder, err := service.newDecoder()
-	if err != nil {
-		service.failJob(
-			jobID,
-			contracts.Internal(fmt.Sprintf("configure DICOM decoder: %v", err)),
-		)
-		return
-	}
-
-	service.logDecodeStudyCall(contracts.JobKindRenderStudy, study)
-	sourceStudy, err := decoder.DecodeStudy(ctx, study.InputPath)
+	sourceStudy, err := service.loadSourceStudy(ctx, contracts.JobKindRenderStudy, study)
 	if err != nil {
 		if service.finishCancelledIfRequested(ctx, jobID, "loadingStudy", "") {
 			return
 		}
-		service.failJob(jobID, contracts.Internal(fmt.Sprintf("load source study: %v", err)))
+		service.failJob(jobID, err)
 		return
 	}
 	if service.finishCancelledIfRequested(ctx, jobID, "loadingStudy", "") {
@@ -497,7 +519,7 @@ func (service *Service) executeRenderJob(
 		return
 	}
 
-	preview := render.RenderSourceImage(sourceStudy.Image, render.DefaultRenderPlan())
+	preview := service.loadOrRenderSourcePreview(study.InputPath, sourceStudy.Image)
 	if service.finishCancelledIfRequested(ctx, jobID, "renderingPreview", "") {
 		return
 	}
@@ -582,22 +604,12 @@ func (service *Service) executeProcessJob(
 		return
 	}
 
-	decoder, err := service.newDecoder()
-	if err != nil {
-		service.failJob(
-			jobID,
-			contracts.Internal(fmt.Sprintf("configure DICOM decoder: %v", err)),
-		)
-		return
-	}
-
-	service.logDecodeStudyCall(contracts.JobKindProcessStudy, study)
-	sourceStudy, err := decoder.DecodeStudy(ctx, study.InputPath)
+	sourceStudy, err := service.loadSourceStudy(ctx, contracts.JobKindProcessStudy, study)
 	if err != nil {
 		if service.finishCancelledIfRequested(ctx, jobID, "loadingStudy", previewPath) {
 			return
 		}
-		service.failJob(jobID, contracts.Internal(fmt.Sprintf("load source study: %v", err)))
+		service.failJob(jobID, err)
 		return
 	}
 	if service.finishCancelledIfRequested(ctx, jobID, "loadingStudy", previewPath) {
@@ -615,15 +627,14 @@ func (service *Service) executeProcessJob(
 		return
 	}
 
-	output, err := processing.ProcessSourceImage(
-		sourceStudy.Image,
-		render.DefaultRenderPlan(),
+	output, err := processing.ProcessRenderedPreview(
+		service.loadOrRenderSourcePreview(study.InputPath, sourceStudy.Image),
 		resolved.Controls,
 		resolved.Palette,
 		resolved.Compare,
 	)
 	if err != nil {
-		service.failJob(jobID, contracts.Internal(fmt.Sprintf("process source study: %v", err)))
+		service.failJob(jobID, contracts.Internal(fmt.Sprintf("process source preview: %v", err)))
 		return
 	}
 	if service.finishCancelledIfRequested(ctx, jobID, "processingPixels", previewPath) {
@@ -735,22 +746,12 @@ func (service *Service) executeAnalyzeJob(
 		return
 	}
 
-	decoder, err := service.newDecoder()
-	if err != nil {
-		service.failJob(
-			jobID,
-			contracts.Internal(fmt.Sprintf("configure DICOM decoder: %v", err)),
-		)
-		return
-	}
-
-	service.logDecodeStudyCall(contracts.JobKindAnalyzeStudy, study)
-	sourceStudy, err := decoder.DecodeStudy(ctx, study.InputPath)
+	sourceStudy, err := service.loadSourceStudy(ctx, contracts.JobKindAnalyzeStudy, study)
 	if err != nil {
 		if service.finishCancelledIfRequested(ctx, jobID, "loadingStudy", previewPath) {
 			return
 		}
-		service.failJob(jobID, contracts.Internal(fmt.Sprintf("load source study: %v", err)))
+		service.failJob(jobID, err)
 		return
 	}
 	if service.finishCancelledIfRequested(ctx, jobID, "loadingStudy", previewPath) {
@@ -768,7 +769,7 @@ func (service *Service) executeAnalyzeJob(
 		return
 	}
 
-	preview := render.RenderSourceImage(sourceStudy.Image, render.DefaultRenderPlan())
+	preview := service.loadOrRenderSourcePreview(study.InputPath, sourceStudy.Image)
 	if err := render.SavePreviewPNG(previewPath, preview); err != nil {
 		service.failJob(jobID, contracts.Internal(fmt.Sprintf("write analysis preview PNG: %v", err)))
 		return
@@ -904,6 +905,48 @@ func (service *Service) failJob(jobID string, err error) {
 	_, _ = service.registry.Fail(jobID, backendErr)
 }
 
+func (service *Service) loadSourceStudy(
+	ctx context.Context,
+	jobKind contracts.JobKind,
+	study contracts.StudyRecord,
+) (dicommeta.SourceStudy, error) {
+	decoder, err := service.newDecoder()
+	if err != nil {
+		return dicommeta.SourceStudy{}, contracts.Internal(
+			fmt.Sprintf("configure DICOM decoder: %v", err),
+		)
+	}
+
+	sourceStudy, err := service.decodeCache.GetOrDecode(
+		ctx,
+		study.InputPath,
+		benchmarkingDecoder{
+			delegate: decoder,
+			beforeDecode: func() {
+				service.logDecodeStudyCall(jobKind, study)
+			},
+		},
+	)
+	if err != nil {
+		return dicommeta.SourceStudy{}, contracts.Internal(fmt.Sprintf("load source study: %v", err))
+	}
+
+	return sourceStudy, nil
+}
+
+func (service *Service) loadOrRenderSourcePreview(
+	inputPath string,
+	source imaging.SourceImage,
+) imaging.PreviewImage {
+	if preview, ok := service.memoryCache.LoadSourcePreview(inputPath); ok {
+		return preview
+	}
+
+	preview := service.renderSourcePreview(source, render.DefaultRenderPlan())
+	service.memoryCache.StoreSourcePreview(inputPath, preview)
+	return preview
+}
+
 func queuedJobSnapshot(
 	jobID string,
 	jobKind contracts.JobKind,
@@ -976,7 +1019,6 @@ func processFingerprint(
 	payload, err := json.Marshal(struct {
 		Namespace  string                 `json:"namespace"`
 		InputPath  string                 `json:"inputPath"`
-		OutputPath *string                `json:"outputPath"`
 		PresetID   string                 `json:"presetId"`
 		Invert     bool                   `json:"invert"`
 		Brightness *int                   `json:"brightness"`
@@ -985,9 +1027,8 @@ func processFingerprint(
 		Compare    bool                   `json:"compare"`
 		Palette    *contracts.PaletteName `json:"palette"`
 	}{
-		Namespace:  "process-study-v2",
+		Namespace:  "process-study-v3",
 		InputPath:  study.InputPath,
-		OutputPath: command.OutputPath,
 		PresetID:   command.PresetID,
 		Invert:     command.Invert,
 		Brightness: command.Brightness,
@@ -1002,6 +1043,22 @@ func processFingerprint(
 
 	sum := sha256.Sum256(payload)
 	return hex.EncodeToString(sum[:]), nil
+}
+
+type benchmarkingDecoder struct {
+	delegate     studyDecoder
+	beforeDecode func()
+}
+
+func (decoder benchmarkingDecoder) DecodeStudy(
+	ctx context.Context,
+	path string,
+) (dicommeta.SourceStudy, error) {
+	if decoder.beforeDecode != nil {
+		decoder.beforeDecode()
+	}
+
+	return decoder.delegate.DecodeStudy(ctx, path)
 }
 
 func analyzeFingerprint(study contracts.StudyRecord) (string, error) {
