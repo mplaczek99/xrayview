@@ -1,17 +1,40 @@
 import { normalizeBackendError } from "./backendErrors";
+import type {
+  AnalyzeStudyCommand,
+  JobCommand,
+  JobSnapshot,
+  MeasureLineAnnotationCommand,
+  MeasureLineAnnotationCommandResult,
+  OpenStudyCommand,
+  OpenStudyCommandResult,
+  ProcessStudyCommand,
+  ProcessingManifest,
+  RenderStudyCommand,
+  StartedJob,
+} from "./generated/contracts";
 
 export interface WailsBackendCommandResponse {
   status: number;
   body: string;
 }
 
-interface DesktopBindings {
+export interface DesktopBindings {
   PickDicomFile(): Promise<string>;
   PickSaveDicomPath(defaultName?: string): Promise<string>;
   InvokeBackendCommand(
     command: string,
     payloadJson?: string,
   ): Promise<WailsBackendCommandResponse>;
+  OpenStudy(command: OpenStudyCommand): Promise<OpenStudyCommandResult>;
+  StartRenderJob(command: RenderStudyCommand): Promise<StartedJob>;
+  StartProcessJob(command: ProcessStudyCommand): Promise<StartedJob>;
+  StartAnalyzeJob(command: AnalyzeStudyCommand): Promise<StartedJob>;
+  GetJobSnapshot(command: JobCommand): Promise<JobSnapshot>;
+  CancelJobByID(command: JobCommand): Promise<JobSnapshot>;
+  GetProcessingManifest(): Promise<ProcessingManifest>;
+  MeasureLineAnnotation(
+    command: MeasureLineAnnotationCommand,
+  ): Promise<MeasureLineAnnotationCommandResult>;
 }
 
 declare global {
@@ -33,6 +56,10 @@ function requireBindings(): DesktopBindings {
   }
 
   return bindings;
+}
+
+export function getWailsBindings(): DesktopBindings {
+  return requireBindings();
 }
 
 export function isWailsRuntime(): boolean {

@@ -103,9 +103,8 @@ export function useJobs() {
           job.state === "cancelling",
       );
 
-      // The Wails runtime API exists in sidecar mode too, but Phase 2 only wires
-      // backend event emission for the later in-process path. Keep the fast
-      // polling fallback until push delivery is actually available.
+      // Completion events arrive in the embedded desktop path, but progress
+      // updates still come from polling while a job is running.
       scheduleNext(stillPending ? FAST_POLL_MS : SLOW_POLL_MS);
     }
 

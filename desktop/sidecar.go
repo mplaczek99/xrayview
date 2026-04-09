@@ -79,20 +79,10 @@ type SidecarController struct {
 }
 
 func NewSidecarController() *SidecarController {
-	baseURL := firstEnv(sidecarBaseURLEnvKey, legacySidecarBaseURLEnvKey)
-	if baseURL == "" {
-		baseURL = defaultBackendBaseURL
-	}
-
-	baseDir := firstEnv(sidecarBaseDirEnvKey, legacySidecarBaseDirEnvKey)
-	if baseDir == "" {
-		baseDir = filepath.Join(os.TempDir(), "xrayview", "desktop")
-	}
-
 	return &SidecarController{
 		mode:    resolveRuntimeMode(),
-		baseURL: strings.TrimRight(baseURL, "/"),
-		baseDir: baseDir,
+		baseURL: resolveSidecarBaseURL(),
+		baseDir: resolveSidecarBaseDir(),
 		probeClient: &http.Client{
 			Timeout: sidecarProbeTimeout,
 		},
@@ -100,6 +90,28 @@ func NewSidecarController() *SidecarController {
 			Timeout: sidecarRequestTimeout,
 		},
 	}
+}
+
+func hasExplicitBackendURL() bool {
+	return firstEnv(sidecarBaseURLEnvKey, legacySidecarBaseURLEnvKey) != ""
+}
+
+func resolveSidecarBaseURL() string {
+	baseURL := firstEnv(sidecarBaseURLEnvKey, legacySidecarBaseURLEnvKey)
+	if baseURL == "" {
+		baseURL = defaultBackendBaseURL
+	}
+
+	return strings.TrimRight(baseURL, "/")
+}
+
+func resolveSidecarBaseDir() string {
+	baseDir := firstEnv(sidecarBaseDirEnvKey, legacySidecarBaseDirEnvKey)
+	if baseDir == "" {
+		baseDir = filepath.Join(os.TempDir(), "xrayview", "desktop")
+	}
+
+	return filepath.Clean(baseDir)
 }
 
 func (controller *SidecarController) Enabled() bool {

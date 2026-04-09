@@ -28,6 +28,7 @@ import {
 } from "./mockStudy";
 import type { BackendAPI } from "./runtimeTypes";
 import type { ProcessingRequest } from "./types";
+import { getWailsBindings } from "./wails";
 
 const PALETTE_LABELS: Record<PaletteName, string> = {
   none: "Neutral",
@@ -228,6 +229,16 @@ async function invokeDesktopBackend<T>(
   return parsed as T;
 }
 
+async function invokeTypedDesktopBinding<T>(
+  invoke: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await invoke();
+  } catch (error) {
+    throw normalizeBackendError(error);
+  }
+}
+
 export function createMockBackendAPI(): BackendAPI {
   return {
     mode: "mock",
@@ -346,6 +357,40 @@ export function createMockBackendAPI(): BackendAPI {
 }
 
 export function createDesktopBackendAPI(): BackendAPI {
+  const bindings = getWailsBindings();
+  const hasTypedBindings = typeof bindings.OpenStudy === "function";
+
+  if (hasTypedBindings) {
+    return {
+      mode: "desktop",
+      loadProcessingManifest: () =>
+        invokeTypedDesktopBinding(() => bindings.GetProcessingManifest()),
+      openStudy: async (inputPath): Promise<OpenStudyCommandResult> =>
+        invokeTypedDesktopBinding(() => bindings.OpenStudy({ inputPath })),
+      startRenderStudyJob: async (studyId) =>
+        invokeTypedDesktopBinding(() => bindings.StartRenderJob({ studyId })),
+      startProcessStudyJob: async (studyId, request) =>
+        invokeTypedDesktopBinding(() =>
+          bindings.StartProcessJob(buildProcessStudyCommand(studyId, request)),
+        ),
+      startAnalyzeStudyJob: async (studyId) =>
+        invokeTypedDesktopBinding(() => bindings.StartAnalyzeJob({ studyId })),
+      getJob: async (jobId) =>
+        invokeTypedDesktopBinding(() => bindings.GetJobSnapshot({ jobId })),
+      cancelJob: async (jobId) =>
+        invokeTypedDesktopBinding(() => bindings.CancelJobByID({ jobId })),
+      measureLineAnnotation: async (studyId, annotation): Promise<LineAnnotation> => {
+        const payload = await invokeTypedDesktopBinding(() =>
+          bindings.MeasureLineAnnotation({
+            studyId,
+            annotation,
+          }),
+        );
+        return payload.annotation;
+      },
+    };
+  }
+
   return {
     mode: "desktop",
     loadProcessingManifest: () =>

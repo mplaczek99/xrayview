@@ -1,12 +1,15 @@
 package main
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	backendapi "xrayview/backend"
 )
 
 var tinyPNG = []byte{
@@ -21,11 +24,102 @@ var tinyPNG = []byte{
 	0x44, 0xae, 0x42, 0x60, 0x82,
 }
 
-func TestServeAssetServesPreviewArtifact(t *testing.T) {
-	app, err := NewDesktopApp()
-	if err != nil {
-		t.Fatalf("NewDesktopApp() error = %v", err)
+type stubBackendService struct {
+	openStudyFn             func(backendapi.OpenStudyCommand) (backendapi.OpenStudyCommandResult, error)
+	startRenderJobFn        func(backendapi.RenderStudyCommand) (backendapi.StartedJob, error)
+	startProcessJobFn       func(backendapi.ProcessStudyCommand) (backendapi.StartedJob, error)
+	startAnalyzeJobFn       func(backendapi.AnalyzeStudyCommand) (backendapi.StartedJob, error)
+	getJobFn                func(backendapi.JobCommand) (backendapi.JobSnapshot, error)
+	cancelJobFn             func(backendapi.JobCommand) (backendapi.JobSnapshot, error)
+	getProcessingManifestFn func() backendapi.ProcessingManifest
+	measureLineFn           func(
+		backendapi.MeasureLineAnnotationCommand,
+	) (backendapi.MeasureLineAnnotationCommandResult, error)
+}
+
+func (service stubBackendService) OpenStudy(
+	command backendapi.OpenStudyCommand,
+) (backendapi.OpenStudyCommandResult, error) {
+	if service.openStudyFn != nil {
+		return service.openStudyFn(command)
 	}
+
+	return backendapi.OpenStudyCommandResult{}, nil
+}
+
+func (service stubBackendService) StartRenderJob(
+	command backendapi.RenderStudyCommand,
+) (backendapi.StartedJob, error) {
+	if service.startRenderJobFn != nil {
+		return service.startRenderJobFn(command)
+	}
+
+	return backendapi.StartedJob{}, nil
+}
+
+func (service stubBackendService) StartProcessJob(
+	command backendapi.ProcessStudyCommand,
+) (backendapi.StartedJob, error) {
+	if service.startProcessJobFn != nil {
+		return service.startProcessJobFn(command)
+	}
+
+	return backendapi.StartedJob{}, nil
+}
+
+func (service stubBackendService) StartAnalyzeJob(
+	command backendapi.AnalyzeStudyCommand,
+) (backendapi.StartedJob, error) {
+	if service.startAnalyzeJobFn != nil {
+		return service.startAnalyzeJobFn(command)
+	}
+
+	return backendapi.StartedJob{}, nil
+}
+
+func (service stubBackendService) GetJob(
+	command backendapi.JobCommand,
+) (backendapi.JobSnapshot, error) {
+	if service.getJobFn != nil {
+		return service.getJobFn(command)
+	}
+
+	return backendapi.JobSnapshot{}, nil
+}
+
+func (service stubBackendService) CancelJob(
+	command backendapi.JobCommand,
+) (backendapi.JobSnapshot, error) {
+	if service.cancelJobFn != nil {
+		return service.cancelJobFn(command)
+	}
+
+	return backendapi.JobSnapshot{}, nil
+}
+
+func (service stubBackendService) GetProcessingManifest() backendapi.ProcessingManifest {
+	if service.getProcessingManifestFn != nil {
+		return service.getProcessingManifestFn()
+	}
+
+	return backendapi.DefaultProcessingManifest()
+}
+
+func (service stubBackendService) MeasureLineAnnotation(
+	command backendapi.MeasureLineAnnotationCommand,
+) (backendapi.MeasureLineAnnotationCommandResult, error) {
+	if service.measureLineFn != nil {
+		return service.measureLineFn(command)
+	}
+
+	return backendapi.MeasureLineAnnotationCommandResult{}, nil
+}
+
+func (service stubBackendService) OnJobCompletion(callback func(backendapi.JobSnapshot)) {
+}
+
+func TestServeAssetServesPreviewArtifact(t *testing.T) {
+	app := &DesktopApp{}
 
 	previewPath := filepath.Join(t.TempDir(), "preview.png")
 	if err := os.WriteFile(previewPath, tinyPNG, 0o644); err != nil {
@@ -51,6 +145,94 @@ func TestServeAssetServesPreviewArtifact(t *testing.T) {
 
 	if recorder.Body.Len() == 0 {
 		t.Fatal("ServeAsset() returned an empty body")
+	}
+}
+
+func TestNewDesktopAppUsesInProcessBackendByDefault(t *testing.T) {
+	t.Setenv(sidecarRuntimeEnvKey, "desktop")
+	t.Setenv(sidecarBaseURLEnvKey, "")
+	t.Setenv(legacySidecarBaseURLEnvKey, "")
+	t.Setenv(sidecarBaseDirEnvKey, t.TempDir())
+	t.Setenv(legacySidecarBaseDirEnvKey, "")
+
+	app, err := NewDesktopApp()
+	if err != nil {
+		t.Fatalf("NewDesktopApp() error = %v", err)
+	}
+
+	if app.backend == nil {
+		t.Fatal("NewDesktopApp() did not construct an embedded backend")
+	}
+
+	if app.sidecar != nil {
+		t.Fatal("NewDesktopApp() should not create a sidecar controller in default embedded mode")
+	}
+}
+
+func TestOpenStudyUsesEmbeddedBackend(t *testing.T) {
+	app := &DesktopApp{
+		backend: stubBackendService{
+			openStudyFn: func(
+				command backendapi.OpenStudyCommand,
+			) (backendapi.OpenStudyCommandResult, error) {
+				if command.InputPath != "/tmp/example.dcm" {
+					t.Fatalf("OpenStudy() inputPath = %q, want %q", command.InputPath, "/tmp/example.dcm")
+				}
+
+				return backendapi.OpenStudyCommandResult{
+					Study: backendapi.StudyRecord{
+						StudyID:   "study-1",
+						InputPath: command.InputPath,
+						InputName: "example.dcm",
+					},
+				}, nil
+			},
+		},
+	}
+
+	result, err := app.OpenStudy(backendapi.OpenStudyCommand{InputPath: "/tmp/example.dcm"})
+	if err != nil {
+		t.Fatalf("OpenStudy() error = %v", err)
+	}
+
+	if result.Study.StudyID != "study-1" {
+		t.Fatalf("OpenStudy() studyId = %q, want %q", result.Study.StudyID, "study-1")
+	}
+}
+
+func TestInvokeBackendCommandUsesEmbeddedBackend(t *testing.T) {
+	app := &DesktopApp{
+		backend: stubBackendService{
+			openStudyFn: func(
+				command backendapi.OpenStudyCommand,
+			) (backendapi.OpenStudyCommandResult, error) {
+				return backendapi.OpenStudyCommandResult{
+					Study: backendapi.StudyRecord{
+						StudyID:   "study-embedded",
+						InputPath: command.InputPath,
+						InputName: "embedded.dcm",
+					},
+				}, nil
+			},
+		},
+	}
+
+	response := app.InvokeBackendCommand("open_study", `{"inputPath":"/tmp/embedded.dcm"}`)
+	if response.Status != http.StatusOK {
+		t.Fatalf("InvokeBackendCommand() status = %d, want %d", response.Status, http.StatusOK)
+	}
+
+	var payload backendapi.OpenStudyCommandResult
+	if err := json.Unmarshal([]byte(response.Body), &payload); err != nil {
+		t.Fatalf("InvokeBackendCommand() body was not valid JSON: %v", err)
+	}
+
+	if payload.Study.StudyID != "study-embedded" {
+		t.Fatalf(
+			"InvokeBackendCommand() studyId = %q, want %q",
+			payload.Study.StudyID,
+			"study-embedded",
+		)
 	}
 }
 

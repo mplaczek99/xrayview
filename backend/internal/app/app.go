@@ -29,7 +29,20 @@ type App struct {
 }
 
 func New(cfg config.Config, logger *slog.Logger) (*App, error) {
-	return newApp(cfg, logger, nil, nil, nil)
+	return newApp(cfg, logger, nil, nil, nil, true)
+}
+
+func NewService(cfg config.Config, logger *slog.Logger) (*App, error) {
+	application, err := newApp(cfg, logger, nil, nil, nil, false)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := application.prepare(); err != nil {
+		return nil, err
+	}
+
+	return application, nil
 }
 
 func NewWithServices(
@@ -39,7 +52,7 @@ func NewWithServices(
 	studyRegistry *studies.Registry,
 	jobService *jobs.Service,
 ) (*App, error) {
-	return newApp(cfg, logger, cacheStore, studyRegistry, jobService)
+	return newApp(cfg, logger, cacheStore, studyRegistry, jobService, true)
 }
 
 func newApp(
@@ -48,6 +61,7 @@ func newApp(
 	cacheStore *cache.Store,
 	studyRegistry *studies.Registry,
 	jobService *jobs.Service,
+	createServer bool,
 ) (*App, error) {
 	if logger == nil {
 		logger = logging.New(cfg.ServiceName, cfg.Logging.Level)
@@ -76,18 +90,20 @@ func newApp(
 		studies:     studyRegistry,
 		startedAt:   startedAt,
 	}
-	router := httpapi.NewRouter(httpapi.RouterDeps{
-		Service:     application,
-		Config:      cfg,
-		Logger:      logger,
-		Cache:       cacheStore,
-		Persistence: persistenceCatalog,
-		StartedAt:   startedAt,
-	})
-	application.server = &http.Server{
-		Addr:              cfg.ListenAddress(),
-		Handler:           router,
-		ReadHeaderTimeout: 5 * time.Second,
+	if createServer {
+		router := httpapi.NewRouter(httpapi.RouterDeps{
+			Service:     application,
+			Config:      cfg,
+			Logger:      logger,
+			Cache:       cacheStore,
+			Persistence: persistenceCatalog,
+			StartedAt:   startedAt,
+		})
+		application.server = &http.Server{
+			Addr:              cfg.ListenAddress(),
+			Handler:           router,
+			ReadHeaderTimeout: 5 * time.Second,
+		}
 	}
 
 	return application, nil
@@ -107,10 +123,14 @@ func NewFromEnvironment() (*App, error) {
 		return nil, err
 	}
 
-	return newApp(cfg, logger, cacheStore, studyRegistry, jobService)
+	return newApp(cfg, logger, cacheStore, studyRegistry, jobService, true)
 }
 
 func (app *App) Handler() http.Handler {
+	if app.server == nil {
+		return nil
+	}
+
 	return app.server.Handler
 }
 
@@ -119,7 +139,11 @@ func (app *App) Config() config.Config {
 }
 
 func (app *App) Run(ctx context.Context) error {
-	if err := app.bootstrap(); err != nil {
+	if app.server == nil {
+		return errors.New("backend HTTP server is not configured")
+	}
+
+	if err := app.prepare(); err != nil {
 		return err
 	}
 
@@ -150,7 +174,7 @@ func (app *App) Run(ctx context.Context) error {
 	}
 }
 
-func (app *App) bootstrap() error {
+func (app *App) prepare() error {
 	if err := app.cache.Ensure(); err != nil {
 		return err
 	}
@@ -159,13 +183,22 @@ func (app *App) bootstrap() error {
 		return err
 	}
 
-	app.logger.Info(
-		"backend ready",
-		slog.String("listen_address", app.config.ListenAddress()),
-		slog.String("cache_dir", app.cache.RootDir()),
-		slog.String("persistence_dir", app.persistence.RootDir()),
-		slog.Int("backend_contract_version", contracts.BackendContractVersion),
-	)
+	if app.server != nil {
+		app.logger.Info(
+			"backend ready",
+			slog.String("listen_address", app.config.ListenAddress()),
+			slog.String("cache_dir", app.cache.RootDir()),
+			slog.String("persistence_dir", app.persistence.RootDir()),
+			slog.Int("backend_contract_version", contracts.BackendContractVersion),
+		)
+	} else {
+		app.logger.Info(
+			"embedded backend ready",
+			slog.String("cache_dir", app.cache.RootDir()),
+			slog.String("persistence_dir", app.persistence.RootDir()),
+			slog.Int("backend_contract_version", contracts.BackendContractVersion),
+		)
+	}
 
 	return nil
 }

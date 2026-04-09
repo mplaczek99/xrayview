@@ -2,7 +2,10 @@ module xrayview/desktop
 
 go 1.26.0
 
-require github.com/wailsapp/wails/v2 v2.11.0
+require (
+	github.com/wailsapp/wails/v2 v2.11.0
+	xrayview/backend v0.0.0
+)
 
 require (
 	github.com/bep/debounce v1.2.1 // indirect
@@ -29,7 +32,14 @@ require (
 	github.com/wailsapp/go-webview2 v1.0.22 // indirect
 	github.com/wailsapp/mimetype v1.4.1 // indirect
 	golang.org/x/crypto v0.33.0 // indirect
+	golang.org/x/image v0.26.0 // indirect
 	golang.org/x/net v0.35.0 // indirect
 	golang.org/x/sys v0.30.0 // indirect
-	golang.org/x/text v0.22.0 // indirect
+	golang.org/x/text v0.24.0 // indirect
+	xrayview/contracts v0.0.0 // indirect
+)
+
+replace (
+	xrayview/backend => ../backend
+	xrayview/contracts => ../contracts
 )
