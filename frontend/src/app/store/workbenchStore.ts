@@ -37,7 +37,7 @@ const INITIAL_STATE: WorkbenchState = {
   jobs: {},
   jobOrder: [],
   isOpeningStudy: false,
-  workbenchStatus: "Open a DICOM study to begin.",
+  workbenchStatus: "Open a DICOM study or BMP/TIFF image to begin.",
 };
 
 type Listener = () => void;

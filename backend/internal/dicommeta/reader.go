@@ -97,13 +97,21 @@ const (
 func ReadFile(path string) (Metadata, error) {
 	file, err := os.Open(path)
 	if err != nil {
-		return Metadata{}, fmt.Errorf("open DICOM file: %w", err)
+		return Metadata{}, fmt.Errorf("open source file: %w", err)
 	}
 	defer file.Close()
 
 	metadata, err := Read(file)
 	if err != nil {
-		return Metadata{}, fmt.Errorf("read DICOM metadata from %s: %w", path, err)
+		if supportsStandaloneImagePath(path) {
+			if _, seekErr := file.Seek(0, io.SeekStart); seekErr != nil {
+				return Metadata{}, fmt.Errorf("seek source input: %w", seekErr)
+			}
+			if imageMetadata, imageErr := tryReadImageMetadata(file); imageErr == nil {
+				return imageMetadata, nil
+			}
+		}
+		return Metadata{}, fmt.Errorf("read source metadata from %s: %w", path, err)
 	}
 
 	return metadata, nil
@@ -111,7 +119,7 @@ func ReadFile(path string) (Metadata, error) {
 
 func Read(source readerAtSeeker) (Metadata, error) {
 	if _, err := source.Seek(0, io.SeekStart); err != nil {
-		return Metadata{}, fmt.Errorf("seek DICOM input: %w", err)
+		return Metadata{}, fmt.Errorf("seek source input: %w", err)
 	}
 
 	transferSyntaxUID, err := loadTransferSyntaxUID(source)

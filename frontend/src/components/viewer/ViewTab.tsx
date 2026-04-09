@@ -71,7 +71,7 @@ export function ViewTab() {
               <span className="empty-state__loader" aria-hidden="true" />
               <h3 className="empty-state__title">Opening study...</h3>
               <p className="empty-state__copy">
-                Loading and rendering the DICOM preview.
+                Loading and rendering the study preview.
               </p>
             </>
           ) : (
@@ -84,15 +84,16 @@ export function ViewTab() {
               </svg>
               <h3 className="empty-state__title">No study loaded</h3>
               <p className="empty-state__copy">
-                Open a DICOM study to inspect it, pan and zoom, draw manual line
-                measurements, or run automatic tooth analysis.
+                Open a DICOM study or BMP/TIFF image to inspect it, pan and
+                zoom, draw manual line measurements, or run automatic tooth
+                analysis.
               </p>
               <button
                 className="button button--primary empty-state__cta"
                 type="button"
                 onClick={() => void workbenchActions.openStudy()}
               >
-                Open DICOM
+                Open Study
               </button>
             </>
           )}
@@ -115,7 +116,7 @@ export function ViewTab() {
             <svg className="button__icon" viewBox="0 0 16 16" fill="none" aria-hidden="true">
               <path d="M2 3a1 1 0 011-1h4l2 2h4a1 1 0 011 1v7a1 1 0 01-1 1H3a1 1 0 01-1-1V3z" stroke="currentColor" strokeWidth="1.5" />
             </svg>
-            {isOpeningStudy ? "Opening..." : "Open DICOM"}
+            {isOpeningStudy ? "Opening..." : "Open Study"}
           </button>
         </div>
 
@@ -194,7 +195,7 @@ export function ViewTab() {
             selectedAnnotationId={selectedAnnotationId}
             tool={viewerTool}
             emptyTitle="No study loaded"
-            emptyDescription="Open a DICOM study to inspect it, pan and zoom, or draw a manual line measurement."
+            emptyDescription="Open a DICOM study or BMP/TIFF image to inspect it, pan and zoom, or draw a manual line measurement."
             onSelectAnnotation={(annotationId) =>
               workbenchActions.selectAnnotation(annotationId)
             }

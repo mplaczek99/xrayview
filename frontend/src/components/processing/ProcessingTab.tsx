@@ -127,7 +127,7 @@ export function ProcessingTab() {
           <DicomViewer
             previewUrl={previewUrl}
             emptyTitle="No image loaded"
-            emptyDescription="Load a DICOM file in the View tab first."
+            emptyDescription="Load a DICOM study or BMP/TIFF image in the View tab first."
           />
         )}
       </div>

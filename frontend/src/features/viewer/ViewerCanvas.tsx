@@ -60,7 +60,7 @@ export function ViewerCanvas({
   selectedAnnotationId,
   tool,
   emptyTitle = "No image loaded",
-  emptyDescription = "Open a DICOM file to view it here.",
+  emptyDescription = "Open a DICOM study or BMP/TIFF image to view it here.",
   onSelectAnnotation,
   onCreateLine,
   onUpdateLine,

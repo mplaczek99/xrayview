@@ -5,6 +5,8 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/color"
 	"io"
 	"log/slog"
 	"net/http"
@@ -16,6 +18,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"golang.org/x/image/bmp"
 
 	"xrayview/backend/internal/cache"
 	"xrayview/backend/internal/config"
@@ -255,6 +259,59 @@ func TestOpenStudyIncludesMeasurementScaleWhenSpacingMetadataExists(t *testing.T
 	}
 	if got, want := payload.Study.MeasurementScale.Source, "PixelSpacing"; got != want {
 		t.Fatalf("measurementScale.source = %q, want %q", got, want)
+	}
+}
+
+func TestOpenStudyAcceptsStandaloneBMPInput(t *testing.T) {
+	deps := testDependencies(t)
+	handler := NewRouter(deps)
+
+	inputPath := filepath.Join(t.TempDir(), "standalone.bmp")
+	writeStandaloneBMPFixture(t, inputPath)
+
+	payload := openStudyViaRouter(t, handler, inputPath)
+
+	if got, want := payload.Study.InputPath, inputPath; got != want {
+		t.Fatalf("inputPath = %q, want %q", got, want)
+	}
+	if got, want := payload.Study.InputName, "standalone.bmp"; got != want {
+		t.Fatalf("inputName = %q, want %q", got, want)
+	}
+	if payload.Study.MeasurementScale != nil {
+		t.Fatalf("measurementScale = %+v, want nil", payload.Study.MeasurementScale)
+	}
+	if got, want := deps.Studies.Count(), 1; got != want {
+		t.Fatalf("study count = %d, want %d", got, want)
+	}
+}
+
+func TestOpenStudyAcceptsActualBMPFixture(t *testing.T) {
+	deps := testDependencies(t)
+	handler := NewRouter(deps)
+
+	inputPath := actualBMPPath(t)
+	payload := openStudyViaRouter(t, handler, inputPath)
+
+	if got, want := payload.Study.InputPath, inputPath; got != want {
+		t.Fatalf("inputPath = %q, want %q", got, want)
+	}
+	if got, want := payload.Study.InputName, "xrays1.bmp"; got != want {
+		t.Fatalf("inputName = %q, want %q", got, want)
+	}
+}
+
+func TestOpenStudyAcceptsActualTIFFFixture(t *testing.T) {
+	deps := testDependencies(t)
+	handler := NewRouter(deps)
+
+	inputPath := actualTIFFPath(t)
+	payload := openStudyViaRouter(t, handler, inputPath)
+
+	if got, want := payload.Study.InputPath, inputPath; got != want {
+		t.Fatalf("inputPath = %q, want %q", got, want)
+	}
+	if got, want := payload.Study.InputName, "xrays1.tif"; got != want {
+		t.Fatalf("inputName = %q, want %q", got, want)
 	}
 }
 
@@ -538,9 +595,22 @@ func TestMeasureLineAnnotationRejectsUnknownStudy(t *testing.T) {
 }
 
 func TestRenderJobEndpointsCompletePreview(t *testing.T) {
+	assertRenderJobCompletesPreview(t, sampleDicomPath(t))
+}
+
+func TestRenderJobEndpointsCompletePreviewForActualBMPFixture(t *testing.T) {
+	assertRenderJobCompletesPreview(t, actualBMPPath(t))
+}
+
+func TestRenderJobEndpointsCompletePreviewForActualTIFFFixture(t *testing.T) {
+	assertRenderJobCompletesPreview(t, actualTIFFPath(t))
+}
+
+func assertRenderJobCompletesPreview(t *testing.T, inputPath string) {
+	t.Helper()
+
 	deps := withJobService(testDependencies(t))
 	handler := NewRouter(deps)
-	inputPath := sampleDicomPath(t)
 
 	openRecorder := httptest.NewRecorder()
 	openRequest := httptest.NewRequest(
@@ -881,6 +951,32 @@ func sampleDicomPath(t *testing.T) string {
 	)
 }
 
+func actualBMPPath(t *testing.T) string {
+	t.Helper()
+
+	_, currentFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller returned no file path")
+	}
+
+	return filepath.Clean(
+		filepath.Join(filepath.Dir(currentFile), "..", "..", "..", "images", "BMP", "xrays1.bmp"),
+	)
+}
+
+func actualTIFFPath(t *testing.T) string {
+	t.Helper()
+
+	_, currentFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller returned no file path")
+	}
+
+	return filepath.Clean(
+		filepath.Join(filepath.Dir(currentFile), "..", "..", "..", "images", "TIF", "xrays1.tif"),
+	)
+}
+
 func copySampleDicom(t *testing.T, name string) string {
 	t.Helper()
 
@@ -919,6 +1015,22 @@ func openStudyViaRouter(t *testing.T, handler http.Handler, inputPath string) co
 	}
 
 	return payload
+}
+
+func writeStandaloneBMPFixture(t *testing.T, path string) {
+	t.Helper()
+
+	img := image.NewGray(image.Rect(0, 0, 2, 1))
+	img.SetGray(0, 0, color.Gray{Y: 0})
+	img.SetGray(1, 0, color.Gray{Y: 255})
+
+	var payload bytes.Buffer
+	if err := bmp.Encode(&payload, img); err != nil {
+		t.Fatalf("bmp.Encode returned error: %v", err)
+	}
+	if err := os.WriteFile(path, payload.Bytes(), 0o644); err != nil {
+		t.Fatalf("WriteFile returned error: %v", err)
+	}
 }
 
 func buildScaledDicomFixture() []byte {

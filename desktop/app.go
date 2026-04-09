@@ -63,11 +63,15 @@ func (app *DesktopApp) PickDicomFile() (string, error) {
 	}
 
 	return wailsruntime.OpenFileDialog(app.ctx, wailsruntime.OpenDialogOptions{
-		Title: "Open DICOM Study",
+		Title: "Open Study or BMP/TIFF",
 		Filters: []wailsruntime.FileFilter{
 			{
-				DisplayName: "DICOM Files (*.dcm;*.dicom)",
-				Pattern:     "*.dcm;*.dicom",
+				DisplayName: "Supported Files (*.dcm;*.dicom;*.bmp;*.tif;*.tiff)",
+				Pattern:     "*.dcm;*.dicom;*.bmp;*.tif;*.tiff",
+			},
+			{
+				DisplayName: "All Files (*)",
+				Pattern:     "*",
 			},
 		},
 	})

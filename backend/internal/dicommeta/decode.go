@@ -124,12 +124,20 @@ func (Decoder) DecodeStudy(ctx context.Context, path string) (SourceStudy, error
 func DecodeFile(path string) (SourceStudy, error) {
 	file, err := os.Open(path)
 	if err != nil {
-		return SourceStudy{}, fmt.Errorf("open DICOM file: %w", err)
+		return SourceStudy{}, fmt.Errorf("open source file: %w", err)
 	}
 	defer file.Close()
 
 	study, err := Decode(file)
 	if err != nil {
+		if supportsStandaloneImagePath(path) {
+			if _, seekErr := file.Seek(0, io.SeekStart); seekErr != nil {
+				return SourceStudy{}, fmt.Errorf("seek source input: %w", seekErr)
+			}
+			if imageStudy, imageErr := tryDecodeImageStudy(file); imageErr == nil {
+				return imageStudy, nil
+			}
+		}
 		return SourceStudy{}, fmt.Errorf("decode source study from %s: %w", path, err)
 	}
 
@@ -138,7 +146,7 @@ func DecodeFile(path string) (SourceStudy, error) {
 
 func Decode(source readerAtSeeker) (SourceStudy, error) {
 	if _, err := source.Seek(0, io.SeekStart); err != nil {
-		return SourceStudy{}, fmt.Errorf("seek DICOM input: %w", err)
+		return SourceStudy{}, fmt.Errorf("seek source input: %w", err)
 	}
 
 	transferSyntaxUID, err := loadTransferSyntaxUID(source)

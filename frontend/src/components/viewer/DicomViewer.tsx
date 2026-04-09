@@ -18,7 +18,7 @@ export function DicomViewer({
   imageSize = null,
   overlay = null,
   emptyTitle = "No image loaded",
-  emptyDescription = "Open a DICOM file to view it here.",
+  emptyDescription = "Open a DICOM study or BMP/TIFF image to view it here.",
 }: DicomViewerProps) {
   const [loadFailed, setLoadFailed] = useState(false);
 

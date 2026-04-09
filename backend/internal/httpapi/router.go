@@ -210,7 +210,7 @@ func handleOpenStudy(writer http.ResponseWriter, request *http.Request, deps Dep
 	if err != nil {
 		writeBackendError(
 			writer,
-			contracts.InvalidInput(fmt.Sprintf("failed to read DICOM metadata: %v", err)),
+			contracts.InvalidInput(fmt.Sprintf("failed to read study metadata: %v", err)),
 		)
 		return
 	}
