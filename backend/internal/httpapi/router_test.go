@@ -21,6 +21,7 @@ import (
 
 	"golang.org/x/image/bmp"
 
+	"xrayview/backend/internal/annotations"
 	"xrayview/backend/internal/cache"
 	"xrayview/backend/internal/config"
 	"xrayview/backend/internal/contracts"
@@ -30,31 +31,228 @@ import (
 	"xrayview/backend/internal/studies"
 )
 
-func testDependencies(t *testing.T) Dependencies {
+type testDeps struct {
+	RouterDeps
+	Cache       *cache.Store
+	Persistence *persistence.Catalog
+	Jobs        *jobs.Service
+	Studies     *studies.Registry
+}
+
+type testBackendService struct {
+	logger      *slog.Logger
+	persistence *persistence.Catalog
+	jobs        *jobs.Service
+	studies     *studies.Registry
+}
+
+type mockBackendService struct {
+	openStudy             func(contracts.OpenStudyCommand) (contracts.OpenStudyCommandResult, error)
+	startRenderJob        func(contracts.RenderStudyCommand) (contracts.StartedJob, error)
+	startProcessJob       func(contracts.ProcessStudyCommand) (contracts.StartedJob, error)
+	startAnalyzeJob       func(contracts.AnalyzeStudyCommand) (contracts.StartedJob, error)
+	getJob                func(contracts.JobCommand) (contracts.JobSnapshot, error)
+	cancelJob             func(contracts.JobCommand) (contracts.JobSnapshot, error)
+	getProcessingManifest func() contracts.ProcessingManifest
+	measureLineAnnotation func(contracts.MeasureLineAnnotationCommand) (contracts.MeasureLineAnnotationCommandResult, error)
+}
+
+func (service mockBackendService) OpenStudy(
+	command contracts.OpenStudyCommand,
+) (contracts.OpenStudyCommandResult, error) {
+	return service.openStudy(command)
+}
+
+func (service mockBackendService) StartRenderJob(
+	command contracts.RenderStudyCommand,
+) (contracts.StartedJob, error) {
+	return service.startRenderJob(command)
+}
+
+func (service mockBackendService) StartProcessJob(
+	command contracts.ProcessStudyCommand,
+) (contracts.StartedJob, error) {
+	return service.startProcessJob(command)
+}
+
+func (service mockBackendService) StartAnalyzeJob(
+	command contracts.AnalyzeStudyCommand,
+) (contracts.StartedJob, error) {
+	return service.startAnalyzeJob(command)
+}
+
+func (service mockBackendService) GetJob(command contracts.JobCommand) (contracts.JobSnapshot, error) {
+	return service.getJob(command)
+}
+
+func (service mockBackendService) CancelJob(
+	command contracts.JobCommand,
+) (contracts.JobSnapshot, error) {
+	return service.cancelJob(command)
+}
+
+func (service mockBackendService) GetProcessingManifest() contracts.ProcessingManifest {
+	return service.getProcessingManifest()
+}
+
+func (service mockBackendService) MeasureLineAnnotation(
+	command contracts.MeasureLineAnnotationCommand,
+) (contracts.MeasureLineAnnotationCommandResult, error) {
+	return service.measureLineAnnotation(command)
+}
+
+func (service testBackendService) OpenStudy(
+	command contracts.OpenStudyCommand,
+) (contracts.OpenStudyCommandResult, error) {
+	if command.InputPath == "" {
+		return contracts.OpenStudyCommandResult{}, contracts.InvalidInput("inputPath is required")
+	}
+
+	info, err := os.Stat(command.InputPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return contracts.OpenStudyCommandResult{}, contracts.NotFound(
+				fmt.Sprintf("input file does not exist: %s", command.InputPath),
+			)
+		}
+
+		return contracts.OpenStudyCommandResult{}, contracts.Internal(
+			fmt.Sprintf("failed to inspect input file %s: %v", command.InputPath, err),
+		)
+	}
+	if info.IsDir() {
+		return contracts.OpenStudyCommandResult{}, contracts.InvalidInput(
+			fmt.Sprintf("input path must be a file: %s", command.InputPath),
+		)
+	}
+
+	metadata, err := dicommeta.ReadFile(command.InputPath)
+	if err != nil {
+		return contracts.OpenStudyCommandResult{}, contracts.InvalidInput(
+			fmt.Sprintf("failed to read study metadata: %v", err),
+		)
+	}
+
+	study, err := service.studies.Register(command.InputPath, metadata.MeasurementScale())
+	if err != nil {
+		return contracts.OpenStudyCommandResult{}, contracts.Internal(
+			fmt.Sprintf("failed to register study: %v", err),
+		)
+	}
+
+	if err := service.persistence.RecordOpenedStudy(study); err != nil && service.logger != nil {
+		service.logger.Warn(
+			"failed to record opened study",
+			slog.String("study_id", study.StudyID),
+			slog.String("input_path", study.InputPath),
+			slog.Any("error", err),
+		)
+	}
+
+	return contracts.OpenStudyCommandResult{Study: study}, nil
+}
+
+func (service testBackendService) StartRenderJob(
+	command contracts.RenderStudyCommand,
+) (contracts.StartedJob, error) {
+	return service.jobs.StartRenderJob(command)
+}
+
+func (service testBackendService) StartProcessJob(
+	command contracts.ProcessStudyCommand,
+) (contracts.StartedJob, error) {
+	return service.jobs.StartProcessJob(command)
+}
+
+func (service testBackendService) StartAnalyzeJob(
+	command contracts.AnalyzeStudyCommand,
+) (contracts.StartedJob, error) {
+	return service.jobs.StartAnalyzeJob(command)
+}
+
+func (service testBackendService) GetJob(command contracts.JobCommand) (contracts.JobSnapshot, error) {
+	return service.jobs.GetJob(command)
+}
+
+func (service testBackendService) CancelJob(
+	command contracts.JobCommand,
+) (contracts.JobSnapshot, error) {
+	return service.jobs.CancelJob(command)
+}
+
+func (service testBackendService) GetProcessingManifest() contracts.ProcessingManifest {
+	return contracts.DefaultProcessingManifest()
+}
+
+func (service testBackendService) MeasureLineAnnotation(
+	command contracts.MeasureLineAnnotationCommand,
+) (contracts.MeasureLineAnnotationCommandResult, error) {
+	studyID := strings.TrimSpace(command.StudyID)
+	if studyID == "" {
+		return contracts.MeasureLineAnnotationCommandResult{}, contracts.InvalidInput("studyId is required")
+	}
+
+	study, ok := service.studies.Get(studyID)
+	if !ok {
+		return contracts.MeasureLineAnnotationCommandResult{}, contracts.NotFound(
+			fmt.Sprintf("study not found: %s", studyID),
+		)
+	}
+
+	return contracts.MeasureLineAnnotationCommandResult{
+		StudyID: study.StudyID,
+		Annotation: annotations.MeasureLineAnnotation(
+			command.Annotation,
+			study.MeasurementScale,
+		),
+	}, nil
+}
+
+func (service testBackendService) SupportedJobKinds() []string {
+	return service.jobs.SupportedKinds()
+}
+
+func (service testBackendService) StudyCount() int {
+	return service.studies.Count()
+}
+
+func testDependencies(t *testing.T) testDeps {
 	t.Helper()
 
 	rootDir := filepath.Join(t.TempDir(), "xrayview")
 	cacheStore := cache.NewWithRoot(rootDir)
-
-	return Dependencies{
-		Config:      config.Default(),
-		Logger:      slog.New(slog.NewTextHandler(io.Discard, nil)),
-		Cache:       cacheStore,
-		Persistence: persistence.New(cacheStore.PersistenceDir()),
-		Studies:     studies.New(),
-		StartedAt:   time.Date(2026, time.January, 2, 3, 4, 5, 0, time.UTC),
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	studyRegistry := studies.New()
+	jobService := jobs.New(cacheStore, studyRegistry, logger)
+	cfg := config.Default()
+	persistenceCatalog := persistence.New(cacheStore.PersistenceDir())
+	service := testBackendService{
+		logger:      logger,
+		persistence: persistenceCatalog,
+		jobs:        jobService,
+		studies:     studyRegistry,
 	}
-}
 
-func withJobService(deps Dependencies) Dependencies {
-	deps.Jobs = jobs.New(deps.Cache, deps.Studies, deps.Logger)
-	return deps
+	return testDeps{
+		RouterDeps: RouterDeps{
+			Service:     service,
+			Config:      cfg,
+			Logger:      logger,
+			Cache:       cacheStore,
+			Persistence: persistenceCatalog,
+			StartedAt:   time.Date(2026, time.January, 2, 3, 4, 5, 0, time.UTC),
+		},
+		Cache:       cacheStore,
+		Persistence: persistenceCatalog,
+		Jobs:        jobService,
+		Studies:     studyRegistry,
+	}
 }
 
 func testRouter(t *testing.T) http.Handler {
 	t.Helper()
 
-	return NewRouter(withJobService(testDependencies(t)))
+	return NewRouter(testDependencies(t).RouterDeps)
 }
 
 func TestHealthzIncludesContractMetadata(t *testing.T) {
@@ -108,6 +306,66 @@ func TestCommandsEndpointListsSupportedCommands(t *testing.T) {
 
 	if len(payload.Commands) != len(contracts.SupportedCommands) {
 		t.Fatalf("command count = %d, want %d", len(payload.Commands), len(contracts.SupportedCommands))
+	}
+}
+
+func TestRouterDispatchesOpenStudyToBackendService(t *testing.T) {
+	inputPath := sampleDicomPath(t)
+	called := false
+	handler := NewRouter(RouterDeps{
+		Config: config.Default(),
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Service: mockBackendService{
+			openStudy: func(command contracts.OpenStudyCommand) (contracts.OpenStudyCommandResult, error) {
+				called = true
+				if got, want := command.InputPath, inputPath; got != want {
+					t.Fatalf("InputPath = %q, want %q", got, want)
+				}
+
+				return contracts.OpenStudyCommandResult{
+					Study: contracts.StudyRecord{
+						StudyID:   "study-1",
+						InputPath: command.InputPath,
+						InputName: filepath.Base(command.InputPath),
+					},
+				}, nil
+			},
+			startRenderJob: func(contracts.RenderStudyCommand) (contracts.StartedJob, error) {
+				return contracts.StartedJob{}, fmt.Errorf("unexpected StartRenderJob call")
+			},
+			startProcessJob: func(contracts.ProcessStudyCommand) (contracts.StartedJob, error) {
+				return contracts.StartedJob{}, fmt.Errorf("unexpected StartProcessJob call")
+			},
+			startAnalyzeJob: func(contracts.AnalyzeStudyCommand) (contracts.StartedJob, error) {
+				return contracts.StartedJob{}, fmt.Errorf("unexpected StartAnalyzeJob call")
+			},
+			getJob: func(contracts.JobCommand) (contracts.JobSnapshot, error) {
+				return contracts.JobSnapshot{}, fmt.Errorf("unexpected GetJob call")
+			},
+			cancelJob: func(contracts.JobCommand) (contracts.JobSnapshot, error) {
+				return contracts.JobSnapshot{}, fmt.Errorf("unexpected CancelJob call")
+			},
+			getProcessingManifest: contracts.DefaultProcessingManifest,
+			measureLineAnnotation: func(contracts.MeasureLineAnnotationCommand) (contracts.MeasureLineAnnotationCommandResult, error) {
+				return contracts.MeasureLineAnnotationCommandResult{}, fmt.Errorf("unexpected MeasureLineAnnotation call")
+			},
+		},
+	})
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/commands/open_study",
+		strings.NewReader(`{"inputPath":"`+inputPath+`"}`),
+	)
+	request.Header.Set("content-type", "application/json")
+	handler.ServeHTTP(recorder, request)
+
+	if !called {
+		t.Fatal("OpenStudy was not dispatched to backend service")
+	}
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
 	}
 }
 
@@ -172,7 +430,7 @@ func TestGetProcessingManifestReturnsFrozenPayload(t *testing.T) {
 
 func TestOpenStudyRegistersStudyAndReturnsContractPayload(t *testing.T) {
 	deps := testDependencies(t)
-	handler := NewRouter(deps)
+	handler := NewRouter(deps.RouterDeps)
 	inputPath := sampleDicomPath(t)
 
 	recorder := httptest.NewRecorder()
@@ -224,7 +482,7 @@ func TestOpenStudyRegistersStudyAndReturnsContractPayload(t *testing.T) {
 
 func TestOpenStudyIncludesMeasurementScaleWhenSpacingMetadataExists(t *testing.T) {
 	deps := testDependencies(t)
-	handler := NewRouter(deps)
+	handler := NewRouter(deps.RouterDeps)
 	inputPath := filepath.Join(t.TempDir(), "scaled-study.dcm")
 	if err := os.WriteFile(inputPath, buildScaledDicomFixture(), 0o644); err != nil {
 		t.Fatalf("WriteFile returned error: %v", err)
@@ -264,7 +522,7 @@ func TestOpenStudyIncludesMeasurementScaleWhenSpacingMetadataExists(t *testing.T
 
 func TestOpenStudyAcceptsStandaloneBMPInput(t *testing.T) {
 	deps := testDependencies(t)
-	handler := NewRouter(deps)
+	handler := NewRouter(deps.RouterDeps)
 
 	inputPath := filepath.Join(t.TempDir(), "standalone.bmp")
 	writeStandaloneBMPFixture(t, inputPath)
@@ -287,7 +545,7 @@ func TestOpenStudyAcceptsStandaloneBMPInput(t *testing.T) {
 
 func TestOpenStudyAcceptsActualBMPFixture(t *testing.T) {
 	deps := testDependencies(t)
-	handler := NewRouter(deps)
+	handler := NewRouter(deps.RouterDeps)
 
 	inputPath := actualBMPPath(t)
 	payload := openStudyViaRouter(t, handler, inputPath)
@@ -302,7 +560,7 @@ func TestOpenStudyAcceptsActualBMPFixture(t *testing.T) {
 
 func TestOpenStudyAcceptsActualTIFFFixture(t *testing.T) {
 	deps := testDependencies(t)
-	handler := NewRouter(deps)
+	handler := NewRouter(deps.RouterDeps)
 
 	inputPath := actualTIFFPath(t)
 	payload := openStudyViaRouter(t, handler, inputPath)
@@ -317,7 +575,7 @@ func TestOpenStudyAcceptsActualTIFFFixture(t *testing.T) {
 
 func TestOpenStudyReordersExistingRecentStudyWithoutDuplicate(t *testing.T) {
 	deps := testDependencies(t)
-	handler := NewRouter(deps)
+	handler := NewRouter(deps.RouterDeps)
 	firstPath := copySampleDicom(t, "first-open.dcm")
 	secondPath := copySampleDicom(t, "second-open.dcm")
 
@@ -343,7 +601,7 @@ func TestOpenStudyReordersExistingRecentStudyWithoutDuplicate(t *testing.T) {
 
 func TestOpenStudyTruncatesRecentStudyCatalogToTenEntries(t *testing.T) {
 	deps := testDependencies(t)
-	handler := NewRouter(deps)
+	handler := NewRouter(deps.RouterDeps)
 
 	openedPaths := make([]string, 0, 12)
 	for index := 0; index < 12; index++ {
@@ -370,7 +628,7 @@ func TestOpenStudyTruncatesRecentStudyCatalogToTenEntries(t *testing.T) {
 
 func TestOpenStudyRenamesCorruptedCatalogAndContinues(t *testing.T) {
 	deps := testDependencies(t)
-	handler := NewRouter(deps)
+	handler := NewRouter(deps.RouterDeps)
 	catalogPath := deps.Persistence.Path()
 	if err := os.MkdirAll(filepath.Dir(catalogPath), 0o755); err != nil {
 		t.Fatalf("MkdirAll returned error: %v", err)
@@ -473,7 +731,7 @@ func TestOpenStudyReturnsNotFoundForMissingInput(t *testing.T) {
 
 func TestMeasureLineAnnotationReturnsMeasuredPixels(t *testing.T) {
 	deps := testDependencies(t)
-	handler := NewRouter(deps)
+	handler := NewRouter(deps.RouterDeps)
 	study, err := deps.Studies.Register("/tmp/manual-measurement.dcm", nil)
 	if err != nil {
 		t.Fatalf("Register returned error: %v", err)
@@ -521,7 +779,7 @@ func TestMeasureLineAnnotationReturnsMeasuredPixels(t *testing.T) {
 
 func TestMeasureLineAnnotationReturnsCalibratedLength(t *testing.T) {
 	deps := testDependencies(t)
-	handler := NewRouter(deps)
+	handler := NewRouter(deps.RouterDeps)
 	study, err := deps.Studies.Register(
 		"/tmp/calibrated-measurement.dcm",
 		&contracts.MeasurementScale{
@@ -609,8 +867,8 @@ func TestRenderJobEndpointsCompletePreviewForActualTIFFFixture(t *testing.T) {
 func assertRenderJobCompletesPreview(t *testing.T, inputPath string) {
 	t.Helper()
 
-	deps := withJobService(testDependencies(t))
-	handler := NewRouter(deps)
+	deps := testDependencies(t)
+	handler := NewRouter(deps.RouterDeps)
 
 	openRecorder := httptest.NewRecorder()
 	openRequest := httptest.NewRequest(
@@ -703,8 +961,8 @@ func assertRenderJobCompletesPreview(t *testing.T, inputPath string) {
 }
 
 func TestProcessJobEndpointCompletesPreview(t *testing.T) {
-	deps := withJobService(testDependencies(t))
-	handler := NewRouter(deps)
+	deps := testDependencies(t)
+	handler := NewRouter(deps.RouterDeps)
 	inputPath := sampleDicomPath(t)
 
 	openRecorder := httptest.NewRecorder()
@@ -823,8 +1081,8 @@ func TestProcessJobEndpointCompletesPreview(t *testing.T) {
 }
 
 func TestAnalyzeJobEndpointCompletesPreview(t *testing.T) {
-	deps := withJobService(testDependencies(t))
-	handler := NewRouter(deps)
+	deps := testDependencies(t)
+	handler := NewRouter(deps.RouterDeps)
 	inputPath := sampleDicomPath(t)
 
 	openRecorder := httptest.NewRecorder()

@@ -15,6 +15,10 @@ import (
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
+const (
+	eventJobUpdate = "xrayview:job-update"
+)
+
 type backendCommandResponse struct {
 	Status int    `json:"status"`
 	Body   string `json:"body"`

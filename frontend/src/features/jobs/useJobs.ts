@@ -1,5 +1,6 @@
 import { useEffect } from "react";
-import { getRuntimeAdapter } from "../../lib/runtime";
+import type { JobSnapshot as ContractJobSnapshot } from "../../lib/generated/contracts";
+import { getRuntimeAdapter, normalizeJobSnapshot } from "../../lib/runtime";
 import {
   selectPendingJobCount,
   useWorkbenchStore,
@@ -13,7 +14,19 @@ import {
 const FAST_POLL_MS = 200;
 const SLOW_POLL_MS = 2000;
 const IDLE_POLL_MS = 0;
+const JOB_UPDATE_EVENT = "xrayview:job-update";
 const runtime = getRuntimeAdapter();
+
+declare global {
+  interface Window {
+    runtime?: {
+      EventsOn?: (
+        eventName: string,
+        callback: (...args: unknown[]) => void,
+      ) => (() => void) | void;
+    };
+  }
+}
 
 export function useJobs() {
   const pendingJobCount = useWorkbenchStore(selectPendingJobCount);
@@ -21,6 +34,38 @@ export function useJobs() {
   useEffect(() => {
     let cancelled = false;
     let timer: number | undefined;
+    let unsubscribeEvent: (() => void) | undefined;
+
+    function applyJobUpdate(job: Awaited<ReturnType<typeof runtime.getJob>>) {
+      workbenchActions.receiveJobUpdate(job);
+      if (job.state === "completed") {
+        logCompletedJobVisibleTiming(job.jobId);
+      } else if (job.state === "failed" || job.state === "cancelled") {
+        clearJobSubmitTiming(job.jobId);
+      }
+    }
+
+    const eventsOn = runtime.mode === "desktop" ? window.runtime?.EventsOn : undefined;
+    if (eventsOn) {
+      const unsubscribe = eventsOn(
+        JOB_UPDATE_EVENT,
+        (...args: unknown[]) => {
+          if (cancelled) {
+            return;
+          }
+
+          const [snapshot] = args as [ContractJobSnapshot | undefined];
+          if (!snapshot) {
+            return;
+          }
+
+          applyJobUpdate(normalizeJobSnapshot(snapshot, runtime.mode));
+        },
+      );
+      if (typeof unsubscribe === "function") {
+        unsubscribeEvent = unsubscribe;
+      }
+    }
 
     async function pollPendingJobs() {
       const state = workbenchActions.getState();
@@ -42,12 +87,7 @@ export function useJobs() {
           try {
             const job = await runtime.getJob(jobId);
             if (!cancelled) {
-              workbenchActions.receiveJobUpdate(job);
-              if (job.state === "completed") {
-                logCompletedJobVisibleTiming(jobId);
-              } else if (job.state === "failed" || job.state === "cancelled") {
-                clearJobSubmitTiming(jobId);
-              }
+              applyJobUpdate(job);
             }
           } catch {
             // Keep polling other jobs; individual fetch failures should not tear
@@ -62,6 +102,10 @@ export function useJobs() {
           job.state === "running" ||
           job.state === "cancelling",
       );
+
+      // The Wails runtime API exists in sidecar mode too, but Phase 2 only wires
+      // backend event emission for the later in-process path. Keep the fast
+      // polling fallback until push delivery is actually available.
       scheduleNext(stillPending ? FAST_POLL_MS : SLOW_POLL_MS);
     }
 
@@ -92,6 +136,7 @@ export function useJobs() {
       if (timer !== undefined) {
         window.clearTimeout(timer);
       }
+      unsubscribeEvent?.();
     };
   }, [pendingJobCount]);
 }

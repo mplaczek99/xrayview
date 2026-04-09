@@ -118,7 +118,7 @@ function normalizeJobResultPayload(
   }
 }
 
-function normalizeJobSnapshot(
+export function normalizeJobSnapshot(
   snapshot: ContractJobSnapshot,
   runtime: RuntimeMode,
 ): JobSnapshot {

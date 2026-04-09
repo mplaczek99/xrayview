@@ -32,6 +32,7 @@ type studyDecoder interface {
 type decodeHelperFactory func() (studyDecoder, error)
 type idGenerator func() (string, error)
 type renderSourcePreviewFunc func(imaging.SourceImage, render.RenderPlan) imaging.PreviewImage
+type JobCompletionCallback func(snapshot contracts.JobSnapshot)
 
 type Service struct {
 	supportedKinds         []contracts.JobKind
@@ -45,6 +46,8 @@ type Service struct {
 	decodeCache            *studies.DecodeCache
 	concurrencyLimit       chan struct{}
 	renderSourcePreview    renderSourcePreviewFunc
+	callbackMu             sync.RWMutex
+	onJobCompletion        JobCompletionCallback
 }
 
 const decodeBenchmarkEnvKey = "XRAYVIEW_BENCH_LOG_DECODES"
@@ -99,6 +102,13 @@ func (service *Service) SupportedKinds() []string {
 	}
 
 	return kinds
+}
+
+func (service *Service) OnJobCompletion(callback JobCompletionCallback) {
+	service.callbackMu.Lock()
+	defer service.callbackMu.Unlock()
+
+	service.onJobCompletion = callback
 }
 
 func (service *Service) StartRenderJob(
@@ -835,7 +845,10 @@ func (service *Service) finishCancelledIfRequested(
 	if previewPath != "" {
 		_ = os.Remove(previewPath)
 	}
-	_, _ = service.registry.MarkCancelled(jobID, stage, "Cancelled by user")
+	snapshot, err := service.registry.MarkCancelled(jobID, stage, "Cancelled by user")
+	if err == nil {
+		service.notifyJobCompletion(snapshot)
+	}
 	return true
 }
 
@@ -853,9 +866,11 @@ func (service *Service) completeRenderJob(
 	}
 	if snapshot.State == contracts.JobStateCancelled {
 		_ = os.Remove(result.PreviewPath)
+		service.notifyJobCompletion(snapshot)
 		return
 	}
 	service.memoryCache.StoreRender(fingerprint, result)
+	service.notifyJobCompletion(snapshot)
 }
 
 func (service *Service) completeProcessJob(
@@ -872,9 +887,11 @@ func (service *Service) completeProcessJob(
 	}
 	if snapshot.State == contracts.JobStateCancelled {
 		cleanupPaths(result.PreviewPath, result.DicomPath)
+		service.notifyJobCompletion(snapshot)
 		return
 	}
 	service.memoryCache.StoreProcess(fingerprint, result)
+	service.notifyJobCompletion(snapshot)
 }
 
 func (service *Service) completeAnalyzeJob(
@@ -891,9 +908,11 @@ func (service *Service) completeAnalyzeJob(
 	}
 	if snapshot.State == contracts.JobStateCancelled {
 		_ = os.Remove(result.PreviewPath)
+		service.notifyJobCompletion(snapshot)
 		return
 	}
 	service.memoryCache.StoreAnalyze(fingerprint, result)
+	service.notifyJobCompletion(snapshot)
 }
 
 func (service *Service) failJob(jobID string, err error) {
@@ -902,7 +921,10 @@ func (service *Service) failJob(jobID string, err error) {
 		backendErr = contracts.Internal(err.Error())
 	}
 
-	_, _ = service.registry.Fail(jobID, backendErr)
+	snapshot, err := service.registry.Fail(jobID, backendErr)
+	if err == nil {
+		service.notifyJobCompletion(snapshot)
+	}
 }
 
 func (service *Service) loadSourceStudy(
@@ -945,6 +967,16 @@ func (service *Service) loadOrRenderSourcePreview(
 	preview := service.renderSourcePreview(source, render.DefaultRenderPlan())
 	service.memoryCache.StoreSourcePreview(inputPath, preview)
 	return preview
+}
+
+func (service *Service) notifyJobCompletion(snapshot contracts.JobSnapshot) {
+	service.callbackMu.RLock()
+	callback := service.onJobCompletion
+	service.callbackMu.RUnlock()
+
+	if callback != nil {
+		callback(snapshot)
+	}
 }
 
 func queuedJobSnapshot(

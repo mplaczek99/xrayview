@@ -32,6 +32,16 @@ func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 	return newApp(cfg, logger, nil, nil, nil)
 }
 
+func NewWithServices(
+	cfg config.Config,
+	logger *slog.Logger,
+	cacheStore *cache.Store,
+	studyRegistry *studies.Registry,
+	jobService *jobs.Service,
+) (*App, error) {
+	return newApp(cfg, logger, cacheStore, studyRegistry, jobService)
+}
+
 func newApp(
 	cfg config.Config,
 	logger *slog.Logger,
@@ -57,17 +67,7 @@ func newApp(
 		jobService = jobs.New(cacheStore, studyRegistry, logger)
 	}
 	startedAt := time.Now().UTC()
-	router := httpapi.NewRouter(httpapi.Dependencies{
-		Config:      cfg,
-		Logger:      logger,
-		Cache:       cacheStore,
-		Persistence: persistenceCatalog,
-		Jobs:        jobService,
-		Studies:     studyRegistry,
-		StartedAt:   startedAt,
-	})
-
-	return &App{
+	application := &App{
 		config:      cfg,
 		logger:      logger,
 		cache:       cacheStore,
@@ -75,12 +75,22 @@ func newApp(
 		jobs:        jobService,
 		studies:     studyRegistry,
 		startedAt:   startedAt,
-		server: &http.Server{
-			Addr:              cfg.ListenAddress(),
-			Handler:           router,
-			ReadHeaderTimeout: 5 * time.Second,
-		},
-	}, nil
+	}
+	router := httpapi.NewRouter(httpapi.RouterDeps{
+		Service:     application,
+		Config:      cfg,
+		Logger:      logger,
+		Cache:       cacheStore,
+		Persistence: persistenceCatalog,
+		StartedAt:   startedAt,
+	})
+	application.server = &http.Server{
+		Addr:              cfg.ListenAddress(),
+		Handler:           router,
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+
+	return application, nil
 }
 
 func NewFromEnvironment() (*App, error) {

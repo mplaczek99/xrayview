@@ -22,11 +22,22 @@ type staticDecoder struct {
 	study dicommeta.SourceStudy
 }
 
+type failingDecoder struct {
+	err error
+}
+
 func (decoder staticDecoder) DecodeStudy(
 	_ context.Context,
 	_ string,
 ) (dicommeta.SourceStudy, error) {
 	return decoder.study, nil
+}
+
+func (decoder failingDecoder) DecodeStudy(
+	_ context.Context,
+	_ string,
+) (dicommeta.SourceStudy, error) {
+	return dicommeta.SourceStudy{}, decoder.err
 }
 
 type blockingDecoder struct {
@@ -319,6 +330,113 @@ func TestStartRenderJobReusesCachedResultAcrossStudyReopen(t *testing.T) {
 	}
 	if secondResult.StudyID == *secondSnapshot.StudyID {
 		t.Fatal("second payload StudyID unexpectedly matched top-level cached study id")
+	}
+}
+
+func TestOnJobCompletionReceivesCompletedSnapshot(t *testing.T) {
+	studyRegistry, study := registerTestStudy(t)
+	cacheStore := cache.New(filepath.Join(t.TempDir(), "cache"))
+	sourceStudy := dicommeta.SourceStudy{
+		Image: imaging.SourceImage{
+			Width:  2,
+			Height: 2,
+			Format: imaging.FormatGrayFloat32,
+			Pixels: []float32{0, 32, 128, 255},
+		},
+	}
+	service := newService(
+		cacheStore,
+		studyRegistry,
+		nil,
+		dicomexport.GoWriter{},
+		func() (studyDecoder, error) { return staticDecoder{study: sourceStudy}, nil },
+		sequenceJobIDs("job-1"),
+	)
+	completions := make(chan contracts.JobSnapshot, 1)
+	service.OnJobCompletion(func(snapshot contracts.JobSnapshot) {
+		completions <- snapshot
+	})
+
+	started, err := service.StartRenderJob(contracts.RenderStudyCommand{StudyID: study.StudyID})
+	if err != nil {
+		t.Fatalf("StartRenderJob returned error: %v", err)
+	}
+
+	waitForTerminalJob(t, service, started.JobID)
+	snapshot := waitForCompletionCallback(t, completions)
+	if got, want := snapshot.JobID, started.JobID; got != want {
+		t.Fatalf("callback JobID = %q, want %q", got, want)
+	}
+	if got, want := snapshot.State, contracts.JobStateCompleted; got != want {
+		t.Fatalf("callback State = %q, want %q", got, want)
+	}
+}
+
+func TestOnJobCompletionReceivesFailedSnapshot(t *testing.T) {
+	studyRegistry, study := registerTestStudy(t)
+	cacheStore := cache.New(filepath.Join(t.TempDir(), "cache"))
+	service := newService(
+		cacheStore,
+		studyRegistry,
+		nil,
+		dicomexport.GoWriter{},
+		func() (studyDecoder, error) { return failingDecoder{err: fmt.Errorf("boom")}, nil },
+		sequenceJobIDs("job-1"),
+	)
+	completions := make(chan contracts.JobSnapshot, 1)
+	service.OnJobCompletion(func(snapshot contracts.JobSnapshot) {
+		completions <- snapshot
+	})
+
+	started, err := service.StartRenderJob(contracts.RenderStudyCommand{StudyID: study.StudyID})
+	if err != nil {
+		t.Fatalf("StartRenderJob returned error: %v", err)
+	}
+
+	waitForTerminalJob(t, service, started.JobID)
+	snapshot := waitForCompletionCallback(t, completions)
+	if got, want := snapshot.State, contracts.JobStateFailed; got != want {
+		t.Fatalf("callback State = %q, want %q", got, want)
+	}
+	if snapshot.Error == nil {
+		t.Fatal("callback Error = nil, want backend error payload")
+	}
+}
+
+func TestOnJobCompletionReceivesCancelledSnapshot(t *testing.T) {
+	studyRegistry, study := registerTestStudy(t)
+	cacheStore := cache.New(filepath.Join(t.TempDir(), "cache"))
+	decoder := &blockingDecoder{
+		started: make(chan struct{}, 1),
+	}
+	service := newService(
+		cacheStore,
+		studyRegistry,
+		nil,
+		dicomexport.GoWriter{},
+		func() (studyDecoder, error) { return decoder, nil },
+		sequenceJobIDs("job-1"),
+	)
+	completions := make(chan contracts.JobSnapshot, 1)
+	service.OnJobCompletion(func(snapshot contracts.JobSnapshot) {
+		completions <- snapshot
+	})
+
+	started, err := service.StartRenderJob(contracts.RenderStudyCommand{StudyID: study.StudyID})
+	if err != nil {
+		t.Fatalf("StartRenderJob returned error: %v", err)
+	}
+
+	<-decoder.started
+
+	if _, err := service.CancelJob(contracts.JobCommand{JobID: started.JobID}); err != nil {
+		t.Fatalf("CancelJob returned error: %v", err)
+	}
+
+	waitForTerminalJob(t, service, started.JobID)
+	snapshot := waitForCompletionCallback(t, completions)
+	if got, want := snapshot.State, contracts.JobStateCancelled; got != want {
+		t.Fatalf("callback State = %q, want %q", got, want)
 	}
 }
 
@@ -964,6 +1082,21 @@ func waitForTerminalJob(t *testing.T, service *Service, jobID string) contracts.
 
 	t.Fatalf("job %s did not reach a terminal state before timeout", jobID)
 	return contracts.JobSnapshot{}
+}
+
+func waitForCompletionCallback(
+	t *testing.T,
+	completions <-chan contracts.JobSnapshot,
+) contracts.JobSnapshot {
+	t.Helper()
+
+	select {
+	case snapshot := <-completions:
+		return snapshot
+	case <-time.After(5 * time.Second):
+		t.Fatal("job completion callback did not fire before timeout")
+		return contracts.JobSnapshot{}
+	}
 }
 
 func stringsHasPathPrefix(path string, prefix string) bool {

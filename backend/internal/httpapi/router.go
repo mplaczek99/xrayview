@@ -6,27 +6,42 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
-	"xrayview/backend/internal/annotations"
 	"xrayview/backend/internal/cache"
 	"xrayview/backend/internal/config"
 	"xrayview/backend/internal/contracts"
-	"xrayview/backend/internal/dicommeta"
-	"xrayview/backend/internal/jobs"
 	"xrayview/backend/internal/persistence"
-	"xrayview/backend/internal/studies"
 )
 
-type Dependencies struct {
+type BackendService interface {
+	OpenStudy(command contracts.OpenStudyCommand) (contracts.OpenStudyCommandResult, error)
+	StartRenderJob(command contracts.RenderStudyCommand) (contracts.StartedJob, error)
+	StartProcessJob(command contracts.ProcessStudyCommand) (contracts.StartedJob, error)
+	StartAnalyzeJob(command contracts.AnalyzeStudyCommand) (contracts.StartedJob, error)
+	GetJob(command contracts.JobCommand) (contracts.JobSnapshot, error)
+	CancelJob(command contracts.JobCommand) (contracts.JobSnapshot, error)
+	GetProcessingManifest() contracts.ProcessingManifest
+	MeasureLineAnnotation(
+		command contracts.MeasureLineAnnotationCommand,
+	) (contracts.MeasureLineAnnotationCommandResult, error)
+}
+
+type supportedJobKindsProvider interface {
+	SupportedJobKinds() []string
+}
+
+type studyCountProvider interface {
+	StudyCount() int
+}
+
+type RouterDeps struct {
+	Service     BackendService
 	Config      config.Config
 	Logger      *slog.Logger
 	Cache       *cache.Store
 	Persistence *persistence.Catalog
-	Jobs        *jobs.Service
-	Studies     *studies.Registry
 	StartedAt   time.Time
 }
 
@@ -53,7 +68,7 @@ type commandListResponse struct {
 	BackendContractVersion int      `json:"backendContractVersion"`
 }
 
-func NewRouter(deps Dependencies) http.Handler {
+func NewRouter(deps RouterDeps) http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /healthz", func(writer http.ResponseWriter, request *http.Request) {
@@ -96,10 +111,18 @@ func NewRouter(deps Dependencies) http.Handler {
 			)
 			return
 		}
+		if deps.Service == nil {
+			writeJSON(
+				writer,
+				http.StatusInternalServerError,
+				contracts.Internal("backend service is not configured"),
+			)
+			return
+		}
 
 		switch contracts.CommandName(commandName) {
 		case contracts.CommandGetProcessingManifest:
-			writeJSON(writer, http.StatusOK, contracts.DefaultProcessingManifest())
+			writeJSON(writer, http.StatusOK, deps.Service.GetProcessingManifest())
 		case contracts.CommandOpenStudy:
 			handleOpenStudy(writer, request, deps)
 		case contracts.CommandStartRenderJob:
@@ -140,7 +163,17 @@ func NewRouter(deps Dependencies) http.Handler {
 	return wrapLocalTransport(mux, deps.Logger)
 }
 
-func buildRuntimeResponse(deps Dependencies) runtimeResponse {
+func buildRuntimeResponse(deps RouterDeps) runtimeResponse {
+	cacheDir := deps.Config.Paths.CacheDir
+	if deps.Cache != nil {
+		cacheDir = deps.Cache.RootDir()
+	}
+
+	persistenceDir := deps.Config.Paths.PersistenceDir
+	if deps.Persistence != nil {
+		persistenceDir = deps.Persistence.RootDir()
+	}
+
 	return runtimeResponse{
 		Status:                 "ok",
 		Service:                deps.Config.ServiceName,
@@ -151,13 +184,33 @@ func buildRuntimeResponse(deps Dependencies) runtimeResponse {
 		APIBasePath:            APIBasePath,
 		CommandEndpoint:        CommandEndpointTemplate,
 		ListenAddress:          deps.Config.ListenAddress(),
-		CacheDir:               deps.Cache.RootDir(),
-		PersistenceDir:         deps.Persistence.RootDir(),
+		CacheDir:               cacheDir,
+		PersistenceDir:         persistenceDir,
 		SupportedCommands:      contracts.SupportedCommandStrings(),
-		SupportedJobKinds:      deps.Jobs.SupportedKinds(),
-		StudyCount:             deps.Studies.Count(),
+		SupportedJobKinds:      resolveSupportedJobKinds(deps.Service),
+		StudyCount:             resolveStudyCount(deps.Service),
 		StartedAt:              deps.StartedAt.UTC().Format(time.RFC3339),
 	}
+}
+
+func resolveSupportedJobKinds(service BackendService) []string {
+	if provider, ok := service.(supportedJobKindsProvider); ok {
+		return provider.SupportedJobKinds()
+	}
+
+	return []string{
+		string(contracts.JobKindRenderStudy),
+		string(contracts.JobKindProcessStudy),
+		string(contracts.JobKindAnalyzeStudy),
+	}
+}
+
+func resolveStudyCount(service BackendService) int {
+	if provider, ok := service.(studyCountProvider); ok {
+		return provider.StudyCount()
+	}
+
+	return 0
 }
 
 func writeJSON(writer http.ResponseWriter, statusCode int, payload any) {
@@ -169,81 +222,30 @@ func writeJSON(writer http.ResponseWriter, statusCode int, payload any) {
 	}
 }
 
-func handleOpenStudy(writer http.ResponseWriter, request *http.Request, deps Dependencies) {
+func handleOpenStudy(writer http.ResponseWriter, request *http.Request, deps RouterDeps) {
 	var command contracts.OpenStudyCommand
 	if err := decodeJSONRequest(request, &command); err != nil {
 		writeBackendError(writer, err)
 		return
 	}
 
-	if command.InputPath == "" {
-		writeBackendError(writer, contracts.InvalidInput("inputPath is required"))
-		return
-	}
-
-	info, err := os.Stat(command.InputPath)
+	result, err := deps.Service.OpenStudy(command)
 	if err != nil {
-		if os.IsNotExist(err) {
-			writeBackendError(
-				writer,
-				contracts.NotFound(fmt.Sprintf("input file does not exist: %s", command.InputPath)),
-			)
-			return
-		}
-
-		writeBackendError(
-			writer,
-			contracts.Internal(fmt.Sprintf("failed to inspect input file %s: %v", command.InputPath, err)),
-		)
+		writeBackendError(writer, err)
 		return
 	}
 
-	if info.IsDir() {
-		writeBackendError(
-			writer,
-			contracts.InvalidInput(fmt.Sprintf("input path must be a file: %s", command.InputPath)),
-		)
-		return
-	}
-
-	metadata, err := dicommeta.ReadFile(command.InputPath)
-	if err != nil {
-		writeBackendError(
-			writer,
-			contracts.InvalidInput(fmt.Sprintf("failed to read study metadata: %v", err)),
-		)
-		return
-	}
-
-	study, err := deps.Studies.Register(command.InputPath, metadata.MeasurementScale())
-	if err != nil {
-		writeBackendError(
-			writer,
-			contracts.Internal(fmt.Sprintf("failed to register study: %v", err)),
-		)
-		return
-	}
-
-	if err := deps.Persistence.RecordOpenedStudy(study); err != nil && deps.Logger != nil {
-		deps.Logger.Warn(
-			"failed to record opened study",
-			slog.String("study_id", study.StudyID),
-			slog.String("input_path", study.InputPath),
-			slog.Any("error", err),
-		)
-	}
-
-	writeJSON(writer, http.StatusOK, contracts.OpenStudyCommandResult{Study: study})
+	writeJSON(writer, http.StatusOK, result)
 }
 
-func handleStartRenderJob(writer http.ResponseWriter, request *http.Request, deps Dependencies) {
+func handleStartRenderJob(writer http.ResponseWriter, request *http.Request, deps RouterDeps) {
 	var command contracts.RenderStudyCommand
 	if err := decodeJSONRequest(request, &command); err != nil {
 		writeBackendError(writer, err)
 		return
 	}
 
-	started, err := deps.Jobs.StartRenderJob(command)
+	started, err := deps.Service.StartRenderJob(command)
 	if err != nil {
 		writeBackendError(writer, err)
 		return
@@ -252,14 +254,14 @@ func handleStartRenderJob(writer http.ResponseWriter, request *http.Request, dep
 	writeJSON(writer, http.StatusOK, started)
 }
 
-func handleStartProcessJob(writer http.ResponseWriter, request *http.Request, deps Dependencies) {
+func handleStartProcessJob(writer http.ResponseWriter, request *http.Request, deps RouterDeps) {
 	var command contracts.ProcessStudyCommand
 	if err := decodeJSONRequest(request, &command); err != nil {
 		writeBackendError(writer, err)
 		return
 	}
 
-	started, err := deps.Jobs.StartProcessJob(command)
+	started, err := deps.Service.StartProcessJob(command)
 	if err != nil {
 		writeBackendError(writer, err)
 		return
@@ -268,14 +270,14 @@ func handleStartProcessJob(writer http.ResponseWriter, request *http.Request, de
 	writeJSON(writer, http.StatusOK, started)
 }
 
-func handleStartAnalyzeJob(writer http.ResponseWriter, request *http.Request, deps Dependencies) {
+func handleStartAnalyzeJob(writer http.ResponseWriter, request *http.Request, deps RouterDeps) {
 	var command contracts.AnalyzeStudyCommand
 	if err := decodeJSONRequest(request, &command); err != nil {
 		writeBackendError(writer, err)
 		return
 	}
 
-	started, err := deps.Jobs.StartAnalyzeJob(command)
+	started, err := deps.Service.StartAnalyzeJob(command)
 	if err != nil {
 		writeBackendError(writer, err)
 		return
@@ -284,14 +286,14 @@ func handleStartAnalyzeJob(writer http.ResponseWriter, request *http.Request, de
 	writeJSON(writer, http.StatusOK, started)
 }
 
-func handleGetJob(writer http.ResponseWriter, request *http.Request, deps Dependencies) {
+func handleGetJob(writer http.ResponseWriter, request *http.Request, deps RouterDeps) {
 	var command contracts.JobCommand
 	if err := decodeJSONRequest(request, &command); err != nil {
 		writeBackendError(writer, err)
 		return
 	}
 
-	snapshot, err := deps.Jobs.GetJob(command)
+	snapshot, err := deps.Service.GetJob(command)
 	if err != nil {
 		writeBackendError(writer, err)
 		return
@@ -300,14 +302,14 @@ func handleGetJob(writer http.ResponseWriter, request *http.Request, deps Depend
 	writeJSON(writer, http.StatusOK, snapshot)
 }
 
-func handleCancelJob(writer http.ResponseWriter, request *http.Request, deps Dependencies) {
+func handleCancelJob(writer http.ResponseWriter, request *http.Request, deps RouterDeps) {
 	var command contracts.JobCommand
 	if err := decodeJSONRequest(request, &command); err != nil {
 		writeBackendError(writer, err)
 		return
 	}
 
-	snapshot, err := deps.Jobs.CancelJob(command)
+	snapshot, err := deps.Service.CancelJob(command)
 	if err != nil {
 		writeBackendError(writer, err)
 		return
@@ -316,32 +318,20 @@ func handleCancelJob(writer http.ResponseWriter, request *http.Request, deps Dep
 	writeJSON(writer, http.StatusOK, snapshot)
 }
 
-func handleMeasureLineAnnotation(writer http.ResponseWriter, request *http.Request, deps Dependencies) {
+func handleMeasureLineAnnotation(writer http.ResponseWriter, request *http.Request, deps RouterDeps) {
 	var command contracts.MeasureLineAnnotationCommand
 	if err := decodeJSONRequest(request, &command); err != nil {
 		writeBackendError(writer, err)
 		return
 	}
 
-	studyID := strings.TrimSpace(command.StudyID)
-	if studyID == "" {
-		writeBackendError(writer, contracts.InvalidInput("studyId is required"))
+	result, err := deps.Service.MeasureLineAnnotation(command)
+	if err != nil {
+		writeBackendError(writer, err)
 		return
 	}
 
-	study, ok := deps.Studies.Get(studyID)
-	if !ok {
-		writeBackendError(writer, contracts.NotFound(fmt.Sprintf("study not found: %s", studyID)))
-		return
-	}
-
-	writeJSON(writer, http.StatusOK, contracts.MeasureLineAnnotationCommandResult{
-		StudyID: study.StudyID,
-		Annotation: annotations.MeasureLineAnnotation(
-			command.Annotation,
-			study.MeasurementScale,
-		),
-	})
+	writeJSON(writer, http.StatusOK, result)
 }
 
 func decodeJSONRequest(request *http.Request, payload any) error {
