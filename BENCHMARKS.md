@@ -104,3 +104,45 @@ Measured against one open/render/process/analyze workflow on `images/sample-dent
 - Peak RSS (sidecar)
 - Peak RSS (desktop shell)
 - Sidecar startup time
+
+## Phase 4 Evaluation
+
+Recorded on 2026-04-09 18:16:00 CDT.
+
+The migration plan marks Phase 4 as conditional: measure first, keep it only if the
+preview-serving optimization produces a meaningful user-visible win. To evaluate that
+without changing the shipped runtime path, the desktop test suite now includes a
+benchmark that compares the current disk-backed `ServeAsset` path to a minimal
+in-memory candidate that writes the same 512 KiB preview payload directly to the
+response writer.
+
+Command:
+
+```bash
+env GOCACHE=/tmp/xrayview-go-build-cache-desktop \
+GOTMPDIR=/tmp/xrayview-go-tmp-desktop \
+go -C desktop test -run '^$' \
+  -bench 'BenchmarkServeAssetFrom(Disk|MemoryCandidate)$' \
+  -benchmem -count=3
+```
+
+Results:
+
+| Benchmark | Median | Raw runs | Bytes/op | Allocs/op |
+| --- | --- | --- | --- | --- |
+| `BenchmarkServeAssetFromDisk` | 288.845 us | 288.379 us, 288.845 us, 291.312 us | 1,050,510 | 27 |
+| `BenchmarkServeAssetFromMemoryCandidate` | 107.747 us | 106.955 us, 107.747 us, 109.487 us | 525,274 | 11 |
+
+Comparison:
+
+- Absolute improvement: about `181 us` (`0.18 ms`) for a 512 KiB preview response.
+- Relative improvement: about `62.7%` faster than reopening the file.
+- Decision: **skip Phase 4 runtime changes**. Per `MIGRATION.md` section 4.2, this is
+  well below the `< 10 ms` threshold for keeping the optimization.
+
+Conclusion:
+
+- The disk roundtrip is not a meaningful bottleneck on this machine for typical preview
+  payload sizes.
+- The repo keeps the simpler Phase 3 disk-backed preview path and records this section
+  as the justification for not shipping the in-memory registry.
