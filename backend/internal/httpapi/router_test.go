@@ -369,6 +369,139 @@ func TestRouterDispatchesOpenStudyToBackendService(t *testing.T) {
 	}
 }
 
+func TestRouterDispatchesCancelJobToBackendService(t *testing.T) {
+	called := false
+	handler := NewRouter(RouterDeps{
+		Config: config.Default(),
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Service: mockBackendService{
+			openStudy: func(contracts.OpenStudyCommand) (contracts.OpenStudyCommandResult, error) {
+				return contracts.OpenStudyCommandResult{}, fmt.Errorf("unexpected OpenStudy call")
+			},
+			startRenderJob: func(contracts.RenderStudyCommand) (contracts.StartedJob, error) {
+				return contracts.StartedJob{}, fmt.Errorf("unexpected StartRenderJob call")
+			},
+			startProcessJob: func(contracts.ProcessStudyCommand) (contracts.StartedJob, error) {
+				return contracts.StartedJob{}, fmt.Errorf("unexpected StartProcessJob call")
+			},
+			startAnalyzeJob: func(contracts.AnalyzeStudyCommand) (contracts.StartedJob, error) {
+				return contracts.StartedJob{}, fmt.Errorf("unexpected StartAnalyzeJob call")
+			},
+			getJob: func(contracts.JobCommand) (contracts.JobSnapshot, error) {
+				return contracts.JobSnapshot{}, fmt.Errorf("unexpected GetJob call")
+			},
+			cancelJob: func(command contracts.JobCommand) (contracts.JobSnapshot, error) {
+				called = true
+				if got, want := command.JobID, "job-1"; got != want {
+					t.Fatalf("JobID = %q, want %q", got, want)
+				}
+
+				return contracts.JobSnapshot{
+					JobID:   command.JobID,
+					JobKind: contracts.JobKindRenderStudy,
+					State:   contracts.JobStateCancelled,
+					Progress: contracts.JobProgress{
+						Percent: 35,
+						Stage:   "loadingStudy",
+						Message: "Cancelled by user",
+					},
+				}, nil
+			},
+			getProcessingManifest: contracts.DefaultProcessingManifest,
+			measureLineAnnotation: func(contracts.MeasureLineAnnotationCommand) (contracts.MeasureLineAnnotationCommandResult, error) {
+				return contracts.MeasureLineAnnotationCommandResult{}, fmt.Errorf("unexpected MeasureLineAnnotation call")
+			},
+		},
+	})
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/commands/cancel_job",
+		strings.NewReader(`{"jobId":"job-1"}`),
+	)
+	request.Header.Set("content-type", "application/json")
+	handler.ServeHTTP(recorder, request)
+
+	if !called {
+		t.Fatal("CancelJob was not dispatched to backend service")
+	}
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
+	}
+
+	var payload contracts.JobSnapshot
+	if err := json.NewDecoder(recorder.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode failed: %v", err)
+	}
+	if got, want := payload.JobID, "job-1"; got != want {
+		t.Fatalf("JobID = %q, want %q", got, want)
+	}
+	if got, want := payload.State, contracts.JobStateCancelled; got != want {
+		t.Fatalf("State = %q, want %q", got, want)
+	}
+}
+
+func TestCommandEndpointRejectsTrailingJSONContent(t *testing.T) {
+	called := false
+	handler := NewRouter(RouterDeps{
+		Config: config.Default(),
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Service: mockBackendService{
+			openStudy: func(contracts.OpenStudyCommand) (contracts.OpenStudyCommandResult, error) {
+				called = true
+				return contracts.OpenStudyCommandResult{}, nil
+			},
+			startRenderJob: func(contracts.RenderStudyCommand) (contracts.StartedJob, error) {
+				return contracts.StartedJob{}, fmt.Errorf("unexpected StartRenderJob call")
+			},
+			startProcessJob: func(contracts.ProcessStudyCommand) (contracts.StartedJob, error) {
+				return contracts.StartedJob{}, fmt.Errorf("unexpected StartProcessJob call")
+			},
+			startAnalyzeJob: func(contracts.AnalyzeStudyCommand) (contracts.StartedJob, error) {
+				return contracts.StartedJob{}, fmt.Errorf("unexpected StartAnalyzeJob call")
+			},
+			getJob: func(contracts.JobCommand) (contracts.JobSnapshot, error) {
+				return contracts.JobSnapshot{}, fmt.Errorf("unexpected GetJob call")
+			},
+			cancelJob: func(contracts.JobCommand) (contracts.JobSnapshot, error) {
+				return contracts.JobSnapshot{}, fmt.Errorf("unexpected CancelJob call")
+			},
+			getProcessingManifest: contracts.DefaultProcessingManifest,
+			measureLineAnnotation: func(contracts.MeasureLineAnnotationCommand) (contracts.MeasureLineAnnotationCommandResult, error) {
+				return contracts.MeasureLineAnnotationCommandResult{}, fmt.Errorf("unexpected MeasureLineAnnotation call")
+			},
+		},
+	})
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/commands/open_study",
+		strings.NewReader(`{"inputPath":"`+sampleDicomPath(t)+`"} true`),
+	)
+	request.Header.Set("content-type", "application/json")
+	handler.ServeHTTP(recorder, request)
+
+	if called {
+		t.Fatal("OpenStudy was called for invalid trailing JSON payload")
+	}
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadRequest)
+	}
+
+	var payload contracts.BackendError
+	if err := json.NewDecoder(recorder.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode failed: %v", err)
+	}
+	if got, want := payload.Code, contracts.BackendErrorCodeInvalidInput; got != want {
+		t.Fatalf("error code = %q, want %q", got, want)
+	}
+	if got, want := payload.Details[0], "unexpected trailing JSON content"; got != want {
+		t.Fatalf("error detail = %q, want %q", got, want)
+	}
+}
+
 func TestGetProcessingManifestReturnsFrozenPayload(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(

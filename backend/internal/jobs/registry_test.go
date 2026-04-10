@@ -2,7 +2,9 @@ package jobs
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"xrayview/backend/internal/contracts"
@@ -312,5 +314,185 @@ func TestRegistryBoundsRetainedTerminalJobs(t *testing.T) {
 
 	if got, want := len(registry.jobs), maxTerminalJobs; got != want {
 		t.Fatalf("len(jobs) = %d, want %d", got, want)
+	}
+}
+
+func TestRegistryJobIDGenerationFailuresReturnInternalError(t *testing.T) {
+	tests := []struct {
+		name string
+		run  func(*Registry) error
+	}{
+		{
+			name: "start job",
+			run: func(registry *Registry) error {
+				_, err := registry.StartJob(
+					contracts.JobKindRenderStudy,
+					"study-1",
+					"fingerprint-1",
+				)
+				return err
+			},
+		},
+		{
+			name: "create cached job",
+			run: func(registry *Registry) error {
+				_, err := registry.CreateCachedJob(
+					contracts.JobKindRenderStudy,
+					"study-1",
+					contracts.JobResult{
+						Kind: contracts.JobKindRenderStudy,
+						Payload: contracts.RenderStudyCommandResult{
+							StudyID:     "study-1",
+							PreviewPath: "/tmp/preview.png",
+						},
+					},
+				)
+				return err
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			registry := NewRegistry(func() (string, error) {
+				return "", errors.New("boom")
+			})
+
+			err := test.run(registry)
+			if err == nil {
+				t.Fatal("returned nil error, want internal error")
+			}
+
+			backendErr, ok := err.(contracts.BackendError)
+			if !ok {
+				t.Fatalf("error type = %T, want contracts.BackendError", err)
+			}
+			if got, want := backendErr.Code, contracts.BackendErrorCodeInternal; got != want {
+				t.Fatalf("error code = %q, want %q", got, want)
+			}
+			if !strings.Contains(backendErr.Message, "generate job id: boom") {
+				t.Fatalf("error message = %q, want generate-job-id context", backendErr.Message)
+			}
+		})
+	}
+}
+
+func TestRegistryAttachCancelInvokesCallbackImmediatelyAfterQueuedCancellation(t *testing.T) {
+	registry := NewRegistry(sequenceJobIDs("job-1"))
+
+	started, err := registry.StartJob(
+		contracts.JobKindRenderStudy,
+		"study-1",
+		"fingerprint-1",
+	)
+	if err != nil {
+		t.Fatalf("StartJob returned error: %v", err)
+	}
+
+	if _, err := registry.Cancel(started.Snapshot.JobID); err != nil {
+		t.Fatalf("Cancel returned error: %v", err)
+	}
+
+	cancelCalled := false
+	if err := registry.AttachCancel(started.Snapshot.JobID, func() {
+		cancelCalled = true
+	}); err != nil {
+		t.Fatalf("AttachCancel returned error: %v", err)
+	}
+	if !cancelCalled {
+		t.Fatal("cancel func not invoked for already-cancelled job")
+	}
+
+	snapshot, err := registry.Get(started.Snapshot.JobID)
+	if err != nil {
+		t.Fatalf("Get returned error: %v", err)
+	}
+	if got, want := snapshot.State, contracts.JobStateCancelled; got != want {
+		t.Fatalf("State = %q, want %q", got, want)
+	}
+}
+
+func TestRegistryFailWrapsPlainErrorsAsInternal(t *testing.T) {
+	registry := NewRegistry(sequenceJobIDs("job-1"))
+
+	started, err := registry.StartJob(
+		contracts.JobKindRenderStudy,
+		"study-1",
+		"fingerprint-1",
+	)
+	if err != nil {
+		t.Fatalf("StartJob returned error: %v", err)
+	}
+
+	snapshot, err := registry.Fail(started.Snapshot.JobID, errors.New("boom"))
+	if err != nil {
+		t.Fatalf("Fail returned error: %v", err)
+	}
+	if got, want := snapshot.State, contracts.JobStateFailed; got != want {
+		t.Fatalf("State = %q, want %q", got, want)
+	}
+	if snapshot.Error == nil {
+		t.Fatal("Error = nil, want backend error payload")
+	}
+	if got, want := snapshot.Error.Code, contracts.BackendErrorCodeInternal; got != want {
+		t.Fatalf("Error.Code = %q, want %q", got, want)
+	}
+	if got, want := snapshot.Error.Message, "boom"; got != want {
+		t.Fatalf("Error.Message = %q, want %q", got, want)
+	}
+}
+
+func TestRegistryGetReturnsIndependentSnapshotCopies(t *testing.T) {
+	registry := NewRegistry(sequenceJobIDs("job-1"))
+
+	started, err := registry.StartJob(
+		contracts.JobKindAnalyzeStudy,
+		"study-1",
+		"fingerprint-1",
+	)
+	if err != nil {
+		t.Fatalf("StartJob returned error: %v", err)
+	}
+
+	if _, err := registry.Fail(
+		started.Snapshot.JobID,
+		contracts.InvalidInput("bad request").WithDetails("detail-1"),
+	); err != nil {
+		t.Fatalf("Fail returned error: %v", err)
+	}
+
+	first, err := registry.Get(started.Snapshot.JobID)
+	if err != nil {
+		t.Fatalf("first Get returned error: %v", err)
+	}
+	if first.StudyID == nil {
+		t.Fatal("StudyID = nil, want populated study id")
+	}
+	if first.Error == nil || len(first.Error.Details) != 1 {
+		t.Fatalf("Error = %#v, want cloned backend error details", first.Error)
+	}
+
+	*first.StudyID = "mutated-study"
+	first.Error.Message = "mutated message"
+	first.Error.Details[0] = "mutated detail"
+
+	second, err := registry.Get(started.Snapshot.JobID)
+	if err != nil {
+		t.Fatalf("second Get returned error: %v", err)
+	}
+	if second.StudyID == nil {
+		t.Fatal("second StudyID = nil, want populated study id")
+	}
+	if got, want := *second.StudyID, "study-1"; got != want {
+		t.Fatalf("StudyID = %q, want %q", got, want)
+	}
+	if second.Error == nil {
+		t.Fatal("second Error = nil, want backend error payload")
+	}
+	if got, want := second.Error.Message, "bad request"; got != want {
+		t.Fatalf("Error.Message = %q, want %q", got, want)
+	}
+	if got, want := second.Error.Details[0], "detail-1"; got != want {
+		t.Fatalf("Error.Details[0] = %q, want %q", got, want)
 	}
 }

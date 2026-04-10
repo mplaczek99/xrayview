@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -137,6 +138,64 @@ func (decoder *concurrencyTrackingDecoder) MaxActive() int {
 	defer decoder.mu.Unlock()
 
 	return decoder.maxActive
+}
+
+type partialFailingSecondaryCaptureWriter struct {
+	err error
+}
+
+func (writer partialFailingSecondaryCaptureWriter) WriteSecondaryCapture(
+	ctx context.Context,
+	path string,
+	_ imaging.PreviewImage,
+	_ dicommeta.SourceMetadata,
+) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := os.WriteFile(path, []byte("partial-dicom"), 0o644); err != nil {
+		return err
+	}
+
+	return writer.err
+}
+
+type blockingSecondaryCaptureWriter struct {
+	started chan struct{}
+}
+
+func (writer *blockingSecondaryCaptureWriter) WriteSecondaryCapture(
+	ctx context.Context,
+	path string,
+	_ imaging.PreviewImage,
+	_ dicommeta.SourceMetadata,
+) error {
+	if err := os.WriteFile(path, []byte("partial-dicom"), 0o644); err != nil {
+		return err
+	}
+
+	select {
+	case writer.started <- struct{}{}:
+	default:
+	}
+
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+type successfulSecondaryCaptureWriter struct{}
+
+func (successfulSecondaryCaptureWriter) WriteSecondaryCapture(
+	ctx context.Context,
+	path string,
+	_ imaging.PreviewImage,
+	_ dicommeta.SourceMetadata,
+) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	return os.WriteFile(path, []byte("complete-dicom"), 0o644)
 }
 
 func TestStartRenderJobWritesPreviewAndServesCachedSnapshot(t *testing.T) {
@@ -1034,6 +1093,477 @@ func TestStartRenderJobBoundsConcurrentExecutions(t *testing.T) {
 	}
 }
 
+func TestServiceRejectsBlankIdentifiers(t *testing.T) {
+	service := newService(
+		cache.New(filepath.Join(t.TempDir(), "cache")),
+		studies.New(),
+		nil,
+		dicomexport.GoWriter{},
+		nil,
+		sequenceJobIDs("job-1"),
+	)
+
+	tests := []struct {
+		name        string
+		run         func(*Service) error
+		wantMessage string
+	}{
+		{
+			name: "render study id",
+			run: func(service *Service) error {
+				_, err := service.StartRenderJob(contracts.RenderStudyCommand{StudyID: " \t"})
+				return err
+			},
+			wantMessage: "studyId is required",
+		},
+		{
+			name: "process study id",
+			run: func(service *Service) error {
+				_, err := service.StartProcessJob(contracts.ProcessStudyCommand{
+					StudyID:  " ",
+					PresetID: "default",
+				})
+				return err
+			},
+			wantMessage: "studyId is required",
+		},
+		{
+			name: "analyze study id",
+			run: func(service *Service) error {
+				_, err := service.StartAnalyzeJob(contracts.AnalyzeStudyCommand{StudyID: "\n"})
+				return err
+			},
+			wantMessage: "studyId is required",
+		},
+		{
+			name: "get job id",
+			run: func(service *Service) error {
+				_, err := service.GetJob(contracts.JobCommand{JobID: "  "})
+				return err
+			},
+			wantMessage: "jobId is required",
+		},
+		{
+			name: "cancel job id",
+			run: func(service *Service) error {
+				_, err := service.CancelJob(contracts.JobCommand{JobID: "\t"})
+				return err
+			},
+			wantMessage: "jobId is required",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := test.run(service)
+			if err == nil {
+				t.Fatal("returned nil error, want invalid input error")
+			}
+
+			backendErr, ok := err.(contracts.BackendError)
+			if !ok {
+				t.Fatalf("error type = %T, want contracts.BackendError", err)
+			}
+			if got, want := backendErr.Code, contracts.BackendErrorCodeInvalidInput; got != want {
+				t.Fatalf("error code = %q, want %q", got, want)
+			}
+			if got, want := backendErr.Message, test.wantMessage; got != want {
+				t.Fatalf("error message = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+func TestStartProcessJobRejectsInvalidOutputPath(t *testing.T) {
+	tests := []struct {
+		name        string
+		outputPath  *string
+		wantCode    contracts.BackendErrorCode
+		wantMessage string
+	}{
+		{
+			name:        "blank path",
+			outputPath:  stringPointer("   "),
+			wantCode:    contracts.BackendErrorCodeInvalidInput,
+			wantMessage: "outputPath is required when provided",
+		},
+		{
+			name:        "dot path",
+			outputPath:  stringPointer("."),
+			wantCode:    contracts.BackendErrorCodeInvalidInput,
+			wantMessage: "outputPath is required when provided",
+		},
+		{
+			name:        "existing directory",
+			outputPath:  stringPointer(t.TempDir()),
+			wantCode:    contracts.BackendErrorCodeInvalidInput,
+			wantMessage: "output path must be a file",
+		},
+		{
+			name:        "missing parent directory",
+			outputPath:  stringPointer(filepath.Join(t.TempDir(), "missing", "output.dcm")),
+			wantCode:    contracts.BackendErrorCodeNotFound,
+			wantMessage: "output directory does not exist",
+		},
+		{
+			name: "parent is file",
+			outputPath: func() *string {
+				parentFile := filepath.Join(t.TempDir(), "not-a-directory")
+				return stringPointer(filepath.Join(parentFile, "output.dcm"))
+			}(),
+			wantCode:    contracts.BackendErrorCodeInvalidInput,
+			wantMessage: "output directory must be a directory",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			studyRegistry, study := registerTestStudy(t)
+			cacheStore := cache.New(filepath.Join(t.TempDir(), "cache"))
+			service := newService(
+				cacheStore,
+				studyRegistry,
+				nil,
+				dicomexport.GoWriter{},
+				func() (studyDecoder, error) { return staticDecoder{study: syntheticAnalyzeSourceStudy()}, nil },
+				sequenceJobIDs("job-1"),
+			)
+
+			if test.name == "parent is file" {
+				parent := filepath.Dir(*test.outputPath)
+				if err := os.WriteFile(parent, []byte("file"), 0o644); err != nil {
+					t.Fatalf("WriteFile returned error: %v", err)
+				}
+			}
+
+			_, err := service.StartProcessJob(contracts.ProcessStudyCommand{
+				StudyID:    study.StudyID,
+				OutputPath: test.outputPath,
+				PresetID:   "default",
+			})
+			if err == nil {
+				t.Fatal("StartProcessJob returned nil error, want path validation error")
+			}
+
+			backendErr, ok := err.(contracts.BackendError)
+			if !ok {
+				t.Fatalf("error type = %T, want contracts.BackendError", err)
+			}
+			if got, want := backendErr.Code, test.wantCode; got != want {
+				t.Fatalf("error code = %q, want %q", got, want)
+			}
+			if got := backendErr.Message; !strings.HasPrefix(got, test.wantMessage) {
+				t.Fatalf("error message = %q, want prefix %q", backendErr.Message, test.wantMessage)
+			}
+		})
+	}
+}
+
+func TestStartJobsFailWhenRegisteredInputFileDisappears(t *testing.T) {
+	tests := []struct {
+		name  string
+		start func(*Service, string) (contracts.StartedJob, error)
+	}{
+		{
+			name: "render",
+			start: func(service *Service, studyID string) (contracts.StartedJob, error) {
+				return service.StartRenderJob(contracts.RenderStudyCommand{StudyID: studyID})
+			},
+		},
+		{
+			name: "process",
+			start: func(service *Service, studyID string) (contracts.StartedJob, error) {
+				return service.StartProcessJob(contracts.ProcessStudyCommand{
+					StudyID:  studyID,
+					PresetID: "default",
+				})
+			},
+		},
+		{
+			name: "analyze",
+			start: func(service *Service, studyID string) (contracts.StartedJob, error) {
+				return service.StartAnalyzeJob(contracts.AnalyzeStudyCommand{StudyID: studyID})
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			studyRegistry, study := registerTestStudy(t)
+			if err := os.Remove(study.InputPath); err != nil {
+				t.Fatalf("Remove returned error: %v", err)
+			}
+
+			service := newService(
+				cache.New(filepath.Join(t.TempDir(), "cache")),
+				studyRegistry,
+				nil,
+				dicomexport.GoWriter{},
+				func() (studyDecoder, error) { return staticDecoder{study: syntheticAnalyzeSourceStudy()}, nil },
+				sequenceJobIDs("job-1"),
+			)
+
+			started, err := test.start(service, study.StudyID)
+			if err != nil {
+				t.Fatalf("start returned error: %v", err)
+			}
+
+			snapshot := waitForTerminalJob(t, service, started.JobID)
+			if got, want := snapshot.State, contracts.JobStateFailed; got != want {
+				t.Fatalf("State = %q, want %q", got, want)
+			}
+			if snapshot.Result != nil {
+				t.Fatalf("Result = %#v, want nil", snapshot.Result)
+			}
+			if snapshot.Error == nil {
+				t.Fatal("Error = nil, want backend error payload")
+			}
+			if got, want := snapshot.Error.Code, contracts.BackendErrorCodeNotFound; got != want {
+				t.Fatalf("Error.Code = %q, want %q", got, want)
+			}
+			if got, want := snapshot.Error.Message, fmt.Sprintf("input file does not exist: %s", study.InputPath); got != want {
+				t.Fatalf("Error.Message = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+func TestRenderAndAnalyzeJobsRemovePreviewArtifactWhenPreviewWriteFails(t *testing.T) {
+	tests := []struct {
+		name        string
+		namespace   string
+		start       func(*Service, string) (contracts.StartedJob, error)
+		fingerprint func(contracts.StudyRecord) (string, error)
+		wantMessage string
+	}{
+		{
+			name:      "render",
+			namespace: "render",
+			start: func(service *Service, studyID string) (contracts.StartedJob, error) {
+				return service.StartRenderJob(contracts.RenderStudyCommand{StudyID: studyID})
+			},
+			fingerprint: renderFingerprint,
+			wantMessage: "write preview PNG",
+		},
+		{
+			name:      "analyze",
+			namespace: "analyze",
+			start: func(service *Service, studyID string) (contracts.StartedJob, error) {
+				return service.StartAnalyzeJob(contracts.AnalyzeStudyCommand{StudyID: studyID})
+			},
+			fingerprint: analyzeFingerprint,
+			wantMessage: "write analysis preview PNG",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			studyRegistry, study := registerTestStudy(t)
+			cacheStore := cache.New(filepath.Join(t.TempDir(), "cache"))
+			service := newService(
+				cacheStore,
+				studyRegistry,
+				nil,
+				dicomexport.GoWriter{},
+				func() (studyDecoder, error) { return staticDecoder{study: syntheticAnalyzeSourceStudy()}, nil },
+				sequenceJobIDs("job-1"),
+			)
+			service.renderSourcePreview = func(
+				imaging.SourceImage,
+				render.RenderPlan,
+			) imaging.PreviewImage {
+				return imaging.PreviewImage{
+					Width:  1,
+					Height: 1,
+					Format: imaging.FormatGray8,
+				}
+			}
+
+			fingerprint, err := test.fingerprint(study)
+			if err != nil {
+				t.Fatalf("fingerprint returned error: %v", err)
+			}
+			previewPath, err := cacheStore.ArtifactPath(test.namespace, fingerprint, "png")
+			if err != nil {
+				t.Fatalf("ArtifactPath returned error: %v", err)
+			}
+
+			started, err := test.start(service, study.StudyID)
+			if err != nil {
+				t.Fatalf("start returned error: %v", err)
+			}
+
+			snapshot := waitForTerminalJob(t, service, started.JobID)
+			if got, want := snapshot.State, contracts.JobStateFailed; got != want {
+				t.Fatalf("State = %q, want %q", got, want)
+			}
+			if snapshot.Result != nil {
+				t.Fatalf("Result = %#v, want nil on preview write failure", snapshot.Result)
+			}
+			if snapshot.Error == nil {
+				t.Fatal("Error = nil, want backend error payload")
+			}
+			if got, want := snapshot.Error.Code, contracts.BackendErrorCodeInternal; got != want {
+				t.Fatalf("Error.Code = %q, want %q", got, want)
+			}
+			if !strings.Contains(snapshot.Error.Message, test.wantMessage) {
+				t.Fatalf("Error.Message = %q, want substring %q", snapshot.Error.Message, test.wantMessage)
+			}
+			if _, err := os.Stat(previewPath); !os.IsNotExist(err) {
+				t.Fatalf("preview artifact unexpectedly remained, err = %v", err)
+			}
+		})
+	}
+}
+
+func TestStartProcessJobWriterFailureCleansUpArtifactsAndDoesNotCacheFailure(t *testing.T) {
+	studyRegistry, study := registerTestStudy(t)
+	cacheStore := cache.New(filepath.Join(t.TempDir(), "cache"))
+	service := newService(
+		cacheStore,
+		studyRegistry,
+		nil,
+		partialFailingSecondaryCaptureWriter{err: fmt.Errorf("disk full")},
+		func() (studyDecoder, error) { return staticDecoder{study: syntheticAnalyzeSourceStudy()}, nil },
+		sequenceJobIDs("job-1", "job-2"),
+	)
+
+	outputPath := filepath.Join(t.TempDir(), "processed-output.dcm")
+	command := contracts.ProcessStudyCommand{
+		StudyID:    study.StudyID,
+		PresetID:   "default",
+		OutputPath: stringPointer(outputPath),
+	}
+
+	fingerprint, err := processFingerprint(study, command)
+	if err != nil {
+		t.Fatalf("processFingerprint returned error: %v", err)
+	}
+	previewPath, err := cacheStore.ArtifactPath("process", fingerprint, "png")
+	if err != nil {
+		t.Fatalf("ArtifactPath returned error: %v", err)
+	}
+
+	started, err := service.StartProcessJob(command)
+	if err != nil {
+		t.Fatalf("StartProcessJob returned error: %v", err)
+	}
+
+	failed := waitForTerminalJob(t, service, started.JobID)
+	if got, want := failed.State, contracts.JobStateFailed; got != want {
+		t.Fatalf("failed State = %q, want %q", got, want)
+	}
+	if failed.Result != nil {
+		t.Fatalf("failed Result = %#v, want nil", failed.Result)
+	}
+	if failed.Error == nil {
+		t.Fatal("failed Error = nil, want backend error payload")
+	}
+	if got, want := failed.Error.Code, contracts.BackendErrorCodeInternal; got != want {
+		t.Fatalf("failed Error.Code = %q, want %q", got, want)
+	}
+	if !strings.Contains(failed.Error.Message, "write processed DICOM: disk full") {
+		t.Fatalf("failed Error.Message = %q, want wrapped writer error", failed.Error.Message)
+	}
+	for _, path := range []string{previewPath, outputPath} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("artifact %q unexpectedly remained after failure, err = %v", path, err)
+		}
+	}
+
+	service.secondaryCaptureWriter = successfulSecondaryCaptureWriter{}
+
+	restarted, err := service.StartProcessJob(command)
+	if err != nil {
+		t.Fatalf("second StartProcessJob returned error: %v", err)
+	}
+	if got, want := restarted.JobID, "job-2"; got != want {
+		t.Fatalf("second JobID = %q, want %q", got, want)
+	}
+
+	completed := waitForTerminalJob(t, service, restarted.JobID)
+	if got, want := completed.State, contracts.JobStateCompleted; got != want {
+		t.Fatalf("completed State = %q, want %q", got, want)
+	}
+	if completed.FromCache {
+		t.Fatal("completed FromCache = true, want false after prior failure")
+	}
+	if info, err := os.Stat(outputPath); err != nil || info.IsDir() {
+		t.Fatalf("output artifact missing after successful retry: %v", err)
+	}
+}
+
+func TestStartProcessJobCancellationDuringSecondaryCaptureWriteRemovesArtifacts(t *testing.T) {
+	studyRegistry, study := registerTestStudy(t)
+	cacheStore := cache.New(filepath.Join(t.TempDir(), "cache"))
+	writer := &blockingSecondaryCaptureWriter{started: make(chan struct{}, 1)}
+	service := newService(
+		cacheStore,
+		studyRegistry,
+		nil,
+		writer,
+		func() (studyDecoder, error) { return staticDecoder{study: syntheticAnalyzeSourceStudy()}, nil },
+		sequenceJobIDs("job-1"),
+	)
+
+	outputPath := filepath.Join(t.TempDir(), "processed-output.dcm")
+	command := contracts.ProcessStudyCommand{
+		StudyID:    study.StudyID,
+		PresetID:   "default",
+		OutputPath: stringPointer(outputPath),
+	}
+
+	fingerprint, err := processFingerprint(study, command)
+	if err != nil {
+		t.Fatalf("processFingerprint returned error: %v", err)
+	}
+	previewPath, err := cacheStore.ArtifactPath("process", fingerprint, "png")
+	if err != nil {
+		t.Fatalf("ArtifactPath returned error: %v", err)
+	}
+
+	started, err := service.StartProcessJob(command)
+	if err != nil {
+		t.Fatalf("StartProcessJob returned error: %v", err)
+	}
+
+	select {
+	case <-writer.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("secondary capture writer did not start before timeout")
+	}
+
+	for _, path := range []string{previewPath, outputPath} {
+		if info, err := os.Stat(path); err != nil || info.IsDir() {
+			t.Fatalf("artifact %q missing before cancellation cleanup, err = %v", path, err)
+		}
+	}
+
+	cancelled, err := service.CancelJob(contracts.JobCommand{JobID: started.JobID})
+	if err != nil {
+		t.Fatalf("CancelJob returned error: %v", err)
+	}
+	if got, want := cancelled.State, contracts.JobStateCancelling; got != want {
+		t.Fatalf("CancelJob State = %q, want %q", got, want)
+	}
+
+	snapshot := waitForTerminalJob(t, service, started.JobID)
+	if got, want := snapshot.State, contracts.JobStateCancelled; got != want {
+		t.Fatalf("terminal State = %q, want %q", got, want)
+	}
+	if snapshot.Result != nil {
+		t.Fatalf("Result = %#v, want nil for cancelled job", snapshot.Result)
+	}
+	if snapshot.Error != nil {
+		t.Fatalf("Error = %#v, want nil for cancelled job", snapshot.Error)
+	}
+	for _, path := range []string{previewPath, outputPath} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("artifact %q unexpectedly remained after cancellation, err = %v", path, err)
+		}
+	}
+}
+
 func registerTestStudy(t *testing.T) (*studies.Registry, contracts.StudyRecord) {
 	t.Helper()
 
@@ -1172,4 +1702,8 @@ func fillSourceTriangleRoot(
 			pixels[rowY*width+xx] = value
 		}
 	}
+}
+
+func stringPointer(value string) *string {
+	return &value
 }

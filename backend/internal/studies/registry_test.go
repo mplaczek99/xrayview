@@ -1,7 +1,9 @@
 package studies
 
 import (
+	"errors"
 	"fmt"
+	"path/filepath"
 	"testing"
 )
 
@@ -82,5 +84,67 @@ func TestRegisterBoundsRegistrySize(t *testing.T) {
 
 	if got, want := registry.Count(), maxRegisteredStudies; got != want {
 		t.Fatalf("Count = %d, want %d", got, want)
+	}
+}
+
+func TestRegisterPropagatesIDGenerationError(t *testing.T) {
+	wantErr := errors.New("generate failed")
+	registry := newRegistryWithIDGenerator(func() (string, error) {
+		return "", wantErr
+	})
+
+	_, err := registry.Register("/tmp/example-study.dcm", nil)
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("Register error = %v, want %v", err, wantErr)
+	}
+	if got := registry.Count(); got != 0 {
+		t.Fatalf("Count = %d, want 0 after failed registration", got)
+	}
+}
+
+func TestInputNameFromPath(t *testing.T) {
+	tests := []struct {
+		name      string
+		inputPath string
+		want      string
+	}{
+		{
+			name:      "absolute file path",
+			inputPath: filepath.Join(string(filepath.Separator), "tmp", "study.dcm"),
+			want:      "study.dcm",
+		},
+		{
+			name:      "relative file path",
+			inputPath: filepath.Join("nested", "study.dcm"),
+			want:      "study.dcm",
+		},
+		{
+			name:      "directory path with trailing separator",
+			inputPath: filepath.Join(string(filepath.Separator), "tmp", "nested") + string(filepath.Separator),
+			want:      "nested",
+		},
+		{
+			name:      "root path",
+			inputPath: string(filepath.Separator),
+			want:      string(filepath.Separator),
+		},
+		{
+			name:      "empty path",
+			inputPath: "",
+			want:      "",
+		},
+		{
+			name:      "dot path",
+			inputPath: ".",
+			want:      ".",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := inputNameFromPath(test.inputPath); got != test.want {
+				t.Fatalf("inputNameFromPath(%q) = %q, want %q", test.inputPath, got, test.want)
+			}
+		})
 	}
 }

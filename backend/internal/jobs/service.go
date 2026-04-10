@@ -552,6 +552,7 @@ func (service *Service) executeRenderJob(
 		return
 	}
 	if err := render.SavePreviewPNG(previewPath, preview); err != nil {
+		cleanupPaths(previewPath)
 		service.failJob(jobID, contracts.Internal(fmt.Sprintf("write preview PNG: %v", err)))
 		return
 	}
@@ -782,6 +783,7 @@ func (service *Service) executeAnalyzeJob(
 
 	preview := service.loadOrRenderSourcePreview(study.InputPath, sourceStudy.Image)
 	if err := render.SavePreviewPNG(previewPath, preview); err != nil {
+		cleanupPaths(previewPath)
 		service.failJob(jobID, contracts.Internal(fmt.Sprintf("write analysis preview PNG: %v", err)))
 		return
 	}

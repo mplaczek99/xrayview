@@ -2,6 +2,7 @@ package studies
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -14,7 +15,9 @@ type countingDecoder struct {
 	mu      sync.Mutex
 	study   dicommeta.SourceStudy
 	calls   int
+	err     error
 	release <-chan struct{}
+	started chan struct{}
 }
 
 func (decoder *countingDecoder) DecodeStudy(
@@ -29,6 +32,13 @@ func (decoder *countingDecoder) DecodeStudy(
 	decoder.calls++
 	decoder.mu.Unlock()
 
+	if decoder.started != nil {
+		select {
+		case decoder.started <- struct{}{}:
+		default:
+		}
+	}
+
 	if decoder.release != nil {
 		select {
 		case <-ctx.Done():
@@ -37,7 +47,18 @@ func (decoder *countingDecoder) DecodeStudy(
 		}
 	}
 
+	if decoder.err != nil {
+		return dicommeta.SourceStudy{}, decoder.err
+	}
+
 	return decoder.study, nil
+}
+
+func (decoder *countingDecoder) CallCount() int {
+	decoder.mu.Lock()
+	defer decoder.mu.Unlock()
+
+	return decoder.calls
 }
 
 func TestDecodeCacheConcurrentGetOrDecodeCoalescesByPath(t *testing.T) {
@@ -157,6 +178,80 @@ func TestDecodeCacheEvictsByByteBudget(t *testing.T) {
 
 	if cache.totalBytes > cache.maxBytes {
 		t.Fatalf("totalBytes %d exceeds maxBytes %d", cache.totalBytes, cache.maxBytes)
+	}
+}
+
+func TestDecodeCacheDoesNotCacheFailedDecode(t *testing.T) {
+	cache := NewDecodeCache(1)
+	wantErr := errors.New("decode failed")
+	decoder := &countingDecoder{err: wantErr}
+
+	for attempt := 0; attempt < 2; attempt++ {
+		if _, err := cache.GetOrDecode(context.Background(), "/tmp/study.dcm", decoder); !errors.Is(err, wantErr) {
+			t.Fatalf("GetOrDecode attempt %d error = %v, want %v", attempt+1, err, wantErr)
+		}
+	}
+
+	if got, want := decoder.CallCount(), 2; got != want {
+		t.Fatalf("DecodeStudy calls = %d, want %d", got, want)
+	}
+	if got := cache.Len(); got != 0 {
+		t.Fatalf("Len = %d, want 0 after failed decodes", got)
+	}
+}
+
+func TestDecodeCacheCancelledWaiterDoesNotPoisonInflightDecode(t *testing.T) {
+	cache := NewDecodeCache(1)
+	release := make(chan struct{})
+	decoder := &countingDecoder{
+		study:   testDecodedStudy(2, 2),
+		release: release,
+		started: make(chan struct{}, 1),
+	}
+
+	firstDone := make(chan error, 1)
+	go func() {
+		_, err := cache.GetOrDecode(context.Background(), "/tmp/study.dcm", decoder)
+		firstDone <- err
+	}()
+
+	select {
+	case <-decoder.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("initial decode did not start before timeout")
+	}
+
+	waiterCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if _, err := cache.GetOrDecode(waiterCtx, "/tmp/study.dcm", decoder); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled waiter error = %v, want %v", err, context.Canceled)
+	}
+
+	close(release)
+
+	select {
+	case err := <-firstDone:
+		if err != nil {
+			t.Fatalf("initial decode returned error: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("initial decode did not complete before timeout")
+	}
+
+	study, err := cache.GetOrDecode(context.Background(), "/tmp/study.dcm", decoder)
+	if err != nil {
+		t.Fatalf("GetOrDecode after success returned error: %v", err)
+	}
+	if got, want := study.Image.Width, uint32(2); got != want {
+		t.Fatalf("study.Image.Width = %d, want %d", got, want)
+	}
+
+	if got, want := decoder.CallCount(), 1; got != want {
+		t.Fatalf("DecodeStudy calls = %d, want %d", got, want)
+	}
+	if got, want := cache.Len(), 1; got != want {
+		t.Fatalf("Len = %d, want %d", got, want)
 	}
 }
 
