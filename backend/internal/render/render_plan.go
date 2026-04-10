@@ -18,6 +18,14 @@ func RenderGrayscalePixels(source imaging.SourceImage, plan RenderPlan) []uint8 
 	pixels := make([]uint8, len(source.Pixels))
 	window := ResolveWindow(source, plan.Window)
 
+	if source.MinValue >= 0 && source.MaxValue <= 65535 {
+		lut := buildRenderLUT(source, window)
+		for index, value := range source.Pixels {
+			pixels[index] = lut[uint16(value+0.5)]
+		}
+		return pixels
+	}
+
 	for index, value := range source.Pixels {
 		var byteValue uint8
 		if window != nil {
@@ -34,4 +42,22 @@ func RenderGrayscalePixels(source imaging.SourceImage, plan RenderPlan) []uint8 
 	}
 
 	return pixels
+}
+
+func buildRenderLUT(source imaging.SourceImage, window *WindowTransform) [65536]uint8 {
+	var lut [65536]uint8
+	for i := range 65536 {
+		value := float32(i)
+		var byteValue uint8
+		if window != nil {
+			byteValue = window.Map(value)
+		} else {
+			byteValue = MapLinear(value, source.MinValue, source.MaxValue)
+		}
+		if source.Invert {
+			byteValue = 255 - byteValue
+		}
+		lut[i] = byteValue
+	}
+	return lut
 }

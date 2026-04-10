@@ -72,6 +72,84 @@ func TestRenderSourceImageAppliesSourceInvertAfterWindowing(t *testing.T) {
 	}
 }
 
+func BenchmarkRenderGrayscalePixels(b *testing.B) {
+	const width, height = 2048, 1536
+	pixels := make([]float32, width*height)
+	for i := range pixels {
+		pixels[i] = float32(i % 4096)
+	}
+
+	source := imaging.SourceImage{
+		Width:    width,
+		Height:   height,
+		Pixels:   pixels,
+		MinValue: 0,
+		MaxValue: 4095,
+		DefaultWindow: &imaging.WindowLevel{
+			Center: 2048,
+			Width:  4096,
+		},
+	}
+
+	plan := DefaultRenderPlan()
+
+	b.ResetTimer()
+	for range b.N {
+		RenderGrayscalePixels(source, plan)
+	}
+}
+
+func BenchmarkRenderGrayscalePixelsFullRange(b *testing.B) {
+	const width, height = 2048, 1536
+	pixels := make([]float32, width*height)
+	for i := range pixels {
+		pixels[i] = float32(i % 4096)
+	}
+
+	source := imaging.SourceImage{
+		Width:    width,
+		Height:   height,
+		Pixels:   pixels,
+		MinValue: 0,
+		MaxValue: 4095,
+	}
+
+	plan := RenderPlan{Window: FullRangeWindowMode()}
+
+	b.ResetTimer()
+	for range b.N {
+		RenderGrayscalePixels(source, plan)
+	}
+}
+
+func BenchmarkRenderGrayscalePixelsInvert(b *testing.B) {
+	const width, height = 2048, 1536
+	pixels := make([]float32, width*height)
+	for i := range pixels {
+		pixels[i] = float32(i % 4096)
+	}
+
+	source := imaging.SourceImage{
+		Width:    width,
+		Height:   height,
+		Pixels:   pixels,
+		MinValue: 0,
+		MaxValue: 4095,
+		DefaultWindow: &imaging.WindowLevel{
+			Center: 2048,
+			Width:  4096,
+		},
+		Invert: true,
+	}
+
+	plan := DefaultRenderPlan()
+
+	b.ResetTimer()
+	for range b.N {
+		RenderGrayscalePixels(source, plan)
+	}
+}
+
 func equalBytes(left, right []uint8) bool {
 	if len(left) != len(right) {
 		return false
