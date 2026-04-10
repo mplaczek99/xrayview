@@ -11,15 +11,17 @@ import (
 )
 
 const (
-	maxMemoryCacheEntries   = 32
-	maxSourcePreviewEntries = 32
+	maxMemoryCacheEntries       = 32
+	maxSourcePreviewEntries     = 32
+	maxSourcePreviewBytes uint64 = 64 * 1024 * 1024 // 64 MB
 )
 
 type Memory struct {
-	mu             sync.Mutex
-	logger         *slog.Logger
-	entries        map[string]contracts.JobResult
-	sourcePreviews map[string]imaging.PreviewImage
+	mu                    sync.Mutex
+	logger                *slog.Logger
+	entries               map[string]contracts.JobResult
+	sourcePreviews        map[string]imaging.PreviewImage
+	sourcePreviewBytes    uint64
 }
 
 func NewMemory(logger *slog.Logger) *Memory {
@@ -121,7 +123,13 @@ func (memory *Memory) StoreSourcePreview(inputPath string, preview imaging.Previ
 	memory.mu.Lock()
 	defer memory.mu.Unlock()
 
-	memory.sourcePreviews[inputPath] = clonePreviewImage(preview)
+	if existing, ok := memory.sourcePreviews[inputPath]; ok {
+		memory.sourcePreviewBytes -= existing.ByteSize()
+	}
+
+	cloned := clonePreviewImage(preview)
+	memory.sourcePreviews[inputPath] = cloned
+	memory.sourcePreviewBytes += cloned.ByteSize()
 	memory.evictSourcePreviewLocked(inputPath)
 }
 
@@ -314,17 +322,22 @@ func (memory *Memory) evictResultLocked(keepFingerprint string) {
 }
 
 func (memory *Memory) evictSourcePreviewLocked(keepInputPath string) {
-	if len(memory.sourcePreviews) <= maxSourcePreviewEntries {
-		return
-	}
+	for len(memory.sourcePreviews) > maxSourcePreviewEntries || memory.sourcePreviewBytes > maxSourcePreviewBytes {
+		evicted := false
+		for inputPath, preview := range memory.sourcePreviews {
+			if inputPath == keepInputPath {
+				continue
+			}
 
-	for inputPath := range memory.sourcePreviews {
-		if inputPath == keepInputPath {
-			continue
+			memory.sourcePreviewBytes -= preview.ByteSize()
+			delete(memory.sourcePreviews, inputPath)
+			evicted = true
+			break
 		}
 
-		delete(memory.sourcePreviews, inputPath)
-		return
+		if !evicted {
+			break
+		}
 	}
 }
 

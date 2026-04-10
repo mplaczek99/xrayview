@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -197,42 +196,6 @@ func TestOpenStudyUsesEmbeddedBackend(t *testing.T) {
 
 	if result.Study.StudyID != "study-1" {
 		t.Fatalf("OpenStudy() studyId = %q, want %q", result.Study.StudyID, "study-1")
-	}
-}
-
-func TestInvokeBackendCommandUsesEmbeddedBackend(t *testing.T) {
-	app := &DesktopApp{
-		backend: stubBackendService{
-			openStudyFn: func(
-				command backendapi.OpenStudyCommand,
-			) (backendapi.OpenStudyCommandResult, error) {
-				return backendapi.OpenStudyCommandResult{
-					Study: backendapi.StudyRecord{
-						StudyID:   "study-embedded",
-						InputPath: command.InputPath,
-						InputName: "embedded.dcm",
-					},
-				}, nil
-			},
-		},
-	}
-
-	response := app.InvokeBackendCommand("open_study", `{"inputPath":"/tmp/embedded.dcm"}`)
-	if response.Status != http.StatusOK {
-		t.Fatalf("InvokeBackendCommand() status = %d, want %d", response.Status, http.StatusOK)
-	}
-
-	var payload backendapi.OpenStudyCommandResult
-	if err := json.Unmarshal([]byte(response.Body), &payload); err != nil {
-		t.Fatalf("InvokeBackendCommand() body was not valid JSON: %v", err)
-	}
-
-	if payload.Study.StudyID != "study-embedded" {
-		t.Fatalf(
-			"InvokeBackendCommand() studyId = %q, want %q",
-			payload.Study.StudyID,
-			"study-embedded",
-		)
 	}
 }
 

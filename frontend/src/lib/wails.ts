@@ -13,18 +13,9 @@ import type {
   StartedJob,
 } from "./generated/contracts";
 
-export interface WailsBackendCommandResponse {
-  status: number;
-  body: string;
-}
-
 export interface DesktopBindings {
   PickDicomFile(): Promise<string>;
   PickSaveDicomPath(defaultName?: string): Promise<string>;
-  InvokeBackendCommand(
-    command: string,
-    payloadJson?: string,
-  ): Promise<WailsBackendCommandResponse>;
   OpenStudy(command: OpenStudyCommand): Promise<OpenStudyCommandResult>;
   StartRenderJob(command: RenderStudyCommand): Promise<StartedJob>;
   StartProcessJob(command: ProcessStudyCommand): Promise<StartedJob>;
@@ -93,16 +84,3 @@ export async function pickWailsSaveDicomPath(
   }
 }
 
-export async function invokeWailsBackendCommand(
-  command: string,
-  payload?: unknown,
-): Promise<WailsBackendCommandResponse> {
-  try {
-    return await requireBindings().InvokeBackendCommand(
-      command,
-      payload === undefined ? "" : JSON.stringify(payload),
-    );
-  } catch (error) {
-    throw normalizeBackendError(error);
-  }
-}

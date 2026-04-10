@@ -52,6 +52,7 @@ type Service struct {
 
 const decodeBenchmarkEnvKey = "XRAYVIEW_BENCH_LOG_DECODES"
 const maxConcurrentJobs = 3
+const maxArtifactBytes int64 = 256 * 1024 * 1024 // 256 MB
 
 var decodeBenchmarkCounts = struct {
 	mu     sync.Mutex
@@ -871,6 +872,7 @@ func (service *Service) completeRenderJob(
 	}
 	service.memoryCache.StoreRender(fingerprint, result)
 	service.notifyJobCompletion(snapshot)
+	service.evictArtifactsIfNeeded()
 }
 
 func (service *Service) completeProcessJob(
@@ -892,6 +894,7 @@ func (service *Service) completeProcessJob(
 	}
 	service.memoryCache.StoreProcess(fingerprint, result)
 	service.notifyJobCompletion(snapshot)
+	service.evictArtifactsIfNeeded()
 }
 
 func (service *Service) completeAnalyzeJob(
@@ -913,6 +916,17 @@ func (service *Service) completeAnalyzeJob(
 	}
 	service.memoryCache.StoreAnalyze(fingerprint, result)
 	service.notifyJobCompletion(snapshot)
+	service.evictArtifactsIfNeeded()
+}
+
+func (service *Service) evictArtifactsIfNeeded() {
+	removed, err := service.cache.EvictArtifactsOverLimit(maxArtifactBytes)
+	if err != nil && service.logger != nil {
+		service.logger.Warn("artifact eviction failed", "error", err)
+	}
+	if removed > 0 && service.logger != nil {
+		service.logger.Info("evicted old artifacts", "removed", removed)
+	}
 }
 
 func (service *Service) failJob(jobID string, err error) {

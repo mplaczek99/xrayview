@@ -55,6 +55,10 @@ func (image *SourceImage) Normalize() {
 	}
 }
 
+func (image SourceImage) ByteSize() uint64 {
+	return uint64(len(image.Pixels)) * 4 // float32 = 4 bytes
+}
+
 func (image SourceImage) ExpectedPixelCount() uint64 {
 	return uint64(image.Width) * uint64(image.Height)
 }
@@ -100,6 +104,10 @@ func (image SourceImage) Validate() error {
 	}
 
 	return nil
+}
+
+func (image PreviewImage) ByteSize() uint64 {
+	return uint64(len(image.Pixels))
 }
 
 func (image PreviewImage) ExpectedByteCount() uint64 {

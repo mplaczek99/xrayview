@@ -2,15 +2,21 @@ package jobs
 
 import (
 	"context"
+	"fmt"
 	"os"
+	"path/filepath"
 	"testing"
+	"time"
 
 	"xrayview/backend/internal/analysis"
+	"xrayview/backend/internal/cache"
 	"xrayview/backend/internal/contracts"
 	"xrayview/backend/internal/dicommeta"
+	dicomexport "xrayview/backend/internal/export"
 	"xrayview/backend/internal/imaging"
 	"xrayview/backend/internal/processing"
 	"xrayview/backend/internal/render"
+	"xrayview/backend/internal/studies"
 )
 
 const benchmarkDicomPath = "../../../images/sample-dental-radiograph.dcm"
@@ -87,6 +93,87 @@ func BenchmarkAnalyzePreview(b *testing.B) {
 		}
 		benchmarkToothAnalysis = result
 	}
+}
+
+func BenchmarkFullWorkflow(b *testing.B) {
+	if _, err := os.Stat(benchmarkDicomPath); err != nil {
+		b.Skip("benchmark DICOM not available")
+	}
+
+	absPath, err := filepath.Abs(benchmarkDicomPath)
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		b.StopTimer()
+		tempDir := b.TempDir()
+		cacheStore := cache.New(filepath.Join(tempDir, "cache"))
+		studyRegistry := studies.New()
+		jobSeq := 0
+		service := newService(
+			cacheStore,
+			studyRegistry,
+			nil,
+			dicomexport.GoWriter{},
+			nil,
+			func() (string, error) {
+				jobSeq++
+				return fmt.Sprintf("bench-job-%d", jobSeq), nil
+			},
+		)
+
+		study, err := studyRegistry.Register(absPath, nil)
+		if err != nil {
+			b.Fatal(err)
+		}
+		b.StartTimer()
+
+		// Render
+		renderJob, err := service.StartRenderJob(contracts.RenderStudyCommand{StudyID: study.StudyID})
+		if err != nil {
+			b.Fatal(err)
+		}
+		waitBenchJob(b, service, renderJob.JobID)
+
+		// Process
+		processJob, err := service.StartProcessJob(contracts.ProcessStudyCommand{
+			StudyID:  study.StudyID,
+			PresetID: "default",
+		})
+		if err != nil {
+			b.Fatal(err)
+		}
+		waitBenchJob(b, service, processJob.JobID)
+
+		// Analyze
+		analyzeJob, err := service.StartAnalyzeJob(contracts.AnalyzeStudyCommand{StudyID: study.StudyID})
+		if err != nil {
+			b.Fatal(err)
+		}
+		waitBenchJob(b, service, analyzeJob.JobID)
+	}
+}
+
+func waitBenchJob(b *testing.B, service *Service, jobID string) {
+	b.Helper()
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		snapshot, err := service.GetJob(contracts.JobCommand{JobID: jobID})
+		if err != nil {
+			b.Fatal(err)
+		}
+		if isTerminalState(snapshot.State) {
+			if snapshot.State != contracts.JobStateCompleted {
+				b.Fatalf("job %s ended in state %s", jobID, snapshot.State)
+			}
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	b.Fatalf("job %s did not complete before timeout", jobID)
 }
 
 func loadBenchmarkStudy(b *testing.B) dicommeta.SourceStudy {

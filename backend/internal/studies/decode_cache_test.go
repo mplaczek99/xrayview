@@ -132,6 +132,34 @@ func TestDecodeCachePropagatesContextCancellation(t *testing.T) {
 	}
 }
 
+func TestDecodeCacheEvictsByByteBudget(t *testing.T) {
+	cache := NewDecodeCache(100) // high item cap — won't trigger count eviction
+	// Each 2×2 float32 study is 2*2*4 = 16 bytes of pixel data.
+	// Set budget to allow only one entry.
+	cache.maxBytes = 20
+	decoder := &countingDecoder{study: testDecodedStudy(2, 2)}
+
+	if _, err := cache.GetOrDecode(context.Background(), "/tmp/a.dcm", decoder); err != nil {
+		t.Fatalf("GetOrDecode a returned error: %v", err)
+	}
+
+	if got, want := cache.Len(), 1; got != want {
+		t.Fatalf("Len = %d, want %d after first insert", got, want)
+	}
+
+	if _, err := cache.GetOrDecode(context.Background(), "/tmp/b.dcm", decoder); err != nil {
+		t.Fatalf("GetOrDecode b returned error: %v", err)
+	}
+
+	if got, want := cache.Len(), 1; got != want {
+		t.Fatalf("Len = %d, want %d after byte budget eviction", got, want)
+	}
+
+	if cache.totalBytes > cache.maxBytes {
+		t.Fatalf("totalBytes %d exceeds maxBytes %d", cache.totalBytes, cache.maxBytes)
+	}
+}
+
 func testDecodedStudy(width, height uint32) dicommeta.SourceStudy {
 	pixels := make([]float32, int(width*height))
 	for index := range pixels {

@@ -7,17 +7,21 @@ import (
 	"xrayview/backend/internal/dicommeta"
 )
 
-const defaultDecodeCacheCapacity = 4
+const (
+	defaultDecodeCacheCapacity = 4
+	defaultDecodeCacheMaxBytes = 512 * 1024 * 1024 // 512 MB
+)
 
 type sourceStudyDecoder interface {
 	DecodeStudy(context.Context, string) (dicommeta.SourceStudy, error)
 }
 
 type decodeCacheEntry struct {
-	key   string
-	study dicommeta.SourceStudy
-	prev  *decodeCacheEntry
-	next  *decodeCacheEntry
+	key       string
+	study     dicommeta.SourceStudy
+	byteSize  uint64
+	prev      *decodeCacheEntry
+	next      *decodeCacheEntry
 }
 
 type decodeInflight struct {
@@ -27,14 +31,16 @@ type decodeInflight struct {
 }
 
 // DecodeCache stores decoded studies by input path and evicts least-recently-used
-// entries once it reaches capacity. It is safe for concurrent use.
+// entries when capacity or byte budget is exceeded. It is safe for concurrent use.
 type DecodeCache struct {
-	mu       sync.Mutex
-	capacity int
-	entries  map[string]*decodeCacheEntry
-	inflight map[string]*decodeInflight
-	head     *decodeCacheEntry
-	tail     *decodeCacheEntry
+	mu         sync.Mutex
+	capacity   int
+	maxBytes   uint64
+	totalBytes uint64
+	entries    map[string]*decodeCacheEntry
+	inflight   map[string]*decodeInflight
+	head       *decodeCacheEntry
+	tail       *decodeCacheEntry
 }
 
 func NewDecodeCache(capacity int) *DecodeCache {
@@ -44,6 +50,7 @@ func NewDecodeCache(capacity int) *DecodeCache {
 
 	return &DecodeCache{
 		capacity: capacity,
+		maxBytes: defaultDecodeCacheMaxBytes,
 		entries:  make(map[string]*decodeCacheEntry, capacity),
 		inflight: make(map[string]*decodeInflight, capacity),
 	}
@@ -89,17 +96,18 @@ func (cache *DecodeCache) GetOrDecode(
 			cache.moveToFrontLocked(entry)
 			inflight.study = entry.study
 		} else {
+			entryBytes := study.Image.ByteSize()
 			entry := &decodeCacheEntry{
-				key:   path,
-				study: study,
+				key:      path,
+				study:    study,
+				byteSize: entryBytes,
 			}
 			cache.entries[path] = entry
 			cache.pushFrontLocked(entry)
+			cache.totalBytes += entryBytes
 			inflight.study = study
 
-			if len(cache.entries) > cache.capacity {
-				cache.evictLocked()
-			}
+			cache.evictOverLimitsLocked()
 		}
 	}
 
@@ -160,12 +168,19 @@ func (cache *DecodeCache) removeLocked(entry *decodeCacheEntry) {
 	entry.next = nil
 }
 
-func (cache *DecodeCache) evictLocked() {
+func (cache *DecodeCache) evictOverLimitsLocked() {
+	for cache.tail != nil && (len(cache.entries) > cache.capacity || cache.totalBytes > cache.maxBytes) {
+		cache.evictTailLocked()
+	}
+}
+
+func (cache *DecodeCache) evictTailLocked() {
 	if cache.tail == nil {
 		return
 	}
 
 	victim := cache.tail
 	cache.removeLocked(victim)
+	cache.totalBytes -= victim.byteSize
 	delete(cache.entries, victim.key)
 }

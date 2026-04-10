@@ -126,7 +126,9 @@ func (app *DesktopApp) PickSaveDicomPath(defaultName string) (string, error) {
 	})
 }
 
-func (app *DesktopApp) InvokeBackendCommand(
+// invokeBackendCommand dispatches a command to the sidecar process over HTTP.
+// Only used as a fallback when the sidecar is active (hasExplicitBackendURL).
+func (app *DesktopApp) invokeBackendCommand(
 	command string,
 	payloadJSON string,
 ) backendCommandResponse {
@@ -135,14 +137,10 @@ func (app *DesktopApp) InvokeBackendCommand(
 		return errorResponse(http.StatusBadRequest, "backend command name is required", true)
 	}
 
-	if app.backend != nil {
-		return app.invokeEmbeddedCommand(command, payloadJSON)
-	}
-
 	if app.sidecar == nil || !app.sidecar.Enabled() {
 		return errorResponse(
 			http.StatusServiceUnavailable,
-			"desktop backend is disabled while the desktop shell is running in mock mode",
+			"desktop backend is not available",
 			true,
 		)
 	}
@@ -336,143 +334,6 @@ func errorResponse(
 	}
 }
 
-func (app *DesktopApp) invokeEmbeddedCommand(
-	command string,
-	payloadJSON string,
-) backendCommandResponse {
-	switch command {
-	case "get_processing_manifest":
-		return successResponse(app.backend.GetProcessingManifest())
-	case "open_study":
-		return invokeEmbeddedJSONCommand(
-			payloadJSON,
-			app.backend.OpenStudy,
-		)
-	case "start_render_job":
-		return invokeEmbeddedJSONCommand(
-			payloadJSON,
-			app.backend.StartRenderJob,
-		)
-	case "start_process_job":
-		return invokeEmbeddedJSONCommand(
-			payloadJSON,
-			app.backend.StartProcessJob,
-		)
-	case "start_analyze_job":
-		return invokeEmbeddedJSONCommand(
-			payloadJSON,
-			app.backend.StartAnalyzeJob,
-		)
-	case "get_job":
-		return invokeEmbeddedJSONCommand(
-			payloadJSON,
-			app.backend.GetJob,
-		)
-	case "cancel_job":
-		return invokeEmbeddedJSONCommand(
-			payloadJSON,
-			app.backend.CancelJob,
-		)
-	case "measure_line_annotation":
-		return invokeEmbeddedJSONCommand(
-			payloadJSON,
-			app.backend.MeasureLineAnnotation,
-		)
-	default:
-		return errorResponse(
-			http.StatusNotFound,
-			fmt.Sprintf("unsupported backend command: %s", command),
-			true,
-		)
-	}
-}
-
-func invokeEmbeddedJSONCommand[T any, R any](
-	payloadJSON string,
-	handler func(T) (R, error),
-) backendCommandResponse {
-	command, err := decodeCommandPayload[T](payloadJSON)
-	if err != nil {
-		return backendErrorResponse(err)
-	}
-
-	result, err := handler(command)
-	if err != nil {
-		return backendErrorResponse(err)
-	}
-
-	return successResponse(result)
-}
-
-func decodeCommandPayload[T any](payloadJSON string) (T, error) {
-	var payload T
-	if strings.TrimSpace(payloadJSON) == "" {
-		return payload, backendapi.BackendError{
-			Code:        backendapi.BackendErrorCodeInvalidInput,
-			Message:     "backend command payload is required",
-			Recoverable: true,
-		}
-	}
-
-	if err := json.Unmarshal([]byte(payloadJSON), &payload); err != nil {
-		return payload, backendapi.BackendError{
-			Code:        backendapi.BackendErrorCodeInvalidInput,
-			Message:     "backend command payload must be valid JSON",
-			Details:     []string{err.Error()},
-			Recoverable: true,
-		}
-	}
-
-	return payload, nil
-}
-
-func successResponse(payload any) backendCommandResponse {
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return errorResponse(
-			http.StatusInternalServerError,
-			"failed to encode backend response",
-			false,
-		)
-	}
-
-	return backendCommandResponse{
-		Status: http.StatusOK,
-		Body:   string(body),
-	}
-}
-
-func backendErrorResponse(err error) backendCommandResponse {
-	var backendErr backendapi.BackendError
-	if errors.As(err, &backendErr) {
-		status := http.StatusInternalServerError
-		switch backendErr.Code {
-		case backendapi.BackendErrorCodeInvalidInput:
-			status = http.StatusBadRequest
-		case backendapi.BackendErrorCodeNotFound:
-			status = http.StatusNotFound
-		case backendapi.BackendErrorCodeCancelled:
-			status = http.StatusConflict
-		case backendapi.BackendErrorCodeConflict:
-			status = http.StatusConflict
-		case backendapi.BackendErrorCodeCacheCorrupted:
-			status = http.StatusInternalServerError
-		}
-
-		body, marshalErr := json.Marshal(backendErr)
-		if marshalErr != nil {
-			return errorResponse(http.StatusInternalServerError, "failed to encode backend error", false)
-		}
-
-		return backendCommandResponse{
-			Status: status,
-			Body:   string(body),
-		}
-	}
-
-	return errorResponse(http.StatusInternalServerError, err.Error(), false)
-}
-
 func invokeViaHTTP[T any](app *DesktopApp, command string, payload any) (T, error) {
 	var zero T
 	payloadJSON := ""
@@ -484,7 +345,7 @@ func invokeViaHTTP[T any](app *DesktopApp, command string, payload any) (T, erro
 		payloadJSON = string(bytes)
 	}
 
-	response := app.InvokeBackendCommand(command, payloadJSON)
+	response := app.invokeBackendCommand(command, payloadJSON)
 	if response.Status >= http.StatusBadRequest {
 		var backendErr backendapi.BackendError
 		if err := json.Unmarshal([]byte(response.Body), &backendErr); err != nil {

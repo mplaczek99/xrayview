@@ -1,23 +1,16 @@
 import type {
-  AnalyzeStudyCommand,
-  BackendError,
-  JobCommand,
   JobResult,
   JobSnapshot as ContractJobSnapshot,
   JobState,
   LineAnnotation,
-  MeasureLineAnnotationCommand,
   MeasureLineAnnotationCommandResult,
-  OpenStudyCommand,
   OpenStudyCommandResult,
   PaletteName,
   ProcessStudyCommand,
   ProcessingManifest,
-  RenderStudyCommand,
   StartedJob,
 } from "./generated/contracts";
 import { normalizeBackendError } from "./backendErrors";
-import { invokeDesktopBackendCommand } from "./desktop";
 import { MOCK_PROCESSED_DICOM_PATH } from "./mockRuntime";
 import { MOCK_PROCESSING_MANIFEST } from "./mockProcessingManifest";
 import {
@@ -188,47 +181,6 @@ function startMockJob(
   return { jobId };
 }
 
-function parseBackendResponseBody<T>(
-  command: string,
-  responseBody: string,
-): T | null {
-  if (responseBody.trim() === "") {
-    return null;
-  }
-
-  try {
-    return JSON.parse(responseBody) as T;
-  } catch (error) {
-    throw normalizeBackendError({
-      code: "internal",
-      message: `invalid JSON response for backend command ${command}`,
-      details: error instanceof Error && error.message ? [error.message] : [],
-      recoverable: false,
-    });
-  }
-}
-
-async function invokeDesktopBackend<T>(
-  command: string,
-  payload?: unknown,
-): Promise<T> {
-  const response = await invokeDesktopBackendCommand(command, payload);
-  const parsed = parseBackendResponseBody<T | BackendError>(command, response.body);
-
-  if (response.status >= 400) {
-    throw normalizeBackendError(
-      parsed ?? {
-        code: "internal",
-        message: `backend command ${command} failed with status ${response.status}`,
-        details: [],
-        recoverable: response.status >= 500,
-      },
-    );
-  }
-
-  return parsed as T;
-}
-
 async function invokeTypedDesktopBinding<T>(
   invoke: () => Promise<T>,
 ): Promise<T> {
@@ -358,76 +310,31 @@ export function createMockBackendAPI(): BackendAPI {
 
 export function createDesktopBackendAPI(): BackendAPI {
   const bindings = getWailsBindings();
-  const hasTypedBindings = typeof bindings.OpenStudy === "function";
-
-  if (hasTypedBindings) {
-    return {
-      mode: "desktop",
-      loadProcessingManifest: () =>
-        invokeTypedDesktopBinding(() => bindings.GetProcessingManifest()),
-      openStudy: async (inputPath): Promise<OpenStudyCommandResult> =>
-        invokeTypedDesktopBinding(() => bindings.OpenStudy({ inputPath })),
-      startRenderStudyJob: async (studyId) =>
-        invokeTypedDesktopBinding(() => bindings.StartRenderJob({ studyId })),
-      startProcessStudyJob: async (studyId, request) =>
-        invokeTypedDesktopBinding(() =>
-          bindings.StartProcessJob(buildProcessStudyCommand(studyId, request)),
-        ),
-      startAnalyzeStudyJob: async (studyId) =>
-        invokeTypedDesktopBinding(() => bindings.StartAnalyzeJob({ studyId })),
-      getJob: async (jobId) =>
-        invokeTypedDesktopBinding(() => bindings.GetJobSnapshot({ jobId })),
-      cancelJob: async (jobId) =>
-        invokeTypedDesktopBinding(() => bindings.CancelJobByID({ jobId })),
-      measureLineAnnotation: async (studyId, annotation): Promise<LineAnnotation> => {
-        const payload = await invokeTypedDesktopBinding(() =>
-          bindings.MeasureLineAnnotation({
-            studyId,
-            annotation,
-          }),
-        );
-        return payload.annotation;
-      },
-    };
-  }
 
   return {
     mode: "desktop",
     loadProcessingManifest: () =>
-      invokeDesktopBackend<ProcessingManifest>("get_processing_manifest"),
-    openStudy: async (inputPath): Promise<OpenStudyCommandResult> => {
-      const request: OpenStudyCommand = { inputPath };
-      return invokeDesktopBackend<OpenStudyCommandResult>("open_study", request);
-    },
-    startRenderStudyJob: async (studyId) => {
-      const request: RenderStudyCommand = { studyId };
-      return invokeDesktopBackend<StartedJob>("start_render_job", request);
-    },
+      invokeTypedDesktopBinding(() => bindings.GetProcessingManifest()),
+    openStudy: async (inputPath): Promise<OpenStudyCommandResult> =>
+      invokeTypedDesktopBinding(() => bindings.OpenStudy({ inputPath })),
+    startRenderStudyJob: async (studyId) =>
+      invokeTypedDesktopBinding(() => bindings.StartRenderJob({ studyId })),
     startProcessStudyJob: async (studyId, request) =>
-      invokeDesktopBackend<StartedJob>(
-        "start_process_job",
-        buildProcessStudyCommand(studyId, request),
+      invokeTypedDesktopBinding(() =>
+        bindings.StartProcessJob(buildProcessStudyCommand(studyId, request)),
       ),
-    startAnalyzeStudyJob: async (studyId) => {
-      const request: AnalyzeStudyCommand = { studyId };
-      return invokeDesktopBackend<StartedJob>("start_analyze_job", request);
-    },
-    getJob: async (jobId) => {
-      const request: JobCommand = { jobId };
-      return invokeDesktopBackend<ContractJobSnapshot>("get_job", request);
-    },
-    cancelJob: async (jobId) => {
-      const request: JobCommand = { jobId };
-      return invokeDesktopBackend<ContractJobSnapshot>("cancel_job", request);
-    },
+    startAnalyzeStudyJob: async (studyId) =>
+      invokeTypedDesktopBinding(() => bindings.StartAnalyzeJob({ studyId })),
+    getJob: async (jobId) =>
+      invokeTypedDesktopBinding(() => bindings.GetJobSnapshot({ jobId })),
+    cancelJob: async (jobId) =>
+      invokeTypedDesktopBinding(() => bindings.CancelJobByID({ jobId })),
     measureLineAnnotation: async (studyId, annotation): Promise<LineAnnotation> => {
-      const request: MeasureLineAnnotationCommand = {
-        studyId,
-        annotation,
-      };
-      const payload = await invokeDesktopBackend<MeasureLineAnnotationCommandResult>(
-        "measure_line_annotation",
-        request,
+      const payload = await invokeTypedDesktopBinding(() =>
+        bindings.MeasureLineAnnotation({
+          studyId,
+          annotation,
+        }),
       );
       return payload.annotation;
     },
