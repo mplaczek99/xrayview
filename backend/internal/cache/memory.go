@@ -11,17 +11,17 @@ import (
 )
 
 const (
-	maxMemoryCacheEntries       = 32
-	maxSourcePreviewEntries     = 32
-	maxSourcePreviewBytes uint64 = 64 * 1024 * 1024 // 64 MB
+	maxMemoryCacheEntries          = 32
+	maxSourcePreviewEntries        = 32
+	maxSourcePreviewBytes   uint64 = 64 * 1024 * 1024 // 64 MB
 )
 
 type Memory struct {
-	mu                    sync.Mutex
-	logger                *slog.Logger
-	entries               map[string]contracts.JobResult
-	sourcePreviews        map[string]imaging.PreviewImage
-	sourcePreviewBytes    uint64
+	mu                 sync.Mutex
+	logger             *slog.Logger
+	entries            map[string]contracts.JobResult
+	sourcePreviews     map[string]imaging.PreviewImage
+	sourcePreviewBytes uint64
 }
 
 func NewMemory(logger *slog.Logger) *Memory {

@@ -17,11 +17,11 @@ type sourceStudyDecoder interface {
 }
 
 type decodeCacheEntry struct {
-	key       string
-	study     dicommeta.SourceStudy
-	byteSize  uint64
-	prev      *decodeCacheEntry
-	next      *decodeCacheEntry
+	key      string
+	study    dicommeta.SourceStudy
+	byteSize uint64
+	prev     *decodeCacheEntry
+	next     *decodeCacheEntry
 }
 
 type decodeInflight struct {
