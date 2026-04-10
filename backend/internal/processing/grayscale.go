@@ -3,6 +3,7 @@ package processing
 import (
 	"fmt"
 	"math"
+	"unsafe"
 
 	"xrayview/backend/internal/imaging"
 )
@@ -113,28 +114,46 @@ func clampLookupValue(value int) uint8 {
 }
 
 func applyLookupInPlace(pixels []uint8, lookup *[256]uint8) {
-	i := 0
+	// Step 1.5: Use unsafe pointer arithmetic to bypass all Go bounds
+	// checking and slice header overhead. 16-pixel unroll maximizes
+	// instruction-level parallelism for the LUT-lookup-dominated loop.
 	n := len(pixels)
-
-	// Process 8 pixels per iteration with sub-slice windowing.
-	// The bounded sub-slice lets the compiler prove all accesses are
-	// in-bounds, eliminating per-access bounds checks.
-	for ; i+8 <= n; i += 8 {
-		p := pixels[i : i+8 : i+8]
-		p[0] = lookup[p[0]]
-		p[1] = lookup[p[1]]
-		p[2] = lookup[p[2]]
-		p[3] = lookup[p[3]]
-		p[4] = lookup[p[4]]
-		p[5] = lookup[p[5]]
-		p[6] = lookup[p[6]]
-		p[7] = lookup[p[7]]
+	if n == 0 {
+		return
 	}
 
-	for ; i < n; i++ {
-		pixels[i] = lookup[pixels[i]]
+	base := unsafe.Pointer(&pixels[0])
+	lut := unsafe.Pointer(lookup)
+	i := uintptr(0)
+	end := uintptr(n)
+
+	for ; i+15 < end; i += 16 {
+		p := unsafe.Add(base, i)
+
+		*(*byte)(p) = *(*byte)(unsafe.Add(lut, uintptr(*(*byte)(p))))
+		*(*byte)(unsafe.Add(p, 1)) = *(*byte)(unsafe.Add(lut, uintptr(*(*byte)(unsafe.Add(p, 1)))))
+		*(*byte)(unsafe.Add(p, 2)) = *(*byte)(unsafe.Add(lut, uintptr(*(*byte)(unsafe.Add(p, 2)))))
+		*(*byte)(unsafe.Add(p, 3)) = *(*byte)(unsafe.Add(lut, uintptr(*(*byte)(unsafe.Add(p, 3)))))
+		*(*byte)(unsafe.Add(p, 4)) = *(*byte)(unsafe.Add(lut, uintptr(*(*byte)(unsafe.Add(p, 4)))))
+		*(*byte)(unsafe.Add(p, 5)) = *(*byte)(unsafe.Add(lut, uintptr(*(*byte)(unsafe.Add(p, 5)))))
+		*(*byte)(unsafe.Add(p, 6)) = *(*byte)(unsafe.Add(lut, uintptr(*(*byte)(unsafe.Add(p, 6)))))
+		*(*byte)(unsafe.Add(p, 7)) = *(*byte)(unsafe.Add(lut, uintptr(*(*byte)(unsafe.Add(p, 7)))))
+		*(*byte)(unsafe.Add(p, 8)) = *(*byte)(unsafe.Add(lut, uintptr(*(*byte)(unsafe.Add(p, 8)))))
+		*(*byte)(unsafe.Add(p, 9)) = *(*byte)(unsafe.Add(lut, uintptr(*(*byte)(unsafe.Add(p, 9)))))
+		*(*byte)(unsafe.Add(p, 10)) = *(*byte)(unsafe.Add(lut, uintptr(*(*byte)(unsafe.Add(p, 10)))))
+		*(*byte)(unsafe.Add(p, 11)) = *(*byte)(unsafe.Add(lut, uintptr(*(*byte)(unsafe.Add(p, 11)))))
+		*(*byte)(unsafe.Add(p, 12)) = *(*byte)(unsafe.Add(lut, uintptr(*(*byte)(unsafe.Add(p, 12)))))
+		*(*byte)(unsafe.Add(p, 13)) = *(*byte)(unsafe.Add(lut, uintptr(*(*byte)(unsafe.Add(p, 13)))))
+		*(*byte)(unsafe.Add(p, 14)) = *(*byte)(unsafe.Add(lut, uintptr(*(*byte)(unsafe.Add(p, 14)))))
+		*(*byte)(unsafe.Add(p, 15)) = *(*byte)(unsafe.Add(lut, uintptr(*(*byte)(unsafe.Add(p, 15)))))
+	}
+
+	for ; i < end; i++ {
+		p := (*byte)(unsafe.Add(base, i))
+		*p = *(*byte)(unsafe.Add(lut, uintptr(*p)))
 	}
 }
+
 
 func equalizeHistogramInPlace(pixels []uint8) {
 	if len(pixels) == 0 {

@@ -59,12 +59,12 @@ The render and processing pipelines iterate over every pixel in the image. For a
 **Expected improvement:** ~15-25% speedup on processing inner loop for the non-equalize case.
 **How to test:** Add `BenchmarkProcessGrayscalePixels` with various control combinations. Compare unrolled vs current.
 
-### Step 1.5: Vectorize Pixel Loops with `unsafe` Batch Operations
+### Step 1.5: Vectorize Pixel Loops with `unsafe` Batch Operations ✅
 
-**File:** `backend/internal/processing/grayscale.go:115-119`, `backend/internal/render/render_plan.go:17-37`
+**File:** `backend/internal/processing/grayscale.go:116-153`
 **What it does:** `applyLookupInPlace` iterates byte-by-byte through the pixel array.
-**Optimization:** Process pixels in uint64-sized chunks (8 pixels at a time). Read 8 bytes as a uint64, apply the LUT to each byte, write back as uint64. This reduces memory access overhead by 8x for the inner loop.
-**Expected improvement:** ~2x speedup on LUT application for large images. Modern CPUs process 64-bit reads/writes at the same cost as 8-bit.
+**Optimization:** Use `unsafe` pointer arithmetic to bypass Go bounds checking and slice header overhead. 16-pixel unrolled loop with raw pointer offsets eliminates all runtime safety checks from the hot path. Note: the originally-planned uint64 read/write approach was benchmarked but the shift/OR repack overhead negated the memory access savings. Pure pointer arithmetic with byte-level LUT lookups proved faster.
+**Actual improvement:** ~10% speedup on LUT application (730→654 ns/op, 4270→4800 MB/s for 3M pixels). The plan's predicted 2x was overstated — LUT random-access latency dominates, not sequential memory ops.
 **How to test:** Benchmark with 3M pixel arrays before/after.
 
 ---
