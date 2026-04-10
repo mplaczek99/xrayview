@@ -27,7 +27,7 @@
 
 The render and processing pipelines iterate over every pixel in the image. For a typical dental radiograph (2000x1500 = 3M pixels), these loops dominate wall-clock time.
 
-### Step 1.1: Precompute Window Transform as a Lookup Table
+### Step 1.1: Precompute Window Transform as a Lookup Table ✅
 
 **File:** `backend/internal/render/render_plan.go:17-37`
 **What it does:** `RenderGrayscalePixels` calls `window.Map(value)` per pixel, which involves 2 float comparisons + 1 float multiply + 1 float add + ClampToByte per pixel.
@@ -35,7 +35,7 @@ The render and processing pipelines iterate over every pixel in the image. For a
 **Expected improvement:** 3-5x speedup on the render inner loop. Eliminates all float arithmetic and branch mispredictions in the hot path.
 **How to test:** Add a `BenchmarkRenderGrayscalePixels` in `render_plan_test.go` with a 2048x1536 synthetic image. Compare before/after with `go test -bench=. -benchmem`.
 
-### Step 1.2: Eliminate Per-Pixel Branch on `source.Invert`
+### Step 1.2: Eliminate Per-Pixel Branch on `source.Invert` ✅
 
 **File:** `backend/internal/render/render_plan.go:29-31`
 **What it does:** Every pixel checks `if source.Invert { byteValue = 255 - byteValue }`.
@@ -43,7 +43,7 @@ The render and processing pipelines iterate over every pixel in the image. For a
 **Expected improvement:** ~5-10% on render loop by eliminating a branch per pixel. With the LUT approach from 1.1, this is free.
 **How to test:** Same benchmark as 1.1.
 
-### Step 1.3: Eliminate Per-Pixel `window != nil` Check
+### Step 1.3: Eliminate Per-Pixel `window != nil` Check ✅
 
 **File:** `backend/internal/render/render_plan.go:23-27`
 **What it does:** Every pixel checks `if window != nil` to decide between windowed and linear mapping.
@@ -51,7 +51,7 @@ The render and processing pipelines iterate over every pixel in the image. For a
 **Expected improvement:** ~5% on render loop (branch elimination). Free with LUT approach.
 **How to test:** Same benchmark as 1.1.
 
-### Step 1.4: Process Grayscale Pixels with Combined LUT
+### Step 1.4: Process Grayscale Pixels with Combined LUT ✅
 
 **File:** `backend/internal/processing/grayscale.go:34-74`
 **What it does:** `ProcessGrayscalePixels` builds up a [256]uint8 lookup table by composing invert/brightness/contrast, then applies it. This is already well-designed, but histogram equalization forces a flush and re-scan.
