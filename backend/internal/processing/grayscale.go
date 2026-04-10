@@ -154,7 +154,6 @@ func applyLookupInPlace(pixels []uint8, lookup *[256]uint8) {
 	}
 }
 
-
 func equalizeHistogramInPlace(pixels []uint8) {
 	if len(pixels) == 0 {
 		return
