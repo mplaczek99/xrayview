@@ -26,19 +26,23 @@ func RenderGrayscalePixels(source imaging.SourceImage, plan RenderPlan) []uint8 
 		return pixels
 	}
 
-	for index, value := range source.Pixels {
-		var byteValue uint8
-		if window != nil {
-			byteValue = window.Map(value)
-		} else {
-			byteValue = MapLinear(value, source.MinValue, source.MaxValue)
+	switch {
+	case window != nil && source.Invert:
+		for index, value := range source.Pixels {
+			pixels[index] = 255 - window.Map(value)
 		}
-
-		if source.Invert {
-			byteValue = 255 - byteValue
+	case window != nil:
+		for index, value := range source.Pixels {
+			pixels[index] = window.Map(value)
 		}
-
-		pixels[index] = byteValue
+	case source.Invert:
+		for index, value := range source.Pixels {
+			pixels[index] = 255 - MapLinear(value, source.MinValue, source.MaxValue)
+		}
+	default:
+		for index, value := range source.Pixels {
+			pixels[index] = MapLinear(value, source.MinValue, source.MaxValue)
+		}
 	}
 
 	return pixels
