@@ -113,8 +113,26 @@ func clampLookupValue(value int) uint8 {
 }
 
 func applyLookupInPlace(pixels []uint8, lookup *[256]uint8) {
-	for index, value := range pixels {
-		pixels[index] = lookup[value]
+	i := 0
+	n := len(pixels)
+
+	// Process 8 pixels per iteration with sub-slice windowing.
+	// The bounded sub-slice lets the compiler prove all accesses are
+	// in-bounds, eliminating per-access bounds checks.
+	for ; i+8 <= n; i += 8 {
+		p := pixels[i : i+8 : i+8]
+		p[0] = lookup[p[0]]
+		p[1] = lookup[p[1]]
+		p[2] = lookup[p[2]]
+		p[3] = lookup[p[3]]
+		p[4] = lookup[p[4]]
+		p[5] = lookup[p[5]]
+		p[6] = lookup[p[6]]
+		p[7] = lookup[p[7]]
+	}
+
+	for ; i < n; i++ {
+		pixels[i] = lookup[pixels[i]]
 	}
 }
 

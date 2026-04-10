@@ -216,6 +216,76 @@ func grayPixels(imageValue *image.Gray) []uint8 {
 	return pixels
 }
 
+func BenchmarkProcessGrayscalePixels(b *testing.B) {
+	// Typical dental radiograph: 2048x1536 = ~3M pixels
+	const width, height = 2048, 1536
+	size := width * height
+
+	makePixels := func() []uint8 {
+		pixels := make([]uint8, size)
+		for i := range pixels {
+			pixels[i] = uint8(i % 256)
+		}
+		return pixels
+	}
+
+	b.Run("identity", func(b *testing.B) {
+		pixels := makePixels()
+		controls := GrayscaleControls{Contrast: 1.0}
+		b.SetBytes(int64(size))
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			ProcessGrayscalePixels(pixels, controls)
+		}
+	})
+
+	b.Run("invert+brightness+contrast", func(b *testing.B) {
+		pixels := makePixels()
+		controls := GrayscaleControls{
+			Invert:     true,
+			Brightness: 20,
+			Contrast:   1.5,
+		}
+		b.SetBytes(int64(size))
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			ProcessGrayscalePixels(pixels, controls)
+		}
+	})
+
+	b.Run("invert+brightness+contrast+equalize", func(b *testing.B) {
+		controls := GrayscaleControls{
+			Invert:     true,
+			Brightness: 20,
+			Contrast:   1.5,
+			Equalize:   true,
+		}
+		b.SetBytes(int64(size))
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			pixels := makePixels()
+			ProcessGrayscalePixels(pixels, controls)
+		}
+	})
+}
+
+func BenchmarkApplyLookupInPlace(b *testing.B) {
+	const size = 2048 * 1536
+	pixels := make([]uint8, size)
+	for i := range pixels {
+		pixels[i] = uint8(i % 256)
+	}
+	var lookup [256]uint8
+	for i := range lookup {
+		lookup[i] = 255 - uint8(i)
+	}
+	b.SetBytes(int64(size))
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		applyLookupInPlace(pixels, &lookup)
+	}
+}
+
 func equalBytes(left, right []uint8) bool {
 	if len(left) != len(right) {
 		return false
