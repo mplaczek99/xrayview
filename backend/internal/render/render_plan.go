@@ -50,18 +50,27 @@ func RenderGrayscalePixels(source imaging.SourceImage, plan RenderPlan) []uint8 
 
 func buildRenderLUT(source imaging.SourceImage, window *WindowTransform) [65536]uint8 {
 	var lut [65536]uint8
-	for i := range 65536 {
-		value := float32(i)
-		var byteValue uint8
-		if window != nil {
-			byteValue = window.Map(value)
-		} else {
-			byteValue = MapLinear(value, source.MinValue, source.MaxValue)
+
+	// Step 1.3: hoist window-nil and invert checks outside the loop.
+	// Each branch runs a branchless inner loop — no per-entry conditionals.
+	switch {
+	case window != nil && source.Invert:
+		for i := range 65536 {
+			lut[i] = 255 - window.Map(float32(i))
 		}
-		if source.Invert {
-			byteValue = 255 - byteValue
+	case window != nil:
+		for i := range 65536 {
+			lut[i] = window.Map(float32(i))
 		}
-		lut[i] = byteValue
+	case source.Invert:
+		for i := range 65536 {
+			lut[i] = 255 - MapLinear(float32(i), source.MinValue, source.MaxValue)
+		}
+	default:
+		for i := range 65536 {
+			lut[i] = MapLinear(float32(i), source.MinValue, source.MaxValue)
+		}
 	}
+
 	return lut
 }
