@@ -145,13 +145,20 @@ The render and processing pipelines iterate over every pixel in the image. For a
 **How to test:** Benchmark both compression levels, measure encode time and file size.
 **Actual result:** ~1.6x speedup (Gray8: 7.1ms→4.3ms, RGBA8: 25.4ms→16.1ms). Less than predicted 3-5x because Go's `png` package filter heuristics limit how much compression level alone affects speed. Alloc increased ~45% (acceptable for throwaway cache files).
 
-### Step 3.3: Consider Using JPEG for Preview Artifacts
+### Step 3.3: Consider Using JPEG for Preview Artifacts ✅ INVESTIGATED — PNG RETAINED
 
 **File:** `backend/internal/render/preview_png.go`
 **What it does:** All previews are saved as PNG.
-**Optimization:** For grayscale previews displayed in the viewer (not DICOM export), encode as JPEG quality 92. JPEG encoding is 5-10x faster than PNG for grayscale images and produces smaller files. PNG would remain for any pixel-exact processing paths.
-**Expected improvement:** ~5-10x speedup on preview artifact creation. Requires frontend changes to handle both formats.
-**How to test:** Benchmark JPEG vs PNG encode for typical dental radiograph sizes.
+**Optimization investigated:** Encode Gray8 previews as JPEG quality 92 instead of PNG BestSpeed. Created `preview_jpeg.go` with `SavePreviewJPEG`/`EncodePreviewJPEG` and `preview.go` with format-dispatching `SavePreview`/`PreviewExtension`. Full JPEG infrastructure is available for future use.
+**Expected improvement:** ~5-10x speedup on preview artifact creation.
+**Actual result:** Go's stdlib `image/jpeg` encoder uses pure-Go DCT — it is **~3x slower** than PNG BestSpeed for Gray8, not faster. `BenchmarkEncodePreviewJPEG` vs `BenchmarkEncodePreviewPNG` with 2048×1536 Gray8:
+- **PNG BestSpeed**: ~4.3 ms/op, 1,255,054 B/op, 32 allocs
+- **JPEG q92**: ~12.1 ms/op, 4,512 B/op, 6 allocs
+- **JPEG q75**: ~11.3 ms/op, 4,512 B/op, 6 allocs
+- JPEG quality setting barely affects encode time — DCT dominates, not entropy coding.
+- JPEG allocates 99.6% less memory (4.5 KB vs 1.2 MB) and 81% fewer allocs (6 vs 32).
+- **Decision:** Retain PNG BestSpeed for all preview artifacts. The plan's predicted 5-10x speedup assumed C-level libjpeg-turbo performance; Go's stdlib `image/jpeg` is unoptimized pure-Go. The allocation reduction is significant but doesn't justify a 3x wall-clock regression. JPEG infrastructure kept in `preview_jpeg.go` and `preview.go` for potential future use with a CGO libjpeg-turbo binding.
+**How to test:** `BenchmarkEncodePreviewJPEG` and `BenchmarkSavePreviewJPEG` in `preview_jpeg_test.go`.
 
 ---
 
