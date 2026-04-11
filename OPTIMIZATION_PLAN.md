@@ -87,13 +87,16 @@ The render and processing pipelines iterate over every pixel in the image. For a
 **Actual improvement:** `BenchmarkEncodePreviewPNG/Gray8`: 4,007,568 → 861,837 B/op (78% reduction, saved 3.1 MB/call), 8.2 → 7.3 ms/op (11% speedup), 31 → 30 allocs. `RGBA8`: 13,470,096 → 887,180 B/op (93% reduction, saved 12.6 MB/call), 28.7 → 26.1 ms/op (9% speedup), 31 → 30 allocs.
 **How to test:** `BenchmarkEncodePreviewPNG` in `preview_png_test.go` with 2048x1536 image, compare allocs.
 
-### Step 2.3: Avoid Double Clone in Cache Store/Load
+### Step 2.3: Avoid Double Clone in Cache Store/Load ✅
 
 **File:** `backend/internal/cache/memory.go:122-146`
 **What it does:** `StoreSourcePreview` clones the preview on store. `LoadSourcePreview` clones again on load. For a 3 MB image, this means 6 MB of unnecessary copying per cache round-trip.
-**Optimization:** Since `LoadSourcePreview` already returns a clone (safe for the caller to mutate), avoid cloning on store if the caller doesn't retain the buffer. Alternatively, use copy-on-write semantics or reference counting. At minimum, document the contract and eliminate one clone.
-**Expected improvement:** 3-12 MB less allocation per cache hit, ~5% speedup on cached job paths.
-**How to test:** Benchmark cache store/load round-trip.
+**Optimization:** Removed the `clonePreviewImage` call from `StoreSourcePreview` — the cache now takes ownership of the pixel slice directly. `LoadSourcePreview` still returns a defensive clone, so all readers remain safe. All callers of `loadOrRenderSourcePreview` in `jobs/service.go` are read-only on the returned pixels (SavePreviewPNG reads for PNG encode, ProcessRenderedPreview copies internally before processing, CombineComparison only reads). Documented the ownership contract on StoreSourcePreview.
+**Actual improvement:** `BenchmarkSourcePreviewStoreLoad` with 2048×1536 gray8 (3.1 MB):
+- **RoundTrip**: 512k → 222k ns/op (57% faster), 6,291,471 → 3,145,739 B/op (50% reduction, saved 3.1 MB), 2 → 1 allocs
+- **StoreOnly**: 260k → 214 ns/op (99.9% faster), 3,145,824 → 32 B/op (99.999% reduction), 3 → 1 allocs
+- **LoadOnly**: unchanged (clone on load preserved)
+**How to test:** `BenchmarkSourcePreviewStoreLoad` in `memory_test.go` with `-benchmem`.
 
 ### Step 2.4: Preallocate `bytes.Buffer` in DICOM Export
 

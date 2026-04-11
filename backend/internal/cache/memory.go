@@ -119,6 +119,9 @@ func (memory *Memory) LoadAnalyze(
 	return cloneAnalyzeResult(payload), true
 }
 
+// StoreSourcePreview stores a preview in the cache. The cache takes ownership
+// of preview.Pixels — callers must not mutate the slice after calling Store.
+// LoadSourcePreview returns a defensive clone, so readers are always safe.
 func (memory *Memory) StoreSourcePreview(inputPath string, preview imaging.PreviewImage) {
 	memory.mu.Lock()
 	defer memory.mu.Unlock()
@@ -127,9 +130,8 @@ func (memory *Memory) StoreSourcePreview(inputPath string, preview imaging.Previ
 		memory.sourcePreviewBytes -= existing.ByteSize()
 	}
 
-	cloned := clonePreviewImage(preview)
-	memory.sourcePreviews[inputPath] = cloned
-	memory.sourcePreviewBytes += cloned.ByteSize()
+	memory.sourcePreviews[inputPath] = preview
+	memory.sourcePreviewBytes += preview.ByteSize()
 	memory.evictSourcePreviewLocked(inputPath)
 }
 

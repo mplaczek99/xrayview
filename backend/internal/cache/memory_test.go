@@ -143,6 +143,54 @@ func TestMemorySourcePreviewRoundTripClonesPixels(t *testing.T) {
 	}
 }
 
+func BenchmarkSourcePreviewStoreLoad(b *testing.B) {
+	// 2048x1536 gray8 = 3,145,728 bytes — typical dental radiograph.
+	const width, height = 2048, 1536
+	pixels := make([]uint8, width*height)
+	for i := range pixels {
+		pixels[i] = uint8(i)
+	}
+
+	b.Run("RoundTrip", func(b *testing.B) {
+		memory := NewMemory(nil)
+		preview := imaging.GrayPreview(width, height, pixels)
+		b.ResetTimer()
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			memory.StoreSourcePreview("/tmp/bench.dcm", preview)
+			loaded, ok := memory.LoadSourcePreview("/tmp/bench.dcm")
+			if !ok {
+				b.Fatal("cache miss")
+			}
+			_ = loaded
+		}
+	})
+
+	b.Run("StoreOnly", func(b *testing.B) {
+		memory := NewMemory(nil)
+		preview := imaging.GrayPreview(width, height, pixels)
+		b.ResetTimer()
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			memory.StoreSourcePreview(fmt.Sprintf("/tmp/bench-%d.dcm", i), preview)
+		}
+	})
+
+	b.Run("LoadOnly", func(b *testing.B) {
+		memory := NewMemory(nil)
+		memory.StoreSourcePreview("/tmp/bench.dcm", imaging.GrayPreview(width, height, pixels))
+		b.ResetTimer()
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			loaded, ok := memory.LoadSourcePreview("/tmp/bench.dcm")
+			if !ok {
+				b.Fatal("cache miss")
+			}
+			_ = loaded
+		}
+	})
+}
+
 func TestMemoryStoreBoundsResultEntries(t *testing.T) {
 	memory := NewMemory(nil)
 
