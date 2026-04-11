@@ -109,13 +109,17 @@ The render and processing pipelines iterate over every pixel in the image. For a
 - Plan predicted ~20% speedup but modern Go `bytes.Buffer` growth strategy is already efficient — the buffer growth was a small fraction of total cost. Pixel data copies across `binaryElement`, `evenLengthBytes`, and `rgbaToRGB` dominate allocation.
 **How to test:** `BenchmarkEncodeSecondaryCapture` in `secondary_capture_test.go` with `-benchmem`.
 
-### Step 2.5: Avoid `rgbaToRGB` Allocation in Export
+### Step 2.5: Avoid `rgbaToRGB` Allocation in Export ✅
 
-**File:** `backend/internal/export/secondary_capture.go:364-369`
-**What it does:** `rgbaToRGB` allocates a new `[]uint8` slice that is 75% the size of the input. For a 2000x1500 RGBA image, this is ~9 MB in, ~6.75 MB out.
-**Optimization:** Write RGB bytes directly into the DICOM element buffer instead of creating an intermediate slice. Use a streaming approach that converts RGBA->RGB while writing to the `bytes.Buffer`.
-**Expected improvement:** Eliminates ~7 MB of temporary allocation per RGBA DICOM export.
-**How to test:** Benchmark export with RGBA preview.
+**File:** `backend/internal/export/secondary_capture.go:372-387`
+**What it does:** `rgbaToRGB` allocated a new `[]uint8` slice (~9 MB), then `evenLengthBytes` copied it (~9 MB), then `binaryElement` defensively copied again (~9 MB) — three allocations for the same pixel data.
+**Optimization:** Replaced the `rgbaToRGB` → `evenLengthBytes` → `binaryElement` chain with a single `rgbaPixelElement` function that pre-calculates the padded RGB size, allocates once, and converts RGBA→RGB directly into the element value buffer. Eliminated the old `rgbaToRGB` function entirely.
+**Actual improvement:** `BenchmarkEncodeSecondaryCapture` with 2048×1536 RGBA8:
+- **B/op**: 37,762,963 → 18,888,593 (50% reduction, saved 18.9 MB/call — plan predicted ~7 MB, actual was higher because downstream copies were also eliminated)
+- **allocs/op**: 55 → 53 (2 fewer)
+- **ns/op**: ~7,180 μs → ~6,070 μs (15% speedup)
+- Gray8 path unchanged (not affected).
+**How to test:** `BenchmarkEncodeSecondaryCapture` in `secondary_capture_test.go` with `-benchmem`.
 
 ---
 

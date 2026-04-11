@@ -235,7 +235,7 @@ func pixelElements(preview imaging.PreviewImage) []element {
 			u16Element(0x00280101, 8),
 			u16Element(0x00280102, 7),
 			u16Element(0x00280103, 0),
-			binaryElement(0x7fe00010, "OB", evenLengthBytes(rgbaToRGB(preview.Pixels), 0x00)),
+			rgbaPixelElement(0x7fe00010, preview.Pixels),
 		}
 	default:
 		return nil
@@ -369,12 +369,24 @@ func writeElement(buffer *bytes.Buffer, encoded element) error {
 	return nil
 }
 
-func rgbaToRGB(rgba []uint8) []byte {
-	rgb := make([]uint8, 0, len(rgba)/4*3)
-	for offset := 0; offset+3 < len(rgba); offset += 4 {
-		rgb = append(rgb, rgba[offset], rgba[offset+1], rgba[offset+2])
+// rgbaPixelElement converts RGBA pixel data to RGB directly into a single
+// element value buffer, avoiding intermediate allocations from rgbaToRGB,
+// evenLengthBytes, and binaryElement's defensive copy.
+func rgbaPixelElement(tag uint32, rgba []uint8) element {
+	rgbLen := len(rgba) / 4 * 3
+	paddedLen := rgbLen
+	if paddedLen%2 != 0 {
+		paddedLen++ // DICOM even-length padding; pad byte is 0x00 from make
 	}
-	return rgb
+	rgb := make([]byte, paddedLen)
+	j := 0
+	for offset := 0; offset+3 < len(rgba); offset += 4 {
+		rgb[j] = rgba[offset]
+		rgb[j+1] = rgba[offset+1]
+		rgb[j+2] = rgba[offset+2]
+		j += 3
+	}
+	return element{tag: tag, vr: "OB", value: rgb}
 }
 
 func generateUID() (string, error) {
