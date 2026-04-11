@@ -136,13 +136,14 @@ The render and processing pipelines iterate over every pixel in the image. For a
 - Plan predicted 10-20% but Go's `png.Encode` already writes in moderately large IDAT chunks, so syscall count was lower than expected. The 64 KB buffer still reduces small writes for chunk headers, CRC values, IHDR, and IEND. Benefit would be larger on network writers or slower I/O backends.
 **How to test:** `BenchmarkSavePreviewPNG` in `preview_png_test.go` with `-benchmem`.
 
-### Step 3.2: Use `png.Encoder` with `BestSpeed` Compression
+### Step 3.2: Use `png.Encoder` with `BestSpeed` Compression ✅ DONE
 
-**File:** `backend/internal/render/preview_png.go:41`
+**File:** `backend/internal/render/preview_png.go:49`
 **What it does:** `png.Encode(writer, imageValue)` uses default compression, which is `zlib.DefaultCompression` (level 6).
 **Optimization:** Use `(&png.Encoder{CompressionLevel: png.BestSpeed}).Encode(writer, imageValue)`. Preview PNGs are consumed locally over loopback and are temporary cache artifacts - they don't need maximum compression.
 **Expected improvement:** ~3-5x speedup on PNG encoding. File size increases ~20-40%, but these are local cache files read once then discarded. This is likely the single largest speedup for the render job path.
 **How to test:** Benchmark both compression levels, measure encode time and file size.
+**Actual result:** ~1.6x speedup (Gray8: 7.1ms→4.3ms, RGBA8: 25.4ms→16.1ms). Less than predicted 3-5x because Go's `png` package filter heuristics limit how much compression level alone affects speed. Alloc increased ~45% (acceptable for throwaway cache files).
 
 ### Step 3.3: Consider Using JPEG for Preview Artifacts
 

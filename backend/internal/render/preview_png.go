@@ -46,7 +46,8 @@ func EncodePreviewPNG(writer io.Writer, preview imaging.PreviewImage) error {
 		return err
 	}
 
-	if err := png.Encode(writer, imageValue); err != nil {
+	encoder := png.Encoder{CompressionLevel: png.BestSpeed}
+	if err := encoder.Encode(writer, imageValue); err != nil {
 		return fmt.Errorf("encode preview PNG: %w", err)
 	}
 
