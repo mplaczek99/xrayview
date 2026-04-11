@@ -3,6 +3,7 @@ package bufpool
 import "sync"
 
 var uint8Pool = sync.Pool{}
+var uint16Pool = sync.Pool{}
 var float32Pool = sync.Pool{}
 
 // GetUint8 returns a []uint8 of length n from the pool, or allocates a new
@@ -23,6 +24,26 @@ func PutUint8(buf []uint8) {
 	}
 	buf = buf[:cap(buf)]
 	uint8Pool.Put(&buf)
+}
+
+// GetUint16 returns a []uint16 of length n from the pool, or allocates a new
+// one if no pooled buffer has enough capacity.
+func GetUint16(n int) []uint16 {
+	if v := uint16Pool.Get(); v != nil {
+		if buf := *v.(*[]uint16); cap(buf) >= n {
+			return buf[:n]
+		}
+	}
+	return make([]uint16, n)
+}
+
+// PutUint16 returns a buffer to the pool for later reuse.
+func PutUint16(buf []uint16) {
+	if cap(buf) == 0 {
+		return
+	}
+	buf = buf[:cap(buf)]
+	uint16Pool.Put(&buf)
 }
 
 // GetFloat32 returns a []float32 of length n from the pool, or allocates a

@@ -547,6 +547,73 @@ func BenchmarkAnalyzeGrayscalePixels(b *testing.B) {
 	}
 }
 
+func TestGaussianBlurIntegerMatchesFloat(t *testing.T) {
+	const width = 2048
+	const height = 1536
+	pixels := make([]uint8, width*height)
+	for i := range pixels {
+		pixels[i] = uint8((i*7 + 13) % 256)
+	}
+
+	reference := gaussianBlurGrayFast(pixels, width, height, 1.4)
+	integer := gaussianBlurGrayInteger(pixels, width, height)
+
+	if len(reference) != len(integer) {
+		t.Fatalf("length mismatch: %d vs %d", len(reference), len(integer))
+	}
+
+	maxDiff := 0
+	diffs := 0
+	for i := range reference {
+		d := int(reference[i]) - int(integer[i])
+		if d < 0 {
+			d = -d
+		}
+		if d > maxDiff {
+			maxDiff = d
+		}
+		if d > 0 {
+			diffs++
+		}
+	}
+
+	if maxDiff > 1 {
+		t.Fatalf("max pixel diff = %d, want <= 1", maxDiff)
+	}
+	t.Logf("integer vs float: %d/%d pixels differ (%.2f%%), max diff = %d",
+		diffs, len(pixels), float64(diffs)/float64(len(pixels))*100, maxDiff)
+
+	bufpool.PutUint8(reference)
+	bufpool.PutUint8(integer)
+}
+
+func BenchmarkGaussianBlurSmall(b *testing.B) {
+	const width = 2048
+	const height = 1536
+	pixels := make([]uint8, width*height)
+	for i := range pixels {
+		pixels[i] = uint8(i % 256)
+	}
+
+	b.Run("Float", func(b *testing.B) {
+		b.SetBytes(int64(len(pixels)))
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			out := gaussianBlurGrayFast(pixels, width, height, 1.4)
+			bufpool.PutUint8(out)
+		}
+	})
+
+	b.Run("Integer", func(b *testing.B) {
+		b.SetBytes(int64(len(pixels)))
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			out := gaussianBlurGrayInteger(pixels, width, height)
+			bufpool.PutUint8(out)
+		}
+	})
+}
+
 func equalBools(left, right []bool) bool {
 	if len(left) != len(right) {
 		return false

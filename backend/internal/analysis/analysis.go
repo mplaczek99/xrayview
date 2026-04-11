@@ -722,12 +722,177 @@ func gaussianBlurGray(pixels []uint8, width, height uint32, sigma float64) []uin
 	return blurred
 }
 
-// dualGaussianBlurGray performs two separable Gaussian blurs using the
-// optimized blur path that splits boundary/interior processing.
+// dualGaussianBlurGray performs two separable Gaussian blurs. Uses the
+// integer-arithmetic path for sigma=1.4 (fixed kernel) and the optimized
+// float path for larger kernels.
 func dualGaussianBlurGray(pixels []uint8, width, height uint32, sigma1, sigma2 float64) ([]uint8, []uint8) {
-	blurred1 := gaussianBlurGrayFast(pixels, width, height, sigma1)
+	var blurred1 []uint8
+	if sigma1 == 1.4 {
+		blurred1 = gaussianBlurGrayInteger(pixels, width, height)
+	} else {
+		blurred1 = gaussianBlurGrayFast(pixels, width, height, sigma1)
+	}
 	blurred2 := gaussianBlurGrayFast(pixels, width, height, sigma2)
 	return blurred1, blurred2
+}
+
+// gaussianBlurGrayInteger performs a separable Gaussian blur using fixed-point
+// integer arithmetic. The kernel [7, 27, 57, 74, 57, 27, 7] (sum=256)
+// approximates a Gaussian with sigma≈1.4 (kernel size 7, radius 3).
+// Horizontal pass stores weighted sums as uint16 (max 65280); vertical pass
+// accumulates uint32 and divides by 65536 (>>16) for the final uint8 output.
+func gaussianBlurGrayInteger(pixels []uint8, width, height uint32) []uint8 {
+	widthInt := int(width)
+	heightInt := int(height)
+	pixelCount := len(pixels)
+
+	// Fixed-point kernel: [7, 27, 57, 74, 57, 27, 7], sum = 256.
+	const (
+		w0     = 7
+		w1     = 27
+		w2     = 57
+		w3     = 74
+		radius = 3
+	)
+
+	transient := bufpool.GetUint16(pixelCount)
+
+	// --- Horizontal pass ---
+	for y := 0; y < heightInt; y++ {
+		rs := y * widthInt
+
+		// Left boundary (x < radius): clamp source indices to 0.
+		for x := 0; x < radius && x < widthInt; x++ {
+			var sum uint32
+			for k := 0; k < 7; k++ {
+				sx := x + k - radius
+				if sx < 0 {
+					sx = 0
+				} else if sx >= widthInt {
+					sx = widthInt - 1
+				}
+				kw := [7]uint32{w0, w1, w2, w3, w2, w1, w0}
+				sum += uint32(pixels[rs+sx]) * kw[k]
+			}
+			transient[rs+x] = uint16(sum)
+		}
+
+		// Interior: fully unrolled, no bounds checks.
+		for x := radius; x < widthInt-radius; x++ {
+			b := rs + x - radius
+			transient[rs+x] = uint16(
+				uint32(pixels[b])*w0 + uint32(pixels[b+1])*w1 +
+					uint32(pixels[b+2])*w2 + uint32(pixels[b+3])*w3 +
+					uint32(pixels[b+4])*w2 + uint32(pixels[b+5])*w1 +
+					uint32(pixels[b+6])*w0)
+		}
+
+		// Right boundary (x >= width-radius): clamp to width-1.
+		for x := widthInt - radius; x < widthInt; x++ {
+			if x < radius {
+				continue
+			}
+			var sum uint32
+			for k := 0; k < 7; k++ {
+				sx := x + k - radius
+				if sx >= widthInt {
+					sx = widthInt - 1
+				}
+				kw := [7]uint32{w0, w1, w2, w3, w2, w1, w0}
+				sum += uint32(pixels[rs+sx]) * kw[k]
+			}
+			transient[rs+x] = uint16(sum)
+		}
+	}
+
+	blurred := bufpool.GetUint8(pixelCount)
+
+	// --- Vertical pass ---
+	// Top boundary rows (y < radius): clamp source row to 0.
+	for y := 0; y < radius && y < heightInt; y++ {
+		ro := y * widthInt
+		for x := 0; x < widthInt; x++ {
+			var sum uint32
+			for k := 0; k < 7; k++ {
+				sy := y + k - radius
+				if sy < 0 {
+					sy = 0
+				} else if sy >= heightInt {
+					sy = heightInt - 1
+				}
+				kw := [7]uint32{w0, w1, w2, w3, w2, w1, w0}
+				sum += uint32(transient[sy*widthInt+x]) * kw[k]
+			}
+			blurred[ro+x] = uint8((sum + 32768) >> 16)
+		}
+	}
+
+	// Interior rows: fully unrolled kernel, 4-column unrolling.
+	for y := radius; y < heightInt-radius; y++ {
+		ro := y * widthInt
+		by := y - radius
+		r0 := by * widthInt
+		r1 := (by + 1) * widthInt
+		r2 := (by + 2) * widthInt
+		r3 := (by + 3) * widthInt
+		r4 := (by + 4) * widthInt
+		r5 := (by + 5) * widthInt
+		r6 := (by + 6) * widthInt
+
+		x := 0
+		for ; x <= widthInt-4; x += 4 {
+			s0 := uint32(transient[r0+x])*w0 + uint32(transient[r1+x])*w1 +
+				uint32(transient[r2+x])*w2 + uint32(transient[r3+x])*w3 +
+				uint32(transient[r4+x])*w2 + uint32(transient[r5+x])*w1 +
+				uint32(transient[r6+x])*w0
+			s1 := uint32(transient[r0+x+1])*w0 + uint32(transient[r1+x+1])*w1 +
+				uint32(transient[r2+x+1])*w2 + uint32(transient[r3+x+1])*w3 +
+				uint32(transient[r4+x+1])*w2 + uint32(transient[r5+x+1])*w1 +
+				uint32(transient[r6+x+1])*w0
+			s2 := uint32(transient[r0+x+2])*w0 + uint32(transient[r1+x+2])*w1 +
+				uint32(transient[r2+x+2])*w2 + uint32(transient[r3+x+2])*w3 +
+				uint32(transient[r4+x+2])*w2 + uint32(transient[r5+x+2])*w1 +
+				uint32(transient[r6+x+2])*w0
+			s3 := uint32(transient[r0+x+3])*w0 + uint32(transient[r1+x+3])*w1 +
+				uint32(transient[r2+x+3])*w2 + uint32(transient[r3+x+3])*w3 +
+				uint32(transient[r4+x+3])*w2 + uint32(transient[r5+x+3])*w1 +
+				uint32(transient[r6+x+3])*w0
+			blurred[ro+x] = uint8((s0 + 32768) >> 16)
+			blurred[ro+x+1] = uint8((s1 + 32768) >> 16)
+			blurred[ro+x+2] = uint8((s2 + 32768) >> 16)
+			blurred[ro+x+3] = uint8((s3 + 32768) >> 16)
+		}
+		for ; x < widthInt; x++ {
+			sum := uint32(transient[r0+x])*w0 + uint32(transient[r1+x])*w1 +
+				uint32(transient[r2+x])*w2 + uint32(transient[r3+x])*w3 +
+				uint32(transient[r4+x])*w2 + uint32(transient[r5+x])*w1 +
+				uint32(transient[r6+x])*w0
+			blurred[ro+x] = uint8((sum + 32768) >> 16)
+		}
+	}
+
+	// Bottom boundary rows (y >= height-radius): clamp to last row.
+	for y := heightInt - radius; y < heightInt; y++ {
+		if y < radius {
+			continue
+		}
+		ro := y * widthInt
+		for x := 0; x < widthInt; x++ {
+			var sum uint32
+			for k := 0; k < 7; k++ {
+				sy := y + k - radius
+				if sy >= heightInt {
+					sy = heightInt - 1
+				}
+				kw := [7]uint32{w0, w1, w2, w3, w2, w1, w0}
+				sum += uint32(transient[sy*widthInt+x]) * kw[k]
+			}
+			blurred[ro+x] = uint8((sum + 32768) >> 16)
+		}
+	}
+
+	bufpool.PutUint16(transient)
+	return blurred
 }
 
 // gaussianBlurGrayFast is an optimized separable Gaussian blur. It splits both

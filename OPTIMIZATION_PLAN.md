@@ -180,13 +180,19 @@ The render and processing pipelines iterate over every pixel in the image. For a
 - **Pixel accuracy**: exact match vs original (0/3,145,728 pixels differ for both sigma=1.4 and sigma=9.0)
 **How to test:** `BenchmarkGaussianBlurDual` and `TestGaussianBlurGrayFastMatchesOriginal` in `analysis_test.go`.
 
-### Step 4.2: Use Integer Approximation for Small Gaussian Blur
+### Step 4.2: Use Integer Approximation for Small Gaussian Blur ✅
 
-**File:** `backend/internal/analysis/analysis.go:666-712`
+**File:** `backend/internal/analysis/analysis.go`
 **What it does:** Blur uses float32 accumulation for kernel weights.
-**Optimization:** For sigma=1.4 (kernel size ~5), use fixed-point integer arithmetic with a [1, 4, 6, 4, 1]/16 binomial approximation. This avoids all float operations and uses only shifts and adds.
-**Expected improvement:** ~2x speedup on small blur pass. Integer ops are cheaper than float on most architectures, and the quality difference is invisible for threshold-based tooth detection.
-**How to test:** Compare blur output images pixel-by-pixel, verify max difference <= 1. Benchmark both.
+**Optimization:** Created `gaussianBlurGrayInteger` using fixed-point integer arithmetic with the kernel [7, 27, 57, 74, 57, 27, 7] / 256 (matching the actual Gaussian for sigma=1.4, kernel size 7, radius 3). Horizontal pass stores weighted sums as uint16 (max 65280, half the memory of float32 transient). Vertical pass accumulates uint32 and divides by 65536 (>>16) with rounding bias (+32768). Interior loops are fully unrolled (no kernel loop) with 4-column vertical unrolling. Kernel weights are compile-time constants — no kernel allocation. Added `GetUint16`/`PutUint16` to `bufpool` for transient buffer pooling. `dualGaussianBlurGray` dispatches sigma=1.4 to the integer path.
+**Actual improvement:** `BenchmarkGaussianBlurSmall` with 2048×1536 (3.1M pixels):
+- **Float**: ~20.8 ms/op, ~280 KB B/op, 3 allocs
+- **Integer**: ~13.4 ms/op, ~80 B/op, 2 allocs
+- **1.55x speedup** (35% faster). Plan predicted 2x — modern CPUs handle float nearly as fast as integer; memory bandwidth dominates over arithmetic. The gains come from: uint16 transient (half the cache footprint of float32), no kernel allocation, no float→uint8 conversion overhead, fully unrolled compile-time-constant kernel.
+- **Dual blur** (Fused): 193 → 183 ms/op (5% faster, 1 fewer alloc). Sigma=9.0 dominates the dual blur.
+- **AnalyzeGrayscalePixels** (end-to-end): ~5.1 → ~4.9 ms/op (~5% faster, 1 fewer alloc).
+- **Pixel accuracy**: max diff ≤ 1 vs float reference; only 0.05% of pixels differ by 1. Invisible for threshold-based tooth detection.
+**How to test:** `TestGaussianBlurIntegerMatchesFloat` and `BenchmarkGaussianBlurSmall` in `analysis_test.go`.
 
 ### Step 4.3: Skip Analysis on Cached Source Preview
 
