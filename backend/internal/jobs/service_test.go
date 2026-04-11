@@ -955,6 +955,130 @@ func TestStartAnalyzeJobDeduplicatesActiveStudyAnalysis(t *testing.T) {
 	}
 }
 
+func TestAnalyzeJobSkipsDecodeWhenSourcePreviewAndScaleCached(t *testing.T) {
+	studyRegistry, study := registerTestStudy(t)
+	cacheStore := cache.New(filepath.Join(t.TempDir(), "cache"))
+	sourceStudy := syntheticAnalyzeSourceStudy()
+	decoder := &countingServiceDecoder{study: sourceStudy}
+	service := newService(
+		cacheStore,
+		studyRegistry,
+		nil,
+		dicomexport.GoWriter{},
+		func() (studyDecoder, error) { return decoder, nil },
+		sequenceJobIDs("job-1"),
+	)
+
+	preview := render.RenderSourceImage(sourceStudy.Image, render.DefaultRenderPlan())
+	service.memoryCache.StoreSourcePreview(study.InputPath, preview)
+	service.memoryCache.StoreMeasurementScale(study.InputPath, sourceStudy.MeasurementScale)
+
+	started, err := service.StartAnalyzeJob(contracts.AnalyzeStudyCommand{StudyID: study.StudyID})
+	if err != nil {
+		t.Fatalf("StartAnalyzeJob returned error: %v", err)
+	}
+
+	snapshot := waitForTerminalJob(t, service, started.JobID)
+	if got, want := snapshot.State, contracts.JobStateCompleted; got != want {
+		t.Fatalf("State = %q, want %q", got, want)
+	}
+
+	if got := decoder.CallCount(); got != 0 {
+		t.Fatalf("DecodeStudy calls = %d, want 0 (should skip decode on cache hit)", got)
+	}
+
+	result, ok := snapshot.Result.Payload.(contracts.AnalyzeStudyCommandResult)
+	if !ok {
+		t.Fatalf("Result.Payload type = %T, want contracts.AnalyzeStudyCommandResult", snapshot.Result.Payload)
+	}
+	if result.Analysis.Tooth == nil {
+		t.Fatal("Analysis.Tooth = nil, want detected synthetic candidate")
+	}
+	if result.Analysis.Calibration.MeasurementScale == nil {
+		t.Fatal("Analysis.Calibration.MeasurementScale = nil, want cached scale")
+	}
+	if !result.Analysis.Calibration.RealWorldMeasurementsAvailable {
+		t.Fatal("Analysis.Calibration.RealWorldMeasurementsAvailable = false, want true")
+	}
+}
+
+func TestRenderThenAnalyzeSkipsDecodeOnEvictedDecodeCache(t *testing.T) {
+	studyRegistry := studies.New()
+	studyDir := t.TempDir()
+	inputPaths := make([]string, 6)
+	studyRecords := make([]contracts.StudyRecord, 6)
+	for i := range inputPaths {
+		inputPaths[i] = filepath.Join(studyDir, fmt.Sprintf("study-%d.dcm", i))
+		if err := os.WriteFile(inputPaths[i], []byte("dicom"), 0o644); err != nil {
+			t.Fatalf("WriteFile returned error: %v", err)
+		}
+		study, err := studyRegistry.Register(inputPaths[i], nil)
+		if err != nil {
+			t.Fatalf("Register returned error: %v", err)
+		}
+		studyRecords[i] = study
+	}
+
+	sourceStudy := syntheticAnalyzeSourceStudy()
+	decoder := &countingServiceDecoder{study: sourceStudy}
+	cacheStore := cache.New(filepath.Join(t.TempDir(), "cache"))
+	jobSeq := 0
+	service := newService(
+		cacheStore,
+		studyRegistry,
+		nil,
+		dicomexport.GoWriter{},
+		func() (studyDecoder, error) { return decoder, nil },
+		func() (string, error) {
+			jobSeq++
+			return fmt.Sprintf("job-%d", jobSeq), nil
+		},
+	)
+
+	renderStarted, err := service.StartRenderJob(contracts.RenderStudyCommand{StudyID: studyRecords[0].StudyID})
+	if err != nil {
+		t.Fatalf("StartRenderJob returned error: %v", err)
+	}
+	renderSnapshot := waitForTerminalJob(t, service, renderStarted.JobID)
+	if got, want := renderSnapshot.State, contracts.JobStateCompleted; got != want {
+		t.Fatalf("render State = %q, want %q", got, want)
+	}
+	decodesAfterRender := decoder.CallCount()
+
+	for i := 1; i <= 5; i++ {
+		started, err := service.StartRenderJob(contracts.RenderStudyCommand{StudyID: studyRecords[i].StudyID})
+		if err != nil {
+			t.Fatalf("StartRenderJob[%d] error: %v", i, err)
+		}
+		snap := waitForTerminalJob(t, service, started.JobID)
+		if snap.State != contracts.JobStateCompleted {
+			t.Fatalf("render[%d] State = %q", i, snap.State)
+		}
+	}
+
+	analyzeStarted, err := service.StartAnalyzeJob(contracts.AnalyzeStudyCommand{StudyID: studyRecords[0].StudyID})
+	if err != nil {
+		t.Fatalf("StartAnalyzeJob returned error: %v", err)
+	}
+	analyzeSnapshot := waitForTerminalJob(t, service, analyzeStarted.JobID)
+	if got, want := analyzeSnapshot.State, contracts.JobStateCompleted; got != want {
+		t.Fatalf("analyze State = %q, want %q", got, want)
+	}
+
+	if got := decoder.CallCount(); got != decodesAfterRender+5 {
+		t.Fatalf("DecodeStudy calls = %d, want %d (analyze should skip decode, 5 more renders fill decode cache)",
+			got, decodesAfterRender+5)
+	}
+
+	result, ok := analyzeSnapshot.Result.Payload.(contracts.AnalyzeStudyCommandResult)
+	if !ok {
+		t.Fatalf("Result.Payload type = %T, want contracts.AnalyzeStudyCommandResult", analyzeSnapshot.Result.Payload)
+	}
+	if result.Analysis.Tooth == nil {
+		t.Fatal("Analysis.Tooth = nil, want detected candidate")
+	}
+}
+
 func TestWorkflowReusesDecodeAndSourcePreviewAcrossJobs(t *testing.T) {
 	studyRegistry, study := registerTestStudy(t)
 	cacheStore := cache.New(filepath.Join(t.TempDir(), "cache"))

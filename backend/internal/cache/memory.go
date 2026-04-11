@@ -16,19 +16,25 @@ const (
 	maxSourcePreviewBytes   uint64 = 64 * 1024 * 1024 // 64 MB
 )
 
+type cachedScale struct {
+	scale *contracts.MeasurementScale
+}
+
 type Memory struct {
-	mu                 sync.Mutex
-	logger             *slog.Logger
-	entries            map[string]contracts.JobResult
-	sourcePreviews     map[string]imaging.PreviewImage
-	sourcePreviewBytes uint64
+	mu                  sync.Mutex
+	logger              *slog.Logger
+	entries             map[string]contracts.JobResult
+	sourcePreviews      map[string]imaging.PreviewImage
+	sourcePreviewBytes  uint64
+	measurementScales   map[string]cachedScale
 }
 
 func NewMemory(logger *slog.Logger) *Memory {
 	return &Memory{
-		logger:         logger,
-		entries:        make(map[string]contracts.JobResult),
-		sourcePreviews: make(map[string]imaging.PreviewImage),
+		logger:            logger,
+		entries:           make(map[string]contracts.JobResult),
+		sourcePreviews:    make(map[string]imaging.PreviewImage),
+		measurementScales: make(map[string]cachedScale),
 	}
 }
 
@@ -145,6 +151,25 @@ func (memory *Memory) LoadSourcePreview(inputPath string) (imaging.PreviewImage,
 	}
 
 	return clonePreviewImage(preview), true
+}
+
+func (memory *Memory) StoreMeasurementScale(inputPath string, scale *contracts.MeasurementScale) {
+	memory.mu.Lock()
+	defer memory.mu.Unlock()
+
+	memory.measurementScales[inputPath] = cachedScale{scale: cloneMeasurementScale(scale)}
+}
+
+func (memory *Memory) LoadMeasurementScale(inputPath string) (*contracts.MeasurementScale, bool) {
+	memory.mu.Lock()
+	defer memory.mu.Unlock()
+
+	cached, ok := memory.measurementScales[inputPath]
+	if !ok {
+		return nil, false
+	}
+
+	return cloneMeasurementScale(cached.scale), true
 }
 
 func (memory *Memory) storeLocked(fingerprint string, result contracts.JobResult) {
@@ -333,6 +358,7 @@ func (memory *Memory) evictSourcePreviewLocked(keepInputPath string) {
 
 			memory.sourcePreviewBytes -= preview.ByteSize()
 			delete(memory.sourcePreviews, inputPath)
+			delete(memory.measurementScales, inputPath)
 			evicted = true
 			break
 		}

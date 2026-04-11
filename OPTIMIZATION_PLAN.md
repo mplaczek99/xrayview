@@ -194,13 +194,18 @@ The render and processing pipelines iterate over every pixel in the image. For a
 - **Pixel accuracy**: max diff ≤ 1 vs float reference; only 0.05% of pixels differ by 1. Invisible for threshold-based tooth detection.
 **How to test:** `TestGaussianBlurIntegerMatchesFloat` and `BenchmarkGaussianBlurSmall` in `analysis_test.go`.
 
-### Step 4.3: Skip Analysis on Cached Source Preview
+### Step 4.3: Skip Analysis on Cached Source Preview ✅
 
-**File:** `backend/internal/jobs/service.go` (executeAnalyzeJob)
+**File:** `backend/internal/jobs/service.go` (executeAnalyzeJob), `backend/internal/cache/memory.go`
 **What it does:** The analyze job always decodes the full DICOM, renders a preview, then analyzes. If a source preview is already cached, it still decodes the full source image.
-**Optimization:** When `loadOrRenderSourcePreview` gets a cache hit, the DICOM pixel decode was wasted. Restructure so the analyze path checks for a cached source preview FIRST and only decodes the DICOM if needed (for measurement scale metadata). The metadata is much smaller and could be cached separately.
-**Expected improvement:** Eliminates redundant ~100-500ms DICOM decode on cached source preview hits.
-**How to test:** Integration test: open study, render, then analyze. Second analyze should skip decode.
+**Optimization:** Added `StoreMeasurementScale`/`LoadMeasurementScale` to `cache.Memory`, keyed by `inputPath` alongside source previews. `executeAnalyzeJob` now checks for cached source preview AND cached measurement scale FIRST — if both hit, the entire DICOM decode and render are skipped. Render and process jobs cache the measurement scale after decoding, so it's available for future analyze jobs. Measurement scales are evicted alongside source previews to stay in sync.
+**Actual improvement:** `BenchmarkAnalyzeJob` with 2048×1536 sample dental radiograph:
+- **WithDecode** (cold cache): ~230 ms/op, ~52 MB/op, ~685 allocs
+- **CacheHit** (warm cache): ~213 ms/op, ~35 MB/op, ~495 allocs
+- **7.4% wall-clock speedup** (~17 ms saved — 8 ms decode + 9 ms render), **33% memory reduction** (17 MB saved), **28% fewer allocations** (190 fewer)
+- Plan predicted 100-500 ms savings; actual decode for this 2048×1536 image is ~8 ms. Savings scale with image size and I/O latency — network-mounted DICOM files or larger images (4K+) would see proportionally larger gains.
+- `BenchmarkFullWorkflow` unchanged (~395 ms) because `DecodeCache` already deduplicates decodes within a single session. The optimization targets the cross-session / evicted-decode-cache scenario.
+**How to test:** `TestAnalyzeJobSkipsDecodeWhenSourcePreviewAndScaleCached` (direct cache pre-population, verifies zero decoder calls) and `TestRenderThenAnalyzeSkipsDecodeOnEvictedDecodeCache` (render 6 studies to evict decode cache, verify analyze skips decode) in `service_test.go`.
 
 ### Step 4.4: Optimize Morphological Operations
 

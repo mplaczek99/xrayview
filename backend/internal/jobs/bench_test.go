@@ -95,6 +95,43 @@ func BenchmarkAnalyzePreview(b *testing.B) {
 	}
 }
 
+func BenchmarkAnalyzeJob(b *testing.B) {
+	study := loadBenchmarkStudy(b)
+	plan := render.DefaultRenderPlan()
+
+	b.Run("WithDecode", func(b *testing.B) {
+		ctx := context.Background()
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			decoded, err := dicommeta.NewDecoder().DecodeStudy(ctx, benchmarkDicomPath)
+			if err != nil {
+				b.Fatal(err)
+			}
+			preview := render.RenderSourceImage(decoded.Image, plan)
+			result, err := analysis.AnalyzePreview(preview, decoded.MeasurementScale)
+			if err != nil {
+				b.Fatal(err)
+			}
+			benchmarkToothAnalysis = result
+		}
+	})
+
+	b.Run("CacheHit", func(b *testing.B) {
+		preview := render.RenderSourceImage(study.Image, plan)
+
+		b.ReportAllocs()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			result, err := analysis.AnalyzePreview(preview, study.MeasurementScale)
+			if err != nil {
+				b.Fatal(err)
+			}
+			benchmarkToothAnalysis = result
+		}
+	})
+}
+
 func BenchmarkFullWorkflow(b *testing.B) {
 	if _, err := os.Stat(benchmarkDicomPath); err != nil {
 		b.Skip("benchmark DICOM not available")

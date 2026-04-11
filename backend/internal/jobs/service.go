@@ -515,6 +515,7 @@ func (service *Service) executeRenderJob(
 		service.failJob(jobID, err)
 		return
 	}
+	service.memoryCache.StoreMeasurementScale(study.InputPath, sourceStudy.MeasurementScale)
 	if service.finishCancelledIfRequested(ctx, jobID, "loadingStudy", "") {
 		return
 	}
@@ -624,6 +625,7 @@ func (service *Service) executeProcessJob(
 		service.failJob(jobID, err)
 		return
 	}
+	service.memoryCache.StoreMeasurementScale(study.InputPath, sourceStudy.MeasurementScale)
 	if service.finishCancelledIfRequested(ctx, jobID, "loadingStudy", previewPath) {
 		return
 	}
@@ -747,47 +749,73 @@ func (service *Service) executeAnalyzeJob(
 		return
 	}
 
-	if err := service.transitionJob(
-		jobID,
-		contracts.JobStateRunning,
-		35,
-		"loadingStudy",
-		"Loading source study",
-	); err != nil {
-		service.failJob(jobID, err)
-		return
-	}
+	var preview imaging.PreviewImage
+	var measurementScale *contracts.MeasurementScale
 
-	sourceStudy, err := service.loadSourceStudy(ctx, contracts.JobKindAnalyzeStudy, study)
-	if err != nil {
+	cachedPreview, previewHit := service.memoryCache.LoadSourcePreview(study.InputPath)
+	cachedScale, scaleHit := service.memoryCache.LoadMeasurementScale(study.InputPath)
+
+	if previewHit && scaleHit {
+		preview = cachedPreview
+		measurementScale = cachedScale
+	} else {
+		if err := service.transitionJob(
+			jobID,
+			contracts.JobStateRunning,
+			35,
+			"loadingStudy",
+			"Loading source study",
+		); err != nil {
+			service.failJob(jobID, err)
+			return
+		}
+
+		sourceStudy, err := service.loadSourceStudy(ctx, contracts.JobKindAnalyzeStudy, study)
+		if err != nil {
+			if service.finishCancelledIfRequested(ctx, jobID, "loadingStudy", previewPath) {
+				return
+			}
+			service.failJob(jobID, err)
+			return
+		}
 		if service.finishCancelledIfRequested(ctx, jobID, "loadingStudy", previewPath) {
 			return
 		}
-		service.failJob(jobID, err)
-		return
-	}
-	if service.finishCancelledIfRequested(ctx, jobID, "loadingStudy", previewPath) {
-		return
+
+		service.memoryCache.StoreMeasurementScale(study.InputPath, sourceStudy.MeasurementScale)
+		measurementScale = sourceStudy.MeasurementScale
+
+		if err := service.transitionJob(
+			jobID,
+			contracts.JobStateRunning,
+			65,
+			"renderingPreview",
+			"Rendering analysis preview",
+		); err != nil {
+			service.failJob(jobID, err)
+			return
+		}
+
+		preview = service.loadOrRenderSourcePreview(study.InputPath, sourceStudy.Image)
 	}
 
 	if err := service.transitionJob(
 		jobID,
 		contracts.JobStateRunning,
-		65,
-		"renderingPreview",
-		"Rendering analysis preview",
+		75,
+		"writingPreview",
+		"Writing analysis preview",
 	); err != nil {
 		service.failJob(jobID, err)
 		return
 	}
 
-	preview := service.loadOrRenderSourcePreview(study.InputPath, sourceStudy.Image)
 	if err := render.SavePreviewPNG(previewPath, preview); err != nil {
 		cleanupPaths(previewPath)
 		service.failJob(jobID, contracts.Internal(fmt.Sprintf("write analysis preview PNG: %v", err)))
 		return
 	}
-	if service.finishCancelledIfRequested(ctx, jobID, "renderingPreview", previewPath) {
+	if service.finishCancelledIfRequested(ctx, jobID, "writingPreview", previewPath) {
 		return
 	}
 
@@ -802,7 +830,7 @@ func (service *Service) executeAnalyzeJob(
 		return
 	}
 
-	toothAnalysis, err := analysis.AnalyzePreview(preview, cloneMeasurementScale(sourceStudy.MeasurementScale))
+	toothAnalysis, err := analysis.AnalyzePreview(preview, cloneMeasurementScale(measurementScale))
 	if err != nil {
 		service.failJob(jobID, contracts.Internal(fmt.Sprintf("analyze tooth candidate: %v", err)))
 		return
