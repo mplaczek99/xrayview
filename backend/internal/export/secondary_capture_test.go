@@ -378,6 +378,46 @@ func elementBytes(t *testing.T, elements map[uint32]parsedElement, tag uint32) [
 	return encoded.value
 }
 
+func BenchmarkEncodeSecondaryCapture(b *testing.B) {
+	fixedTime := time.Date(2026, time.April, 8, 12, 34, 56, 0, time.UTC)
+	uidGen := func() (string, error) { return "2.25.12345", nil }
+	meta := dicommeta.SourceMetadata{StudyInstanceUID: "1.2.3.4.5"}
+
+	b.Run("Gray8_2048x1536", func(b *testing.B) {
+		pixels := make([]uint8, 2048*1536)
+		for i := range pixels {
+			pixels[i] = uint8(i % 256)
+		}
+		preview := imaging.GrayPreview(2048, 1536, pixels)
+		b.ResetTimer()
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			result, err := encodeSecondaryCapture(preview, meta, fixedTime, uidGen)
+			if err != nil {
+				b.Fatal(err)
+			}
+			_ = result
+		}
+	})
+
+	b.Run("RGBA8_2048x1536", func(b *testing.B) {
+		pixels := make([]uint8, 2048*1536*4)
+		for i := range pixels {
+			pixels[i] = uint8(i % 256)
+		}
+		preview := imaging.RGBAPreview(2048, 1536, pixels)
+		b.ResetTimer()
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			result, err := encodeSecondaryCapture(preview, meta, fixedTime, uidGen)
+			if err != nil {
+				b.Fatal(err)
+			}
+			_ = result
+		}
+	})
+}
+
 func floatValue(value *float64) float64 {
 	if value == nil {
 		return 0

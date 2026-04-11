@@ -150,7 +150,15 @@ func encodeSecondaryCapture(
 		groupLength += length
 	}
 
+	// Preallocate buffer: 128 (preamble) + 4 (DICM) + meta overhead +
+	// dataset metadata (~2KB generous) + pixel data (dominates size).
+	pixelSize := len(preview.Pixels)
+	if preview.Format == imaging.FormatRGBA8 {
+		pixelSize = pixelSize / 4 * 3 // RGBA→RGB conversion
+	}
+	estimatedSize := 128 + 4 + groupLength + 2048 + pixelSize
 	var payload bytes.Buffer
+	payload.Grow(estimatedSize)
 	payload.Write(make([]byte, 128))
 	payload.WriteString("DICM")
 	if err := writeElement(&payload, u32Element(0x00020000, groupLength)); err != nil {

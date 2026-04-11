@@ -98,13 +98,16 @@ The render and processing pipelines iterate over every pixel in the image. For a
 - **LoadOnly**: unchanged (clone on load preserved)
 **How to test:** `BenchmarkSourcePreviewStoreLoad` in `memory_test.go` with `-benchmem`.
 
-### Step 2.4: Preallocate `bytes.Buffer` in DICOM Export
+### Step 2.4: Preallocate `bytes.Buffer` in DICOM Export ✅
 
 **File:** `backend/internal/export/secondary_capture.go:153`
 **What it does:** `var payload bytes.Buffer` starts at zero capacity and grows dynamically as DICOM elements are written. A secondary capture DICOM will be at least as large as the pixel data (3+ MB), causing multiple reallocs.
-**Optimization:** Pre-calculate the expected size: `128 (preamble) + 4 (DICM) + meta_length + dataset_length`. The pixel data size is known from `preview.Pixels`. Call `payload.Grow(estimatedSize)` upfront.
-**Expected improvement:** Eliminates 4-6 intermediate buffer reallocations and copies. ~20% speedup on DICOM export for large images.
-**How to test:** `BenchmarkEncodeSecondaryCapture` with benchmem.
+**Optimization:** Pre-calculate the expected size: `128 (preamble) + 4 (DICM) + groupLength + 2048 (metadata overhead) + pixelSize`. For RGBA previews, pixel size accounts for RGBA→RGB conversion (3/4 of input). Call `payload.Grow(estimatedSize)` upfront.
+**Actual improvement:** `BenchmarkEncodeSecondaryCapture` with 2048×1536 images:
+- **Gray8**: 61 → 57 allocs/op (4 fewer buffer growth reallocs eliminated), B/op ~unchanged (pixel data copies dominate), speed within noise
+- **RGBA8**: 59 → 55 allocs/op (4 fewer), ~3.7% speedup (7.67 → 7.38 ms/op), B/op ~unchanged
+- Plan predicted ~20% speedup but modern Go `bytes.Buffer` growth strategy is already efficient — the buffer growth was a small fraction of total cost. Pixel data copies across `binaryElement`, `evenLengthBytes`, and `rgbaToRGB` dominate allocation.
+**How to test:** `BenchmarkEncodeSecondaryCapture` in `secondary_capture_test.go` with `-benchmem`.
 
 ### Step 2.5: Avoid `rgbaToRGB` Allocation in Export
 
