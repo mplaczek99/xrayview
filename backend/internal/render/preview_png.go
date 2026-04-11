@@ -51,13 +51,13 @@ func previewImage(preview imaging.PreviewImage) (image.Image, error) {
 	switch preview.Format {
 	case imaging.FormatGray8:
 		return &image.Gray{
-			Pix:    append([]uint8(nil), preview.Pixels...),
+			Pix:    preview.Pixels,
 			Stride: int(preview.Width),
 			Rect:   rect,
 		}, nil
 	case imaging.FormatRGBA8:
 		return &image.RGBA{
-			Pix:    append([]uint8(nil), preview.Pixels...),
+			Pix:    preview.Pixels,
 			Stride: int(preview.Width) * 4,
 			Rect:   rect,
 		}, nil

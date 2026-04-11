@@ -4,6 +4,7 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -128,4 +129,42 @@ func grayPixels(imageValue *image.Gray) []uint8 {
 	}
 
 	return pixels
+}
+
+func BenchmarkEncodePreviewPNG(b *testing.B) {
+	const width, height = 2048, 1536
+	grayPix := make([]uint8, width*height)
+	for i := range grayPix {
+		grayPix[i] = uint8(i % 256)
+	}
+	rgbaPix := make([]uint8, width*height*4)
+	for i := 0; i < width*height; i++ {
+		v := uint8(i % 256)
+		rgbaPix[i*4] = v
+		rgbaPix[i*4+1] = v
+		rgbaPix[i*4+2] = v
+		rgbaPix[i*4+3] = 255
+	}
+
+	b.Run("Gray8", func(b *testing.B) {
+		preview := imaging.GrayPreview(width, height, grayPix)
+		b.ResetTimer()
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			if err := EncodePreviewPNG(io.Discard, preview); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+
+	b.Run("RGBA8", func(b *testing.B) {
+		preview := imaging.RGBAPreview(width, height, rgbaPix)
+		b.ResetTimer()
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			if err := EncodePreviewPNG(io.Discard, preview); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
 }

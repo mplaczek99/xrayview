@@ -79,13 +79,13 @@ The render and processing pipelines iterate over every pixel in the image. For a
 **Actual improvement:** `BenchmarkAnalyzePreview`: 50.9 MB/op → ~33.8 MB/op (33% reduction in allocated bytes). The float32 transient reuse within a single analysis call saves ~8.9 MB immediately; cross-iteration pooling saves another ~8.9 MB of uint8 buffers. Render and processing paths benefit under repeated-call workloads when callers release preview pixels.
 **How to test:** Run `go test -bench=. -benchmem` and compare `allocs/op` and `B/op` before/after. Also measure with `GODEBUG=gctrace=1` under load.
 
-### Step 2.2: Eliminate Defensive Clone in `previewImage()`
+### Step 2.2: Eliminate Defensive Clone in `previewImage()` ✅
 
 **File:** `backend/internal/render/preview_png.go:53-57`
 **What it does:** `previewImage` clones the entire pixel buffer with `append([]uint8(nil), preview.Pixels...)` before passing to `image.Gray`. This copies 3+ MB of data defensively.
 **Optimization:** Since `png.Encode` only reads the pixel data and doesn't mutate it, pass the original slice directly. The `image.Gray` struct doesn't own the slice. This eliminates one full image copy per PNG encode.
-**Expected improvement:** Saves 3-12 MB allocation + memcpy per preview save. ~10-15% speedup on PNG write path.
-**How to test:** Add `BenchmarkEncodePreviewPNG` and compare allocs.
+**Actual improvement:** `BenchmarkEncodePreviewPNG/Gray8`: 4,007,568 → 861,837 B/op (78% reduction, saved 3.1 MB/call), 8.2 → 7.3 ms/op (11% speedup), 31 → 30 allocs. `RGBA8`: 13,470,096 → 887,180 B/op (93% reduction, saved 12.6 MB/call), 28.7 → 26.1 ms/op (9% speedup), 31 → 30 allocs.
+**How to test:** `BenchmarkEncodePreviewPNG` in `preview_png_test.go` with 2048x1536 image, compare allocs.
 
 ### Step 2.3: Avoid Double Clone in Cache Store/Load
 
