@@ -1,6 +1,9 @@
 package render
 
-import "xrayview/backend/internal/imaging"
+import (
+	"xrayview/backend/internal/bufpool"
+	"xrayview/backend/internal/imaging"
+)
 
 type RenderPlan struct {
 	Window WindowMode
@@ -15,7 +18,7 @@ func RenderSourceImage(source imaging.SourceImage, plan RenderPlan) imaging.Prev
 }
 
 func RenderGrayscalePixels(source imaging.SourceImage, plan RenderPlan) []uint8 {
-	pixels := make([]uint8, len(source.Pixels))
+	pixels := bufpool.GetUint8(len(source.Pixels))
 	window := ResolveWindow(source, plan.Window)
 
 	if source.MinValue >= 0 && source.MaxValue <= 65535 {

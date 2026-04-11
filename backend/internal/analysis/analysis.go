@@ -5,6 +5,7 @@ import (
 	"math"
 	"sort"
 
+	"xrayview/backend/internal/bufpool"
 	"xrayview/backend/internal/contracts"
 	"xrayview/backend/internal/imaging"
 )
@@ -66,6 +67,10 @@ func AnalyzeGrayscalePixels(
 	largeBlur := gaussianBlurGray(normalized, width, height, 9.0)
 	toothness := buildToothnessMap(normalized, smallBlur, largeBlur, width, height)
 
+	// Return blur buffers — no longer needed after toothness map is built.
+	bufpool.PutUint8(smallBlur)
+	bufpool.PutUint8(largeBlur)
+
 	toothnessThreshold := maxUint8(percentileInRegion(toothness, width, search, 0.79), 118)
 	intensityThreshold := maxUint8(percentileInRegion(normalized, width, search, 0.69), 82)
 
@@ -81,6 +86,10 @@ func AnalyzeGrayscalePixels(
 	mask = openBinaryMask(closeBinaryMask(mask, int(width), int(height)), int(width), int(height))
 
 	candidates := collectCandidates(mask, normalized, toothness, width, height, search)
+
+	// Return analysis buffers — candidates hold pixel indices, not buffer refs.
+	bufpool.PutUint8(normalized)
+	bufpool.PutUint8(toothness)
 	detectedCandidates := selectDetectedCandidates(candidates)
 	primaryCandidate := selectPrimaryCandidate(detectedCandidates)
 
@@ -182,10 +191,12 @@ func normalizePixels(pixels []uint8) []uint8 {
 	lower := histogramPercentile(histogram, total, 0.02)
 	upper := histogramPercentile(histogram, total, 0.98)
 	if upper <= lower {
-		return append([]uint8(nil), pixels...)
+		buf := bufpool.GetUint8(len(pixels))
+		copy(buf, pixels)
+		return buf
 	}
 
-	normalized := make([]uint8, len(pixels))
+	normalized := bufpool.GetUint8(len(pixels))
 	scaleRange := uint32(upper - lower)
 	for index, value := range pixels {
 		switch {
@@ -207,7 +218,7 @@ func buildToothnessMap(
 	largeBlur []uint8,
 	width, height uint32,
 ) []uint8 {
-	toothness := make([]uint8, len(normalized))
+	toothness := bufpool.GetUint8(len(normalized))
 	for y := uint32(0); y < height; y++ {
 		for x := uint32(0); x < width; x++ {
 			index := int(y*width + x)
@@ -673,7 +684,7 @@ func gaussianBlurGray(pixels []uint8, width, height uint32, sigma float64) []uin
 	widthInt := int(width)
 	heightInt := int(height)
 
-	transient := make([]float32, len(pixels))
+	transient := bufpool.GetFloat32(len(pixels))
 	for y := 0; y < heightInt; y++ {
 		rowStart := y * widthInt
 		for x := 0; x < widthInt; x++ {
@@ -691,7 +702,7 @@ func gaussianBlurGray(pixels []uint8, width, height uint32, sigma float64) []uin
 		}
 	}
 
-	blurred := make([]uint8, len(pixels))
+	blurred := bufpool.GetUint8(len(pixels))
 	for y := 0; y < heightInt; y++ {
 		for x := 0; x < widthInt; x++ {
 			var sum float32
@@ -708,6 +719,7 @@ func gaussianBlurGray(pixels []uint8, width, height uint32, sigma float64) []uin
 		}
 	}
 
+	bufpool.PutFloat32(transient)
 	return blurred
 }
 

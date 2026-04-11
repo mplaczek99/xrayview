@@ -71,12 +71,12 @@ The render and processing pipelines iterate over every pixel in the image. For a
 
 ## Phase 2: Memory Allocation Reduction (Backend)
 
-### Step 2.1: Use `sync.Pool` for Pixel Buffers
+### Step 2.1: Use `sync.Pool` for Pixel Buffers ✅
 
 **Files:** `backend/internal/render/render_plan.go:18`, `backend/internal/processing/grayscale.go:28`, `backend/internal/analysis/analysis.go:175-201`
 **What it does:** Every render/process/analyze call allocates fresh `[]uint8` and `[]float32` slices for pixel data (often 3-12 MB each).
-**Optimization:** Create `sync.Pool` instances for common buffer sizes. After use, return buffers to the pool. Use `pool.Get()` + slice to needed length instead of `make()`.
-**Expected improvement:** Reduces GC pressure by 60-80% for repeated operations on same-sized images. Eliminates ~6-24 MB of allocation per job cycle.
+**Optimization:** Created `backend/internal/bufpool/bufpool.go` with `sync.Pool`-backed `GetUint8`/`PutUint8`/`GetFloat32`/`PutFloat32`. Wired into render (pixel output buffer), processing (pixel clone), and analysis (normalized, smallBlur, largeBlur, toothness, and gaussianBlur transient float32 buffers). Analysis returns all intermediate buffers to the pool after use; the second gaussianBlurGray call reuses the float32 transient from the first.
+**Actual improvement:** `BenchmarkAnalyzePreview`: 50.9 MB/op → ~33.8 MB/op (33% reduction in allocated bytes). The float32 transient reuse within a single analysis call saves ~8.9 MB immediately; cross-iteration pooling saves another ~8.9 MB of uint8 buffers. Render and processing paths benefit under repeated-call workloads when callers release preview pixels.
 **How to test:** Run `go test -bench=. -benchmem` and compare `allocs/op` and `B/op` before/after. Also measure with `GODEBUG=gctrace=1` under load.
 
 ### Step 2.2: Eliminate Defensive Clone in `previewImage()`

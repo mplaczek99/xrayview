@@ -5,6 +5,7 @@ import (
 	"math"
 	"unsafe"
 
+	"xrayview/backend/internal/bufpool"
 	"xrayview/backend/internal/imaging"
 )
 
@@ -26,7 +27,8 @@ func ProcessPreviewImage(
 		return imaging.PreviewImage{}, "", fmt.Errorf("grayscale processing requires %q preview input", imaging.FormatGray8)
 	}
 
-	pixels := append([]uint8(nil), preview.Pixels...)
+	pixels := bufpool.GetUint8(len(preview.Pixels))
+	copy(pixels, preview.Pixels)
 	mode := ProcessGrayscalePixels(pixels, controls)
 
 	return imaging.GrayPreview(preview.Width, preview.Height, pixels), mode, nil
