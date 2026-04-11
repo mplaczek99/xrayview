@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"testing"
 
+	"xrayview/backend/internal/bufpool"
 	"xrayview/backend/internal/contracts"
 	"xrayview/backend/internal/imaging"
 )
@@ -459,6 +460,91 @@ func equalBytes(left, right []uint8) bool {
 		}
 	}
 	return true
+}
+
+func TestGaussianBlurGrayFastMatchesOriginal(t *testing.T) {
+	const width = 2048
+	const height = 1536
+	pixels := make([]uint8, width*height)
+	for i := range pixels {
+		pixels[i] = uint8((i * 7 + 13) % 256)
+	}
+
+	for _, sigma := range []float64{1.4, 9.0} {
+		original := gaussianBlurGray(pixels, width, height, sigma)
+		fast := gaussianBlurGrayFast(pixels, width, height, sigma)
+
+		if len(original) != len(fast) {
+			t.Fatalf("sigma=%.1f: length mismatch %d vs %d", sigma, len(original), len(fast))
+		}
+
+		maxDiff := 0
+		diffs := 0
+		for i := range original {
+			d := int(original[i]) - int(fast[i])
+			if d < 0 {
+				d = -d
+			}
+			if d > maxDiff {
+				maxDiff = d
+			}
+			if d > 0 {
+				diffs++
+			}
+		}
+
+		// Allow ±1 from rounding difference (math.Round vs +0.5 cast).
+		if maxDiff > 1 {
+			t.Fatalf("sigma=%.1f: max pixel diff = %d, want <= 1", sigma, maxDiff)
+		}
+		t.Logf("sigma=%.1f: %d/%d pixels differ by 1 (%.2f%%)", sigma, diffs, len(pixels), float64(diffs)/float64(len(pixels))*100)
+
+		bufpool.PutUint8(original)
+		bufpool.PutUint8(fast)
+	}
+}
+
+func BenchmarkGaussianBlurDual(b *testing.B) {
+	const width = 2048
+	const height = 1536
+	pixels := make([]uint8, width*height)
+	for i := range pixels {
+		pixels[i] = uint8(i % 256)
+	}
+
+	b.Run("Sequential", func(b *testing.B) {
+		b.SetBytes(int64(len(pixels)))
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			small := gaussianBlurGray(pixels, width, height, 1.4)
+			large := gaussianBlurGray(pixels, width, height, 9.0)
+			bufpool.PutUint8(small)
+			bufpool.PutUint8(large)
+		}
+	})
+
+	b.Run("Fused", func(b *testing.B) {
+		b.SetBytes(int64(len(pixels)))
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			small, large := dualGaussianBlurGray(pixels, width, height, 1.4, 9.0)
+			bufpool.PutUint8(small)
+			bufpool.PutUint8(large)
+		}
+	})
+}
+
+func BenchmarkAnalyzeGrayscalePixels(b *testing.B) {
+	preview := syntheticToothPreview()
+	b.SetBytes(int64(len(preview.Pixels)))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, err := AnalyzePreview(preview, nil)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
 }
 
 func equalBools(left, right []bool) bool {

@@ -63,8 +63,7 @@ func AnalyzeGrayscalePixels(
 
 	search := defaultSearchRegion(width, height)
 	normalized := normalizePixels(pixels)
-	smallBlur := gaussianBlurGray(normalized, width, height, 1.4)
-	largeBlur := gaussianBlurGray(normalized, width, height, 9.0)
+	smallBlur, largeBlur := dualGaussianBlurGray(normalized, width, height, 1.4, 9.0)
 	toothness := buildToothnessMap(normalized, smallBlur, largeBlur, width, height)
 
 	// Return blur buffers — no longer needed after toothness map is built.
@@ -721,6 +720,165 @@ func gaussianBlurGray(pixels []uint8, width, height uint32, sigma float64) []uin
 
 	bufpool.PutFloat32(transient)
 	return blurred
+}
+
+// dualGaussianBlurGray performs two separable Gaussian blurs using the
+// optimized blur path that splits boundary/interior processing.
+func dualGaussianBlurGray(pixels []uint8, width, height uint32, sigma1, sigma2 float64) ([]uint8, []uint8) {
+	blurred1 := gaussianBlurGrayFast(pixels, width, height, sigma1)
+	blurred2 := gaussianBlurGrayFast(pixels, width, height, sigma2)
+	return blurred1, blurred2
+}
+
+// gaussianBlurGrayFast is an optimized separable Gaussian blur. It splits both
+// passes into boundary (with clamping) and interior (no bounds checks) regions.
+// For sigma=9 (kernel=57, radius=28), 96% of pixels are in the interior where
+// the inner loop is branch-free. Also uses a fast float32 clamp that avoids
+// math.Round and the float32→float64→float32 conversion.
+func gaussianBlurGrayFast(pixels []uint8, width, height uint32, sigma float64) []uint8 {
+	if sigma == 0 {
+		sigma = 0.8
+	}
+
+	kernel := gaussianKernel1D(kernelSizeFromSigma(sigma), sigma)
+	radius := len(kernel) / 2
+	widthInt := int(width)
+	heightInt := int(height)
+	pixelCount := len(pixels)
+
+	transient := bufpool.GetFloat32(pixelCount)
+
+	// Horizontal pass: boundary pixels (x < radius || x >= width-radius)
+	// need clamping; interior pixels are branch-free.
+	for y := 0; y < heightInt; y++ {
+		rowStart := y * widthInt
+
+		// Left boundary.
+		for x := 0; x < radius && x < widthInt; x++ {
+			var sum float32
+			for ki, w := range kernel {
+				sx := x + ki - radius
+				if sx < 0 {
+					sx = 0
+				}
+				sum += float32(pixels[rowStart+sx]) * w
+			}
+			transient[rowStart+x] = sum
+		}
+
+		// Interior (no bounds checks). Slice source to give BCE a hint.
+		for x := radius; x < widthInt-radius; x++ {
+			base := rowStart + x - radius
+			src := pixels[base : base+len(kernel)]
+			var sum float32
+			for ki, w := range kernel {
+				sum += float32(src[ki]) * w
+			}
+			transient[rowStart+x] = sum
+		}
+
+		// Right boundary.
+		for x := widthInt - radius; x < widthInt; x++ {
+			if x < radius {
+				continue // narrow image, already handled by left boundary
+			}
+			var sum float32
+			for ki, w := range kernel {
+				sx := x + ki - radius
+				if sx >= widthInt {
+					sx = widthInt - 1
+				}
+				sum += float32(pixels[rowStart+sx]) * w
+			}
+			transient[rowStart+x] = sum
+		}
+	}
+
+	blurred := bufpool.GetUint8(pixelCount)
+
+	// Vertical pass: boundary rows (y < radius || y >= height-radius) need
+	// clamping; interior rows are branch-free.
+
+	// Top boundary rows.
+	for y := 0; y < radius && y < heightInt; y++ {
+		rowOffset := y * widthInt
+		for x := 0; x < widthInt; x++ {
+			var sum float32
+			for ki, w := range kernel {
+				sy := y + ki - radius
+				if sy < 0 {
+					sy = 0
+				}
+				sum += transient[sy*widthInt+x] * w
+			}
+			blurred[rowOffset+x] = fastClampUint8(sum)
+		}
+	}
+
+	// Interior rows (no bounds checks). Process 4 columns at a time for
+	// instruction-level parallelism: each kernel row offset is computed
+	// once and shared across 4 independent accumulators.
+	for y := radius; y < heightInt-radius; y++ {
+		rowOffset := y * widthInt
+		baseY := y - radius
+		x := 0
+		for ; x <= widthInt-4; x += 4 {
+			var s0, s1, s2, s3 float32
+			for ki, w := range kernel {
+				ro := (baseY + ki) * widthInt
+				s0 += transient[ro+x] * w
+				s1 += transient[ro+x+1] * w
+				s2 += transient[ro+x+2] * w
+				s3 += transient[ro+x+3] * w
+			}
+			blurred[rowOffset+x] = fastClampUint8(s0)
+			blurred[rowOffset+x+1] = fastClampUint8(s1)
+			blurred[rowOffset+x+2] = fastClampUint8(s2)
+			blurred[rowOffset+x+3] = fastClampUint8(s3)
+		}
+		for ; x < widthInt; x++ {
+			var sum float32
+			for ki, w := range kernel {
+				sum += transient[(baseY+ki)*widthInt+x] * w
+			}
+			blurred[rowOffset+x] = fastClampUint8(sum)
+		}
+	}
+
+	// Bottom boundary rows.
+	for y := heightInt - radius; y < heightInt; y++ {
+		if y < radius {
+			continue // short image, already handled by top boundary
+		}
+		rowOffset := y * widthInt
+		for x := 0; x < widthInt; x++ {
+			var sum float32
+			for ki, w := range kernel {
+				sy := y + ki - radius
+				if sy >= heightInt {
+					sy = heightInt - 1
+				}
+				sum += transient[sy*widthInt+x] * w
+			}
+			blurred[rowOffset+x] = fastClampUint8(sum)
+		}
+	}
+
+	bufpool.PutFloat32(transient)
+	return blurred
+}
+
+// fastClampUint8 converts a float32 to uint8 with rounding. Avoids the
+// float32→float64 promotion and math.Round overhead in clampUint8FromFloat32.
+func fastClampUint8(v float32) uint8 {
+	v += 0.5
+	if v <= 0 {
+		return 0
+	}
+	if v >= 255 {
+		return 255
+	}
+	return uint8(v)
 }
 
 func kernelSizeFromSigma(sigma float64) int {

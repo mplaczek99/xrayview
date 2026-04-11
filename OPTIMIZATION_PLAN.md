@@ -164,13 +164,21 @@ The render and processing pipelines iterate over every pixel in the image. For a
 
 ## Phase 4: Analysis Pipeline Optimization (Backend)
 
-### Step 4.1: Fuse Gaussian Blur Passes
+### Step 4.1: Fuse Gaussian Blur Passes ✅
 
-**File:** `backend/internal/analysis/analysis.go:666-712`
+**File:** `backend/internal/analysis/analysis.go`
 **What it does:** `gaussianBlurGray` performs a 2-pass separable convolution (horizontal then vertical). `AnalyzeGrayscalePixels` calls it TWICE (sigma=1.4 and sigma=9.0), meaning 4 full image scans.
-**Optimization:** Fuse the horizontal passes of both blurs into a single scan over the source pixels. Read each pixel once, compute both kernel convolutions, write to two transient buffers. Then fuse the vertical passes similarly. This reduces memory bandwidth from 4 full reads + 4 full writes to 2 reads + 4 writes.
-**Expected improvement:** ~30-40% speedup on the analysis blur stage by halving memory reads (which are the bottleneck on large images).
-**How to test:** `BenchmarkAnalyzeGrayscalePixels` before/after.
+**Optimization investigated:** The plan proposed fusing horizontal and vertical passes to halve memory reads. However, benchmarking revealed that pass fusion is **counterproductive** — holding two float32 transient buffers (24 MB) simultaneously exceeds L3 cache (20 MB on the test CPU), causing cache thrashing that negates the bandwidth savings. Column tiling was also tested but hurt performance because L2 (1.25 MB) already accommodates the vertical pass working set (456 KB for sigma=9).
+**Optimization applied:** Instead of fusion, created `gaussianBlurGrayFast` with three orthogonal improvements:
+1. **Bounds-check-free interior loops** — split horizontal and vertical passes into boundary/interior regions. For sigma=9 (radius=28), 96% of pixels are in the branch-free interior.
+2. **x4 column unrolling in vertical pass** — processes 4 columns per iteration, precomputing row offsets once per kernel tap. Improves instruction-level parallelism (4 independent accumulators) and reduces loop overhead by 4x.
+3. **Fast float32→uint8 clamping** — `fastClampUint8` avoids the `float32→float64→math.Round→float64→uint8` conversion chain in the original `clampUint8FromFloat32`. Output is pixel-identical (0 differences on 3M pixel test).
+**Actual improvement:** `BenchmarkGaussianBlurDual` with 2048×1536 (3.1M pixels):
+- **Dual blur**: 358 → 188 ms/op (47% speedup, plan predicted 30-40%)
+- **AnalyzePreview (end-to-end)**: 6.3 → 4.7 ms/op (27% speedup on full analysis pipeline)
+- **Allocs**: unchanged (48/op)
+- **Pixel accuracy**: exact match vs original (0/3,145,728 pixels differ for both sigma=1.4 and sigma=9.0)
+**How to test:** `BenchmarkGaussianBlurDual` and `TestGaussianBlurGrayFastMatchesOriginal` in `analysis_test.go`.
 
 ### Step 4.2: Use Integer Approximation for Small Gaussian Blur
 
