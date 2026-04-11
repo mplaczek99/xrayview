@@ -125,13 +125,16 @@ The render and processing pipelines iterate over every pixel in the image. For a
 
 ## Phase 3: PNG Encoding Acceleration (Backend)
 
-### Step 3.1: Use Buffered Writer for PNG Output
+### Step 3.1: Use Buffered Writer for PNG Output ✅
 
 **File:** `backend/internal/render/preview_png.go:13-29`
 **What it does:** `SavePreviewPNG` passes the raw `os.File` to `png.Encode`, which makes many small writes.
 **Optimization:** Wrap the file in `bufio.NewWriterSize(file, 64*1024)` before passing to `png.Encode`. Flush before close.
-**Expected improvement:** ~10-20% speedup on PNG save by reducing syscall overhead. Each write to an unbuffered file is a syscall.
-**How to test:** Benchmark `SavePreviewPNG` with a 2048x1536 gray image to a temp file.
+**Actual improvement:** `BenchmarkSavePreviewPNG` with 2048×1536 images:
+- **Gray8**: 7,374 → 7,190 ns/op (~2.5% speedup), 862 → 928 KB/op (+65 KB for buffer), 35 → 37 allocs
+- **RGBA8**: 26,911 → 26,456 ns/op (~1.7% speedup), 887 → 953 KB/op (+65 KB for buffer), 35 → 37 allocs
+- Plan predicted 10-20% but Go's `png.Encode` already writes in moderately large IDAT chunks, so syscall count was lower than expected. The 64 KB buffer still reduces small writes for chunk headers, CRC values, IHDR, and IEND. Benefit would be larger on network writers or slower I/O backends.
+**How to test:** `BenchmarkSavePreviewPNG` in `preview_png_test.go` with `-benchmem`.
 
 ### Step 3.2: Use `png.Encoder` with `BestSpeed` Compression
 

@@ -1,6 +1,7 @@
 package render
 
 import (
+	"bufio"
 	"fmt"
 	"image"
 	"image/png"
@@ -16,9 +17,16 @@ func SavePreviewPNG(path string, preview imaging.PreviewImage) error {
 		return fmt.Errorf("create preview PNG %s: %w", path, err)
 	}
 
-	if err := EncodePreviewPNG(file, preview); err != nil {
+	bw := bufio.NewWriterSize(file, 64*1024)
+
+	if err := EncodePreviewPNG(bw, preview); err != nil {
 		_ = file.Close()
 		return err
+	}
+
+	if err := bw.Flush(); err != nil {
+		_ = file.Close()
+		return fmt.Errorf("flush preview PNG %s: %w", path, err)
 	}
 
 	if err := file.Close(); err != nil {
