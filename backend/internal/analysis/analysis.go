@@ -73,12 +73,14 @@ func AnalyzeGrayscalePixels(
 	toothnessThreshold := maxUint8(percentileInRegion(toothness, width, search, 0.79), 118)
 	intensityThreshold := maxUint8(percentileInRegion(normalized, width, search, 0.69), 82)
 
-	mask := make([]bool, len(normalized))
+	mask := make([]uint8, len(normalized))
 	for y := search.y; y < search.y+search.height; y++ {
 		rowStart := int(y * width)
 		for x := search.x; x < search.x+search.width; x++ {
 			index := rowStart + int(x)
-			mask[index] = toothness[index] >= toothnessThreshold && normalized[index] >= intensityThreshold
+			if toothness[index] >= toothnessThreshold && normalized[index] >= intensityThreshold {
+				mask[index] = 1
+			}
 		}
 	}
 
@@ -278,62 +280,135 @@ func histogramPercentile(histogram [256]uint32, total uint32, percentile float64
 	return 255
 }
 
-func closeBinaryMask(mask []bool, width, height int) []bool {
+func closeBinaryMask(mask []uint8, width, height int) []uint8 {
 	return erodeBinaryMask(dilateBinaryMask(mask, width, height), width, height)
 }
 
-func openBinaryMask(mask []bool, width, height int) []bool {
+func openBinaryMask(mask []uint8, width, height int) []uint8 {
 	return dilateBinaryMask(erodeBinaryMask(mask, width, height), width, height)
 }
 
-func dilateBinaryMask(mask []bool, width, height int) []bool {
-	dilated := make([]bool, len(mask))
+// dilateBinaryMask performs binary morphological dilation with a 3x3 structuring element.
+// The 3x3 operation is decomposed into separable 1×3 horizontal and 3×1 vertical passes.
+// Interior rows are processed without bounds checks, unrolled 4 columns at a time.
+func dilateBinaryMask(mask []uint8, width, height int) []uint8 {
+	n := width * height
+	tmp := bufpool.GetUint8(n)
+	tmp = tmp[:n]
+	out := make([]uint8, n)
+
+	// Horizontal pass: OR left/center/right neighbors within each row.
 	for y := 0; y < height; y++ {
-		for x := 0; x < width; x++ {
-			value := false
-			for ny := maxInt(y-1, 0); ny <= minInt(y+1, height-1); ny++ {
-				for nx := maxInt(x-1, 0); nx <= minInt(x+1, width-1); nx++ {
-					if mask[ny*width+nx] {
-						value = true
-						break
-					}
-				}
-				if value {
-					break
-				}
-			}
-			dilated[y*width+x] = value
+		row := y * width
+		if width == 1 {
+			tmp[row] = mask[row]
+			continue
 		}
+		tmp[row] = mask[row] | mask[row+1]
+		for x := 1; x < width-1; x++ {
+			tmp[row+x] = mask[row+x-1] | mask[row+x] | mask[row+x+1]
+		}
+		tmp[row+width-1] = mask[row+width-2] | mask[row+width-1]
 	}
 
-	return dilated
+	// Vertical pass: OR top/center/bottom neighbors within each column.
+	if height == 1 {
+		copy(out, tmp)
+		bufpool.PutUint8(tmp)
+		return out
+	}
+	// First row: no top neighbor.
+	for x := 0; x < width; x++ {
+		out[x] = tmp[x] | tmp[width+x]
+	}
+	// Interior rows: no bounds checks, 4-column unroll for ILP.
+	for y := 1; y < height-1; y++ {
+		row := y * width
+		prevRow := row - width
+		nextRow := row + width
+		x := 0
+		for ; x <= width-4; x += 4 {
+			out[row+x] = tmp[prevRow+x] | tmp[row+x] | tmp[nextRow+x]
+			out[row+x+1] = tmp[prevRow+x+1] | tmp[row+x+1] | tmp[nextRow+x+1]
+			out[row+x+2] = tmp[prevRow+x+2] | tmp[row+x+2] | tmp[nextRow+x+2]
+			out[row+x+3] = tmp[prevRow+x+3] | tmp[row+x+3] | tmp[nextRow+x+3]
+		}
+		for ; x < width; x++ {
+			out[row+x] = tmp[prevRow+x] | tmp[row+x] | tmp[nextRow+x]
+		}
+	}
+	// Last row: no bottom neighbor.
+	lastRow := (height - 1) * width
+	prevLastRow := lastRow - width
+	for x := 0; x < width; x++ {
+		out[lastRow+x] = tmp[prevLastRow+x] | tmp[lastRow+x]
+	}
+
+	bufpool.PutUint8(tmp)
+	return out
 }
 
-func erodeBinaryMask(mask []bool, width, height int) []bool {
-	eroded := make([]bool, len(mask))
+// erodeBinaryMask performs binary morphological erosion with a 3x3 structuring element.
+// Uses the same separable-pass structure as dilateBinaryMask with AND instead of OR.
+func erodeBinaryMask(mask []uint8, width, height int) []uint8 {
+	n := width * height
+	tmp := bufpool.GetUint8(n)
+	tmp = tmp[:n]
+	out := make([]uint8, n)
+
+	// Horizontal pass: AND left/center/right neighbors within each row.
 	for y := 0; y < height; y++ {
-		for x := 0; x < width; x++ {
-			value := true
-			for ny := maxInt(y-1, 0); ny <= minInt(y+1, height-1); ny++ {
-				for nx := maxInt(x-1, 0); nx <= minInt(x+1, width-1); nx++ {
-					if !mask[ny*width+nx] {
-						value = false
-						break
-					}
-				}
-				if !value {
-					break
-				}
-			}
-			eroded[y*width+x] = value
+		row := y * width
+		if width == 1 {
+			tmp[row] = mask[row]
+			continue
 		}
+		tmp[row] = mask[row] & mask[row+1]
+		for x := 1; x < width-1; x++ {
+			tmp[row+x] = mask[row+x-1] & mask[row+x] & mask[row+x+1]
+		}
+		tmp[row+width-1] = mask[row+width-2] & mask[row+width-1]
 	}
 
-	return eroded
+	// Vertical pass: AND top/center/bottom neighbors within each column.
+	if height == 1 {
+		copy(out, tmp)
+		bufpool.PutUint8(tmp)
+		return out
+	}
+	// First row: no top neighbor.
+	for x := 0; x < width; x++ {
+		out[x] = tmp[x] & tmp[width+x]
+	}
+	// Interior rows: no bounds checks, 4-column unroll for ILP.
+	for y := 1; y < height-1; y++ {
+		row := y * width
+		prevRow := row - width
+		nextRow := row + width
+		x := 0
+		for ; x <= width-4; x += 4 {
+			out[row+x] = tmp[prevRow+x] & tmp[row+x] & tmp[nextRow+x]
+			out[row+x+1] = tmp[prevRow+x+1] & tmp[row+x+1] & tmp[nextRow+x+1]
+			out[row+x+2] = tmp[prevRow+x+2] & tmp[row+x+2] & tmp[nextRow+x+2]
+			out[row+x+3] = tmp[prevRow+x+3] & tmp[row+x+3] & tmp[nextRow+x+3]
+		}
+		for ; x < width; x++ {
+			out[row+x] = tmp[prevRow+x] & tmp[row+x] & tmp[nextRow+x]
+		}
+	}
+	// Last row: no bottom neighbor.
+	lastRow := (height - 1) * width
+	prevLastRow := lastRow - width
+	for x := 0; x < width; x++ {
+		out[lastRow+x] = tmp[prevLastRow+x] & tmp[lastRow+x]
+	}
+
+	bufpool.PutUint8(tmp)
+	return out
 }
 
 func collectCandidates(
-	mask []bool,
+	mask []uint8,
 	normalized []uint8,
 	toothness []uint8,
 	width, height uint32,
@@ -348,7 +423,7 @@ func collectCandidates(
 	for y := int(search.y); y < int(search.y+search.height); y++ {
 		for x := int(search.x); x < int(search.x+search.width); x++ {
 			startIndex := y*widthInt + x
-			if visited[startIndex] || !mask[startIndex] {
+			if visited[startIndex] || mask[startIndex] == 0 {
 				continue
 			}
 
@@ -381,7 +456,7 @@ func collectCandidates(
 				for ny := maxInt(int(py)-1, 0); ny <= minInt(int(py)+1, heightInt-1); ny++ {
 					for nx := maxInt(int(px)-1, 0); nx <= minInt(int(px)+1, widthInt-1); nx++ {
 						neighbor := ny*widthInt + nx
-						if !visited[neighbor] && mask[neighbor] {
+						if !visited[neighbor] && mask[neighbor] != 0 {
 							visited[neighbor] = true
 							queue = append(queue, neighbor)
 						}

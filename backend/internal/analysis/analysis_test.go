@@ -60,35 +60,35 @@ func TestNormalizePixelsStretchesPercentileWindow(t *testing.T) {
 }
 
 func TestOpenBinaryMaskRemovesSinglePixelNoise(t *testing.T) {
-	mask := []bool{
-		false, false, false,
-		false, true, false,
-		false, false, false,
+	mask := []uint8{
+		0, 0, 0,
+		0, 1, 0,
+		0, 0, 0,
 	}
 
 	got := openBinaryMask(mask, 3, 3)
-	want := make([]bool, len(mask))
+	want := make([]uint8, len(mask))
 
-	if !equalBools(got, want) {
+	if !equalBytes(got, want) {
 		t.Fatalf("openBinaryMask = %v, want %v", got, want)
 	}
 }
 
 func TestCloseBinaryMaskFillsSinglePixelHole(t *testing.T) {
-	mask := []bool{
-		true, true, true,
-		true, false, true,
-		true, true, true,
+	mask := []uint8{
+		1, 1, 1,
+		1, 0, 1,
+		1, 1, 1,
 	}
 
 	got := closeBinaryMask(mask, 3, 3)
-	want := []bool{
-		true, true, true,
-		true, true, true,
-		true, true, true,
+	want := []uint8{
+		1, 1, 1,
+		1, 1, 1,
+		1, 1, 1,
 	}
 
-	if !equalBools(got, want) {
+	if !equalBytes(got, want) {
 		t.Fatalf("closeBinaryMask = %v, want %v", got, want)
 	}
 }
@@ -97,12 +97,12 @@ func TestCollectCandidatesAndPrimarySelection(t *testing.T) {
 	const width = 100
 	const height = 100
 
-	mask := make([]bool, width*height)
+	mask := make([]uint8, width*height)
 	normalized := make([]uint8, width*height)
 	toothness := make([]uint8, width*height)
 
-	fillBoolRect(mask, width, 10, 20, 10, 30, true)
-	fillBoolRect(mask, width, 45, 25, 10, 30, true)
+	fillBoolRect(mask, width, 10, 20, 10, 30, 1)
+	fillBoolRect(mask, width, 45, 25, 10, 30, 1)
 	fillByteRect(normalized, width, 10, 20, 10, 30, 210)
 	fillByteRect(normalized, width, 45, 25, 10, 30, 210)
 	fillByteRect(toothness, width, 10, 20, 10, 30, 210)
@@ -348,11 +348,11 @@ func fillByteRect(
 }
 
 func fillBoolRect(
-	mask []bool,
+	mask []uint8,
 	width uint32,
 	x, y uint32,
 	rectWidth, rectHeight uint32,
-	value bool,
+	value uint8,
 ) {
 	for yy := y; yy < y+rectHeight; yy++ {
 		for xx := x; xx < x+rectWidth; xx++ {
@@ -614,14 +614,39 @@ func BenchmarkGaussianBlurSmall(b *testing.B) {
 	})
 }
 
-func equalBools(left, right []bool) bool {
-	if len(left) != len(right) {
-		return false
-	}
-	for index := range left {
-		if left[index] != right[index] {
-			return false
+func BenchmarkMorphologicalOps(b *testing.B) {
+	const width = 2048
+	const height = 1536
+	// ~30% density mask — realistic for tooth segmentation results.
+	mask := make([]uint8, width*height)
+	for i := range mask {
+		if i%3 == 0 {
+			mask[i] = 1
 		}
 	}
-	return true
+
+	b.Run("Dilate", func(b *testing.B) {
+		b.SetBytes(int64(width * height))
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			_ = dilateBinaryMask(mask, width, height)
+		}
+	})
+
+	b.Run("Erode", func(b *testing.B) {
+		b.SetBytes(int64(width * height))
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			_ = erodeBinaryMask(mask, width, height)
+		}
+	})
+
+	b.Run("OpenClose", func(b *testing.B) {
+		b.SetBytes(int64(width * height))
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			_ = openBinaryMask(closeBinaryMask(mask, width, height), width, height)
+		}
+	})
 }
+

@@ -207,13 +207,19 @@ The render and processing pipelines iterate over every pixel in the image. For a
 - `BenchmarkFullWorkflow` unchanged (~395 ms) because `DecodeCache` already deduplicates decodes within a single session. The optimization targets the cross-session / evicted-decode-cache scenario.
 **How to test:** `TestAnalyzeJobSkipsDecodeWhenSourcePreviewAndScaleCached` (direct cache pre-population, verifies zero decoder calls) and `TestRenderThenAnalyzeSkipsDecodeOnEvictedDecodeCache` (render 6 studies to evict decode cache, verify analyze skips decode) in `service_test.go`.
 
-### Step 4.4: Optimize Morphological Operations
+### Step 4.4: Optimize Morphological Operations ✅
 
-**File:** `backend/internal/analysis/analysis.go:271-323`
+**File:** `backend/internal/analysis/analysis.go:281-380`
 **What it does:** `dilateBinaryMask` and `erodeBinaryMask` use 3x3 structuring elements with a nested 4-level loop (y, x, ny, nx).
-**Optimization:** Use a sliding-window approach. For each row, maintain a running max/min of the 3-pixel window. Process horizontal first, then vertical. This reduces the inner operation from 9 comparisons per pixel to ~3. Also, represent the bool mask as `[]uint8` (0/1) to enable batch operations.
-**Expected improvement:** ~2-3x speedup on morphological operations. For a 3M pixel mask, this saves ~18M comparisons per open/close cycle.
-**How to test:** `BenchmarkMorphologicalOps` with a realistic mask.
+**Optimization:** Decomposed the 3x3 operation into separable 1×3 horizontal + 3×1 vertical passes (mathematically equivalent for a square structuring element). Changed mask representation from `[]bool` to `[]uint8` (0/1) throughout the internal pipeline (mask creation, close/open wrappers, dilate/erode, collectCandidates). Boundary rows/columns are handled without touching the interior hot path. Interior rows use 4-column unrolling in the vertical pass for ILP. Horizontal temp buffer is pooled via `bufpool.GetUint8`. All callers updated.
+**Actual improvement:** `BenchmarkMorphologicalOps` with 2048×1536 (~30% density):
+- **Dilate**: 8.9 → 5.9 ms/op (**1.5x speedup, 33% faster**), 357 → 532 MB/s throughput
+- **Erode**: 7.3 → 5.7 ms/op (**1.3x speedup, 22% faster**), 437 → 554 MB/s throughput
+- **OpenClose** (4 ops): 81.3 → 22.9 ms/op (**3.5x speedup, 72% faster**)
+- **AnalyzeGrayscalePixels** (end-to-end): ~4.9 → ~4.2 ms/op (**14% faster**, 1 fewer alloc)
+- Plan predicted 2-3x on individual ops. OpenClose exceeded at 3.5x because separability plus interior-loop branch elimination compound across all 4 sequential operations, each feeding into the next.
+- Pixel semantics: OR/AND on 0/1 bytes is algebraically identical to the original `||`/`&&` on booleans.
+**How to test:** `BenchmarkMorphologicalOps` and all `Test*BinaryMask` + `TestCollectCandidates*` in `analysis_test.go`.
 
 ### Step 4.5: Avoid Allocating Per-Candidate Pixel Slices
 
