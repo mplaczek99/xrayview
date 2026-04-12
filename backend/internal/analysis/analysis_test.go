@@ -381,7 +381,7 @@ func loadAnalyzeFixture(t *testing.T) analyzeFixture {
 	return fixture
 }
 
-func loadAnalyzePreviewFixture(t *testing.T) imaging.PreviewImage {
+func loadAnalyzePreviewFixture(t testing.TB) imaging.PreviewImage {
 	t.Helper()
 
 	file, err := os.Open(repoPathFromHere(t, "backend", "tests", "fixtures", "parity", "sample-dental-radiograph", "analyze-preview.png"))
@@ -414,7 +414,7 @@ func loadAnalyzePreviewFixture(t *testing.T) imaging.PreviewImage {
 	return imaging.GrayPreview(uint32(bounds.Dx()), uint32(bounds.Dy()), pixels)
 }
 
-func repoPathFromHere(t *testing.T, pathParts ...string) string {
+func repoPathFromHere(t testing.TB, pathParts ...string) string {
 	t.Helper()
 
 	_, currentFile, _, ok := runtime.Caller(0)
@@ -612,6 +612,66 @@ func BenchmarkGaussianBlurSmall(b *testing.B) {
 			bufpool.PutUint8(out)
 		}
 	})
+}
+
+func BenchmarkCollectCandidates(b *testing.B) {
+	// 2048x1536 mask with many small blobs + a few large blobs — mimics realistic
+	// tooth segmentation output where most connected components are noise (area <= 150).
+	const width = 2048
+	const height = 1536
+	mask := make([]uint8, width*height)
+	normalized := make([]uint8, width*height)
+	toothness := make([]uint8, width*height)
+
+	// Fill with pseudo-random data for normalized / toothness.
+	for i := range normalized {
+		normalized[i] = uint8((i*7 + 13) % 256)
+		toothness[i] = uint8((i*11 + 37) % 256)
+	}
+
+	// Scatter many small blobs (3x3, area=9) — noise components, rejected by area filter.
+	for y := 50; y < height-50; y += 20 {
+		for x := 50; x < width-50; x += 20 {
+			for dy := 0; dy < 3; dy++ {
+				for dx := 0; dx < 3; dx++ {
+					mask[(y+dy)*width+(x+dx)] = 1
+				}
+			}
+		}
+	}
+	// Add a few large blobs (120x12, area=1440) — surviving tooth candidates.
+	for i := 0; i < 5; i++ {
+		startX := 200 + i*300
+		startY := 400
+		for dy := 0; dy < 12; dy++ {
+			for dx := 0; dx < 120; dx++ {
+				mask[(startY+dy)*width+(startX+dx)] = 1
+			}
+		}
+	}
+
+	search := searchRegion{x: 0, y: 0, width: width, height: height}
+
+	b.SetBytes(int64(width * height))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		candidates := collectCandidates(mask, normalized, toothness, uint32(width), uint32(height), search)
+		_ = candidates
+	}
+}
+
+func BenchmarkAnalyzePreviewSample(b *testing.B) {
+	preview := loadAnalyzePreviewFixture(b)
+	b.SetBytes(int64(len(preview.Pixels)))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, err := AnalyzePreview(preview, nil)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
 }
 
 func BenchmarkMorphologicalOps(b *testing.B) {

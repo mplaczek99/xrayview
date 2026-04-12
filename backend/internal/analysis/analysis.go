@@ -13,6 +13,12 @@ import (
 const (
 	pixelUnits      = "px"
 	millimeterUnits = "mm"
+
+	// minDetectedArea is the minimum pixel area for a connected component to be
+	// included in analysis output. Used by both collectCandidates (to decide
+	// whether to allocate a pixel slice) and selectDetectedCandidates (to filter
+	// the final candidate list). Both must stay in sync.
+	minDetectedArea = 150
 )
 
 type searchRegion struct {
@@ -417,7 +423,9 @@ func collectCandidates(
 	widthInt := int(width)
 	heightInt := int(height)
 	visited := make([]bool, len(mask))
-	queue := make([]int, 0, 256)
+	// queue doubles as pixel storage: after BFS completes, queue[0:len(queue)]
+	// holds every pixel index in the component in BFS order.
+	queue := make([]int, 0, 1024)
 	candidates := make([]componentCandidate, 0)
 
 	for y := int(search.y); y < int(search.y+search.height); y++ {
@@ -431,7 +439,6 @@ func collectCandidates(
 			queue = append(queue[:0], startIndex)
 			head := 0
 
-			pixels := make([]int, 0, 256)
 			minX := uint32(x)
 			maxX := uint32(x)
 			minY := uint32(y)
@@ -443,7 +450,6 @@ func collectCandidates(
 				index := queue[head]
 				head++
 
-				pixels = append(pixels, index)
 				px := uint32(index % widthInt)
 				py := uint32(index / widthInt)
 				minX = minUint32(minX, px)
@@ -464,7 +470,7 @@ func collectCandidates(
 				}
 			}
 
-			area := uint32(len(pixels))
+			area := uint32(len(queue))
 			if area == 0 {
 				continue
 			}
@@ -479,6 +485,15 @@ func collectCandidates(
 			meanToothness := float64(toothnessSum) / float64(area)
 			strict := isStrictToothCandidate(area, bbox, search)
 			score := scoreCandidate(area, bbox, search, meanIntensity, meanToothness, strict)
+
+			// Only allocate a pixel slice for components that will pass the
+			// area filter in selectDetectedCandidates. Small components are
+			// counted and scored but their pixel indices are not kept.
+			var pixels []int
+			if area > minDetectedArea {
+				pixels = make([]int, len(queue))
+				copy(pixels, queue)
+			}
 
 			candidates = append(candidates, componentCandidate{
 				pixels: pixels,
@@ -551,7 +566,7 @@ func scoreCandidate(
 func selectDetectedCandidates(candidates []componentCandidate) []componentCandidate {
 	detectedCandidates := make([]componentCandidate, 0, len(candidates))
 	for _, candidate := range candidates {
-		if candidate.area > 150 {
+		if candidate.area > minDetectedArea {
 			detectedCandidates = append(detectedCandidates, candidate)
 		}
 	}

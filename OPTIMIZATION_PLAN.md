@@ -221,13 +221,24 @@ The render and processing pipelines iterate over every pixel in the image. For a
 - Pixel semantics: OR/AND on 0/1 bytes is algebraically identical to the original `||`/`&&` on booleans.
 **How to test:** `BenchmarkMorphologicalOps` and all `Test*BinaryMask` + `TestCollectCandidates*` in `analysis_test.go`.
 
-### Step 4.5: Avoid Allocating Per-Candidate Pixel Slices
+### Step 4.5: Avoid Allocating Per-Candidate Pixel Slices ✅
 
-**File:** `backend/internal/analysis/analysis.go:349`
+**File:** `backend/internal/analysis/analysis.go`
 **What it does:** `collectCandidates` allocates a `[]int` pixel slice for every connected component, then stores it in the candidate. These slices can hold thousands of pixel indices.
-**Optimization:** Only store the bounding box + area + statistics (intensitySum, toothnessSum) during flood fill. The full pixel list is only needed later for `geometryFromPixels` on selected candidates. Defer pixel collection to a second pass only for candidates that pass the area>150 filter.
-**Expected improvement:** Eliminates allocation of pixel slices for dozens of small/rejected components. Saves ~100KB-1MB of allocations per analysis.
-**How to test:** Benchmark analysis and compare allocs/op.
+**Optimization:** The BFS queue already contains exactly the component's pixel indices after traversal completes (`queue[0:len(queue)]` = all pixels in BFS order). Removed the separate `pixels` slice that was being populated redundantly alongside the queue. After BFS, `area = len(queue)`. Only for components with `area > minDetectedArea` (150) is a new `[]int` allocated and the queue copied into it — small/noise components (the vast majority) get no pixel slice at all. Extracted threshold to `const minDetectedArea = 150` shared by both `collectCandidates` and `selectDetectedCandidates` to prevent drift. Initial queue capacity bumped from 256 to 1024 to reduce growth reallocations for medium components.
+**Actual improvement:** `BenchmarkCollectCandidates` with 2048×1536 mask (many small 3×3 blobs + 5 large blobs):
+- **allocs/op**: 7,074 → 25 (**-99.6%**, eliminated 7,049 pixel-slice allocations)
+- **B/op**: 19.9 MB → 5.4 MB (**-73%**, saved 14.5 MB)
+- **ns/op**: ~9.3 ms → ~6.7 ms (**-28% faster**)
+- `BenchmarkAnalyzePreviewSample` (2048×1088 real dental radiograph, end-to-end):
+  - **allocs/op**: ~503 → ~253 (**-50%**, saved ~250 allocs)
+  - **B/op**: ~35.6 MB → ~29.2 MB (**-18%**, saved ~6.4 MB)
+  - **ns/op**: ~170 ms → ~174 ms (within noise — analysis dominated by blur and morphology)
+- `BenchmarkAnalyzeGrayscalePixels` (240×160 synthetic):
+  - **allocs/op**: 51 → 41 (**-20%**, -10 allocs)
+  - **B/op**: ~537 KB → ~395 KB (**-26%**, -142 KB)
+- Plan predicted 100 KB–1 MB savings; actual is 6.4 MB on the real radiograph due to many small components in complex images. Wall-clock unchanged because pixel-slice allocation was not on the critical path (blur + morphology dominate).
+**How to test:** `BenchmarkCollectCandidates` and `BenchmarkAnalyzePreviewSample` in `analysis_test.go` with `-benchmem`.
 
 ---
 
