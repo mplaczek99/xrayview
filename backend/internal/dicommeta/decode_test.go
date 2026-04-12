@@ -509,6 +509,34 @@ func BenchmarkReadU32Samples(b *testing.B) {
 	})
 }
 
+func BenchmarkDecodeNativePixelData(b *testing.B) {
+	const width, height = 2048, 1536
+	raw := make([]byte, width*height*2)
+	for i := range raw {
+		raw[i] = byte(i*7 + 13)
+	}
+	state := &sourceStudyState{
+		metadata: Metadata{
+			Rows:                      height,
+			Columns:                   width,
+			SamplesPerPixel:           1,
+			BitsAllocated:             16,
+			BitsStored:                16,
+			PixelRepresentation:       0,
+			PhotometricInterpretation: "MONOCHROME2",
+		},
+	}
+	b.SetBytes(int64(len(raw)))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, err := state.decodeNativePixelData(raw, binary.LittleEndian)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 func buildDecodeTestDicom(options decodeDicomOptions, pixelData []byte, includePixelData bool) []byte {
 	var payload bytes.Buffer
 

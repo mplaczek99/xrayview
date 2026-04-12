@@ -355,20 +355,23 @@ func (state *sourceStudyState) decodeNativePixelData(
 		}
 		samples := raw[:frameSampleCount]
 		if samplesPerPixel == 1 {
+			pixels, minVal, maxVal := decodeU8Monochrome(samples, cfg)
 			return buildSourceImage(
 				uint32(width),
 				uint32(height),
-				decodeU8Monochrome(samples, cfg),
+				pixels,
+				minVal,
+				maxVal,
 				cfg.defaultWindow,
 				cfg.invert,
 			)
 		}
 
-		pixels, err := state.decodeU8Color(samples, framePixels, samplesPerPixel)
+		pixels, minVal, maxVal, err := state.decodeU8Color(samples, framePixels, samplesPerPixel)
 		if err != nil {
 			return imaging.SourceImage{}, err
 		}
-		return buildSourceImage(uint32(width), uint32(height), pixels, cfg.defaultWindow, cfg.invert)
+		return buildSourceImage(uint32(width), uint32(height), pixels, minVal, maxVal, cfg.defaultWindow, cfg.invert)
 	case 16:
 		if samplesPerPixel != 1 {
 			return imaging.SourceImage{}, fmt.Errorf("16-bit color DICOM source decode is not supported yet")
@@ -378,10 +381,13 @@ func (state *sourceStudyState) decodeNativePixelData(
 		}
 
 		samples := readU16Samples(raw[:frameSampleCount*2], byteOrder)
+		pixels, minVal, maxVal := decodeU16Monochrome(samples, cfg)
 		return buildSourceImage(
 			uint32(width),
 			uint32(height),
-			decodeU16Monochrome(samples, cfg),
+			pixels,
+			minVal,
+			maxVal,
 			cfg.defaultWindow,
 			cfg.invert,
 		)
@@ -394,10 +400,13 @@ func (state *sourceStudyState) decodeNativePixelData(
 		}
 
 		samples := readU32Samples(raw[:frameSampleCount*4], byteOrder)
+		pixels, minVal, maxVal := decodeU32Monochrome(samples, cfg)
 		return buildSourceImage(
 			uint32(width),
 			uint32(height),
-			decodeU32Monochrome(samples, cfg),
+			pixels,
+			minVal,
+			maxVal,
 			cfg.defaultWindow,
 			cfg.invert,
 		)
@@ -488,9 +497,9 @@ func (state *sourceStudyState) decodeU8Color(
 	samples []byte,
 	framePixels int,
 	samplesPerPixel int,
-) ([]float32, error) {
+) ([]float32, float32, float32, error) {
 	if samplesPerPixel != 3 {
-		return nil, fmt.Errorf(
+		return nil, 0, 0, fmt.Errorf(
 			"unsupported SamplesPerPixel for color source decode: %d",
 			samplesPerPixel,
 		)
@@ -498,20 +507,35 @@ func (state *sourceStudyState) decodeU8Color(
 
 	photometric := strings.ToUpper(strings.TrimSpace(state.metadata.PhotometricInterpretation))
 	if photometric != "RGB" {
-		return nil, fmt.Errorf("unsupported color photometric interpretation: %s", photometric)
+		return nil, 0, 0, fmt.Errorf("unsupported color photometric interpretation: %s", photometric)
+	}
+
+	if framePixels == 0 {
+		return nil, 0, 0, nil
 	}
 
 	pixels := make([]float32, framePixels)
+	var minVal, maxVal float32
 	switch state.metadata.PlanarConfiguration {
 	case 0:
-		for index, chunkOffset := 0, 0; chunkOffset+2 < len(samples); index, chunkOffset = index+1, chunkOffset+3 {
-			pixels[index] = float32(
-				grayFromRGB8(samples[chunkOffset], samples[chunkOffset+1], samples[chunkOffset+2]),
-			)
+		if chunkOffset := 0; chunkOffset+2 < len(samples) {
+			first := float32(grayFromRGB8(samples[chunkOffset], samples[chunkOffset+1], samples[chunkOffset+2]))
+			pixels[0] = first
+			minVal, maxVal = first, first
+		}
+		for index, chunkOffset := 1, 3; chunkOffset+2 < len(samples); index, chunkOffset = index+1, chunkOffset+3 {
+			v := float32(grayFromRGB8(samples[chunkOffset], samples[chunkOffset+1], samples[chunkOffset+2]))
+			pixels[index] = v
+			if v < minVal {
+				minVal = v
+			}
+			if v > maxVal {
+				maxVal = v
+			}
 		}
 	case 1:
 		if len(samples) < framePixels*3 {
-			return nil, fmt.Errorf(
+			return nil, 0, 0, fmt.Errorf(
 				"dicom frame sample count %d does not match image size %d",
 				len(samples),
 				framePixels*3,
@@ -521,14 +545,24 @@ func (state *sourceStudyState) decodeU8Color(
 		red := samples[:framePixels]
 		green := samples[framePixels : framePixels*2]
 		blue := samples[framePixels*2 : framePixels*3]
-		for index := 0; index < framePixels; index += 1 {
-			pixels[index] = float32(grayFromRGB8(red[index], green[index], blue[index]))
+		first := float32(grayFromRGB8(red[0], green[0], blue[0]))
+		pixels[0] = first
+		minVal, maxVal = first, first
+		for index := 1; index < framePixels; index++ {
+			v := float32(grayFromRGB8(red[index], green[index], blue[index]))
+			pixels[index] = v
+			if v < minVal {
+				minVal = v
+			}
+			if v > maxVal {
+				maxVal = v
+			}
 		}
 	default:
-		return nil, fmt.Errorf("unsupported planar configuration: %d", state.metadata.PlanarConfiguration)
+		return nil, 0, 0, fmt.Errorf("unsupported planar configuration: %d", state.metadata.PlanarConfiguration)
 	}
 
-	return pixels, nil
+	return pixels, minVal, maxVal, nil
 }
 
 func (state *sourceStudyState) resolveDecodeConfig() sourceDecodeConfig {
@@ -559,6 +593,8 @@ func buildSourceImage(
 	width uint32,
 	height uint32,
 	pixels []float32,
+	minValue float32,
+	maxValue float32,
 	defaultWindow *imaging.WindowLevel,
 	invert bool,
 ) (imaging.SourceImage, error) {
@@ -570,21 +606,6 @@ func buildSourceImage(
 			width,
 			height,
 		)
-	}
-
-	minValue := float32(0)
-	maxValue := float32(0)
-	if len(pixels) > 0 {
-		minValue = pixels[0]
-		maxValue = pixels[0]
-		for _, value := range pixels[1:] {
-			if value < minValue {
-				minValue = value
-			}
-			if value > maxValue {
-				maxValue = value
-			}
-		}
 	}
 
 	return imaging.SourceImage{
@@ -607,67 +628,155 @@ func sourceImageFromImage(
 	bounds := decoded.Bounds()
 	width := bounds.Dx()
 	height := bounds.Dy()
-	pixels := make([]float32, 0, width*height)
+	n := width * height
+	if n == 0 {
+		return buildSourceImage(uint32(width), uint32(height), nil, 0, 0, defaultWindow, invert)
+	}
+	pixels := make([]float32, 0, n)
 
 	switch imageValue := decoded.(type) {
 	case *image.Gray:
-		for y := bounds.Min.Y; y < bounds.Max.Y; y += 1 {
-			rowStart := imageValue.PixOffset(bounds.Min.X, y)
-			row := imageValue.Pix[rowStart : rowStart+width]
+		rowStart := imageValue.PixOffset(bounds.Min.X, bounds.Min.Y)
+		row := imageValue.Pix[rowStart : rowStart+width]
+		first := float32(row[0])
+		pixels = append(pixels, first)
+		minVal, maxVal := first, first
+		for _, value := range row[1:] {
+			v := float32(value)
+			pixels = append(pixels, v)
+			if v < minVal {
+				minVal = v
+			}
+			if v > maxVal {
+				maxVal = v
+			}
+		}
+		for y := bounds.Min.Y + 1; y < bounds.Max.Y; y++ {
+			rowStart = imageValue.PixOffset(bounds.Min.X, y)
+			row = imageValue.Pix[rowStart : rowStart+width]
 			for _, value := range row {
-				pixels = append(pixels, float32(value))
+				v := float32(value)
+				pixels = append(pixels, v)
+				if v < minVal {
+					minVal = v
+				}
+				if v > maxVal {
+					maxVal = v
+				}
 			}
 		}
-		return buildSourceImage(uint32(width), uint32(height), pixels, defaultWindow, invert)
+		return buildSourceImage(uint32(width), uint32(height), pixels, minVal, maxVal, defaultWindow, invert)
 	case *image.Gray16:
-		for y := bounds.Min.Y; y < bounds.Max.Y; y += 1 {
-			for x := bounds.Min.X; x < bounds.Max.X; x += 1 {
-				pixels = append(pixels, float32(imageValue.Gray16At(x, y).Y))
+		first := float32(imageValue.Gray16At(bounds.Min.X, bounds.Min.Y).Y)
+		pixels = append(pixels, first)
+		minVal, maxVal := first, first
+		for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+			startX := bounds.Min.X
+			if y == bounds.Min.Y {
+				startX++
+			}
+			for x := startX; x < bounds.Max.X; x++ {
+				v := float32(imageValue.Gray16At(x, y).Y)
+				pixels = append(pixels, v)
+				if v < minVal {
+					minVal = v
+				}
+				if v > maxVal {
+					maxVal = v
+				}
 			}
 		}
-		return buildSourceImage(uint32(width), uint32(height), pixels, defaultWindow, invert)
+		return buildSourceImage(uint32(width), uint32(height), pixels, minVal, maxVal, defaultWindow, invert)
 	default:
-		for y := bounds.Min.Y; y < bounds.Max.Y; y += 1 {
-			for x := bounds.Min.X; x < bounds.Max.X; x += 1 {
+		firstRed, firstGreen, firstBlue, _ := decoded.At(bounds.Min.X, bounds.Min.Y).RGBA()
+		first := float32(grayFromRGB8(uint8(firstRed>>8), uint8(firstGreen>>8), uint8(firstBlue>>8)))
+		pixels = append(pixels, first)
+		minVal, maxVal := first, first
+		for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+			startX := bounds.Min.X
+			if y == bounds.Min.Y {
+				startX++
+			}
+			for x := startX; x < bounds.Max.X; x++ {
 				red, green, blue, _ := decoded.At(x, y).RGBA()
-				pixels = append(
-					pixels,
-					float32(
-						grayFromRGB8(
-							uint8(red>>8),
-							uint8(green>>8),
-							uint8(blue>>8),
-						),
-					),
-				)
+				v := float32(grayFromRGB8(uint8(red>>8), uint8(green>>8), uint8(blue>>8)))
+				pixels = append(pixels, v)
+				if v < minVal {
+					minVal = v
+				}
+				if v > maxVal {
+					maxVal = v
+				}
 			}
 		}
-		return buildSourceImage(uint32(width), uint32(height), pixels, nil, false)
+		return buildSourceImage(uint32(width), uint32(height), pixels, minVal, maxVal, nil, false)
 	}
 }
 
-func decodeU8Monochrome(samples []byte, cfg sourceDecodeConfig) []float32 {
-	pixels := make([]float32, len(samples))
-	for index, value := range samples {
-		pixels[index] = scaledStoredPixelValue(uint32(value), cfg)
+func decodeU8Monochrome(samples []byte, cfg sourceDecodeConfig) ([]float32, float32, float32) {
+	n := len(samples)
+	if n == 0 {
+		return nil, 0, 0
 	}
-	return pixels
+	pixels := make([]float32, n)
+	first := scaledStoredPixelValue(uint32(samples[0]), cfg)
+	pixels[0] = first
+	minVal, maxVal := first, first
+	for i := 1; i < n; i++ {
+		v := scaledStoredPixelValue(uint32(samples[i]), cfg)
+		pixels[i] = v
+		if v < minVal {
+			minVal = v
+		}
+		if v > maxVal {
+			maxVal = v
+		}
+	}
+	return pixels, minVal, maxVal
 }
 
-func decodeU16Monochrome(samples []uint16, cfg sourceDecodeConfig) []float32 {
-	pixels := make([]float32, len(samples))
-	for index, value := range samples {
-		pixels[index] = scaledStoredPixelValue(uint32(value), cfg)
+func decodeU16Monochrome(samples []uint16, cfg sourceDecodeConfig) ([]float32, float32, float32) {
+	n := len(samples)
+	if n == 0 {
+		return nil, 0, 0
 	}
-	return pixels
+	pixels := make([]float32, n)
+	first := scaledStoredPixelValue(uint32(samples[0]), cfg)
+	pixels[0] = first
+	minVal, maxVal := first, first
+	for i := 1; i < n; i++ {
+		v := scaledStoredPixelValue(uint32(samples[i]), cfg)
+		pixels[i] = v
+		if v < minVal {
+			minVal = v
+		}
+		if v > maxVal {
+			maxVal = v
+		}
+	}
+	return pixels, minVal, maxVal
 }
 
-func decodeU32Monochrome(samples []uint32, cfg sourceDecodeConfig) []float32 {
-	pixels := make([]float32, len(samples))
-	for index, value := range samples {
-		pixels[index] = scaledStoredPixelValue(value, cfg)
+func decodeU32Monochrome(samples []uint32, cfg sourceDecodeConfig) ([]float32, float32, float32) {
+	n := len(samples)
+	if n == 0 {
+		return nil, 0, 0
 	}
-	return pixels
+	pixels := make([]float32, n)
+	first := scaledStoredPixelValue(samples[0], cfg)
+	pixels[0] = first
+	minVal, maxVal := first, first
+	for i := 1; i < n; i++ {
+		v := scaledStoredPixelValue(samples[i], cfg)
+		pixels[i] = v
+		if v < minVal {
+			minVal = v
+		}
+		if v > maxVal {
+			maxVal = v
+		}
+	}
+	return pixels, minVal, maxVal
 }
 
 func ensureFrameLen(actual int, expected int) error {

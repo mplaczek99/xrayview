@@ -257,13 +257,13 @@ The render and processing pipelines iterate over every pixel in the image. For a
 - The LE path is now essentially free (pointer arithmetic only — returns a slice header aliasing the input). The BE path's 2-3× gain comes from replacing per-element `byteOrder.Uint16()` calls with a single `memmove`-optimized bulk copy plus a compiler-vectorizable swap loop. Plan predicted 3-5× for LE; actual is effectively infinite (sub-nanosecond), since the old loop was ~3M iterations. The 6–12 MB allocation per decode call is now gone entirely for the dominant LE path.
 **How to test:** `BenchmarkReadU16Samples` and `BenchmarkReadU32Samples` in `decode_test.go` with `-benchmem`.
 
-### Step 5.2: Stream Min/Max Computation into Decode Loop
+### Step 5.2: Stream Min/Max Computation into Decode Loop ✅
 
 **File:** `backend/internal/dicommeta/decode.go:573-597`
 **What it does:** `buildSourceImage` iterates over all pixels a second time to find min/max values.
-**Optimization:** Compute min/max during the initial decode loop (in `decodeU8Monochrome`, `decodeU16Monochrome`, `decodeU32Monochrome`). Return them alongside the pixel slice. This eliminates one full scan of the pixel array.
-**Expected improvement:** ~15-20% speedup on DICOM decode by eliminating redundant iteration over 3-12M floats.
-**How to test:** Benchmark `DecodeFile` end-to-end.
+**Optimization:** Changed `decodeU8Monochrome`, `decodeU16Monochrome`, `decodeU32Monochrome` to return `([]float32, float32, float32)`, tracking min/max during the decode pass. Changed `buildSourceImage` to accept pre-computed min/max parameters (second scan removed). Also updated `decodeU8Color` to return min/max and `sourceImageFromImage` to track min/max in its pixel-building loops — all paths now single-pass. The `BenchmarkDecodeNativePixelData` benchmark (2048×1536 16-bit LE) was added in `decode_test.go` for end-to-end measurement.
+**Actual improvement:** `BenchmarkDecodeNativePixelData` (2048×1536 16-bit LE, 12.6 MB pixel data): ~11.2 ms → ~10.7 ms/op (~5% speedup). The predicted 15-20% was overstated for this image size — at 12.6 MB the pixel array fits in L3 cache (20 MB on this CPU), so the second float32 scan was reading from warm cache rather than main memory. The optimization eliminates the second scan entirely and produces a real but modest gain; larger DICOM files (>20 MB) that exceed L3 will see the full bandwidth saving.
+**How to test:** `BenchmarkDecodeNativePixelData` in `decode_test.go` with `-benchmem`.
 
 ### Step 5.3: Use `mmap` for Large DICOM Files
 
