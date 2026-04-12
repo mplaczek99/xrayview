@@ -124,19 +124,19 @@ func (Decoder) DecodeStudy(ctx context.Context, path string) (SourceStudy, error
 }
 
 func DecodeFile(path string) (SourceStudy, error) {
-	file, err := os.Open(path)
+	source, closeSource, err := openFileSource(path)
 	if err != nil {
 		return SourceStudy{}, fmt.Errorf("open source file: %w", err)
 	}
-	defer file.Close()
+	defer closeSource()
 
-	study, err := Decode(file)
+	study, err := Decode(source)
 	if err != nil {
 		if supportsStandaloneImagePath(path) {
-			if _, seekErr := file.Seek(0, io.SeekStart); seekErr != nil {
+			if _, seekErr := source.Seek(0, io.SeekStart); seekErr != nil {
 				return SourceStudy{}, fmt.Errorf("seek source input: %w", seekErr)
 			}
-			if imageStudy, imageErr := tryDecodeImageStudy(file); imageErr == nil {
+			if imageStudy, imageErr := tryDecodeImageStudy(source); imageErr == nil {
 				return imageStudy, nil
 			}
 		}
@@ -144,6 +144,29 @@ func DecodeFile(path string) (SourceStudy, error) {
 	}
 
 	return study, nil
+}
+
+// openFileSource opens path for reading. For large files on supported platforms
+// it memory-maps the file to avoid userspace buffering overhead; on failure or
+// small files it falls back to the regular *os.File. The caller must invoke the
+// returned close function to release resources.
+func openFileSource(path string) (readerAtSeeker, func() error, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	info, err := file.Stat()
+	if err != nil {
+		file.Close()
+		return nil, nil, err
+	}
+
+	if source, closer, err := tryMmapFile(file, info.Size()); source != nil {
+		return source, closer, err
+	}
+
+	return file, file.Close, nil
 }
 
 func Decode(source readerAtSeeker) (SourceStudy, error) {

@@ -265,13 +265,17 @@ The render and processing pipelines iterate over every pixel in the image. For a
 **Actual improvement:** `BenchmarkDecodeNativePixelData` (2048×1536 16-bit LE, 12.6 MB pixel data): ~11.2 ms → ~10.7 ms/op (~5% speedup). The predicted 15-20% was overstated for this image size — at 12.6 MB the pixel array fits in L3 cache (20 MB on this CPU), so the second float32 scan was reading from warm cache rather than main memory. The optimization eliminates the second scan entirely and produces a real but modest gain; larger DICOM files (>20 MB) that exceed L3 will see the full bandwidth saving.
 **How to test:** `BenchmarkDecodeNativePixelData` in `decode_test.go` with `-benchmem`.
 
-### Step 5.3: Use `mmap` for Large DICOM Files
+### Step 5.3: Use `mmap` for Large DICOM Files ✅
 
-**File:** `backend/internal/dicommeta/decode.go:124-145`
+**File:** `backend/internal/dicommeta/decode.go:126-162`, `mmap_unix.go`, `mmap_other.go`
 **What it does:** `DecodeFile` opens the file and reads through it sequentially.
-**Optimization:** Memory-map the file with `syscall.Mmap` for files larger than 1 MB. This lets the OS manage I/O buffering optimally and avoids userspace read copies. The decoder already uses `io.ReaderAt` + `io.Seeker`, which maps cleanly to mmap'd memory.
-**Expected improvement:** ~10-20% speedup on large DICOM file decode (>5 MB) by eliminating userspace buffering overhead.
-**How to test:** Benchmark `DecodeFile` with the sample dental radiograph.
+**Optimization:** Added `openFileSource` helper in `decode.go` and platform-split `tryMmapFile` in `mmap_unix.go` (build tag `unix`) / `mmap_other.go` (`!unix` stub). For files ≥ 1 MB on Unix, `syscall.Mmap(PROT_READ, MAP_SHARED)` maps the file, wraps the data in `bytes.Reader` (satisfies `readerAtSeeker`), and returns a closer that calls `Munmap` + `file.Close`. Small files and non-Unix platforms fall through to regular `*os.File`. `DecodeFile` now calls `openFileSource` instead of `os.Open`.
+**Actual result:** `BenchmarkDecodeFile` with 2.2 MB sample radiograph:
+- **BEFORE**: ~8.5 ms/op, 268 MB/s, 11,144,436 B/op, 184 allocs/op
+- **AFTER**: ~8.5 ms/op, 262 MB/s, 11,144,738 B/op, 187 allocs/op
+- **Wall-clock**: within noise (< 1% difference). Allocs +3 (Stat call + tryMmapFile internals). B/op +302 bytes (mapping overhead).
+- The predicted 10-20% speedup did not materialize for this 2.2 MB file. Root cause: the sample fits in L3 cache (20 MB on i5-13400); the warm-cache benchmark means I/O is not the bottleneck — pixel decode (3.1M float32 conversions) dominates. mmap eliminates the kernel→userspace copy but that copy was already served from the L3-resident page cache, so the win is sub-percent. The optimization is correctly implemented and will benefit cold reads and files >20 MB that exceed L3 (where mmap's demand-paging avoids the single large `read()` syscall entirely). `BenchmarkDecodeFile` added in `decode_test.go`.
+**How to test:** `BenchmarkDecodeFile` in `decode_test.go` with `-benchmem`.
 
 ### Step 5.4: Use `io.ReadFull` Instead of `readValue` for Known Sizes
 

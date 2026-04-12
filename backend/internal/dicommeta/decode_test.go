@@ -6,6 +6,9 @@ import (
 	"image"
 	"image/color"
 	"image/jpeg"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -731,4 +734,29 @@ func findPreservedElement(
 	}
 
 	return PreservedElement{}, false
+}
+
+func BenchmarkDecodeFile(b *testing.B) {
+	_, currentFile, _, ok := runtime.Caller(0)
+	if !ok {
+		b.Fatal("runtime.Caller returned no file path")
+	}
+	path := filepath.Clean(filepath.Join(filepath.Dir(currentFile), "..", "..", "..", "images", "sample-dental-radiograph.dcm"))
+
+	info, err := os.Stat(path)
+	if err != nil {
+		b.Skipf("sample DICOM not found at %s: %v", path, err)
+	}
+
+	b.SetBytes(info.Size())
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		study, err := DecodeFile(path)
+		if err != nil {
+			b.Fatal(err)
+		}
+		_ = study
+	}
 }
