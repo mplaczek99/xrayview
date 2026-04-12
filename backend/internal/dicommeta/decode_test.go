@@ -465,6 +465,50 @@ func TestDecodeCompressedImageBuildsSourceImageFromJPEGPayload(t *testing.T) {
 	}
 }
 
+func BenchmarkReadU16Samples(b *testing.B) {
+	const width, height = 2048, 1536
+	raw := make([]byte, width*height*2)
+	for i := range raw {
+		raw[i] = byte(i*7 + 13)
+	}
+	b.Run("LittleEndian", func(b *testing.B) {
+		b.SetBytes(int64(len(raw)))
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			_ = readU16Samples(raw, binary.LittleEndian)
+		}
+	})
+	b.Run("BigEndian", func(b *testing.B) {
+		b.SetBytes(int64(len(raw)))
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			_ = readU16Samples(raw, binary.BigEndian)
+		}
+	})
+}
+
+func BenchmarkReadU32Samples(b *testing.B) {
+	const width, height = 2048, 1536
+	raw := make([]byte, width*height*4)
+	for i := range raw {
+		raw[i] = byte(i*7 + 13)
+	}
+	b.Run("LittleEndian", func(b *testing.B) {
+		b.SetBytes(int64(len(raw)))
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			_ = readU32Samples(raw, binary.LittleEndian)
+		}
+	})
+	b.Run("BigEndian", func(b *testing.B) {
+		b.SetBytes(int64(len(raw)))
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			_ = readU32Samples(raw, binary.BigEndian)
+		}
+	})
+}
+
 func buildDecodeTestDicom(options decodeDicomOptions, pixelData []byte, includePixelData bool) []byte {
 	var payload bytes.Buffer
 

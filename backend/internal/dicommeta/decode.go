@@ -11,8 +11,10 @@ import (
 	_ "image/png"
 	"io"
 	"math/big"
+	"math/bits"
 	"os"
 	"strings"
+	"unsafe"
 
 	"xrayview/backend/internal/contracts"
 	"xrayview/backend/internal/imaging"
@@ -681,17 +683,41 @@ func ensureFrameLen(actual int, expected int) error {
 }
 
 func readU16Samples(raw []byte, byteOrder binary.ByteOrder) []uint16 {
-	samples := make([]uint16, 0, len(raw)/2)
-	for offset := 0; offset+1 < len(raw); offset += 2 {
-		samples = append(samples, byteOrder.Uint16(raw[offset:offset+2]))
+	n := len(raw) / 2
+	if n == 0 {
+		return nil
+	}
+	if byteOrder == binary.LittleEndian {
+		// Zero-copy: reinterpret the raw byte slice as []uint16.
+		// Safe because decodeU16Monochrome only reads from this slice
+		// and the SourceImage it builds holds no reference to it.
+		return unsafe.Slice((*uint16)(unsafe.Pointer(&raw[0])), n)
+	}
+	// Big-endian: allocate, bulk-copy bytes, then swap each element.
+	samples := make([]uint16, n)
+	dst := unsafe.Slice((*byte)(unsafe.Pointer(&samples[0])), n*2)
+	copy(dst, raw[:n*2])
+	for i, v := range samples {
+		samples[i] = bits.ReverseBytes16(v)
 	}
 	return samples
 }
 
 func readU32Samples(raw []byte, byteOrder binary.ByteOrder) []uint32 {
-	samples := make([]uint32, 0, len(raw)/4)
-	for offset := 0; offset+3 < len(raw); offset += 4 {
-		samples = append(samples, byteOrder.Uint32(raw[offset:offset+4]))
+	n := len(raw) / 4
+	if n == 0 {
+		return nil
+	}
+	if byteOrder == binary.LittleEndian {
+		// Zero-copy: reinterpret the raw byte slice as []uint32.
+		return unsafe.Slice((*uint32)(unsafe.Pointer(&raw[0])), n)
+	}
+	// Big-endian: allocate, bulk-copy bytes, then swap each element.
+	samples := make([]uint32, n)
+	dst := unsafe.Slice((*byte)(unsafe.Pointer(&samples[0])), n*4)
+	copy(dst, raw[:n*4])
+	for i, v := range samples {
+		samples[i] = bits.ReverseBytes32(v)
 	}
 	return samples
 }
