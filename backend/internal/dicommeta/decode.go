@@ -226,6 +226,10 @@ func parseSourceDataset(
 	syntax transferSyntax,
 	state *sourceStudyState,
 ) error {
+	// Reused for element values <= 4 bytes (US, SS, UL, SL). Escapes once per
+	// call rather than one heap allocation per small element (the common case).
+	var smallBuf [4]byte
+
 	for {
 		header, err := readElementHeader(source, syntax)
 		if err == io.EOF {
@@ -253,6 +257,14 @@ func parseSourceDataset(
 			if _, err := source.Seek(int64(header.length), io.SeekCurrent); err != nil {
 				return fmt.Errorf("skip %s payload: %w", header.tag, err)
 			}
+			continue
+		}
+
+		if header.length <= 4 {
+			if _, err := io.ReadFull(source, smallBuf[:header.length]); err != nil {
+				return fmt.Errorf("read value for %s: %w", header.tag, err)
+			}
+			state.applyValue(syntax, header, smallBuf[:header.length])
 			continue
 		}
 

@@ -233,6 +233,10 @@ func loadTransferSyntaxUID(source readerAtSeeker) (string, error) {
 }
 
 func parseDataset(source readerAtSeeker, syntax transferSyntax, metadata *Metadata) error {
+	// Reused for element values <= 4 bytes (US, SS, UL, SL). Escapes once per
+	// call rather than one heap allocation per small element (the common case).
+	var smallBuf [4]byte
+
 	for {
 		header, err := readElementHeader(source, syntax)
 		if err == io.EOF {
@@ -258,6 +262,14 @@ func parseDataset(source readerAtSeeker, syntax transferSyntax, metadata *Metada
 			if _, err := source.Seek(int64(header.length), io.SeekCurrent); err != nil {
 				return fmt.Errorf("skip %s payload: %w", header.tag, err)
 			}
+			continue
+		}
+
+		if header.length <= 4 {
+			if _, err := io.ReadFull(source, smallBuf[:header.length]); err != nil {
+				return fmt.Errorf("read value for %s: %w", header.tag, err)
+			}
+			applyValue(metadata, syntax, header, smallBuf[:header.length])
 			continue
 		}
 
@@ -389,59 +401,57 @@ func peekGroup(source readerAtSeeker, byteOrder binary.ByteOrder) (uint16, error
 }
 
 func readElementHeader(source readerAtSeeker, syntax transferSyntax) (elementHeader, error) {
-	rawTag, err := readValue(source, 4)
-	if err != nil {
+	// Single 4-byte scratch buffer reused for all small reads in this call.
+	// Reduces per-element header allocations from 3-4 (readValue calls) to 1.
+	var buf [4]byte
+
+	if _, err := io.ReadFull(source, buf[:4]); err != nil {
 		return elementHeader{}, err
 	}
 
 	header := elementHeader{
 		tag: tag{
-			group:   syntax.byteOrder.Uint16(rawTag[:2]),
-			element: syntax.byteOrder.Uint16(rawTag[2:]),
+			group:   syntax.byteOrder.Uint16(buf[:2]),
+			element: syntax.byteOrder.Uint16(buf[2:]),
 		},
 	}
 
 	if header.tag.group == 0xfffe {
-		lengthBytes, err := readValue(source, 4)
-		if err != nil {
+		if _, err := io.ReadFull(source, buf[:4]); err != nil {
 			return elementHeader{}, err
 		}
-		header.length = syntax.byteOrder.Uint32(lengthBytes)
+		header.length = syntax.byteOrder.Uint32(buf[:4])
 		return header, nil
 	}
 
 	if syntax.explicit {
-		vrBytes, err := readValue(source, 2)
-		if err != nil {
+		if _, err := io.ReadFull(source, buf[:2]); err != nil {
 			return elementHeader{}, err
 		}
-		header.vr = string(vrBytes)
+		header.vr = string(buf[:2])
 
 		if uses32BitLength(header.vr) {
-			if _, err := readValue(source, 2); err != nil {
+			if _, err := io.ReadFull(source, buf[:2]); err != nil { // skip reserved 2 bytes
 				return elementHeader{}, err
 			}
-			lengthBytes, err := readValue(source, 4)
-			if err != nil {
+			if _, err := io.ReadFull(source, buf[:4]); err != nil {
 				return elementHeader{}, err
 			}
-			header.length = syntax.byteOrder.Uint32(lengthBytes)
+			header.length = syntax.byteOrder.Uint32(buf[:4])
 			return header, nil
 		}
 
-		lengthBytes, err := readValue(source, 2)
-		if err != nil {
+		if _, err := io.ReadFull(source, buf[:2]); err != nil {
 			return elementHeader{}, err
 		}
-		header.length = uint32(syntax.byteOrder.Uint16(lengthBytes))
+		header.length = uint32(syntax.byteOrder.Uint16(buf[:2]))
 		return header, nil
 	}
 
-	lengthBytes, err := readValue(source, 4)
-	if err != nil {
+	if _, err := io.ReadFull(source, buf[:4]); err != nil {
 		return elementHeader{}, err
 	}
-	header.length = syntax.byteOrder.Uint32(lengthBytes)
+	header.length = syntax.byteOrder.Uint32(buf[:4])
 	return header, nil
 }
 

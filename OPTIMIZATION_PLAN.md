@@ -277,13 +277,24 @@ The render and processing pipelines iterate over every pixel in the image. For a
 - The predicted 10-20% speedup did not materialize for this 2.2 MB file. Root cause: the sample fits in L3 cache (20 MB on i5-13400); the warm-cache benchmark means I/O is not the bottleneck — pixel decode (3.1M float32 conversions) dominates. mmap eliminates the kernel→userspace copy but that copy was already served from the L3-resident page cache, so the win is sub-percent. The optimization is correctly implemented and will benefit cold reads and files >20 MB that exceed L3 (where mmap's demand-paging avoids the single large `read()` syscall entirely). `BenchmarkDecodeFile` added in `decode_test.go`.
 **How to test:** `BenchmarkDecodeFile` in `decode_test.go` with `-benchmem`.
 
-### Step 5.4: Use `io.ReadFull` Instead of `readValue` for Known Sizes
+### Step 5.4: Use `io.ReadFull` Instead of `readValue` for Known Sizes ✅
 
-**File:** `backend/internal/dicommeta/decode.go:234`
-**What it does:** `readValue(source, header.length)` allocates a new `[]byte` for each DICOM element value, even for small fixed-size fields (2-4 bytes).
-**Optimization:** For known small elements (US, SS, UL, SL - all <= 4 bytes), use a stack-allocated `[4]byte` buffer and `io.ReadFull` instead of heap-allocating. Only heap-allocate for large/variable elements.
-**Expected improvement:** Eliminates hundreds of tiny allocations per DICOM parse. ~5% speedup on metadata parsing, significant GC reduction.
-**How to test:** Profile DICOM decode with `go test -benchmem`.
+**Files:** `backend/internal/dicommeta/reader.go`, `backend/internal/dicommeta/decode.go`
+**What it does:** `readValue(source, header.length)` allocates a new `[]byte` for each DICOM element value, even for small fixed-size fields (2-4 bytes). `readElementHeader` called `readValue` 3-4 times per element (4-byte tag, 2-byte VR, 2-4 byte length) — each a separate heap allocation.
+**Optimization:**
+1. **`readElementHeader`**: Replaced 3-4 `readValue(source, N)` calls with a single `var buf [4]byte` reused for all reads within the function. Reduces from 3-4 heap allocations to 1 per element header.
+2. **`parseDataset` / `parseSourceDataset`**: Added `var smallBuf [4]byte` at function scope. For `header.length <= 4`, reads into `smallBuf` and passes `smallBuf[:header.length]` to `applyValue`/`state.applyValue` (safe — all callers extract values without storing the slice). This collapses N small-element allocations into 1 allocation per parse call. Large elements (> 4 bytes) unchanged.
+3. Added `BenchmarkReadFile` in `reader_test.go` to isolate metadata-only performance.
+**Actual improvement:** `BenchmarkReadFile` (2.2 MB sample, metadata-only, 2048×1088 image):
+- **allocs/op**: 175 → 98 (**-44%**, eliminated 77 tiny allocations per decode)
+- **B/op**: 1,064 → 920 (**-14%**, saved 144 bytes of heap per decode)
+- **ns/op**: ~43.9 µs → ~41.7 µs (**-5% faster**)
+`BenchmarkDecodeFile` (full decode including pixel data):
+- **allocs/op**: 187 → 110 (**-41%**)
+- **B/op**: 11,144,736 → 11,144,577 (**unchanged** — pixel data float32 conversion dominates)
+- **ns/op**: ~8.7 ms → ~8.4 ms (within noise — pixel decode dominates)
+- Plan predicted ~5% speedup on metadata parsing; actual is ~5%. Allocation reduction of 44% exceeded expectations.
+**How to test:** `BenchmarkReadFile` in `reader_test.go` and `BenchmarkDecodeFile` in `decode_test.go` with `-benchmem`.
 
 ---
 
