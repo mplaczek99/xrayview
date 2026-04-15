@@ -312,13 +312,18 @@ The render and processing pipelines iterate over every pixel in the image. For a
 - Plan predicted 20-40% cache hit rate improvement; this is a correctness fix, not a raw throughput win. Hit-rate improvement is workload-dependent and not directly benchmarkable in a unit test.
 **How to test:** `TestMemorySourcePreviewLRU` and `TestMemoryResultLRU` in `memory_test.go`. `BenchmarkMemoryEviction` for throughput.
 
-### Step 6.2: Batch Artifact Eviction with Debounce
+### Step 6.2: Batch Artifact Eviction with Debounce ✅
 
-**File:** `backend/internal/cache/store.go:89-140`
-**What it does:** `EvictArtifactsOverLimit` walks the entire artifact directory, stats every file, sorts by mtime, then removes oldest. This is called after every job completion.
-**Optimization:** Debounce eviction: only run at most once per 30 seconds. Track approximate total size in memory (increment on write, decrement on eviction) to avoid the directory walk when clearly under limit. Only walk the filesystem when the tracked size exceeds the threshold.
-**Expected improvement:** Eliminates expensive `filepath.Walk` + `os.Stat` calls on every job completion. For a cache with 100 artifacts, this saves ~100 stat syscalls per job.
-**How to test:** Benchmark `EvictArtifactsOverLimit` with a populated cache directory.
+**File:** `backend/internal/cache/store.go`
+**What it does:** `EvictArtifactsOverLimit` walked the entire artifact directory, statted every file, sorted by mtime, then removed oldest. This was called after every job completion.
+**Optimization:** Two fast paths added to `Store` (new fields: `evictMu sync.Mutex`, `evicting bool`, `lastEviction time.Time`, `trackedBytes int64`):
+1. **Size fast path**: if `trackedBytes >= 0 && trackedBytes <= maxTotalBytes`, skip the walk entirely (no eviction needed). After each full walk `trackedBytes` is set to the post-eviction total; `AddArtifactBytes(delta)` is called in `jobs/service.go` after each PNG preview write to keep the estimate current.
+2. **Debounce fast path**: if a previous walk ran within the last 30 seconds (and size is unknown or over limit), skip. Prevents concurrent job completions from each triggering a walk.
+If a walk fails, `trackedBytes` is reset to -1 (unknown) to force a retry. The `evicting` flag prevents concurrent walks.
+**Actual improvement:**
+- **Walk** (full walk, unchanged): ~103 K ns/op, 255 allocs — identical before/after (the walk itself is unchanged).
+- **Sequential** (rapid successive calls, as in production): 43,000 ns/op → **10 ns/op** (99.98% faster), 150 allocs → **0 allocs**. The `trackedBytes ≤ limit` fast path is a lock-check + comparison — no syscalls, no allocations.
+**How to test:** `TestEvictArtifactsDebounceSkipsWalkWithinInterval`, `TestEvictArtifactsSkipsWalkWhenTrackedBytesUnderLimit`, `TestAddArtifactBytesAccumulatesWhenKnown`, `TestAddArtifactBytesIgnoresNonPositive` in `store_test.go`. `BenchmarkEvictArtifactsOverLimit/Walk` and `/Sequential` show before/after contrast.
 
 ### Step 6.3: Use `RWMutex` for Memory Cache Reads
 

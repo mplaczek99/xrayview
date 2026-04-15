@@ -557,6 +557,9 @@ func (service *Service) executeRenderJob(
 		service.failJob(jobID, contracts.Internal(fmt.Sprintf("write preview PNG: %v", err)))
 		return
 	}
+	if info, err := os.Stat(previewPath); err == nil {
+		service.cache.AddArtifactBytes(info.Size())
+	}
 	if service.finishCancelledIfRequested(ctx, jobID, "writingPreview", previewPath) {
 		return
 	}
@@ -670,6 +673,9 @@ func (service *Service) executeProcessJob(
 		cleanupPaths(previewPath, dicomPath)
 		service.failJob(jobID, contracts.Internal(fmt.Sprintf("write preview PNG: %v", err)))
 		return
+	}
+	if info, err := os.Stat(previewPath); err == nil {
+		service.cache.AddArtifactBytes(info.Size())
 	}
 	if service.finishCancelledIfRequested(ctx, jobID, "writingPreview", previewPath) {
 		return
@@ -814,6 +820,9 @@ func (service *Service) executeAnalyzeJob(
 		cleanupPaths(previewPath)
 		service.failJob(jobID, contracts.Internal(fmt.Sprintf("write analysis preview PNG: %v", err)))
 		return
+	}
+	if info, err := os.Stat(previewPath); err == nil {
+		service.cache.AddArtifactBytes(info.Size())
 	}
 	if service.finishCancelledIfRequested(ctx, jobID, "writingPreview", previewPath) {
 		return
