@@ -37,7 +37,7 @@ type sourcePreviewEntry struct {
 }
 
 type Memory struct {
-	mu                 sync.Mutex
+	mu                 sync.RWMutex
 	logger             *slog.Logger
 	entries            map[string]*resultEntry
 	resultHead         *resultEntry
@@ -167,9 +167,19 @@ func (memory *Memory) StoreSourcePreview(inputPath string, preview imaging.Previ
 }
 
 func (memory *Memory) LoadSourcePreview(inputPath string) (imaging.PreviewImage, bool) {
+	// Fast path: concurrent misses return immediately without blocking writers.
+	memory.mu.RLock()
+	_, ok := memory.sourcePreviews[inputPath]
+	memory.mu.RUnlock()
+	if !ok {
+		return imaging.PreviewImage{}, false
+	}
+
+	// Hit path: LRU promotion and pixel clone mutate shared state.
 	memory.mu.Lock()
 	defer memory.mu.Unlock()
 
+	// Re-check: entry may have been evicted between RUnlock and Lock.
 	entry, ok := memory.sourcePreviews[inputPath]
 	if !ok {
 		return imaging.PreviewImage{}, false
@@ -187,8 +197,8 @@ func (memory *Memory) StoreMeasurementScale(inputPath string, scale *contracts.M
 }
 
 func (memory *Memory) LoadMeasurementScale(inputPath string) (*contracts.MeasurementScale, bool) {
-	memory.mu.Lock()
-	defer memory.mu.Unlock()
+	memory.mu.RLock()
+	defer memory.mu.RUnlock()
 
 	cached, ok := memory.measurementScales[inputPath]
 	if !ok {
@@ -217,9 +227,19 @@ func (memory *Memory) loadLocked(
 	fingerprint string,
 	expectedKind contracts.JobKind,
 ) (contracts.JobResult, bool) {
+	// Fast path: concurrent misses return immediately without blocking writers.
+	memory.mu.RLock()
+	_, ok := memory.entries[fingerprint]
+	memory.mu.RUnlock()
+	if !ok {
+		return contracts.JobResult{}, false
+	}
+
+	// Hit path: artifact validation and LRU promotion mutate shared state.
 	memory.mu.Lock()
 	defer memory.mu.Unlock()
 
+	// Re-check: entry may have been evicted between RUnlock and Lock.
 	entry, ok := memory.entries[fingerprint]
 	if !ok {
 		return contracts.JobResult{}, false

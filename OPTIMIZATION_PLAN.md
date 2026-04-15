@@ -325,13 +325,21 @@ If a walk fails, `trackedBytes` is reset to -1 (unknown) to force a retry. The `
 - **Sequential** (rapid successive calls, as in production): 43,000 ns/op → **10 ns/op** (99.98% faster), 150 allocs → **0 allocs**. The `trackedBytes ≤ limit` fast path is a lock-check + comparison — no syscalls, no allocations.
 **How to test:** `TestEvictArtifactsDebounceSkipsWalkWithinInterval`, `TestEvictArtifactsSkipsWalkWhenTrackedBytesUnderLimit`, `TestAddArtifactBytesAccumulatesWhenKnown`, `TestAddArtifactBytesIgnoresNonPositive` in `store_test.go`. `BenchmarkEvictArtifactsOverLimit/Walk` and `/Sequential` show before/after contrast.
 
-### Step 6.3: Use `RWMutex` for Memory Cache Reads
+### Step 6.3: Use `RWMutex` for Memory Cache Reads ✅
 
-**File:** `backend/internal/cache/memory.go:148-185`
-**What it does:** Both `storeLocked` and `loadLocked` acquire a full `sync.Mutex`. Reads and writes are serialized.
-**Optimization:** Change to `sync.RWMutex`. `loadLocked` takes an RLock (allowing concurrent reads). `storeLocked` takes a full Lock. Cache reads happen on every job start (fingerprint check), so concurrent reads matter.
-**Expected improvement:** Eliminates read contention under concurrent job starts. ~10-20% throughput improvement when multiple studies are being processed simultaneously.
-**How to test:** Benchmark concurrent cache lookups with `b.RunParallel`.
+**File:** `backend/internal/cache/memory.go`
+**What it does:** Both `storeLocked` and `loadLocked` acquired a full `sync.Mutex`. Reads and writes were serialized.
+**Optimization applied:** Changed `mu sync.Mutex` to `mu sync.RWMutex`. Three distinct patterns applied:
+1. **`LoadMeasurementScale`**: Pure `RLock` — no LRU list, just a map read + struct clone. True concurrent reads with no write lock contention.
+2. **`loadLocked` / `LoadSourcePreview`**: Two-phase locking — `RLock` for the existence check (miss path returns immediately without blocking writers), then release + `Lock` for artifact validation, kind check, and LRU promotion (hit path). Re-check under write lock handles the race between unlock and relock.
+3. **All store paths and `discardInvalidEntry`**: Full `Lock` unchanged.
+**Actual improvement:** `BenchmarkConcurrentLoad` with 10 parallel goroutines, 16 pre-populated keys (cpu: 13th Gen Intel Core i5-13400):
+- **MeasurementScale**: 144 ns/op → **71 ns/op** (**2.0x faster**). Pure RLock allows all goroutines to proceed simultaneously — lock contention eliminated.
+- **SourcePreview concurrent hit**: 287K ns/op → 334K ns/op (**+16% overhead**). Two-phase locking adds a second lock acquisition for hits; regression is dominated by the 3 MB pixel clone (the lock overhead is ~50 μs on a ~330 μs operation). Cache misses (cold start, the concurrent job-start scenario) now return under RLock without serialization.
+- **LoadOnly / RoundTrip** (serial): within noise — single goroutine sees no contention difference.
+- **Race detector**: clean (`go test -race` passes).
+**Why hit path didn't gain from two-phase**: `LoadSourcePreview` always calls `movePreviewToFrontLocked` (LRU promotion), which mutates the linked list and requires a write lock. Two lock acquisitions per hit is more expensive than one when all goroutines hit the same key. The win is on the miss path (concurrent job starts for uncached studies) and on `LoadMeasurementScale` (pure read, no LRU).
+**How to test:** `BenchmarkConcurrentLoad/SourcePreview` and `BenchmarkConcurrentLoad/MeasurementScale` in `memory_test.go` with `b.RunParallel`. All 28 existing cache tests pass.
 
 ---
 

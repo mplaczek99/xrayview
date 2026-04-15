@@ -348,3 +348,65 @@ func TestMemorySourcePreviewEvictsByByteBudget(t *testing.T) {
 		t.Fatalf("sourcePreviewBytes = %d, want %d after overwrite", got, want)
 	}
 }
+
+// BenchmarkConcurrentLoad measures throughput when N goroutines concurrently
+// load distinct pre-populated keys. This is the hot path during concurrent job
+// starts. RWMutex should allow all readers to proceed in parallel vs Mutex
+// serializing them.
+func BenchmarkConcurrentLoad(b *testing.B) {
+	const numKeys = 16
+	pixels := make([]uint8, 2048*1536)
+	for i := range pixels {
+		pixels[i] = uint8(i)
+	}
+
+	b.Run("SourcePreview", func(b *testing.B) {
+		memory := NewMemory(nil)
+		for i := 0; i < numKeys; i++ {
+			memory.StoreSourcePreview(
+				fmt.Sprintf("/tmp/bench-%02d.dcm", i),
+				imaging.GrayPreview(2048, 1536, pixels),
+			)
+		}
+		b.ResetTimer()
+		b.ReportAllocs()
+		b.RunParallel(func(pb *testing.PB) {
+			i := 0
+			for pb.Next() {
+				key := fmt.Sprintf("/tmp/bench-%02d.dcm", i%numKeys)
+				loaded, ok := memory.LoadSourcePreview(key)
+				if !ok {
+					b.Fatalf("cache miss for key %s", key)
+				}
+				_ = loaded
+				i++
+			}
+		})
+	})
+
+	b.Run("MeasurementScale", func(b *testing.B) {
+		memory := NewMemory(nil)
+		for i := 0; i < numKeys; i++ {
+			scale := &contracts.MeasurementScale{
+				RowSpacingMM:    float64(i) * 0.1,
+				ColumnSpacingMM: float64(i) * 0.2,
+				Source:          "PixelSpacing",
+			}
+			memory.StoreMeasurementScale(fmt.Sprintf("/tmp/bench-%02d.dcm", i), scale)
+		}
+		b.ResetTimer()
+		b.ReportAllocs()
+		b.RunParallel(func(pb *testing.PB) {
+			i := 0
+			for pb.Next() {
+				key := fmt.Sprintf("/tmp/bench-%02d.dcm", i%numKeys)
+				loaded, ok := memory.LoadMeasurementScale(key)
+				if !ok {
+					b.Fatalf("cache miss for key %s", key)
+				}
+				_ = loaded
+				i++
+			}
+		})
+	})
+}
