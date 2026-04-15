@@ -1566,3 +1566,68 @@ func decodeJSONValue(t *testing.T, raw string) any {
 
 	return value
 }
+
+func BenchmarkHandleGetJob(b *testing.B) {
+	snapshot := contracts.JobSnapshot{
+		JobID:   "bench-job-id-1234-5678-abcd",
+		JobKind: contracts.JobKindRenderStudy,
+		State:   contracts.JobStateRunning,
+		Progress: contracts.JobProgress{
+			Percent: 50,
+			Stage:   "rendering",
+			Message: "Applying window transform",
+		},
+	}
+	handler := NewRouter(RouterDeps{
+		Config: config.Default(),
+		Service: mockBackendService{
+			getJob: func(cmd contracts.JobCommand) (contracts.JobSnapshot, error) {
+				return snapshot, nil
+			},
+		},
+		StartedAt: time.Now(),
+	})
+
+	payload := `{"jobId":"bench-job-id-1234-5678-abcd"}`
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, CommandsPath+"/get_job", strings.NewReader(payload))
+		handler.ServeHTTP(rec, req)
+	}
+}
+
+func BenchmarkWriteJSON(b *testing.B) {
+	studyID := "bench-study-id-1234"
+	snapshot := contracts.JobSnapshot{
+		JobID:   "bench-job-id-1234-5678-abcd",
+		JobKind: contracts.JobKindRenderStudy,
+		StudyID: &studyID,
+		State:   contracts.JobStateRunning,
+		Progress: contracts.JobProgress{
+			Percent: 50,
+			Stage:   "rendering",
+			Message: "Applying window transform",
+		},
+	}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		rec := httptest.NewRecorder()
+		writeJSON(rec, http.StatusOK, snapshot)
+	}
+}
+
+func BenchmarkDecodeJSONRequest(b *testing.B) {
+	payload := `{"jobId":"bench-job-id-1234-5678-abcd"}`
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		req := httptest.NewRequest(http.MethodPost, CommandsPath+"/get_job", strings.NewReader(payload))
+		var cmd contracts.JobCommand
+		if err := decodeJSONRequest(req, &cmd); err != nil {
+			b.Fatal(err)
+		}
+	}
+}

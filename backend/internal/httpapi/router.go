@@ -1,12 +1,14 @@
 package httpapi
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"xrayview/backend/internal/cache"
@@ -14,6 +16,23 @@ import (
 	"xrayview/backend/internal/contracts"
 	"xrayview/backend/internal/persistence"
 )
+
+// bodyPool reuses request body read buffers across handler calls.
+var bodyPool = sync.Pool{New: func() any { return new(bytes.Buffer) }}
+
+// jsonWriterEntry pools a bytes.Buffer + json.Encoder pair for writeJSON.
+// The encoder's writer is permanently wired to the buffer; callers Reset()
+// the buffer before reuse. bytes.Buffer.Write never fails, so enc.err
+// remains nil across uses.
+type jsonWriterEntry struct {
+	buf *bytes.Buffer
+	enc *json.Encoder
+}
+
+var jsonWriterPool = sync.Pool{New: func() any {
+	buf := new(bytes.Buffer)
+	return &jsonWriterEntry{buf: buf, enc: json.NewEncoder(buf)}
+}}
 
 type BackendService interface {
 	OpenStudy(command contracts.OpenStudyCommand) (contracts.OpenStudyCommandResult, error)
@@ -214,12 +233,17 @@ func resolveStudyCount(service BackendService) int {
 }
 
 func writeJSON(writer http.ResponseWriter, statusCode int, payload any) {
+	je := jsonWriterPool.Get().(*jsonWriterEntry)
+	je.buf.Reset()
+	if err := je.enc.Encode(payload); err != nil {
+		jsonWriterPool.Put(je)
+		http.Error(writer, err.Error(), http.StatusInternalServerError)
+		return
+	}
 	writer.Header().Set("content-type", "application/json; charset=utf-8")
 	writer.WriteHeader(statusCode)
-
-	if err := json.NewEncoder(writer).Encode(payload); err != nil {
-		http.Error(writer, err.Error(), http.StatusInternalServerError)
-	}
+	writer.Write(je.buf.Bytes()) //nolint:errcheck
+	jsonWriterPool.Put(je)
 }
 
 func handleOpenStudy(writer http.ResponseWriter, request *http.Request, deps RouterDeps) {
@@ -335,7 +359,15 @@ func handleMeasureLineAnnotation(writer http.ResponseWriter, request *http.Reque
 }
 
 func decodeJSONRequest(request *http.Request, payload any) error {
-	decoder := json.NewDecoder(request.Body)
+	buf := bodyPool.Get().(*bytes.Buffer)
+	buf.Reset()
+	defer bodyPool.Put(buf)
+
+	if _, err := buf.ReadFrom(request.Body); err != nil {
+		return contracts.InvalidInput("invalid command payload").WithDetails(err.Error())
+	}
+
+	decoder := json.NewDecoder(buf)
 	decoder.DisallowUnknownFields()
 
 	if err := decoder.Decode(payload); err != nil {
