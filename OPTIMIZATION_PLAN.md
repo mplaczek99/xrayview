@@ -464,13 +464,20 @@ If a walk fails, `trackedBytes` is reset to -1 (unknown) to force a retry. The `
 **Validation:** `node frontend/scripts/validate-annotation-memo.mjs` — 16 tests, all pass. Covers: BEFORE/AFTER comparator behavior for pan, zoom, annotation change, selection change, callback churn, unrelated parent re-render, useMemo selectedLine call count. `npm run build` passes with zero type errors.
 **How to test:** `node frontend/scripts/validate-annotation-memo.mjs`. React DevTools Profiler to count renders during pan/zoom with annotations visible.
 
-### Step 9.5: Use GPU-Accelerated CSS Transforms for Image Positioning
+### Step 9.5: Use GPU-Accelerated CSS Transforms for Image Positioning ✅
 
-**File:** `frontend/src/features/viewer/ViewerCanvas.tsx:443-451`
+**File:** `frontend/src/features/viewer/ViewerCanvas.tsx:443-451`, `frontend/src/styles/base.css`
 **What it does:** Image positioning uses `left`, `top`, `width`, `height` inline styles. These trigger layout recalculation on every viewport change.
-**Optimization:** Use CSS `transform: translate(X, Y) scale(S)` with `transformOrigin: "0 0"` and fixed `width`/`height`. CSS transforms are GPU-composited and skip the layout/paint phases entirely.
-**Expected improvement:** Smoother pan/zoom, especially on lower-end devices. Eliminates layout thrashing during continuous pointer events.
-**How to test:** Chrome DevTools Performance tab -- compare layout time during pan gesture.
+**Optimization:** Replaced `left/top/width/height` inline styles with `width: naturalW`, `height: naturalH`, `transform: translate(offsetX, offsetY) scale(S)`, `transformOrigin: "0 0"`. Added `will-change: transform` to CSS to promote element to its own compositor layer. CSS transforms skip the layout and paint phases — only the compositor stage runs on every pan/zoom frame.
+**Actual improvement:** `node frontend/scripts/validate-gpu-transforms.mjs` — 11 tests, all pass. Confirms:
+- **BEFORE pan**: 2 layout-triggering properties change per frame (`left` + `top`)
+- **BEFORE zoom**: 4 layout-triggering properties change per frame (`left` + `top` + `width` + `height`)
+- **AFTER pan**: 0 layout properties change — only `transform` string updates (compositor only)
+- **AFTER zoom**: 0 layout properties change — only `transform` string updates (compositor only)
+- **100 pan frames**: 200 → 0 layout triggers (100% eliminated)
+- **100 zoom frames**: 400 → 0 layout triggers (100% eliminated)
+- Pixel math verified: `translate(offsetX, offsetY) scale(S)` with `transformOrigin: 0 0` is algebraically identical to the original `left/top/width*S/height*S` positioning for all image corners.
+**How to test:** `node frontend/scripts/validate-gpu-transforms.mjs` for logic validation. Chrome DevTools Performance tab → compare Layout block during pan gesture before/after.
 
 ### Step 9.6: Fine-Grained Store Selectors to Reduce ViewTab Re-renders
 

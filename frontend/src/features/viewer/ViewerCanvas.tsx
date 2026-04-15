@@ -443,10 +443,10 @@ export function ViewerCanvas({
           style={
             transform && resolvedImageSize
               ? {
-                  left: `${transform.offsetX}px`,
-                  top: `${transform.offsetY}px`,
-                  width: `${resolvedImageSize.width * transform.scale}px`,
-                  height: `${resolvedImageSize.height * transform.scale}px`,
+                  width: `${resolvedImageSize.width}px`,
+                  height: `${resolvedImageSize.height}px`,
+                  transform: `translate(${transform.offsetX}px, ${transform.offsetY}px) scale(${transform.scale})`,
+                  transformOrigin: "0 0",
                 }
               : undefined
           }

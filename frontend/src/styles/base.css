@@ -1063,6 +1063,7 @@ button {
   -webkit-user-drag: none;
   opacity: 0;
   transition: opacity 150ms ease;
+  will-change: transform;
 }
 
 .viewer-canvas__image--ready {
