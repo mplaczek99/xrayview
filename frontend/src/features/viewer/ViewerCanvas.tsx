@@ -269,12 +269,15 @@ export function ViewerCanvas({
       cbs.onSelectAnnotation(nextDraft.id);
     }
 
-    window.addEventListener("pointermove", handlePointerMove);
-    window.addEventListener("pointerup", handlePointerUp);
+    const container = containerRef.current;
+    if (!container) return;
+
+    container.addEventListener("pointermove", handlePointerMove);
+    container.addEventListener("pointerup", handlePointerUp);
 
     return () => {
-      window.removeEventListener("pointermove", handlePointerMove);
-      window.removeEventListener("pointerup", handlePointerUp);
+      container.removeEventListener("pointermove", handlePointerMove);
+      container.removeEventListener("pointerup", handlePointerUp);
     };
   }, [interaction, resolvedImageSize, transform]);
 
@@ -332,6 +335,7 @@ export function ViewerCanvas({
       return;
     }
 
+    event.currentTarget.setPointerCapture(event.pointerId);
     const pointer = pointerToLocalPoint(event);
     if (tool === "measureLine") {
       const imagePoint = clampPointToImage(

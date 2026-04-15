@@ -183,6 +183,7 @@ export const AnnotationLayer = memo(
                 vectorEffect="non-scaling-stroke"
                 onPointerDown={(event) => {
                   event.stopPropagation();
+                  event.currentTarget.setPointerCapture(event.pointerId);
                   onStartHandleDrag(selectedLine.id, "start");
                 }}
               />
@@ -194,6 +195,7 @@ export const AnnotationLayer = memo(
                 vectorEffect="non-scaling-stroke"
                 onPointerDown={(event) => {
                   event.stopPropagation();
+                  event.currentTarget.setPointerCapture(event.pointerId);
                   onStartHandleDrag(selectedLine.id, "end");
                 }}
               />

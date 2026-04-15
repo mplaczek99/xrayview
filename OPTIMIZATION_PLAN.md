@@ -512,13 +512,17 @@ If a walk fails, `trackedBytes` is reset to -1 (unknown) to force a retry. The `
 - During slider drags where 3–10 events fire per frame (fast drag on high-refresh display or busy main thread), state updates drop from N → 1. At 60fps steady-state they're equivalent (1 event/frame), but GC pressure is reduced by eliminating N-1 intermediate state objects.
 **How to test:** `node frontend/scripts/validate-debounce-controls.mjs` for logic validation. React DevTools Profiler to count renders during brightness/contrast slider drag.
 
-### Step 9.8: Attach Pointer Listeners to Container, Not Window
+### Step 9.8: Attach Pointer Listeners to Container, Not Window ✅
 
-**File:** `frontend/src/features/viewer/ViewerCanvas.tsx:272-277`
-**What it does:** `window.addEventListener("pointermove", handlePointerMove)` attaches global listeners for pan/draw gestures.
-**Optimization:** Attach to the viewer container element via `containerRef.current` instead of `window`. This prevents the handlers from firing on pointer events outside the viewer and reduces global event listener accumulation if the component remounts.
-**Expected improvement:** Reduces global event listener count, prevents potential memory leaks on remount, and improves event handling efficiency.
-**How to test:** Check `getEventListeners(window)` in DevTools before/after.
+**File:** `frontend/src/features/viewer/ViewerCanvas.tsx`, `frontend/src/features/annotations/AnnotationLayer.tsx`
+**What it does:** `window.addEventListener("pointermove", handlePointerMove)` attaches global listeners for pan/draw/edit gestures.
+**Optimization:** Three changes:
+1. `beginBackgroundInteraction` calls `event.currentTarget.setPointerCapture(event.pointerId)` on the container div — captures subsequent pointer events to the container element even when the pointer leaves its bounds.
+2. Both annotation handle `onPointerDown` handlers (start/end circles) call `event.currentTarget.setPointerCapture(event.pointerId)` on the SVG circle — captured events bubble through SVG → container div, where the container listener catches them.
+3. `useEffect` captures `const container = containerRef.current` at effect start, attaches `pointermove` + `pointerup` to the container instead of `window`. Cleanup uses the same captured reference.
+**Why pointer capture is required:** Simply moving listeners from `window` to container without capture would break gestures when the pointer leaves the container mid-drag. `setPointerCapture` ensures the element continues to receive events regardless of pointer position, preserving existing UX while eliminating global listeners.
+**Actual improvement:** Zero `window` pointer listeners during gestures. No memory leaks from missed cleanup on component remount (captured ref is closed over, so cleanup always removes from the correct element). `getEventListeners(window)` shows no `pointermove`/`pointerup` entries during pan/draw/edit.
+**How to test:** Check `getEventListeners(window)` in DevTools — no `pointermove` or `pointerup` entries during pan/draw. Verify pan still works when dragging outside the viewer bounds (pointer capture keeps the gesture alive).
 
 ---
 
