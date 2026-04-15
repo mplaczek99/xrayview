@@ -438,13 +438,14 @@ If a walk fails, `trackedBytes` is reset to -1 (unknown) to force a retry. The `
 **Validation:** `node frontend/scripts/validate-job-updates.mjs` — 8 tests, all pass. Confirms: (a) BEFORE fires listener 5× for 5 identical polls; (b) AFTER fires 0× for identical polls; (c) progress change, state transition, null→error, null→result all fire correctly; (d) mixed 10-poll sequence with 6 no-ops → exactly 4 notifications. `npm run build` passes with zero type errors.
 **How to test:** `node frontend/scripts/validate-job-updates.mjs`. React DevTools Profiler to count renders during a render job.
 
-### Step 9.3: Batch `setStudyState` Updates
+### Step 9.3: Batch `setStudyState` Updates ✅
 
-**File:** `frontend/src/app/store/workbenchStore.ts:701-725`
-**What it does:** Each `setStudyState` call triggers listener notification. Multiple rapid updates (e.g., receiving a job update that affects both job and study state) fire multiple listener cycles.
-**Optimization:** Use `queueMicrotask` batching: accumulate state changes and notify listeners once per microtask. This is similar to React 18's automatic batching for non-React event handlers.
-**Expected improvement:** ~20-30% fewer listener notifications during rapid state changes.
-**How to test:** Count listener invocations during a processStudy flow.
+**File:** `frontend/src/app/store/workbenchStore.ts`
+**What it does:** Each `setStudyState` call triggered listener notification immediately and synchronously. Multiple synchronous `setState` calls (e.g., three concurrent job poll responses from `Promise.all` resolving together) each fired their own listener cycle and React reconciliation.
+**Optimization:** Added `pendingNotification: boolean` flag to `WorkbenchStore`. `setState` now updates state synchronously (so `getState()` always returns the latest value — required for `useSyncExternalStore` tearless semantics) but defers listener notification via `queueMicrotask`. If multiple `setState` calls happen before the microtask fires, only one microtask is scheduled. Flag is reset BEFORE iterating listeners (re-entrancy safe: if a listener triggers another `setState`, a fresh microtask is queued for that next batch). No-op updates (same state ref) still return early before touching the flag.
+**Actual improvement:** N synchronous `setState` calls → 1 listener notification (N-1 notifications eliminated). Directly benefits the `Promise.all` polling pattern in `useJobs.ts` where 3 concurrent job fetches resolve in the same microtask: 3 `receiveJobUpdate` calls → 1 React reconciliation cycle instead of 3. Also future-proofs any subsequent rapid-fire update patterns.
+**Validation:** `node frontend/scripts/validate-batched-updates.mjs` — 10 tests, all pass. Confirms: (a) BEFORE fires listener 3× for 3 synchronous calls; (b) AFTER fires 0× immediately, 1× after microtask flush; (c) state is readable synchronously before flush; (d) no-op updates never queue microtask; (e) second batch after flush correctly queues new microtask; (f) re-entrancy guard (second batch runs independently). `npm run build` passes with zero type errors.
+**How to test:** `node frontend/scripts/validate-batched-updates.mjs`. React DevTools Profiler to count render cycles during concurrent job polling.
 
 ### Step 9.4: Memoize AnnotationLayer with React.memo
 

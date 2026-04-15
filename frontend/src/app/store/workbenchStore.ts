@@ -334,6 +334,8 @@ class WorkbenchStore {
 
   private listeners = new Set<Listener>();
 
+  private pendingNotification = false;
+
   subscribe = (listener: Listener) => {
     this.listeners.add(listener);
     return () => {
@@ -760,8 +762,15 @@ class WorkbenchStore {
     }
 
     this.state = nextState;
-    for (const listener of this.listeners) {
-      listener();
+
+    if (!this.pendingNotification) {
+      this.pendingNotification = true;
+      queueMicrotask(() => {
+        this.pendingNotification = false;
+        for (const listener of this.listeners) {
+          listener();
+        }
+      });
     }
   }
 }
