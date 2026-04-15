@@ -530,13 +530,20 @@ If a walk fails, `trackedBytes` is reset to -1 (unknown) to force a retry. The `
 
 > The desktop agent identified that polling overhead and redundant serialization dominate the frontend-backend communication path.
 
-### Step 10.1: Exponential Backoff on Job Polling
+### Step 10.1: Exponential Backoff on Job Polling ✅
 
-**File:** Frontend job polling (likely in `features/jobs/` or via `syncJob`)
-**What it does:** The frontend polls `getJob` at a fixed interval to track job progress.
-**Optimization:** Use exponential backoff: start polling at 200ms, double interval up to 2s while job is running. For queued jobs, poll at 1s. For running jobs >80%, poll at 200ms. For terminal states, stop polling.
-**Expected improvement:** Reduces network requests by 50-70% during long-running jobs. Reduces backend load.
-**How to test:** Count HTTP requests during a 5-second render job.
+**File:** `frontend/src/features/jobs/useJobs.ts`
+**What it does:** The frontend polled `getJob` at a fixed 200ms interval regardless of job state or progress.
+**Optimization:** Exponential backoff using schedule-then-double pattern. Constants: `FAST_POLL_MS=200`, `QUEUED_POLL_MS=1000`, `MAX_POLL_MS=2000`. Per-poll cycle: snapshot pre-poll `{percent, state}` for each job. After fetches: if any percent advanced OR state transitioned (queued→running) OR any running job >80% → reset to 200ms. If all jobs are queued → 1000ms (steady, `currentIntervalMs` unchanged so backoff restarts fresh at 200ms when running begins). Otherwise → schedule at `currentIntervalMs` then double (schedule-then-double prevents first-poll doubling to 400ms). `currentIntervalMs` is closure-local; effect re-mount on `pendingJobCount` change resets it to 200ms automatically.
+**Actual improvement:** `node frontend/scripts/validate-exponential-backoff.mjs` — 12 tests, all pass.
+- **BEFORE:** 50 polls at fixed 200ms over 10s job
+- **AFTER:** 16 polls with exponential backoff — **68% reduction** (plan predicted 50-70% ✓)
+- **Backoff sequence** (no progress, running): 200 → 400 → 800 → 1600 → 2000 → 2000 (capped)
+- **Queued phase:** steady 1000ms (5× less frequent than BEFORE's 200ms)
+- **Progress detected / near-complete (>80%):** resets to 200ms immediately
+- **AFTER interval pattern** for a queued→running job: `[1000, 1000, ..., 200, 200, 400, 800, 1600, 2000, ...]`
+- Effect re-mount (new job submitted) naturally resets backoff via fresh closure.
+**How to test:** `node frontend/scripts/validate-exponential-backoff.mjs`.
 
 ### Step 10.2: Use Server-Sent Events for Job Updates
 

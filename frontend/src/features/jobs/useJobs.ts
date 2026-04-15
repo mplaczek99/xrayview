@@ -12,7 +12,8 @@ import {
 } from "./benchmarks";
 
 const FAST_POLL_MS = 200;
-const SLOW_POLL_MS = 2000;
+const QUEUED_POLL_MS = 1000;
+const MAX_POLL_MS = 2000;
 const IDLE_POLL_MS = 0;
 const JOB_UPDATE_EVENT = "xrayview:job-update";
 const runtime = getRuntimeAdapter();
@@ -35,6 +36,7 @@ export function useJobs() {
     let cancelled = false;
     let timer: number | undefined;
     let unsubscribeEvent: (() => void) | undefined;
+    let currentIntervalMs = FAST_POLL_MS;
 
     function applyJobUpdate(job: Awaited<ReturnType<typeof runtime.getJob>>) {
       workbenchActions.receiveJobUpdate(job);
@@ -69,21 +71,25 @@ export function useJobs() {
 
     async function pollPendingJobs() {
       const state = workbenchActions.getState();
-      const pendingIds = Object.values(state.jobs)
-        .filter((job) =>
+      const pendingJobs = Object.values(state.jobs).filter(
+        (job) =>
           job.state === "queued" ||
           job.state === "running" ||
           job.state === "cancelling",
-        )
-        .map((job) => job.jobId);
+      );
 
-      if (pendingIds.length === 0) {
+      if (pendingJobs.length === 0) {
         scheduleNext(IDLE_POLL_MS);
         return;
       }
 
+      // Snapshot pre-poll state for progress change detection.
+      const prePollState = new Map(
+        pendingJobs.map((job) => [job.jobId, { percent: job.progress.percent, state: job.state }]),
+      );
+
       await Promise.all(
-        pendingIds.map(async (jobId) => {
+        pendingJobs.map(async ({ jobId }) => {
           try {
             const job = await runtime.getJob(jobId);
             if (!cancelled) {
@@ -96,16 +102,57 @@ export function useJobs() {
         }),
       );
 
-      const stillPending = Object.values(workbenchActions.getState().jobs).some(
+      if (cancelled) {
+        return;
+      }
+
+      const updatedJobs = Object.values(workbenchActions.getState().jobs).filter(
         (job) =>
           job.state === "queued" ||
           job.state === "running" ||
           job.state === "cancelling",
       );
 
+      if (updatedJobs.length === 0) {
+        scheduleNext(IDLE_POLL_MS);
+        return;
+      }
+
+      let anyProgress = false;
+      let allQueued = true;
+      let anyNearComplete = false;
+
+      for (const job of updatedJobs) {
+        if (job.state !== "queued") {
+          allQueued = false;
+        }
+        if (job.state === "running" && job.progress.percent > 80) {
+          anyNearComplete = true;
+        }
+        const pre = prePollState.get(job.jobId);
+        if (pre !== undefined) {
+          // Percent advance or state transition (queued → running) counts as progress.
+          if (job.progress.percent > pre.percent || job.state !== pre.state) {
+            anyProgress = true;
+          }
+        }
+      }
+
       // Completion events arrive in the embedded desktop path, but progress
       // updates still come from polling while a job is running.
-      scheduleNext(stillPending ? FAST_POLL_MS : SLOW_POLL_MS);
+      if (anyProgress || anyNearComplete) {
+        // Progress detected or near-complete: reset to fast polling.
+        currentIntervalMs = FAST_POLL_MS;
+        scheduleNext(currentIntervalMs);
+      } else if (allQueued) {
+        // Queued-only: use steady slow interval without advancing the backoff state.
+        // currentIntervalMs stays at FAST_POLL_MS so backoff starts fresh when running begins.
+        scheduleNext(QUEUED_POLL_MS);
+      } else {
+        // No progress on running/cancelling jobs: schedule at current interval then double.
+        scheduleNext(currentIntervalMs);
+        currentIntervalMs = Math.min(currentIntervalMs * 2, MAX_POLL_MS);
+      }
     }
 
     function scheduleNext(intervalMs: number) {
