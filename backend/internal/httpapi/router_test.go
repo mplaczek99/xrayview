@@ -1631,3 +1631,17 @@ func BenchmarkDecodeJSONRequest(b *testing.B) {
 		}
 	}
 }
+
+func BenchmarkHealthz(b *testing.B) {
+	handler := NewRouter(RouterDeps{
+		Config:    config.Default(),
+		StartedAt: time.Now(),
+	})
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+		handler.ServeHTTP(rec, req)
+	}
+}

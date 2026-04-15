@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"xrayview/backend/internal/cache"
@@ -87,15 +88,48 @@ type commandListResponse struct {
 	BackendContractVersion int      `json:"backendContractVersion"`
 }
 
+// runtimeCacheEntry holds the pre-serialized JSON bytes for the runtime/healthz
+// response together with the study count used to build them. An atomic.Value
+// stores this so readers never take a lock on the hot path.
+type runtimeCacheEntry struct {
+	json       []byte
+	studyCount int
+}
+
 func NewRouter(deps RouterDeps) http.Handler {
 	mux := http.NewServeMux()
 
+	// runtimeCache caches the serialized healthz/runtime JSON body keyed on
+	// study count (the only field that changes at runtime). All other fields in
+	// runtimeResponse are static after startup. atomic.Value gives lock-free
+	// reads on the polling hot path; a harmless rebuild race on miss is fine
+	// because the same study count always produces identical bytes.
+	var runtimeCache atomic.Value // stores runtimeCacheEntry
+
+	getRuntimeJSON := func() []byte {
+		currentCount := resolveStudyCount(deps.Service)
+		if entry, ok := runtimeCache.Load().(runtimeCacheEntry); ok && entry.studyCount == currentCount {
+			return entry.json
+		}
+		data, _ := json.Marshal(buildRuntimeResponse(deps))
+		data = append(data, '\n')
+		runtimeCache.Store(runtimeCacheEntry{json: data, studyCount: currentCount})
+		return data
+	}
+
+	writeRuntimeJSON := func(writer http.ResponseWriter) {
+		data := getRuntimeJSON()
+		writer.Header().Set("content-type", "application/json; charset=utf-8")
+		writer.WriteHeader(http.StatusOK)
+		writer.Write(data) //nolint:errcheck
+	}
+
 	mux.HandleFunc("GET /healthz", func(writer http.ResponseWriter, request *http.Request) {
-		writeJSON(writer, http.StatusOK, buildRuntimeResponse(deps))
+		writeRuntimeJSON(writer)
 	})
 
 	mux.HandleFunc("GET "+RuntimePath, func(writer http.ResponseWriter, request *http.Request) {
-		writeJSON(writer, http.StatusOK, buildRuntimeResponse(deps))
+		writeRuntimeJSON(writer)
 	})
 
 	mux.HandleFunc("GET "+CommandsPath, func(writer http.ResponseWriter, request *http.Request) {

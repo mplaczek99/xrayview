@@ -360,13 +360,20 @@ If a walk fails, `trackedBytes` is reset to -1 (unknown) to force a retry. The `
 - **Serial benchmark shows near-zero change**: pool hits on every iteration in a single-goroutine benchmark; the dominant costs are `httptest.NewRecorder()`, request body readers, and JSON reflection — not the encoder/decoder struct allocation. The real win is **GC pressure reduction under concurrent polling load**: each goroutine that hits a warmed pool avoids allocating a new 1–4 KB buffer and encoder struct per request.
 **How to test:** `BenchmarkHandleGetJob`, `BenchmarkWriteJSON`, `BenchmarkDecodeJSONRequest` in `router_test.go` with `-benchmem`.
 
-### Step 7.2: Cache Runtime/Health Responses
+### Step 7.2: Cache Runtime/Health Responses ✅
 
-**File:** `backend/internal/httpapi/router.go:74-86`
+**File:** `backend/internal/httpapi/router.go`
 **What it does:** `/healthz` and `/api/v1/runtime` build and serialize the `runtimeResponse` struct on every call.
-**Optimization:** Cache the JSON response bytes and only regenerate when the underlying data changes (study count changes, etc.). Most fields are static after startup. Use an `atomic.Value` to store the cached response with lock-free reads.
-**Expected improvement:** ~95% reduction in healthz/runtime response time. Useful if monitoring tools poll frequently.
-**How to test:** Benchmark `/healthz` endpoint.
+**Optimization applied:**
+- Added `runtimeCacheEntry` struct holding pre-serialized JSON bytes + the study count used to build them.
+- Closure-scoped `atomic.Value` inside `NewRouter` stores the cache; lock-free reads on the polling hot path.
+- `getRuntimeJSON` checks study count on each call; on a hit it returns cached bytes directly. On a miss it calls `json.Marshal` + appends `\n` (matching `json.Encoder` output), stores, and returns.
+- Both `/healthz` and `GET /api/v1/runtime` share the same `writeRuntimeJSON` closure.
+**Actual improvement:** `BenchmarkHealthz` (cpu: 13th Gen Intel Core i5-13400):
+- **Before:** ~3,760 ns/op, 7,260 B/op, 25 allocs/op
+- **After:** ~2,000 ns/op, 6,786 B/op, 19 allocs/op (~47% faster, 6 fewer allocs/op)
+- Note: plan's ~95% estimate assumed serialization dominated; httptest recorder + HTTP infrastructure account for the remaining cost.
+**How to test:** `BenchmarkHealthz` in `router_test.go` with `-benchmem`.
 
 ### Step 7.3: Skip Extra JSON Decode Verification
 
