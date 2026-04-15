@@ -20,20 +20,40 @@ type cachedScale struct {
 	scale *contracts.MeasurementScale
 }
 
+// resultEntry is a node in the result LRU doubly-linked list.
+type resultEntry struct {
+	fingerprint string
+	result      contracts.JobResult
+	prev        *resultEntry
+	next        *resultEntry
+}
+
+// sourcePreviewEntry is a node in the source preview LRU doubly-linked list.
+type sourcePreviewEntry struct {
+	inputPath string
+	preview   imaging.PreviewImage
+	prev      *sourcePreviewEntry
+	next      *sourcePreviewEntry
+}
+
 type Memory struct {
-	mu                  sync.Mutex
-	logger              *slog.Logger
-	entries             map[string]contracts.JobResult
-	sourcePreviews      map[string]imaging.PreviewImage
-	sourcePreviewBytes  uint64
-	measurementScales   map[string]cachedScale
+	mu                 sync.Mutex
+	logger             *slog.Logger
+	entries            map[string]*resultEntry
+	resultHead         *resultEntry
+	resultTail         *resultEntry
+	sourcePreviews     map[string]*sourcePreviewEntry
+	sourcePreviewBytes uint64
+	previewHead        *sourcePreviewEntry
+	previewTail        *sourcePreviewEntry
+	measurementScales  map[string]cachedScale
 }
 
 func NewMemory(logger *slog.Logger) *Memory {
 	return &Memory{
 		logger:            logger,
-		entries:           make(map[string]contracts.JobResult),
-		sourcePreviews:    make(map[string]imaging.PreviewImage),
+		entries:           make(map[string]*resultEntry),
+		sourcePreviews:    make(map[string]*sourcePreviewEntry),
 		measurementScales: make(map[string]cachedScale),
 	}
 }
@@ -133,24 +153,30 @@ func (memory *Memory) StoreSourcePreview(inputPath string, preview imaging.Previ
 	defer memory.mu.Unlock()
 
 	if existing, ok := memory.sourcePreviews[inputPath]; ok {
-		memory.sourcePreviewBytes -= existing.ByteSize()
+		memory.sourcePreviewBytes -= existing.preview.ByteSize()
+		existing.preview = preview
+		memory.sourcePreviewBytes += preview.ByteSize()
+		memory.movePreviewToFrontLocked(existing)
+	} else {
+		entry := &sourcePreviewEntry{inputPath: inputPath, preview: preview}
+		memory.sourcePreviews[inputPath] = entry
+		memory.pushPreviewFrontLocked(entry)
+		memory.sourcePreviewBytes += preview.ByteSize()
 	}
-
-	memory.sourcePreviews[inputPath] = preview
-	memory.sourcePreviewBytes += preview.ByteSize()
-	memory.evictSourcePreviewLocked(inputPath)
+	memory.evictSourcePreviewLocked()
 }
 
 func (memory *Memory) LoadSourcePreview(inputPath string) (imaging.PreviewImage, bool) {
 	memory.mu.Lock()
 	defer memory.mu.Unlock()
 
-	preview, ok := memory.sourcePreviews[inputPath]
+	entry, ok := memory.sourcePreviews[inputPath]
 	if !ok {
 		return imaging.PreviewImage{}, false
 	}
 
-	return clonePreviewImage(preview), true
+	memory.movePreviewToFrontLocked(entry)
+	return clonePreviewImage(entry.preview), true
 }
 
 func (memory *Memory) StoreMeasurementScale(inputPath string, scale *contracts.MeasurementScale) {
@@ -176,8 +202,15 @@ func (memory *Memory) storeLocked(fingerprint string, result contracts.JobResult
 	memory.mu.Lock()
 	defer memory.mu.Unlock()
 
-	memory.entries[fingerprint] = result
-	memory.evictResultLocked(fingerprint)
+	if existing, ok := memory.entries[fingerprint]; ok {
+		existing.result = result
+		memory.moveResultToFrontLocked(existing)
+	} else {
+		entry := &resultEntry{fingerprint: fingerprint, result: result}
+		memory.entries[fingerprint] = entry
+		memory.pushResultFrontLocked(entry)
+	}
+	memory.evictResultLocked()
 }
 
 func (memory *Memory) loadLocked(
@@ -187,28 +220,31 @@ func (memory *Memory) loadLocked(
 	memory.mu.Lock()
 	defer memory.mu.Unlock()
 
-	result, ok := memory.entries[fingerprint]
+	entry, ok := memory.entries[fingerprint]
 	if !ok {
 		return contracts.JobResult{}, false
 	}
 
-	if !resultArtifactsExist(result, memory.logger, fingerprint) {
+	if !resultArtifactsExist(entry.result, memory.logger, fingerprint) {
+		memory.removeResultEntryLocked(entry)
 		delete(memory.entries, fingerprint)
 		return contracts.JobResult{}, false
 	}
 
-	if result.Kind != expectedKind {
+	if entry.result.Kind != expectedKind {
 		memory.warnInvalidEntry(
 			fingerprint,
-			result.Kind,
+			entry.result.Kind,
 			"memory cache entry kind mismatch",
 			slog.String("expected_kind", string(expectedKind)),
 		)
+		memory.removeResultEntryLocked(entry)
 		delete(memory.entries, fingerprint)
 		return contracts.JobResult{}, false
 	}
 
-	return result, true
+	memory.moveResultToFrontLocked(entry)
+	return entry.result, true
 }
 
 func (memory *Memory) discardInvalidEntry(
@@ -220,7 +256,10 @@ func (memory *Memory) discardInvalidEntry(
 	defer memory.mu.Unlock()
 
 	memory.warnInvalidEntry(fingerprint, kind, message)
-	delete(memory.entries, fingerprint)
+	if entry, ok := memory.entries[fingerprint]; ok {
+		memory.removeResultEntryLocked(entry)
+		delete(memory.entries, fingerprint)
+	}
 }
 
 func (memory *Memory) warnInvalidEntry(
@@ -333,40 +372,104 @@ func artifactExists(
 	return false
 }
 
-func (memory *Memory) evictResultLocked(keepFingerprint string) {
-	if len(memory.entries) <= maxMemoryCacheEntries {
-		return
-	}
-
-	for fingerprint := range memory.entries {
-		if fingerprint == keepFingerprint {
-			continue
-		}
-
-		delete(memory.entries, fingerprint)
-		return
+// evictResultLocked removes tail entries until len(entries) <= maxMemoryCacheEntries.
+// Must be called with mu held. The newly inserted entry is always at the front,
+// so it is never the eviction victim under normal capacity conditions.
+func (memory *Memory) evictResultLocked() {
+	for len(memory.entries) > maxMemoryCacheEntries && memory.resultTail != nil {
+		victim := memory.resultTail
+		memory.removeResultEntryLocked(victim)
+		delete(memory.entries, victim.fingerprint)
 	}
 }
 
-func (memory *Memory) evictSourcePreviewLocked(keepInputPath string) {
-	for len(memory.sourcePreviews) > maxSourcePreviewEntries || memory.sourcePreviewBytes > maxSourcePreviewBytes {
-		evicted := false
-		for inputPath, preview := range memory.sourcePreviews {
-			if inputPath == keepInputPath {
-				continue
-			}
-
-			memory.sourcePreviewBytes -= preview.ByteSize()
-			delete(memory.sourcePreviews, inputPath)
-			delete(memory.measurementScales, inputPath)
-			evicted = true
-			break
-		}
-
-		if !evicted {
-			break
-		}
+// evictSourcePreviewLocked removes tail entries until the count and byte budget
+// are within limits. Stops early when only one entry remains to avoid evicting
+// a single oversized entry that was just inserted.
+func (memory *Memory) evictSourcePreviewLocked() {
+	for len(memory.sourcePreviews) > 1 &&
+		(len(memory.sourcePreviews) > maxSourcePreviewEntries || memory.sourcePreviewBytes > maxSourcePreviewBytes) &&
+		memory.previewTail != nil {
+		victim := memory.previewTail
+		memory.sourcePreviewBytes -= victim.preview.ByteSize()
+		memory.removePreviewEntryLocked(victim)
+		delete(memory.sourcePreviews, victim.inputPath)
+		delete(memory.measurementScales, victim.inputPath)
 	}
+}
+
+// --- Result LRU list operations (mu must be held) ---
+
+func (memory *Memory) pushResultFrontLocked(entry *resultEntry) {
+	entry.prev = nil
+	entry.next = memory.resultHead
+	if memory.resultHead != nil {
+		memory.resultHead.prev = entry
+	}
+	memory.resultHead = entry
+	if memory.resultTail == nil {
+		memory.resultTail = entry
+	}
+}
+
+func (memory *Memory) moveResultToFrontLocked(entry *resultEntry) {
+	if memory.resultHead == entry {
+		return
+	}
+	memory.removeResultEntryLocked(entry)
+	memory.pushResultFrontLocked(entry)
+}
+
+func (memory *Memory) removeResultEntryLocked(entry *resultEntry) {
+	if entry.prev != nil {
+		entry.prev.next = entry.next
+	} else {
+		memory.resultHead = entry.next
+	}
+	if entry.next != nil {
+		entry.next.prev = entry.prev
+	} else {
+		memory.resultTail = entry.prev
+	}
+	entry.prev = nil
+	entry.next = nil
+}
+
+// --- Source preview LRU list operations (mu must be held) ---
+
+func (memory *Memory) pushPreviewFrontLocked(entry *sourcePreviewEntry) {
+	entry.prev = nil
+	entry.next = memory.previewHead
+	if memory.previewHead != nil {
+		memory.previewHead.prev = entry
+	}
+	memory.previewHead = entry
+	if memory.previewTail == nil {
+		memory.previewTail = entry
+	}
+}
+
+func (memory *Memory) movePreviewToFrontLocked(entry *sourcePreviewEntry) {
+	if memory.previewHead == entry {
+		return
+	}
+	memory.removePreviewEntryLocked(entry)
+	memory.pushPreviewFrontLocked(entry)
+}
+
+func (memory *Memory) removePreviewEntryLocked(entry *sourcePreviewEntry) {
+	if entry.prev != nil {
+		entry.prev.next = entry.next
+	} else {
+		memory.previewHead = entry.next
+	}
+	if entry.next != nil {
+		entry.next.prev = entry.prev
+	} else {
+		memory.previewTail = entry.prev
+	}
+	entry.prev = nil
+	entry.next = nil
 }
 
 func cloneRenderResult(

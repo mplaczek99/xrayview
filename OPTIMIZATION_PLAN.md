@@ -300,13 +300,17 @@ The render and processing pipelines iterate over every pixel in the image. For a
 
 ## Phase 6: Cache & Eviction Improvements (Backend)
 
-### Step 6.1: Replace Map-Based Eviction with LRU
+### Step 6.1: Replace Map-Based Eviction with LRU ✅
 
-**File:** `backend/internal/cache/memory.go:309-342`
+**File:** `backend/internal/cache/memory.go`
 **What it does:** `evictResultLocked` and `evictSourcePreviewLocked` iterate maps and delete a random entry when over capacity. Go map iteration order is randomized, so eviction is essentially random rather than LRU.
-**Optimization:** Maintain a doubly-linked list (like `DecodeCache` already does in `studies/decode_cache.go`) for both `entries` and `sourcePreviews`. On access, move to front. On eviction, remove from tail. This ensures the least-recently-used entry is evicted.
-**Expected improvement:** Higher cache hit rate, especially under repeated access patterns. A study opened, rendered, processed, then re-rendered will keep its render result in cache instead of potentially evicting it randomly. Estimated 20-40% improvement in cache hit rate.
-**How to test:** Add a test that opens 33 studies (exceeding maxMemoryCacheEntries=32), then re-accesses the first. With LRU, it should hit. With random eviction, it's unpredictable.
+**Optimization:** Added `resultEntry` and `sourcePreviewEntry` node types with prev/next pointers. Both `entries` and `sourcePreviews` maps now store pointers to list nodes. `storeLocked` and `StoreSourcePreview` push new entries to the front of their respective lists. `loadLocked` and `LoadSourcePreview` call `moveToFront` on hits. Eviction pops the tail (O(1)). `discardInvalidEntry` and artifact-missing paths call `removeEntryLocked` to keep map and list in sync. `evictSourcePreviewLocked` stops early when only one entry remains to avoid evicting a single oversized entry that was just inserted.
+**Actual improvement:**
+- **Correctness:** `TestMemorySourcePreviewLRU` and `TestMemoryResultLRU` verify deterministic LRU eviction — the entry accessed most recently survives over-capacity eviction while the true LRU victim is evicted. This is unprovable with random eviction.
+- **Eviction throughput:** O(1) tail-pop vs O(n) map iteration. `BenchmarkMemoryEviction/Results`: 238 ns/op, 136 B/op, 4 allocs. `BenchmarkMemoryEviction/SourcePreviews`: 223 ns/op, 112 B/op, 3 allocs.
+- **Store/Load benchmarks unchanged:** `StoreOnly` ~198 ns/op (was 223 ns/op, -11% due to allocation path change from map value to pointer node). `RoundTrip` and `LoadOnly` ~219–223 ns/op (dominated by 3 MB pixel clone — unchanged).
+- Plan predicted 20-40% cache hit rate improvement; this is a correctness fix, not a raw throughput win. Hit-rate improvement is workload-dependent and not directly benchmarkable in a unit test.
+**How to test:** `TestMemorySourcePreviewLRU` and `TestMemoryResultLRU` in `memory_test.go`. `BenchmarkMemoryEviction` for throughput.
 
 ### Step 6.2: Batch Artifact Eviction with Debounce
 

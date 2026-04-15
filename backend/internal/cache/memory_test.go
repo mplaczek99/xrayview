@@ -221,6 +221,99 @@ func TestMemoryStoreBoundsSourcePreviewEntries(t *testing.T) {
 	}
 }
 
+func TestMemorySourcePreviewLRU(t *testing.T) {
+	memory := NewMemory(nil)
+
+	// Fill cache to capacity.
+	for i := 0; i < maxSourcePreviewEntries; i++ {
+		memory.StoreSourcePreview(
+			fmt.Sprintf("/study-%03d.dcm", i),
+			imaging.GrayPreview(1, 1, []uint8{uint8(i)}),
+		)
+	}
+
+	// Promote the oldest entry to most-recently-used.
+	if _, ok := memory.LoadSourcePreview("/study-000.dcm"); !ok {
+		t.Fatal("LoadSourcePreview(/study-000.dcm) = miss, want hit before eviction")
+	}
+
+	// Store one more entry — must evict the LRU entry (/study-001.dcm).
+	memory.StoreSourcePreview("/study-new.dcm", imaging.GrayPreview(1, 1, []uint8{99}))
+
+	if _, ok := memory.LoadSourcePreview("/study-000.dcm"); !ok {
+		t.Error("/study-000.dcm = miss, want hit (was most recently used)")
+	}
+	if _, ok := memory.LoadSourcePreview("/study-001.dcm"); ok {
+		t.Error("/study-001.dcm = hit, want miss (was least recently used and should be evicted)")
+	}
+}
+
+func TestMemoryResultLRU(t *testing.T) {
+	memory := NewMemory(nil)
+	tempDir := t.TempDir()
+
+	makePreview := func(i int) string {
+		path := filepath.Join(tempDir, fmt.Sprintf("preview-%03d.png", i))
+		if err := os.WriteFile(path, []byte("png"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+
+	// Fill result cache to capacity.
+	for i := 0; i < maxMemoryCacheEntries; i++ {
+		memory.StoreRender(
+			fmt.Sprintf("render:%03d", i),
+			contracts.RenderStudyCommandResult{StudyID: "study-1", PreviewPath: makePreview(i)},
+		)
+	}
+
+	// Promote the oldest entry to most-recently-used.
+	if _, ok := memory.LoadRender("render:000"); !ok {
+		t.Fatal("LoadRender(render:000) = miss, want hit before eviction")
+	}
+
+	// Store one more entry — must evict the LRU entry (render:001).
+	memory.StoreRender("render:new", contracts.RenderStudyCommandResult{
+		StudyID:     "study-1",
+		PreviewPath: makePreview(maxMemoryCacheEntries),
+	})
+
+	if _, ok := memory.LoadRender("render:000"); !ok {
+		t.Error("render:000 = miss, want hit (was most recently used)")
+	}
+	if _, ok := memory.LoadRender("render:001"); ok {
+		t.Error("render:001 = hit, want miss (was least recently used and should be evicted)")
+	}
+}
+
+func BenchmarkMemoryEviction(b *testing.B) {
+	b.Run("Results", func(b *testing.B) {
+		memory := NewMemory(nil)
+		for i := 0; i < maxMemoryCacheEntries; i++ {
+			memory.StoreRender(fmt.Sprintf("render:%05d", i), contracts.RenderStudyCommandResult{StudyID: "study-1"})
+		}
+		b.ResetTimer()
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			memory.StoreRender(fmt.Sprintf("render:%05d", maxMemoryCacheEntries+i), contracts.RenderStudyCommandResult{StudyID: "study-1"})
+		}
+	})
+
+	b.Run("SourcePreviews", func(b *testing.B) {
+		memory := NewMemory(nil)
+		pixels := make([]uint8, 4)
+		for i := 0; i < maxSourcePreviewEntries; i++ {
+			memory.StoreSourcePreview(fmt.Sprintf("/tmp/bench-%05d.dcm", i), imaging.GrayPreview(2, 2, pixels))
+		}
+		b.ResetTimer()
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			memory.StoreSourcePreview(fmt.Sprintf("/tmp/new-%05d.dcm", i), imaging.GrayPreview(2, 2, pixels))
+		}
+	})
+}
+
 func TestMemorySourcePreviewEvictsByByteBudget(t *testing.T) {
 	memory := NewMemory(nil)
 
