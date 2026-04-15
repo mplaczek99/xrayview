@@ -494,13 +494,23 @@ If a walk fails, `trackedBytes` is reset to -1 (unknown) to force a retry. The `
 - In a 10-second render job with 200ms polling (50 polls) where the active study's job advances ~5 times, ViewTab re-renders drop from 50 → ~5 (~90% reduction from cross-study churn elimination).
 **How to test:** `node frontend/scripts/validate-active-study-jobs-selector.mjs`. React DevTools Profiler to count renders during a render job with multiple studies open.
 
-### Step 9.7: Debounce Processing Control Updates
+### Step 9.7: Debounce Processing Control Updates ✅
 
-**File:** `frontend/src/app/store/workbenchStore.ts:499-515`
-**What it does:** `setProcessingControls` creates a new state on every slider drag event (brightness, contrast).
-**Optimization:** Debounce the state update with a 16ms (one frame) delay. Accumulate the latest controls value, only commit to state once per animation frame. This prevents dozens of intermediate state snapshots and re-renders during slider drags.
-**Expected improvement:** Reduces state updates from ~60/s to 1/frame during slider interaction. Eliminates jank.
-**How to test:** Manually test slider responsiveness. Profile with React DevTools.
+**File:** `frontend/src/app/store/workbenchStore.ts` (`setProcessingControls`, `commitPendingControls`)
+**What it does:** `setProcessingControls` created a new state on every slider drag event (brightness, contrast).
+**Optimization:** Added three private fields (`_pendingControls`, `_pendingControlsStudyId`, `_controlsRaf`) to `WorkbenchStore`. `setProcessingControls` now accumulates the latest controls and schedules `requestAnimationFrame` on the first call per frame. Subsequent calls within the same frame update `_pendingControls` without scheduling additional rAFs. The rAF callback calls `commitPendingControls()`, which clears pending state then calls `setStudyState` with the accumulated value. The study ID is captured at call time (not at rAF time) so controls commit to the correct study even if the active study changes before the frame fires.
+**Actual improvement:** `node frontend/scripts/validate-debounce-controls.mjs` — 11 tests, all pass. Confirms:
+- **BEFORE**: 5 rapid slider events → 5 state updates → 5 listener notifications
+- **BEFORE**: 10 rapid events in one frame → 10 state updates (no coalescing)
+- **AFTER**: 5 events → 1 rAF scheduled (not 5), 0 updates until rAF flush → 1 state update after flush
+- **AFTER**: 10 events coalesced to 1 state update (**90% reduction**)
+- **AFTER**: last-value wins (the only meaningful one per frame)
+- **AFTER**: cross-frame correctness — second frame schedules new rAF independently
+- **AFTER**: no rAF scheduled when no active study
+- **AFTER**: study ID isolation correct across study switches
+- The combined path (rAF → `setStudyState` → `queueMicrotask` notify from step 9.3) means the full pipeline is: many slider events → 1 rAF → 1 microtask → 1 React reconciliation per frame. Previously: N slider events → N `setState` → N microtasks → N reconciliations.
+- During slider drags where 3–10 events fire per frame (fast drag on high-refresh display or busy main thread), state updates drop from N → 1. At 60fps steady-state they're equivalent (1 event/frame), but GC pressure is reduced by eliminating N-1 intermediate state objects.
+**How to test:** `node frontend/scripts/validate-debounce-controls.mjs` for logic validation. React DevTools Profiler to count renders during brightness/contrast slider drag.
 
 ### Step 9.8: Attach Pointer Listeners to Container, Not Window
 

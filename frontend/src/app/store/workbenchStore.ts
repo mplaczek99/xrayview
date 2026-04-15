@@ -336,6 +336,12 @@ class WorkbenchStore {
 
   private pendingNotification = false;
 
+  // rAF debounce for setProcessingControls: coalesces rapid slider events
+  // (brightness, contrast) into one state update per animation frame.
+  private _pendingControls: ProcessingControls | null = null;
+  private _pendingControlsStudyId: string | null = null;
+  private _controlsRaf = 0; // 0 = no pending rAF
+
   subscribe = (listener: Listener) => {
     this.listeners.add(listener);
     return () => {
@@ -526,7 +532,30 @@ class WorkbenchStore {
       return;
     }
 
-    this.setStudyState(study.studyId, (current) => ({
+    // Accumulate latest value. If a rAF is already scheduled, it will pick
+    // up this value when it fires — coalescing rapid slider events into one
+    // state update per animation frame.
+    this._pendingControls = controls;
+    this._pendingControlsStudyId = study.studyId;
+
+    if (!this._controlsRaf) {
+      this._controlsRaf = requestAnimationFrame(() => {
+        this._controlsRaf = 0;
+        this.commitPendingControls();
+      });
+    }
+  }
+
+  private commitPendingControls() {
+    const controls = this._pendingControls;
+    const studyId = this._pendingControlsStudyId;
+    this._pendingControls = null;
+    this._pendingControlsStudyId = null;
+    if (!controls || !studyId) {
+      return;
+    }
+
+    this.setStudyState(studyId, (current) => ({
       ...current,
       processing: {
         ...current.processing,
