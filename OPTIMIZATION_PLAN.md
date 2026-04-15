@@ -399,13 +399,16 @@ If a walk fails, `trackedBytes` is reset to -1 (unknown) to force a retry. The `
 - Eliminated map growth rehashes as predicted. Speed impact negligible (pixel data copies dominate cost).
 **How to test:** `BenchmarkEncodeSecondaryCapture` in `secondary_capture_test.go` with `-benchmem`.
 
-### Step 8.2: Avoid Sorting Elements Twice
+### Step 8.2: Avoid Sorting Elements Twice ✅
 
-**File:** `backend/internal/export/secondary_capture.go:168-169`
-**What it does:** `sortElements(datasetElements)` sorts ~25 elements. Elements are inserted from a map, so order is random.
-**Optimization:** Insert dataset elements into a pre-sorted slice (binary insertion) or use a `[]element` with insertion at the correct position from the start. Since tags are uint32, a simple sorted slice with binary search insertion is faster than sort.Slice for <50 elements.
-**Expected improvement:** Negligible for current sizes, but cleaner.
-**How to test:** Benchmark export.
+**File:** `backend/internal/export/secondary_capture.go`
+**What it does:** `elements map[uint32]element` collected ~25 dataset elements, then converted to a slice and called `sortElements`. `metaElements` literal was already in ascending tag order but `sortElements(metaElements)` was called unnecessarily — the second redundant sort.
+**Optimization:** Replaced the map with a `[]element` maintained in sorted tag order via `insertElement` (binary search insertion, handles overwrite for preserved elements). Removed `sortElements(metaElements)` (already ordered). Removed `putElement`, `sortElements`, and the `sort` import entirely.
+**Actual improvement:** `BenchmarkEncodeSecondaryCapture` (2048×1536):
+- **Gray8**: 53 → 43 allocs/op (−10 allocs), B/op ~unchanged, ns/op within noise
+- **RGBA8**: 51 → 41 allocs/op (−10 allocs), B/op ~unchanged, ns/op within noise
+- Eliminated map allocation, map buckets, and map-to-slice copy loop. Speed unchanged (pixel data dominates).
+**How to test:** `BenchmarkEncodeSecondaryCapture` in `secondary_capture_test.go` with `-benchmem`.
 
 ---
 

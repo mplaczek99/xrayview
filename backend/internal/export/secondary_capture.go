@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"math/big"
 	"os"
-	"sort"
 	"strings"
 	"time"
 
@@ -98,38 +97,39 @@ func encodeSecondaryCapture(
 	dateValue := now.Format("20060102")
 	timeValue := now.Format("150405")
 
-	elements := make(map[uint32]element, 32)
-	putElement(elements, stringElement(0x00080016, "UI", secondaryCaptureSOPClassUID))
-	putElement(elements, stringElement(0x00080018, "UI", sopInstanceUID))
-	putElement(elements, stringElement(0x00080060, "CS", "OT"))
-	putElement(elements, multiStringElement(0x00080008, "CS", []string{"DERIVED", "SECONDARY"}))
-	putElement(elements, stringElement(0x00080064, "CS", "WSD"))
-	putElement(elements, stringElement(0x00080012, "DA", dateValue))
-	putElement(elements, stringElement(0x00080013, "TM", timeValue))
-	putElement(elements, stringElement(0x00080023, "DA", dateValue))
-	putElement(elements, stringElement(0x00080033, "TM", timeValue))
-	putElement(elements, stringElement(0x0008103e, "LO", defaultProcessedSeriesDesc))
-	putElement(elements, stringElement(0x00082111, "ST", defaultDerivationDescription))
-	putElement(elements, stringElement(0x00080070, "LO", defaultManufacturer))
-	putElement(elements, stringElement(0x00081090, "LO", defaultManufacturerModelName))
-	putElement(elements, stringElement(0x00181020, "LO", defaultSoftwareVersions))
-	putElement(elements, stringElement(0x0020000d, "UI", studyInstanceUID))
-	putElement(elements, stringElement(0x0020000e, "UI", seriesInstanceUID))
-	putElement(elements, stringElement(0x00200011, "IS", "999"))
-	putElement(elements, stringElement(0x00200013, "IS", "1"))
+	datasetElements := make([]element, 0, 32)
+	insertElement(&datasetElements, stringElement(0x00080016, "UI", secondaryCaptureSOPClassUID))
+	insertElement(&datasetElements, stringElement(0x00080018, "UI", sopInstanceUID))
+	insertElement(&datasetElements, stringElement(0x00080060, "CS", "OT"))
+	insertElement(&datasetElements, multiStringElement(0x00080008, "CS", []string{"DERIVED", "SECONDARY"}))
+	insertElement(&datasetElements, stringElement(0x00080064, "CS", "WSD"))
+	insertElement(&datasetElements, stringElement(0x00080012, "DA", dateValue))
+	insertElement(&datasetElements, stringElement(0x00080013, "TM", timeValue))
+	insertElement(&datasetElements, stringElement(0x00080023, "DA", dateValue))
+	insertElement(&datasetElements, stringElement(0x00080033, "TM", timeValue))
+	insertElement(&datasetElements, stringElement(0x0008103e, "LO", defaultProcessedSeriesDesc))
+	insertElement(&datasetElements, stringElement(0x00082111, "ST", defaultDerivationDescription))
+	insertElement(&datasetElements, stringElement(0x00080070, "LO", defaultManufacturer))
+	insertElement(&datasetElements, stringElement(0x00081090, "LO", defaultManufacturerModelName))
+	insertElement(&datasetElements, stringElement(0x00181020, "LO", defaultSoftwareVersions))
+	insertElement(&datasetElements, stringElement(0x0020000d, "UI", studyInstanceUID))
+	insertElement(&datasetElements, stringElement(0x0020000e, "UI", seriesInstanceUID))
+	insertElement(&datasetElements, stringElement(0x00200011, "IS", "999"))
+	insertElement(&datasetElements, stringElement(0x00200013, "IS", "1"))
 
 	for _, preserved := range sourceMeta.PreservedElements {
 		encoded, err := preservedElement(preserved)
 		if err != nil {
 			return nil, err
 		}
-		putElement(elements, encoded)
+		insertElement(&datasetElements, encoded)
 	}
 
 	for _, encoded := range pixelElements(preview) {
-		putElement(elements, encoded)
+		insertElement(&datasetElements, encoded)
 	}
 
+	// metaElements is defined in ascending tag order; no sort needed.
 	metaElements := []element{
 		binaryElement(0x00020001, "OB", []byte{0x00, 0x01}),
 		stringElement(0x00020002, "UI", secondaryCaptureSOPClassUID),
@@ -138,8 +138,6 @@ func encodeSecondaryCapture(
 		stringElement(0x00020012, "UI", implementationClassUID),
 		stringElement(0x00020013, "SH", implementationVersionName),
 	}
-
-	sortElements(metaElements)
 
 	groupLength := 0
 	for _, encoded := range metaElements {
@@ -170,11 +168,7 @@ func encodeSecondaryCapture(
 		}
 	}
 
-	datasetElements := make([]element, 0, len(elements))
-	for _, encoded := range elements {
-		datasetElements = append(datasetElements, encoded)
-	}
-	sortElements(datasetElements)
+	// datasetElements is maintained in sorted tag order by insertElement.
 	for _, encoded := range datasetElements {
 		if err := writeElement(&payload, encoded); err != nil {
 			return nil, err
@@ -242,8 +236,25 @@ func pixelElements(preview imaging.PreviewImage) []element {
 	}
 }
 
-func putElement(elements map[uint32]element, encoded element) {
-	elements[encoded.tag] = encoded
+// insertElement inserts e into elements maintaining ascending tag order.
+// If an element with the same tag already exists, it is replaced.
+func insertElement(elements *[]element, e element) {
+	lo, hi := 0, len(*elements)
+	for lo < hi {
+		mid := (lo + hi) / 2
+		if (*elements)[mid].tag < e.tag {
+			lo = mid + 1
+		} else {
+			hi = mid
+		}
+	}
+	if lo < len(*elements) && (*elements)[lo].tag == e.tag {
+		(*elements)[lo] = e
+		return
+	}
+	*elements = append(*elements, element{})
+	copy((*elements)[lo+1:], (*elements)[lo:])
+	(*elements)[lo] = e
 }
 
 func stringElement(tag uint32, vr string, value string) element {
@@ -305,14 +316,6 @@ func isSupportedStringVR(vr string) bool {
 	}
 }
 
-func sortElements(elements []element) {
-	sort.Slice(elements, func(left, right int) bool {
-		if elementGroup(elements[left].tag) != elementGroup(elements[right].tag) {
-			return elementGroup(elements[left].tag) < elementGroup(elements[right].tag)
-		}
-		return elementNumber(elements[left].tag) < elementNumber(elements[right].tag)
-	})
-}
 
 func encodedElementLength(encoded element) (int, error) {
 	switch normalizedVR(encoded.vr) {
