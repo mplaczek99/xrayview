@@ -425,13 +425,18 @@ If a walk fails, `trackedBytes` is reset to -1 (unknown) to force a retry. The `
 **Validation:** `node frontend/scripts/validate-selectors.mjs` — 9 tests, all pass. Confirms: (a) unmemoized selector runs body 5× for 5 same-input calls; (b) memoized selector runs body 1× for 5 same-input calls; (c) recomputes correctly on new input references; (d) returns same cached object reference. `npm run build` passes with zero type errors.
 **How to test:** `node frontend/scripts/validate-selectors.mjs` for unit validation. React DevTools Profiler to count renders before/after during a render job.
 
-### Step 9.2: Avoid Spreading Entire State on Every Update
+### Step 9.2: Avoid Spreading Entire State on Every Update ✅
 
-**File:** `frontend/src/app/store/workbenchStore.ts:625-654`
+**File:** `frontend/src/app/store/workbenchStore.ts`
 **What it does:** `receiveJobUpdate` creates new spread copies of `current.jobs`, `current.studies`, and the full state on every job poll update. During active jobs, this runs every 500ms-1s.
-**Optimization:** Only create new object references for objects that actually changed. If the job snapshot is identical to the previous one (same state, same progress percent), skip the update entirely. Add a `jobSnapshotEqual` comparison.
-**Expected improvement:** Eliminates ~50-70% of state updates during job polling (when job state hasn't changed between polls). Reduces GC pressure and React reconciliation.
-**How to test:** Log state update count during a 10-second render job, compare before/after.
+**Optimization:** Added `jobSnapshotEqual` comparing `state`, `progress.percent`, `progress.stage`, `progress.message`, `fromCache`, and null-transitions for `result`/`error`. `receiveJobUpdate` returns `current` unchanged when the check passes — the existing `nextState === this.state` guard in `setState` then skips listener notification and React reconciliation entirely. Terminal states (completed/failed/cancelled) correctly coalesce subsequent identical polls.
+**Note on timing:** `timing` is intentionally excluded from the equality check. It is computed locally by `advanceJobProgressTiming`, not from the backend. Stall detection uses `lastProgressAtMs` (which only advances on real progress) and `useProgressClock` (a `setInterval`) — both work correctly without store updates when progress is unchanged.
+**Actual improvement:** In the common polling scenario (job not advancing between two 200ms polls):
+- **BEFORE:** Every poll creates new `jobs` + `studies` + state object references → listener notification → React reconciliation on every poll
+- **AFTER:** No-op polls return `current` unchanged → 0 listener notifications → 0 React reconciliation work
+- **Listener notification reduction:** 0 for no-op polls (vs 1 per poll before). In a 10s render job with 200ms polling (50 polls) where progress advances ~5 times, listener count drops from 50 → ~5 (~90% reduction).
+**Validation:** `node frontend/scripts/validate-job-updates.mjs` — 8 tests, all pass. Confirms: (a) BEFORE fires listener 5× for 5 identical polls; (b) AFTER fires 0× for identical polls; (c) progress change, state transition, null→error, null→result all fire correctly; (d) mixed 10-poll sequence with 6 no-ops → exactly 4 notifications. `npm run build` passes with zero type errors.
+**How to test:** `node frontend/scripts/validate-job-updates.mjs`. React DevTools Profiler to count renders during a render job.
 
 ### Step 9.3: Batch `setStudyState` Updates
 

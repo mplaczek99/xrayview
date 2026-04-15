@@ -87,6 +87,28 @@ function formatAnalyzeStatus(toothCount: number, fromCache: boolean): string {
     : `${toothCount} teeth measured. Suggestions are ready to edit.`;
 }
 
+// Returns true if the incoming backend snapshot has no meaningful change vs what
+// is already stored. Skips state spreads and listener notifications for the
+// common case where the poller receives the same queued/running snapshot twice.
+//
+// Note: `timing` is intentionally excluded — it is computed locally, not from
+// the backend. Stall detection uses `lastProgressAtMs` (advanced only when
+// percent changes) and `useProgressClock` (setInterval) for re-rendering, so
+// skipping timing-only writes has no visible effect on the ETA display.
+function jobSnapshotEqual(prev: JobSnapshot, next: JobSnapshot): boolean {
+  return (
+    prev.state === next.state &&
+    prev.progress.percent === next.progress.percent &&
+    prev.progress.stage === next.progress.stage &&
+    prev.progress.message === next.progress.message &&
+    prev.fromCache === next.fromCache &&
+    // Null-transitions (null→value or value→null) must not be skipped.
+    // Once both sides are non-null the job is terminal and immutable.
+    (prev.result === null) === (next.result === null) &&
+    (prev.error === null) === (next.error === null)
+  );
+}
+
 function createPendingJobSnapshot(
   jobId: string,
   jobKind: JobSnapshot["jobKind"],
@@ -625,6 +647,13 @@ class WorkbenchStore {
   receiveJobUpdate(job: JobSnapshot) {
     this.setState((current) => {
       const previous = current.jobs[job.jobId];
+      // Skip when the polled snapshot carries no new information — same state,
+      // progress, and terminal flags. Returning `current` triggers the
+      // `nextState === this.state` guard in setState, preventing listener
+      // notifications and React reconciliation for no-op polls.
+      if (previous && jobSnapshotEqual(previous, job)) {
+        return current;
+      }
       const nextJob: JobSnapshot = {
         ...job,
         timing: advanceJobProgressTiming(
