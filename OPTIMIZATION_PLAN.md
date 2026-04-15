@@ -375,13 +375,13 @@ If a walk fails, `trackedBytes` is reset to -1 (unknown) to force a retry. The `
 - Note: plan's ~95% estimate assumed serialization dominated; httptest recorder + HTTP infrastructure account for the remaining cost.
 **How to test:** `BenchmarkHealthz` in `router_test.go` with `-benchmem`.
 
-### Step 7.3: Skip Extra JSON Decode Verification
+### Step 7.3: Skip Extra JSON Decode Verification ✅
 
-**File:** `backend/internal/httpapi/router.go:345-353`
+**File:** `backend/internal/httpapi/router.go:395-424`
 **What it does:** After decoding the command payload, `decodeJSONRequest` tries to decode again to check for trailing content. This second decode attempt touches the rest of the request body.
-**Optimization:** Use `json.Unmarshal` on a pre-read body byte slice instead. Check for trailing content with a simple byte scan for non-whitespace after the JSON value, instead of running a full decoder pass.
-**Expected improvement:** ~10% speedup on command request parsing by eliminating the second decode pass.
-**How to test:** Benchmark `decodeJSONRequest` with typical payloads.
+**Optimization:** Captured `bodyBytes := buf.Bytes()` before the first decode (a zero-alloc slice into the pooled buffer), then used `decoder.InputOffset()` to slice directly to the first unread byte. Replaced the second full `decoder.Decode(&extra)` pass with a bare `for _, b := range bodyBytes[decoder.InputOffset():]` whitespace scan. Kept `DisallowUnknownFields` on the existing decoder — no `json.Unmarshal` workaround needed.
+**Actual improvement:** `BenchmarkDecodeJSONRequest` (45-byte payload): 2147 → 2109 ns/op (1.8% faster), 6183 → 6167 B/op, 20 → 19 allocs/op. Plan's predicted 10% applies to larger payloads where the second decode has meaningful work; for the small-payload benchmark the main win is the eliminated alloc (the `var extra any` that was passed to Decode).
+**How to test:** `BenchmarkDecodeJSONRequest` in `router_test.go`; functional trailing-content coverage at line 481 of `router_test.go`.
 
 ---
 

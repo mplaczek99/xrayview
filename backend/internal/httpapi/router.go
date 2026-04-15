@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -401,6 +400,10 @@ func decodeJSONRequest(request *http.Request, payload any) error {
 		return contracts.InvalidInput("invalid command payload").WithDetails(err.Error())
 	}
 
+	// Capture the full body slice before the decoder reads from buf.
+	// After Decode, InputOffset() is the byte position from buf's origin,
+	// so bodyBytes[InputOffset():] gives all trailing bytes without alloc.
+	bodyBytes := buf.Bytes()
 	decoder := json.NewDecoder(buf)
 	decoder.DisallowUnknownFields()
 
@@ -408,14 +411,14 @@ func decodeJSONRequest(request *http.Request, payload any) error {
 		return contracts.InvalidInput("invalid command payload").WithDetails(err.Error())
 	}
 
-	var extra any
-	if err := decoder.Decode(&extra); err != io.EOF {
-		if err == nil {
+	// Fast trailing-content check: scan raw bytes from InputOffset instead of a
+	// second full decoder pass. InputOffset returns the exact byte position
+	// after the decoded value, covering all body bytes without extra allocation.
+	for _, b := range bodyBytes[decoder.InputOffset():] {
+		if b != ' ' && b != '\t' && b != '\r' && b != '\n' {
 			return contracts.InvalidInput("invalid command payload").
 				WithDetails("unexpected trailing JSON content")
 		}
-
-		return contracts.InvalidInput("invalid command payload").WithDetails(err.Error())
 	}
 
 	return nil
