@@ -747,17 +747,76 @@ export function useWorkbenchStore<T>(selector: (state: WorkbenchState) => T): T 
   );
 }
 
+// createSelector: memoize a derived value on a single input slice.
+// Re-runs resultFn only when inputSelector returns a new reference (Object.is).
+function createSelector<T, R>(
+  inputSelector: (s: WorkbenchState) => T,
+  resultFn: (input: T) => R,
+): (s: WorkbenchState) => R {
+  let lastInput: T;
+  let lastResult: R;
+  let initialized = false;
+  return (s: WorkbenchState): R => {
+    const input = inputSelector(s);
+    if (initialized && Object.is(lastInput, input)) {
+      return lastResult;
+    }
+    lastInput = input;
+    lastResult = resultFn(input);
+    initialized = true;
+    return lastResult;
+  };
+}
+
+// createSelector2: memoize a derived value on two independent input slices.
+function createSelector2<A, B, R>(
+  selA: (s: WorkbenchState) => A,
+  selB: (s: WorkbenchState) => B,
+  resultFn: (a: A, b: B) => R,
+): (s: WorkbenchState) => R {
+  let lastA: A;
+  let lastB: B;
+  let lastResult: R;
+  let initialized = false;
+  return (s: WorkbenchState): R => {
+    const a = selA(s);
+    const b = selB(s);
+    if (initialized && Object.is(lastA, a) && Object.is(lastB, b)) {
+      return lastResult;
+    }
+    lastA = a;
+    lastB = b;
+    lastResult = resultFn(a, b);
+    initialized = true;
+    return lastResult;
+  };
+}
+
 export const selectJobs = (s: WorkbenchState) => s.jobs;
 export const selectJobOrder = (s: WorkbenchState) => s.jobOrder;
 export const selectStudies = (s: WorkbenchState) => s.studies;
 export const selectIsOpeningStudy = (s: WorkbenchState) => s.isOpeningStudy;
 export const selectWorkbenchStatus = (s: WorkbenchState) => s.workbenchStatus;
 export const selectManifest = (s: WorkbenchState) => s.manifest;
-export const selectPendingJobCount = (s: WorkbenchState) =>
-  Object.values(s.jobs).filter((job) =>
-    job.state === "queued" || job.state === "running" || job.state === "cancelling",
-  ).length;
-export const selectActiveStudy = (s: WorkbenchState) =>
-  s.activeStudyId ? s.studies[s.activeStudyId] ?? null : null;
+
+// Memoized on s.jobs: skips Object.values().filter() when jobs map is unchanged.
+export const selectPendingJobCount = createSelector(
+  (s) => s.jobs,
+  (jobs) =>
+    Object.values(jobs).filter(
+      (job) =>
+        job.state === "queued" ||
+        job.state === "running" ||
+        job.state === "cancelling",
+    ).length,
+);
+
+// Memoized on activeStudyId + studies: returns cached reference when neither changes.
+export const selectActiveStudy = createSelector2(
+  (s) => s.activeStudyId,
+  (s) => s.studies,
+  (activeStudyId, studies) =>
+    activeStudyId ? studies[activeStudyId] ?? null : null,
+);
 
 export type { ProcessingRunState };

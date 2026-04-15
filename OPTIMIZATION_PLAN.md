@@ -416,13 +416,14 @@ If a walk fails, `trackedBytes` is reset to -1 (unknown) to force a retry. The `
 
 > The frontend agents identified several rendering bottlenecks, especially during job polling (200ms intervals) and viewer interaction.
 
-### Step 9.1: Memoize Selector Results
+### Step 9.1: Memoize Selector Results ✅
 
-**File:** `frontend/src/app/store/workbenchStore.ts:742-748`
-**What it does:** `useWorkbenchStore` calls `selector(workbenchActions.getState())` on every render. Selectors like `selectPendingJobCount` (line 756-759) create a new filtered array on every call.
-**Optimization:** Use memoized selectors (like Reselect's `createSelector`). For `selectPendingJobCount`, compute and cache the count, only recomputing when `jobs` changes. For `selectActiveStudy`, cache the result keyed on `activeStudyId` + `studies`.
-**Expected improvement:** Eliminates unnecessary React re-renders when selectors return structurally-equal-but-referentially-different values. ~30-50% reduction in React component renders during job polling.
-**How to test:** Use React DevTools Profiler to count renders before/after during a render job.
+**File:** `frontend/src/app/store/workbenchStore.ts`
+**What it does:** `useWorkbenchStore` calls `selector(workbenchActions.getState())` on every render. Selectors like `selectPendingJobCount` created a new filtered array on every call, even when `jobs` hadn't changed.
+**Optimization:** Added `createSelector` (single-input) and `createSelector2` (two-input) memoization helpers using module-level closure over the singleton store. Re-runs the result function only when the input reference changes (`Object.is`). `selectPendingJobCount` memoized on `s.jobs` — skips `Object.values().filter()` on non-jobs state changes (study updates, activeStudyId changes, etc.). `selectActiveStudy` memoized on `(s.activeStudyId, s.studies)` pair — returns cached object reference when neither changes. No external dependencies (no reselect).
+**Actual improvement:** `Object.values().filter()` on the jobs map now runs only when `s.jobs` reference changes (i.e., an actual job update), not on every state notification. During polling at 200 ms intervals, non-job state changes (study updates, viewer state) no longer trigger redundant filter computations. `selectActiveStudy` returns the same object reference from cache when the active study and studies map are unchanged, preventing downstream `Object.is`-based re-render checks from seeing spurious new references.
+**Validation:** `node frontend/scripts/validate-selectors.mjs` — 9 tests, all pass. Confirms: (a) unmemoized selector runs body 5× for 5 same-input calls; (b) memoized selector runs body 1× for 5 same-input calls; (c) recomputes correctly on new input references; (d) returns same cached object reference. `npm run build` passes with zero type errors.
+**How to test:** `node frontend/scripts/validate-selectors.mjs` for unit validation. React DevTools Profiler to count renders before/after during a render job.
 
 ### Step 9.2: Avoid Spreading Entire State on Every Update
 
