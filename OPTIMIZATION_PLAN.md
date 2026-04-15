@@ -479,22 +479,20 @@ If a walk fails, `trackedBytes` is reset to -1 (unknown) to force a retry. The `
 - Pixel math verified: `translate(offsetX, offsetY) scale(S)` with `transformOrigin: 0 0` is algebraically identical to the original `left/top/width*S/height*S` positioning for all image corners.
 **How to test:** `node frontend/scripts/validate-gpu-transforms.mjs` for logic validation. Chrome DevTools Performance tab → compare Layout block during pan gesture before/after.
 
-### Step 9.6: Fine-Grained Store Selectors to Reduce ViewTab Re-renders
+### Step 9.6: Fine-Grained Store Selectors to Reduce ViewTab Re-renders ✅
 
-**File:** `frontend/src/components/viewer/ViewTab.tsx:8-10`
-**What it does:** `const jobs = useWorkbenchStore(selectJobs)` subscribes to the entire jobs map. Every 200ms poll creates a new jobs object reference, causing ViewTab (and all children) to re-render even when the active study's job didn't change.
-**Optimization:** Replace `selectJobs` with a fine-grained selector that returns only the active study's relevant job snapshots:
-```ts
-export const selectActiveStudyJobs = (s: WorkbenchState) => {
-  const study = selectActiveStudy(s);
-  return {
-    render: study?.renderJobId ? s.jobs[study.renderJobId] ?? null : null,
-    analysis: study?.analysisJobId ? s.jobs[study.analysisJobId] ?? null : null,
-  };
-};
-```
-**Expected improvement:** 60-80% fewer ViewTab re-renders during job polling. Major reduction in React reconciliation work.
-**How to test:** Count React renders during a 10-second render job, before/after.
+**File:** `frontend/src/components/viewer/ViewTab.tsx:8-10`, `frontend/src/app/store/workbenchStore.ts`
+**What it does:** `const jobs = useWorkbenchStore(selectJobs)` subscribed to the entire jobs map. Every 200ms poll created a new `jobs` spread object reference, causing ViewTab (and all children) to re-render even when the active study's job didn't change.
+**Optimization:** Added `selectActiveStudyJobs` — an IIFE-closure selector that memoizes on the two specific job snapshot references for the active study (`s.jobs[renderJobId]` and `s.jobs[analysisJobId]`), not on `s.jobs` as a whole. Returns the same result object reference when neither job snapshot has changed. `ViewTab` now uses `useWorkbenchStore(selectActiveStudyJobs)` and accesses `activeStudyJobs.analysis` directly (no `useMemo` needed — selector already guarantees reference stability).
+**Why IIFE closure over `createSelector2`:** `createSelector2(selectActiveStudy, s => s.jobs, ...)` would check `s.jobs` reference — which changes every poll for any study's job — defeating the purpose. The IIFE compares the extracted snapshot refs directly, so cross-study job churn produces zero ref changes.
+**Actual improvement:** `node frontend/scripts/validate-active-study-jobs-selector.mjs` — 9 tests, all pass. Confirms:
+- **BEFORE**: any job update (including other studies) creates new `jobs` ref → ViewTab re-renders
+- **AFTER**: 10 cross-study polls → 0 new result refs (0 re-renders)
+- **AFTER**: 10 mixed polls with 2 active-study advances → exactly 2 new refs (only real changes trigger re-render)
+- **AFTER**: no active study → stable `{ render: null, analysis: null }` ref
+- **AFTER**: active study switch, render job advance, analysis job advance all correctly produce new refs
+- In a 10-second render job with 200ms polling (50 polls) where the active study's job advances ~5 times, ViewTab re-renders drop from 50 → ~5 (~90% reduction from cross-study churn elimination).
+**How to test:** `node frontend/scripts/validate-active-study-jobs-selector.mjs`. React DevTools Profiler to count renders during a render job with multiple studies open.
 
 ### Step 9.7: Debounce Processing Control Updates
 

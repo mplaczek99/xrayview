@@ -1,13 +1,14 @@
 import { useMemo } from "react";
 import type { MeasurementScale } from "../../lib/generated/contracts";
-import { workbenchActions, useWorkbenchStore, selectActiveStudy, selectIsOpeningStudy, selectJobs } from "../../app/store/workbenchStore";
+import { workbenchActions, useWorkbenchStore, selectActiveStudy, selectIsOpeningStudy, selectActiveStudyJobs } from "../../app/store/workbenchStore";
 import { ViewerCanvas } from "../../features/viewer/ViewerCanvas";
 import { ViewSidebar } from "./ViewSidebar";
 
 export function ViewTab() {
   const study = useWorkbenchStore(selectActiveStudy);
   const isOpeningStudy = useWorkbenchStore(selectIsOpeningStudy);
-  const jobs = useWorkbenchStore(selectJobs);
+  const activeStudyJobs = useWorkbenchStore(selectActiveStudyJobs);
+  const analysisJob = activeStudyJobs.analysis;
 
   const teeth = useMemo(
     () =>
@@ -20,10 +21,6 @@ export function ViewTab() {
   );
   const tooth = useMemo(() => study?.analysis?.tooth ?? null, [study?.analysis?.tooth]);
   const warnings = useMemo(() => study?.analysis?.warnings ?? [], [study?.analysis?.warnings]);
-  const analysisJob = useMemo(
-    () => (study?.analysisJobId ? jobs[study.analysisJobId] ?? null : null),
-    [study?.analysisJobId, jobs],
-  );
   const measurementScale: MeasurementScale | null = useMemo(
     () =>
       study?.analysis?.calibration.measurementScale ??

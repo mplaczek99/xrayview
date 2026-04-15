@@ -831,6 +831,37 @@ function createSelector2<A, B, R>(
 }
 
 export const selectJobs = (s: WorkbenchState) => s.jobs;
+
+// Memoized on the two specific job snapshot references for the active study.
+// Returns the same object reference when neither the render nor analysis job
+// snapshot has changed — even when s.jobs itself is a new spread object from
+// an unrelated study's poll update. This prevents ViewTab re-renders during
+// cross-study job churn (the common case during multi-study polling).
+export const selectActiveStudyJobs: (s: WorkbenchState) => {
+  render: import("../../features/jobs/model").JobSnapshot | null;
+  analysis: import("../../features/jobs/model").JobSnapshot | null;
+} = (() => {
+  let lastRender: import("../../features/jobs/model").JobSnapshot | null = null;
+  let lastAnalysis: import("../../features/jobs/model").JobSnapshot | null = null;
+  let lastResult: {
+    render: import("../../features/jobs/model").JobSnapshot | null;
+    analysis: import("../../features/jobs/model").JobSnapshot | null;
+  } = { render: null, analysis: null };
+  let initialized = false;
+  return (s: WorkbenchState) => {
+    const study = selectActiveStudy(s);
+    const renderJob = study?.renderJobId ? s.jobs[study.renderJobId] ?? null : null;
+    const analysisJob = study?.analysisJobId ? s.jobs[study.analysisJobId] ?? null : null;
+    if (initialized && Object.is(renderJob, lastRender) && Object.is(analysisJob, lastAnalysis)) {
+      return lastResult;
+    }
+    lastRender = renderJob;
+    lastAnalysis = analysisJob;
+    lastResult = { render: renderJob, analysis: analysisJob };
+    initialized = true;
+    return lastResult;
+  };
+})();
 export const selectJobOrder = (s: WorkbenchState) => s.jobOrder;
 export const selectStudies = (s: WorkbenchState) => s.studies;
 export const selectIsOpeningStudy = (s: WorkbenchState) => s.isOpeningStudy;
