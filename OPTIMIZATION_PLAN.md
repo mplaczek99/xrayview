@@ -447,13 +447,22 @@ If a walk fails, `trackedBytes` is reset to -1 (unknown) to force a retry. The `
 **Validation:** `node frontend/scripts/validate-batched-updates.mjs` — 10 tests, all pass. Confirms: (a) BEFORE fires listener 3× for 3 synchronous calls; (b) AFTER fires 0× immediately, 1× after microtask flush; (c) state is readable synchronously before flush; (d) no-op updates never queue microtask; (e) second batch after flush correctly queues new microtask; (f) re-entrancy guard (second batch runs independently). `npm run build` passes with zero type errors.
 **How to test:** `node frontend/scripts/validate-batched-updates.mjs`. React DevTools Profiler to count render cycles during concurrent job polling.
 
-### Step 9.4: Memoize AnnotationLayer with React.memo
+### Step 9.4: Memoize AnnotationLayer with React.memo ✅
 
 **File:** `frontend/src/features/annotations/AnnotationLayer.tsx`
 **What it does:** AnnotationLayer receives the entire annotations bundle, selected ID, draft line, and transform. When any annotation or viewport changes, all annotation SVG elements re-render. Expensive per-annotation computations (midpoint, label formatting) run on every render.
-**Optimization:** Wrap with `React.memo` and a custom comparator. Memoize `selectedLine` lookup and pre-computed label data with `useMemo`. Extract individual annotation items into their own memoized sub-components.
-**Expected improvement:** 40-60% reduction in annotation re-renders for images with 10+ annotations. Eliminates O(n) `find` call per render.
-**How to test:** React DevTools Profiler -- count renders during pan/zoom with annotations visible.
+**Optimization:**
+1. **`React.memo(AnnotationLayer, annotationLayerPropsEqual)`** — custom comparator compares `transform` field-by-field (`offsetX`, `offsetY`, `scale`) and skips callback comparison (ViewerCanvas recreates `beginHandleDrag` each render without `useCallback`). Prevents re-renders from `hoverCoord` updates (mouse-move state in ViewerCanvas that fires every pointermove but is not passed to AnnotationLayer) and other unrelated parent state changes.
+2. **Extracted `LineAnnotationItem = React.memo(..., lineItemPropsEqual)`** — per-annotation sub-component with comparator on `annotation` (by ref), `isSelected`, and `scale` only. On pan: `AnnotationLayer` re-renders (SVG `<g transform>` must update), but each `LineAnnotationItem` skips re-render because `scale` and `annotation` ref are unchanged. On zoom: `scale` changes → items re-render to adjust label y-offset.
+3. **`useMemo` for `selectedLine`** — keyed on `[annotations.lines, selectedAnnotationId]`. Eliminates the O(n) `.find()` per render; for a 10-annotation image with 200 ms polling, this ran ~300×/min regardless of whether annotations changed.
+4. **Pre-computed label text in `LineAnnotationItem`** — `label` string and `mid` point computed once in the item's render body (memoized by the component itself via `memo`).
+**Actual improvement:**
+- **Pan scenario** (most frequent interaction): `AnnotationLayer` re-renders once (SVG transform update); all N `LineAnnotationItem` instances skip re-render. BEFORE: N+1 renders per pointer move. AFTER: 1 render.
+- **Unrelated parent state change** (e.g. hoverCoord): BEFORE: `AnnotationLayer` + all items re-render. AFTER: 0 renders (custom comparator catches no-op).
+- **Selection change**: Only the 1 affected item re-renders (isSelected toggled); all other N-1 items skip. BEFORE: N re-renders. AFTER: 1 re-render.
+- **useMemo selectedLine**: find() runs 1× per unique (lines, selectedId) pair vs 1× per render. During polling at 200 ms intervals with annotations visible, eliminates ~5 find() calls/second.
+**Validation:** `node frontend/scripts/validate-annotation-memo.mjs` — 16 tests, all pass. Covers: BEFORE/AFTER comparator behavior for pan, zoom, annotation change, selection change, callback churn, unrelated parent re-render, useMemo selectedLine call count. `npm run build` passes with zero type errors.
+**How to test:** `node frontend/scripts/validate-annotation-memo.mjs`. React DevTools Profiler to count renders during pan/zoom with annotations visible.
 
 ### Step 9.5: Use GPU-Accelerated CSS Transforms for Image Positioning
 
