@@ -387,13 +387,17 @@ If a walk fails, `trackedBytes` is reset to -1 (unknown) to force a retry. The `
 
 ## Phase 8: DICOM Export Optimization (Backend)
 
-### Step 8.1: Preallocate Element Map
+### Step 8.1: Preallocate Element Map ✅
 
 **File:** `backend/internal/export/secondary_capture.go:101`
 **What it does:** `elements := make(map[uint32]element)` with default capacity. Then ~25 elements are inserted.
 **Optimization:** `make(map[uint32]element, 32)` to preallocate capacity and avoid map growth.
 **Expected improvement:** Minor - eliminates 2-3 map rehashes. ~1-2% speedup on export.
-**How to test:** Benchmark with benchmem.
+**Actual improvement:** `BenchmarkEncodeSecondaryCapture` with 2048×1536 images:
+- **Gray8**: 57 → 53 allocs/op (−4 allocs), B/op ~unchanged (~3 KB less), ns/op within noise
+- **RGBA8**: 53 → 51 allocs/op (−2 allocs), B/op ~unchanged, ns/op within noise
+- Eliminated map growth rehashes as predicted. Speed impact negligible (pixel data copies dominate cost).
+**How to test:** `BenchmarkEncodeSecondaryCapture` in `secondary_capture_test.go` with `-benchmem`.
 
 ### Step 8.2: Avoid Sorting Elements Twice
 

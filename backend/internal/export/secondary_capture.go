@@ -98,7 +98,7 @@ func encodeSecondaryCapture(
 	dateValue := now.Format("20060102")
 	timeValue := now.Format("150405")
 
-	elements := make(map[uint32]element)
+	elements := make(map[uint32]element, 32)
 	putElement(elements, stringElement(0x00080016, "UI", secondaryCaptureSOPClassUID))
 	putElement(elements, stringElement(0x00080018, "UI", sopInstanceUID))
 	putElement(elements, stringElement(0x00080060, "CS", "OT"))
