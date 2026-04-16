@@ -20,7 +20,7 @@ func forceEvictReset(store *Store) {
 	store.evictMu.Unlock()
 }
 
-func TestDefaultRootDirMatchesRustCompatibleTempLayout(t *testing.T) {
+func TestDefaultRootDirMatchesLegacyTempLayout(t *testing.T) {
 	expected := filepath.Join(os.TempDir(), "xrayview")
 	if got := DefaultRootDir(); got != expected {
 		t.Fatalf("DefaultRootDir = %q, want %q", got, expected)

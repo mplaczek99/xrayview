@@ -31,7 +31,7 @@ func TestLocalGradientClampsAtImageEdges(t *testing.T) {
 	}
 }
 
-func TestHistogramPercentileMatchesRustTargetRounding(t *testing.T) {
+func TestHistogramPercentileMatchesTargetRounding(t *testing.T) {
 	var histogram [256]uint32
 	histogram[10] = 2
 	histogram[20] = 2
@@ -263,7 +263,7 @@ func TestAnalyzePreviewSamplePreviewReturnsCandidateOrStructuredWarning(t *testi
 	}
 }
 
-func TestAnalyzePreviewSamplePreviewMatchesRustFixtureSemantics(t *testing.T) {
+func TestAnalyzePreviewSamplePreviewMatchesFixtureSemantics(t *testing.T) {
 	fixture := loadAnalyzeFixture(t)
 	analysis, err := AnalyzePreview(loadAnalyzePreviewFixture(t), nil)
 	if err != nil {

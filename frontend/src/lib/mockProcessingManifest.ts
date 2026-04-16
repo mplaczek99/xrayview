@@ -1,6 +1,6 @@
 import type { ProcessingManifest } from "./generated/contracts";
 
-// Keep mock preset ids and defaults aligned with the Rust backend manifest so
+// Keep mock preset ids and defaults aligned with the Go backend manifest so
 // browser-only development exercises the same UI branches.
 export const MOCK_PROCESSING_MANIFEST: ProcessingManifest = {
   defaultPresetId: "default",

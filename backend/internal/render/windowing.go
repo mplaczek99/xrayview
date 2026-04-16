@@ -10,8 +10,9 @@ const (
 	WindowModeManual
 )
 
-// The zero value keeps the Rust behavior: use the source image's embedded
-// default window when available, otherwise fall back to full-range mapping.
+// The zero value preserves the historical default: use the source image's
+// embedded default window when available, otherwise fall back to full-range
+// mapping.
 type WindowMode struct {
 	Kind         WindowModeKind
 	ManualWindow imaging.WindowLevel

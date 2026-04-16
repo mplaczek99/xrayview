@@ -28,7 +28,7 @@ func TestSuggestedAnnotationsReturnsEmptyBundleWithoutTeeth(t *testing.T) {
 	}
 }
 
-func TestSuggestedAnnotationsMatchesRustUnitParity(t *testing.T) {
+func TestSuggestedAnnotationsMatchesUnitParity(t *testing.T) {
 	analysis := contracts.ToothAnalysis{
 		Image: contracts.ToothImageMetadata{
 			Width:  640,
@@ -192,7 +192,7 @@ func TestSuggestedAnnotationsMatchesRustUnitParity(t *testing.T) {
 	}
 }
 
-func TestSuggestedAnnotationsMatchesRustFixtureOutput(t *testing.T) {
+func TestSuggestedAnnotationsMatchesFixtureOutput(t *testing.T) {
 	fixture := loadAnalyzeFixture(t)
 
 	got := SuggestedAnnotations(&fixture.Analysis)

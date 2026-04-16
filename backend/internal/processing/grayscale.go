@@ -49,8 +49,8 @@ func ProcessGrayscalePixels(pixels []uint8, controls GrayscaleControls) string {
 		pendingLookup = false
 	}
 
-	// Keep the Rust behavior exactly: invert, brightness, contrast, then
-	// histogram equalization.
+	// Apply pipeline stages in this fixed order: invert, brightness, contrast,
+	// then histogram equalization.
 	if controls.Invert {
 		composeInvertLookup(&lookup)
 		pendingLookup = true

@@ -1530,7 +1530,7 @@ func TestAllowedOriginReceivesCORSHeaders(t *testing.T) {
 func TestOptionsPreflightReturnsNoContent(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodOptions, CommandsPath+"/open_study", nil)
-	request.Header.Set("Origin", "tauri://localhost")
+	request.Header.Set("Origin", "http://localhost:1420")
 	request.Header.Set("Access-Control-Request-Method", http.MethodPost)
 	request.Header.Set("Access-Control-Request-Headers", "content-type")
 	testRouter(t).ServeHTTP(recorder, request)
@@ -1539,7 +1539,7 @@ func TestOptionsPreflightReturnsNoContent(t *testing.T) {
 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusNoContent)
 	}
 
-	if got, want := recorder.Header().Get("Access-Control-Allow-Origin"), "tauri://localhost"; got != want {
+	if got, want := recorder.Header().Get("Access-Control-Allow-Origin"), "http://localhost:1420"; got != want {
 		t.Fatalf("allow origin = %q, want %q", got, want)
 	}
 

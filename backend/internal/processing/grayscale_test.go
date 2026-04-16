@@ -109,7 +109,7 @@ func TestProcessPreviewImageRequiresGrayPreviewInput(t *testing.T) {
 	}
 }
 
-func TestProcessPreviewImageMatchesRustGrayscaleFixture(t *testing.T) {
+func TestProcessPreviewImageMatchesGrayscaleFixture(t *testing.T) {
 	study, err := dicommeta.DecodeFile(sampleDicomPath(t))
 	if err != nil {
 		t.Fatalf("DecodeFile returned error: %v", err)
@@ -137,7 +137,7 @@ func TestProcessPreviewImageMatchesRustGrayscaleFixture(t *testing.T) {
 		t.Fatalf("processed height = %d, want %d", got, want)
 	}
 	if got, want := processed.Pixels, grayPixels(fixture); !equalBytes(got, want) {
-		t.Fatalf("processed preview does not match the Rust grayscale fixture")
+		t.Fatalf("processed preview does not match the grayscale fixture")
 	}
 }
 

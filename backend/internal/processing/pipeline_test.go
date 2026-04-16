@@ -32,7 +32,7 @@ func TestProcessRenderedPreviewCompareOutputIsRGBAAndDoubleWidth(t *testing.T) {
 	}
 }
 
-func TestProcessSourceImageMatchesRustPaletteFixture(t *testing.T) {
+func TestProcessSourceImageMatchesPaletteFixture(t *testing.T) {
 	study, err := dicommeta.DecodeFile(sampleDicomPath(t))
 	if err != nil {
 		t.Fatalf("DecodeFile returned error: %v", err)
@@ -68,11 +68,11 @@ func TestProcessSourceImageMatchesRustPaletteFixture(t *testing.T) {
 		t.Fatalf("preview format = %q, want %q", got, want)
 	}
 	if got, want := output.Preview.Pixels, rgbaPixels(fixture); !equalBytes(got, want) {
-		t.Fatalf("processed preview does not match the Rust palette fixture")
+		t.Fatalf("processed preview does not match the palette fixture")
 	}
 }
 
-func TestProcessSourceImageMatchesRustCompareFixture(t *testing.T) {
+func TestProcessSourceImageMatchesCompareFixture(t *testing.T) {
 	study, err := dicommeta.DecodeFile(sampleDicomPath(t))
 	if err != nil {
 		t.Fatalf("DecodeFile returned error: %v", err)
@@ -108,6 +108,6 @@ func TestProcessSourceImageMatchesRustCompareFixture(t *testing.T) {
 		t.Fatalf("preview format = %q, want %q", got, want)
 	}
 	if got, want := output.Preview.Pixels, rgbaPixels(fixture); !equalBytes(got, want) {
-		t.Fatalf("processed compare preview does not match the Rust compare fixture")
+		t.Fatalf("processed compare preview does not match the compare fixture")
 	}
 }

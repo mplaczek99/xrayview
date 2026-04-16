@@ -41,7 +41,7 @@ func TestSavePreviewPNGEncodesGrayPreview(t *testing.T) {
 	}
 }
 
-func TestRenderSourceImageMatchesRustPreviewFixture(t *testing.T) {
+func TestRenderSourceImageMatchesPreviewFixture(t *testing.T) {
 	study, err := dicommeta.DecodeFile(sampleDicomPath(t))
 	if err != nil {
 		t.Fatalf("DecodeFile returned error: %v", err)
@@ -61,7 +61,7 @@ func TestRenderSourceImageMatchesRustPreviewFixture(t *testing.T) {
 	}
 
 	if got, want := preview.Pixels, grayPixels(fixture); !equalBytes(got, want) {
-		t.Fatalf("rendered preview does not match the Rust fixture")
+		t.Fatalf("rendered preview does not match the preview fixture")
 	}
 }
 

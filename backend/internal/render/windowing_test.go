@@ -18,7 +18,7 @@ func TestNewWindowTransformRejectsWindowWidthsAtOrBelowOne(t *testing.T) {
 	}
 }
 
-func TestWindowTransformMapMatchesRustBreakpoints(t *testing.T) {
+func TestWindowTransformMapMatchesGoldenBreakpoints(t *testing.T) {
 	transform := NewWindowTransform(imaging.WindowLevel{
 		Center: 128,
 		Width:  256,

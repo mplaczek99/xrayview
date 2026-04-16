@@ -128,16 +128,12 @@ func isAllowedOrigin(origin string) bool {
 		return false
 	}
 
-	if parsed.Scheme == "tauri" {
-		return parsed.Host == "localhost"
-	}
-
 	if parsed.Scheme != "http" && parsed.Scheme != "https" {
 		return false
 	}
 
 	host := parsed.Hostname()
-	if host == "localhost" || host == "tauri.localhost" {
+	if host == "localhost" {
 		return true
 	}
 
