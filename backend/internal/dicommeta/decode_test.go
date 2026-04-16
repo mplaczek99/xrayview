@@ -2,7 +2,9 @@ package dicommeta
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
+	"errors"
 	"image"
 	"image/color"
 	"image/jpeg"
@@ -734,6 +736,91 @@ func findPreservedElement(
 	}
 
 	return PreservedElement{}, false
+}
+
+// cancelAfterNReadsReader wraps a readerAtSeeker and fires cancel after N Read calls.
+// This allows deterministic context cancellation mid-parse for testing.
+type cancelAfterNReadsReader struct {
+	inner  readerAtSeeker
+	reads  int
+	limit  int
+	cancel context.CancelFunc
+}
+
+func (r *cancelAfterNReadsReader) Read(p []byte) (int, error) {
+	r.reads++
+	if r.reads >= r.limit {
+		r.cancel()
+	}
+	return r.inner.Read(p)
+}
+
+func (r *cancelAfterNReadsReader) ReadAt(p []byte, off int64) (int, error) {
+	return r.inner.ReadAt(p, off)
+}
+
+func (r *cancelAfterNReadsReader) Seek(offset int64, whence int) (int64, error) {
+	return r.inner.Seek(offset, whence)
+}
+
+// TestDecodeStudyContextCancelledBeforeStart verifies the fast-path: a
+// pre-cancelled context returns context.Canceled without decoding anything.
+func TestDecodeStudyContextCancelledBeforeStart(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, currentFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller returned no file path")
+	}
+	path := filepath.Clean(filepath.Join(filepath.Dir(currentFile), "..", "..", "..", "images", "sample-dental-radiograph.dcm"))
+	if _, err := os.Stat(path); err != nil {
+		t.Skipf("sample DICOM not found at %s: %v", path, err)
+	}
+
+	_, err := NewDecoder().DecodeStudy(ctx, path)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("DecodeStudy with pre-cancelled context: got %v, want context.Canceled", err)
+	}
+}
+
+// TestDecodeWithContextCancelledDuringParse verifies that context cancellation
+// is detected during the element-parse loop, not only at entry/exit of DecodeStudy.
+// Uses a cancelAfterNReadsReader to fire cancel deterministically after a few
+// element headers are read, before all metadata + pixel data are processed.
+func TestDecodeWithContextCancelledDuringParse(t *testing.T) {
+	dicomData := buildDecodeTestDicom(
+		decodeDicomOptions{
+			buildOptions: buildOptions{
+				withPart10:                true,
+				transferSyntaxUID:         "1.2.840.10008.1.2.1",
+				datasetSyntax:             transferSyntax{byteOrder: binary.LittleEndian, explicit: true},
+				rows:                      4,
+				columns:                   4,
+				photometricInterpretation: "MONOCHROME2",
+				bitsAllocated:             8,
+				bitsStored:                8,
+			},
+			studyInstanceUID: "1.2.3",
+			patientName:      "Test^Patient",
+		},
+		make([]byte, 16),
+		true,
+	)
+
+	// A typical DICOM element header takes ~3 Read calls (tag + VR + length).
+	// Cancel after 6 reads to fire during metadata parsing, before pixel data.
+	ctx, cancel := context.WithCancel(context.Background())
+	reader := &cancelAfterNReadsReader{
+		inner: bytes.NewReader(dicomData),
+		limit: 6,
+		cancel: cancel,
+	}
+
+	_, err := decodeWithCtx(ctx, reader)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("decodeWithCtx with mid-parse cancel: got %v, want context.Canceled", err)
+	}
 }
 
 func BenchmarkDecodeFile(b *testing.B) {

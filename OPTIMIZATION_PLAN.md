@@ -602,13 +602,17 @@ If a walk fails, `trackedBytes` is reset to -1 (unknown) to force a retry. The `
 - Race detector: clean (`go test -race` passes).
 **How to test:** `BenchmarkLaunchJobThroughput` and `BenchmarkLaunchJobConcurrent` in `bench_test.go` with `-benchmem`. Existing service tests pass (`go -C backend test ./internal/jobs/...`).
 
-### Step 11.2: Context-Aware DICOM Decoding
+### Step 11.2: Context-Aware DICOM Decoding ✅
 
-**File:** `backend/internal/dicommeta/decode.go:107-122`
-**What it does:** `DecodeStudy` checks context cancellation only at entry and exit, not during the potentially long decode loop.
-**Optimization:** Check `ctx.Err()` periodically during `parseSourceDataset` (e.g., every 1000 elements or after pixel data decode starts). This allows faster cancellation of in-progress decodes.
-**Expected improvement:** Cancel response time improves from "entire decode duration" to "<50ms". Particularly impactful for large multi-MB DICOM files.
-**How to test:** Start a decode, cancel after 10ms, verify it stops within 100ms.
+**File:** `backend/internal/dicommeta/decode.go`
+**What it does:** `DecodeStudy` previously checked context cancellation only at entry and exit, not during the decode loop. A context cancelled mid-decode would not be detected until `DecodeFile` returned.
+**Optimization:** Threaded `ctx` from `DecodeStudy` → `decodeFileWithCtx` → `decodeWithCtx` → `parseSourceDataset`. Added `ctx.Err()` check at the top of every loop iteration in `parseSourceDataset`. `ctx.Err()` is an atomic load (~1 ns) — no measurable overhead for the typical ~100-element metadata parse. Kept public `Decode(source)` and `DecodeFile(path)` signatures unchanged (delegate to internal ctx-aware helpers using `context.Background()`). Context-cancelled decodes skip the `supportsStandaloneImagePath` image fallback (cancellation is not a "not-a-DICOM" signal).
+**Actual improvement:** `BenchmarkDecodeFile` / `BenchmarkDecodeStudy` (2.2 MB sample, 2048×1088):
+- **ns/op**: ~8.4 ms → ~7.5-8.7 ms (within noise — per-element atomic load is unmeasurable)
+- **B/op**: 11,144,577 (unchanged)
+- **allocs/op**: 110 (unchanged)
+- The plan's predicted "<50ms cancellation" applies to the metadata-parse phase only. The pixel data read (`readValue`) and decode (`decodeU16Monochrome`) are not interruptible — for a 2 MB file the pixel phase is ~3 ms; for a 50 MB+ file it could be 100+ ms. This is a best-effort gate: cancellation is caught before or after the pixel decode block, not during it. The per-element check is free; the limitation is Go's lack of mid-read cancellation primitives.
+**How to test:** `TestDecodeStudyContextCancelledBeforeStart` (pre-cancelled ctx returns `context.Canceled` immediately), `TestDecodeWithContextCancelledDuringParse` (deterministic mid-parse cancel via `cancelAfterNReadsReader`), both in `decode_test.go`.
 
 ---
 

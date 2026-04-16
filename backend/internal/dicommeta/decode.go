@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"image"
 	_ "image/jpeg"
@@ -110,28 +111,25 @@ func (Decoder) DecodeStudy(ctx context.Context, path string) (SourceStudy, error
 	if err := ctx.Err(); err != nil {
 		return SourceStudy{}, err
 	}
-
-	study, err := DecodeFile(path)
-	if err != nil {
-		return SourceStudy{}, err
-	}
-
-	if err := ctx.Err(); err != nil {
-		return SourceStudy{}, err
-	}
-
-	return study, nil
+	return decodeFileWithCtx(ctx, path)
 }
 
 func DecodeFile(path string) (SourceStudy, error) {
+	return decodeFileWithCtx(context.Background(), path)
+}
+
+func decodeFileWithCtx(ctx context.Context, path string) (SourceStudy, error) {
 	source, closeSource, err := openFileSource(path)
 	if err != nil {
 		return SourceStudy{}, fmt.Errorf("open source file: %w", err)
 	}
 	defer closeSource()
 
-	study, err := Decode(source)
+	study, err := decodeWithCtx(ctx, source)
 	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return SourceStudy{}, err
+		}
 		if supportsStandaloneImagePath(path) {
 			if _, seekErr := source.Seek(0, io.SeekStart); seekErr != nil {
 				return SourceStudy{}, fmt.Errorf("seek source input: %w", seekErr)
@@ -170,6 +168,10 @@ func openFileSource(path string) (readerAtSeeker, func() error, error) {
 }
 
 func Decode(source readerAtSeeker) (SourceStudy, error) {
+	return decodeWithCtx(context.Background(), source)
+}
+
+func decodeWithCtx(ctx context.Context, source readerAtSeeker) (SourceStudy, error) {
 	if _, err := source.Seek(0, io.SeekStart); err != nil {
 		return SourceStudy{}, fmt.Errorf("seek source input: %w", err)
 	}
@@ -193,7 +195,7 @@ func Decode(source readerAtSeeker) (SourceStudy, error) {
 		rescaleIntercept: 0.0,
 	}
 
-	if err := parseSourceDataset(source, syntax, &state); err != nil {
+	if err := parseSourceDataset(ctx, source, syntax, &state); err != nil {
 		return SourceStudy{}, err
 	}
 
@@ -222,6 +224,7 @@ func Decode(source readerAtSeeker) (SourceStudy, error) {
 }
 
 func parseSourceDataset(
+	ctx context.Context,
 	source readerAtSeeker,
 	syntax transferSyntax,
 	state *sourceStudyState,
@@ -231,6 +234,10 @@ func parseSourceDataset(
 	var smallBuf [4]byte
 
 	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
 		header, err := readElementHeader(source, syntax)
 		if err == io.EOF {
 			return nil
