@@ -48,6 +48,7 @@ type Service struct {
 	renderSourcePreview    renderSourcePreviewFunc
 	callbackMu             sync.RWMutex
 	onJobCompletion        JobCompletionCallback
+	onJobUpdate            JobCompletionCallback
 }
 
 const decodeBenchmarkEnvKey = "XRAYVIEW_BENCH_LOG_DECODES"
@@ -110,6 +111,13 @@ func (service *Service) OnJobCompletion(callback JobCompletionCallback) {
 	defer service.callbackMu.Unlock()
 
 	service.onJobCompletion = callback
+}
+
+func (service *Service) OnJobUpdate(callback JobCompletionCallback) {
+	service.callbackMu.Lock()
+	defer service.callbackMu.Unlock()
+
+	service.onJobUpdate = callback
 }
 
 func (service *Service) StartRenderJob(
@@ -864,8 +872,12 @@ func (service *Service) transitionJob(
 	stage string,
 	message string,
 ) error {
-	_, err := service.registry.UpdateProgress(jobID, state, percent, stage, message)
-	return err
+	snapshot, err := service.registry.UpdateProgress(jobID, state, percent, stage, message)
+	if err != nil {
+		return err
+	}
+	service.notifyJobUpdate(snapshot)
+	return nil
 }
 
 func (service *Service) finishCancelledIfRequested(
@@ -1022,7 +1034,19 @@ func (service *Service) loadOrRenderSourcePreview(
 	return preview
 }
 
+func (service *Service) notifyJobUpdate(snapshot contracts.JobSnapshot) {
+	service.callbackMu.RLock()
+	callback := service.onJobUpdate
+	service.callbackMu.RUnlock()
+
+	if callback != nil {
+		callback(snapshot)
+	}
+}
+
 func (service *Service) notifyJobCompletion(snapshot contracts.JobSnapshot) {
+	service.notifyJobUpdate(snapshot)
+
 	service.callbackMu.RLock()
 	callback := service.onJobCompletion
 	service.callbackMu.RUnlock()

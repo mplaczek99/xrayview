@@ -95,8 +95,22 @@ type runtimeCacheEntry struct {
 	studyCount int
 }
 
+// jobUpdateSubscriber is an optional interface that BackendService implementations
+// may satisfy to receive all job-state transitions (progress + terminal).
+// The router uses a type assertion so the interface is not required.
+type jobUpdateSubscriber interface {
+	OnJobUpdate(func(contracts.JobSnapshot))
+}
+
 func NewRouter(deps RouterDeps) http.Handler {
 	mux := http.NewServeMux()
+
+	// Wire the SSE hub. If the service supports OnJobUpdate, every job
+	// transition (progress or terminal) is broadcast to connected SSE clients.
+	hub := newSSEHub()
+	if subscriber, ok := deps.Service.(jobUpdateSubscriber); ok {
+		subscriber.OnJobUpdate(hub.broadcast)
+	}
 
 	// runtimeCache caches the serialized healthz/runtime JSON body keyed on
 	// study count (the only field that changes at runtime). All other fields in
@@ -129,6 +143,10 @@ func NewRouter(deps RouterDeps) http.Handler {
 
 	mux.HandleFunc("GET "+RuntimePath, func(writer http.ResponseWriter, request *http.Request) {
 		writeRuntimeJSON(writer)
+	})
+
+	mux.HandleFunc("GET "+EventsPath, func(writer http.ResponseWriter, request *http.Request) {
+		hub.serveSSE(writer, request)
 	})
 
 	mux.HandleFunc("GET "+CommandsPath, func(writer http.ResponseWriter, request *http.Request) {

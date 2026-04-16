@@ -17,6 +17,7 @@ const (
 	RuntimePath             = APIBasePath + "/runtime"
 	CommandsPath            = APIBasePath + "/commands"
 	CommandEndpointTemplate = CommandsPath + "/{command}"
+	EventsPath              = APIBasePath + "/events"
 )
 
 type statusCapturingResponseWriter struct {

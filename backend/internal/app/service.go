@@ -25,6 +25,7 @@ type BackendService interface {
 		command contracts.MeasureLineAnnotationCommand,
 	) (contracts.MeasureLineAnnotationCommandResult, error)
 	OnJobCompletion(callback jobs.JobCompletionCallback)
+	OnJobUpdate(callback jobs.JobCompletionCallback)
 	SupportedJobKinds() []string
 	StudyCount() int
 }
@@ -138,6 +139,10 @@ func (app *App) MeasureLineAnnotation(
 
 func (app *App) OnJobCompletion(callback jobs.JobCompletionCallback) {
 	app.jobs.OnJobCompletion(callback)
+}
+
+func (app *App) OnJobUpdate(callback jobs.JobCompletionCallback) {
+	app.jobs.OnJobUpdate(callback)
 }
 
 func (app *App) SupportedJobKinds() []string {

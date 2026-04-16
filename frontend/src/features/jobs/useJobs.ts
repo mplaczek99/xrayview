@@ -15,6 +15,10 @@ const FAST_POLL_MS = 200;
 const QUEUED_POLL_MS = 1000;
 const MAX_POLL_MS = 2000;
 const IDLE_POLL_MS = 0;
+// When SSE events are active, skip HTTP polling and re-check after this delay.
+// Falls back to normal polling if no event arrives within EVENT_STALE_MS.
+const EVENT_HEARTBEAT_MS = 10_000;
+const EVENT_STALE_MS = 10_000;
 const JOB_UPDATE_EVENT = "xrayview:job-update";
 const runtime = getRuntimeAdapter();
 
@@ -37,6 +41,9 @@ export function useJobs() {
     let timer: number | undefined;
     let unsubscribeEvent: (() => void) | undefined;
     let currentIntervalMs = FAST_POLL_MS;
+    // Tracks the last time a job-update event was received via Wails/SSE.
+    // When fresh (< EVENT_STALE_MS ago), HTTP polling is suppressed entirely.
+    let lastEventAtMs = 0;
 
     function applyJobUpdate(job: Awaited<ReturnType<typeof runtime.getJob>>) {
       workbenchActions.receiveJobUpdate(job);
@@ -61,6 +68,7 @@ export function useJobs() {
             return;
           }
 
+          lastEventAtMs = Date.now();
           applyJobUpdate(normalizeJobSnapshot(snapshot, runtime.mode));
         },
       );
@@ -80,6 +88,13 @@ export function useJobs() {
 
       if (pendingJobs.length === 0) {
         scheduleNext(IDLE_POLL_MS);
+        return;
+      }
+
+      // When SSE/Wails events are actively delivering updates, skip HTTP
+      // polling entirely and schedule a heartbeat in case events go stale.
+      if (eventsOn && Date.now() - lastEventAtMs < EVENT_STALE_MS) {
+        scheduleNext(EVENT_HEARTBEAT_MS);
         return;
       }
 

@@ -20,6 +20,7 @@ type Service interface {
 		command MeasureLineAnnotationCommand,
 	) (MeasureLineAnnotationCommandResult, error)
 	OnJobCompletion(callback func(JobSnapshot))
+	OnJobUpdate(callback func(JobSnapshot))
 }
 
 type embeddedService struct {
@@ -92,6 +93,17 @@ func (service *embeddedService) OnJobCompletion(callback func(JobSnapshot)) {
 	}
 
 	service.app.OnJobCompletion(func(snapshot JobSnapshot) {
+		callback(snapshot)
+	})
+}
+
+func (service *embeddedService) OnJobUpdate(callback func(JobSnapshot)) {
+	if callback == nil {
+		service.app.OnJobUpdate(nil)
+		return
+	}
+
+	service.app.OnJobUpdate(func(snapshot JobSnapshot) {
 		callback(snapshot)
 	})
 }

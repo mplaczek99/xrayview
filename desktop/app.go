@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 	backendapi "xrayview/backend"
@@ -63,7 +65,8 @@ func NewDesktopApp() (*DesktopApp, error) {
 func (app *DesktopApp) startup(ctx context.Context) {
 	app.ctx = ctx
 	if app.backend != nil {
-		app.backend.OnJobCompletion(func(snapshot backendapi.JobSnapshot) {
+		// In-process: subscribe to ALL job transitions (progress + terminal).
+		app.backend.OnJobUpdate(func(snapshot backendapi.JobSnapshot) {
 			wailsruntime.EventsEmit(ctx, eventJobUpdate, snapshot)
 		})
 		wailsruntime.LogInfo(ctx, "xrayview shell running with in-process backend")
@@ -80,7 +83,59 @@ func (app *DesktopApp) startup(ctx context.Context) {
 		return
 	}
 
+	// Sidecar: bridge the backend SSE stream into Wails events so the
+	// frontend receives job-update events without polling.
+	go app.bridgeSidecarSSEToEvents(ctx)
+
 	wailsruntime.LogInfof(ctx, "xrayview shell ready against %s", app.sidecar.BaseURL())
+}
+
+// bridgeSidecarSSEToEvents reads the backend SSE stream and re-emits each
+// job-update frame as a Wails event. Reconnects automatically on error until
+// ctx is cancelled.
+func (app *DesktopApp) bridgeSidecarSSEToEvents(ctx context.Context) {
+	eventsURL := app.sidecar.BaseURL() + "/api/v1/events"
+	client := &http.Client{} // no timeout — long-lived SSE connection
+
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+
+		func() {
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, eventsURL, nil)
+			if err != nil {
+				return
+			}
+			req.Header.Set("Accept", "text/event-stream")
+
+			resp, err := client.Do(req)
+			if err != nil {
+				return
+			}
+			defer resp.Body.Close()
+
+			scanner := bufio.NewScanner(resp.Body)
+			for scanner.Scan() {
+				line := scanner.Text()
+				if !strings.HasPrefix(line, "data: ") {
+					continue
+				}
+				var snapshot backendapi.JobSnapshot
+				if err := json.Unmarshal([]byte(line[6:]), &snapshot); err != nil {
+					continue
+				}
+				wailsruntime.EventsEmit(ctx, eventJobUpdate, snapshot)
+			}
+		}()
+
+		// Brief pause before reconnect to avoid tight error loops.
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
 }
 
 func (app *DesktopApp) shutdown(context.Context) {
