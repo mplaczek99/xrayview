@@ -21,6 +21,7 @@ export interface DesktopBindings {
   StartProcessJob(command: ProcessStudyCommand): Promise<StartedJob>;
   StartAnalyzeJob(command: AnalyzeStudyCommand): Promise<StartedJob>;
   GetJobSnapshot(command: JobCommand): Promise<JobSnapshot>;
+  GetJobsSnapshot(command: { jobIds: string[] }): Promise<JobSnapshot[]>;
   CancelJobByID(command: JobCommand): Promise<JobSnapshot>;
   GetProcessingManifest(): Promise<ProcessingManifest>;
   MeasureLineAnnotation(

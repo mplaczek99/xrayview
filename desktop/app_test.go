@@ -117,6 +117,15 @@ func (service stubBackendService) MeasureLineAnnotation(
 func (service stubBackendService) OnJobCompletion(callback func(backendapi.JobSnapshot)) {
 }
 
+func (service stubBackendService) OnJobUpdate(callback func(backendapi.JobSnapshot)) {
+}
+
+func (service stubBackendService) GetJobs(
+	command backendapi.GetJobsCommand,
+) ([]backendapi.JobSnapshot, error) {
+	return []backendapi.JobSnapshot{}, nil
+}
+
 func TestServeAssetServesPreviewArtifact(t *testing.T) {
 	app := &DesktopApp{}
 

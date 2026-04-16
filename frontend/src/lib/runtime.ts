@@ -162,6 +162,8 @@ function createRuntimeAdapter(
     startAnalyzeStudyJob: (studyId) => backend.startAnalyzeStudyJob(studyId),
     getJob: async (jobId) =>
       normalizeJobSnapshot(await backend.getJob(jobId), mode),
+    getJobs: async (jobIds) =>
+      (await backend.getJobs(jobIds)).map((s) => normalizeJobSnapshot(s, mode)),
     cancelJob: async (jobId) =>
       normalizeJobSnapshot(await backend.cancelJob(jobId), mode),
     measureLineAnnotation: (studyId, annotation) =>

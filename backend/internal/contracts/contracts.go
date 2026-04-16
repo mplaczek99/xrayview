@@ -11,6 +11,7 @@ const (
 	CommandStartProcessJob       CommandName = "start_process_job"
 	CommandStartAnalyzeJob       CommandName = "start_analyze_job"
 	CommandGetJob                CommandName = "get_job"
+	CommandGetJobs               CommandName = "get_jobs"
 	CommandCancelJob             CommandName = "cancel_job"
 	CommandMeasureLineAnnotation CommandName = "measure_line_annotation"
 )
@@ -22,6 +23,7 @@ var SupportedCommands = []CommandName{
 	CommandStartProcessJob,
 	CommandStartAnalyzeJob,
 	CommandGetJob,
+	CommandGetJobs,
 	CommandCancelJob,
 	CommandMeasureLineAnnotation,
 }

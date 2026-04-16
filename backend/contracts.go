@@ -10,6 +10,7 @@ type (
 	AnnotationSource                   = internalcontracts.AnnotationSource
 	BackendError                       = internalcontracts.BackendError
 	BackendErrorCode                   = internalcontracts.BackendErrorCode
+	GetJobsCommand                     = internalcontracts.GetJobsCommand
 	JobCommand                         = internalcontracts.JobCommand
 	JobKind                            = internalcontracts.JobKind
 	JobProgress                        = internalcontracts.JobProgress

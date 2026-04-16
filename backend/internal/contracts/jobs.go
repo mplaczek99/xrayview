@@ -33,6 +33,10 @@ type JobCommand struct {
 	JobID string `json:"jobId"`
 }
 
+type GetJobsCommand struct {
+	JobIDs []string `json:"jobIds"`
+}
+
 type RenderStudyCommand struct {
 	StudyID string `json:"studyId"`
 }

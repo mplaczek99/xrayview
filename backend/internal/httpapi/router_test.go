@@ -52,6 +52,7 @@ type mockBackendService struct {
 	startProcessJob       func(contracts.ProcessStudyCommand) (contracts.StartedJob, error)
 	startAnalyzeJob       func(contracts.AnalyzeStudyCommand) (contracts.StartedJob, error)
 	getJob                func(contracts.JobCommand) (contracts.JobSnapshot, error)
+	getJobs               func(contracts.GetJobsCommand) ([]contracts.JobSnapshot, error)
 	cancelJob             func(contracts.JobCommand) (contracts.JobSnapshot, error)
 	getProcessingManifest func() contracts.ProcessingManifest
 	measureLineAnnotation func(contracts.MeasureLineAnnotationCommand) (contracts.MeasureLineAnnotationCommandResult, error)
@@ -83,6 +84,13 @@ func (service mockBackendService) StartAnalyzeJob(
 
 func (service mockBackendService) GetJob(command contracts.JobCommand) (contracts.JobSnapshot, error) {
 	return service.getJob(command)
+}
+
+func (service mockBackendService) GetJobs(command contracts.GetJobsCommand) ([]contracts.JobSnapshot, error) {
+	if service.getJobs != nil {
+		return service.getJobs(command)
+	}
+	return nil, nil
 }
 
 func (service mockBackendService) CancelJob(
@@ -172,6 +180,10 @@ func (service testBackendService) StartAnalyzeJob(
 
 func (service testBackendService) GetJob(command contracts.JobCommand) (contracts.JobSnapshot, error) {
 	return service.jobs.GetJob(command)
+}
+
+func (service testBackendService) GetJobs(command contracts.GetJobsCommand) ([]contracts.JobSnapshot, error) {
+	return service.jobs.GetJobs(command)
 }
 
 func (service testBackendService) CancelJob(

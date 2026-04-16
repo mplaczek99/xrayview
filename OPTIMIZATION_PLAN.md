@@ -558,13 +558,19 @@ If a walk fails, `trackedBytes` is reset to -1 (unknown) to force a retry. The `
 - **Multi-client fan-out:** verified by `TestSSEHubMultipleClientsAllReceiveBroadcast`
 **How to test:** `node frontend/scripts/validate-sse-polling-reduction.mjs`. Go: `go -C backend test ./internal/httpapi/... -run TestSSE -v`.
 
-### Step 10.3: Deduplicate and Batch Job Polling Requests
+### Step 10.3: Deduplicate and Batch Job Polling Requests ✅
 
-**File:** `frontend/src/features/jobs/useJobs.ts:70-109`
-**What it does:** `pollPendingJobs` fires a separate HTTP request per pending job via `Promise.all`. With 3 concurrent jobs, this is 3 requests every 200ms.
-**Optimization:** (a) Deduplicate job IDs before polling. (b) Add a batch `getJobs` backend endpoint that accepts multiple job IDs and returns all snapshots in a single response. (c) Use `Promise.allSettled` instead of `Promise.all` so one failed request doesn't block others.
-**Expected improvement:** 60-80% reduction in HTTP requests during multi-job scenarios.
-**How to test:** Count HTTP requests during a workflow with 3 concurrent jobs.
+**Files:** `backend/internal/contracts/jobs.go`, `backend/internal/contracts/contracts.go`, `backend/internal/httpapi/router.go`, `backend/internal/jobs/service.go`, `backend/internal/app/service.go`, `backend/contracts.go`, `backend/service.go`, `desktop/app.go`, `frontend/src/lib/wails.ts`, `frontend/src/lib/runtimeTypes.ts`, `frontend/src/lib/backend.ts`, `frontend/src/lib/runtime.ts`, `frontend/src/features/jobs/useJobs.ts`
+**What it does:** `pollPendingJobs` fired a separate HTTP request per pending job via `Promise.all`. With 3 concurrent jobs, this was 3 requests every 200ms.
+**Optimization:** Added `get_jobs` batch command to backend contracts and router. `GetJobsCommand { JobIDs []string }` returns `[]JobSnapshot`, silently omitting unknown IDs. Desktop app exposes `GetJobsSnapshot`. Frontend wires `getJobs(jobIds)` through `BackendAPI` / `RuntimeAdapter` / mock + desktop impls. `useJobs.ts` replaces N individual `getJob` calls with one deduplicated `getJobs` batch call per poll cycle. Deduplication via `new Set()` at call site.
+**Actual improvement:** `node frontend/scripts/validate-batch-polling.mjs` — 8 tests, all pass.
+- **3 jobs, 5s no-progress run**: 18 → 6 HTTP requests (**66.7% reduction**)
+- **5 jobs, 5s no-progress run**: 30 → 6 HTTP requests (**80.0% reduction**)
+- **Deduplication**: duplicate job IDs collapsed to unique set before batch send
+- **Empty pending list**: 0 requests sent (unchanged)
+- Plan predicted 60-80%; actual is 67% for 3 jobs, 80% for 5 jobs — matches prediction ✓
+- Note: `Promise.allSettled` not needed — existing inner `try/catch` per individual call was already equivalent. Batch error handling: if the batch request throws, all job states remain unchanged until next cycle (same semantics as individual failure with try/catch).
+**How to test:** `node frontend/scripts/validate-batch-polling.mjs`. Monitor Network tab with 3+ concurrent jobs — each poll cycle shows 1 `get_jobs` POST instead of N `get_job` POSTs.
 
 ### Step 10.4: Add Cache-Control Headers for Preview Assets
 

@@ -14,6 +14,7 @@ type Service interface {
 	StartProcessJob(command ProcessStudyCommand) (StartedJob, error)
 	StartAnalyzeJob(command AnalyzeStudyCommand) (StartedJob, error)
 	GetJob(command JobCommand) (JobSnapshot, error)
+	GetJobs(command GetJobsCommand) ([]JobSnapshot, error)
 	CancelJob(command JobCommand) (JobSnapshot, error)
 	GetProcessingManifest() ProcessingManifest
 	MeasureLineAnnotation(
@@ -70,6 +71,10 @@ func (service *embeddedService) StartAnalyzeJob(
 
 func (service *embeddedService) GetJob(command JobCommand) (JobSnapshot, error) {
 	return service.app.GetJob(command)
+}
+
+func (service *embeddedService) GetJobs(command GetJobsCommand) ([]JobSnapshot, error) {
+	return service.app.GetJobs(command)
 }
 
 func (service *embeddedService) CancelJob(command JobCommand) (JobSnapshot, error) {

@@ -258,6 +258,16 @@ func (app *DesktopApp) GetJobSnapshot(
 	return invokeViaHTTP[backendapi.JobSnapshot](app, "get_job", command)
 }
 
+func (app *DesktopApp) GetJobsSnapshot(
+	command backendapi.GetJobsCommand,
+) ([]backendapi.JobSnapshot, error) {
+	if app.backend != nil {
+		return app.backend.GetJobs(command)
+	}
+
+	return invokeViaHTTP[[]backendapi.JobSnapshot](app, "get_jobs", command)
+}
+
 func (app *DesktopApp) CancelJobByID(
 	command backendapi.JobCommand,
 ) (backendapi.JobSnapshot, error) {

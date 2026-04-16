@@ -103,19 +103,19 @@ export function useJobs() {
         pendingJobs.map((job) => [job.jobId, { percent: job.progress.percent, state: job.state }]),
       );
 
-      await Promise.all(
-        pendingJobs.map(async ({ jobId }) => {
-          try {
-            const job = await runtime.getJob(jobId);
-            if (!cancelled) {
-              applyJobUpdate(job);
-            }
-          } catch {
-            // Keep polling other jobs; individual fetch failures should not tear
-            // down the UI loop.
+      // Batch fetch: deduplicate IDs and fetch all snapshots in one request.
+      const jobIds = [...new Set(pendingJobs.map((job) => job.jobId))];
+      try {
+        const snapshots = await runtime.getJobs(jobIds);
+        if (!cancelled) {
+          for (const job of snapshots) {
+            applyJobUpdate(job);
           }
-        }),
-      );
+        }
+      } catch {
+        // Batch fetch failed; individual job states remain unchanged until
+        // the next poll cycle.
+      }
 
       if (cancelled) {
         return;

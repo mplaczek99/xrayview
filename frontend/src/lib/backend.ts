@@ -250,6 +250,13 @@ export function createMockBackendAPI(): BackendAPI {
 
       return snapshot;
     },
+    getJobs: async (jobIds): Promise<ContractJobSnapshot[]> => {
+      const unique = [...new Set(jobIds)];
+      return unique.flatMap((jobId) => {
+        const snapshot = mockJobs.get(jobId);
+        return snapshot ? [snapshot] : [];
+      });
+    },
     cancelJob: async (jobId): Promise<ContractJobSnapshot> => {
       const snapshot = mockJobs.get(jobId);
       if (!snapshot) {
@@ -327,6 +334,8 @@ export function createDesktopBackendAPI(): BackendAPI {
       invokeTypedDesktopBinding(() => bindings.StartAnalyzeJob({ studyId })),
     getJob: async (jobId) =>
       invokeTypedDesktopBinding(() => bindings.GetJobSnapshot({ jobId })),
+    getJobs: async (jobIds) =>
+      invokeTypedDesktopBinding(() => bindings.GetJobsSnapshot({ jobIds: [...new Set(jobIds)] })),
     cancelJob: async (jobId) =>
       invokeTypedDesktopBinding(() => bindings.CancelJobByID({ jobId })),
     measureLineAnnotation: async (studyId, annotation): Promise<LineAnnotation> => {

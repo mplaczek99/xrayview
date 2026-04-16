@@ -19,6 +19,7 @@ type BackendService interface {
 	StartProcessJob(command contracts.ProcessStudyCommand) (contracts.StartedJob, error)
 	StartAnalyzeJob(command contracts.AnalyzeStudyCommand) (contracts.StartedJob, error)
 	GetJob(command contracts.JobCommand) (contracts.JobSnapshot, error)
+	GetJobs(command contracts.GetJobsCommand) ([]contracts.JobSnapshot, error)
 	CancelJob(command contracts.JobCommand) (contracts.JobSnapshot, error)
 	GetProcessingManifest() contracts.ProcessingManifest
 	MeasureLineAnnotation(
@@ -103,6 +104,10 @@ func (app *App) StartAnalyzeJob(
 
 func (app *App) GetJob(command contracts.JobCommand) (contracts.JobSnapshot, error) {
 	return app.jobs.GetJob(command)
+}
+
+func (app *App) GetJobs(command contracts.GetJobsCommand) ([]contracts.JobSnapshot, error) {
+	return app.jobs.GetJobs(command)
 }
 
 func (app *App) CancelJob(command contracts.JobCommand) (contracts.JobSnapshot, error) {

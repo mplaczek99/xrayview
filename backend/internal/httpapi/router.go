@@ -40,6 +40,7 @@ type BackendService interface {
 	StartProcessJob(command contracts.ProcessStudyCommand) (contracts.StartedJob, error)
 	StartAnalyzeJob(command contracts.AnalyzeStudyCommand) (contracts.StartedJob, error)
 	GetJob(command contracts.JobCommand) (contracts.JobSnapshot, error)
+	GetJobs(command contracts.GetJobsCommand) ([]contracts.JobSnapshot, error)
 	CancelJob(command contracts.JobCommand) (contracts.JobSnapshot, error)
 	GetProcessingManifest() contracts.ProcessingManifest
 	MeasureLineAnnotation(
@@ -203,6 +204,8 @@ func NewRouter(deps RouterDeps) http.Handler {
 			handleStartAnalyzeJob(writer, request, deps)
 		case contracts.CommandGetJob:
 			handleGetJob(writer, request, deps)
+		case contracts.CommandGetJobs:
+			handleGetJobs(writer, request, deps)
 		case contracts.CommandCancelJob:
 			handleCancelJob(writer, request, deps)
 		case contracts.CommandMeasureLineAnnotation:
@@ -375,6 +378,22 @@ func handleGetJob(writer http.ResponseWriter, request *http.Request, deps Router
 	}
 
 	writeJSON(writer, http.StatusOK, snapshot)
+}
+
+func handleGetJobs(writer http.ResponseWriter, request *http.Request, deps RouterDeps) {
+	var command contracts.GetJobsCommand
+	if err := decodeJSONRequest(request, &command); err != nil {
+		writeBackendError(writer, err)
+		return
+	}
+
+	snapshots, err := deps.Service.GetJobs(command)
+	if err != nil {
+		writeBackendError(writer, err)
+		return
+	}
+
+	writeJSON(writer, http.StatusOK, snapshots)
 }
 
 func handleCancelJob(writer http.ResponseWriter, request *http.Request, deps RouterDeps) {

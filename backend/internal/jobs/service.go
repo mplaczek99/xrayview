@@ -310,6 +310,22 @@ func (service *Service) GetJob(command contracts.JobCommand) (contracts.JobSnaps
 	return service.registry.Get(jobID)
 }
 
+func (service *Service) GetJobs(command contracts.GetJobsCommand) ([]contracts.JobSnapshot, error) {
+	snapshots := make([]contracts.JobSnapshot, 0, len(command.JobIDs))
+	for _, jobID := range command.JobIDs {
+		jobID = strings.TrimSpace(jobID)
+		if jobID == "" {
+			continue
+		}
+		snapshot, err := service.registry.Get(jobID)
+		if err != nil {
+			continue // silently skip missing/unknown jobs
+		}
+		snapshots = append(snapshots, snapshot)
+	}
+	return snapshots, nil
+}
+
 func (service *Service) CancelJob(command contracts.JobCommand) (contracts.JobSnapshot, error) {
 	jobID := strings.TrimSpace(command.JobID)
 	if jobID == "" {
