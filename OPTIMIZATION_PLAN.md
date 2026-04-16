@@ -689,12 +689,13 @@ If a walk fails, `trackedBytes` is reset to -1 (unknown) to force a retry. The `
 **Actual result:** Incremental type-check: 0.980s → 0.507s — **48% faster** on unchanged builds. First run (cache write): ~1.0s (same as before). Subsequent runs with no source changes: ~0.5s.
 **How to test:** Run `npx tsc --noEmit` twice in `frontend/` — second run should be ~2x faster than first.
 
-### Step 13.4: Parallelize Build Steps
+### Step 13.4: Parallelize Build Steps ✅
 
-**File:** `frontend/package.json`
+**File:** `frontend/package.json`, `frontend/scripts/parallel-build.mjs`
 **What it does:** `tsc --noEmit && vite build` runs sequentially.
-**Optimization:** Run in parallel since they're independent.
-**Expected improvement:** 30-50% faster full frontend builds.
+**Optimization:** Added `parallel-build.mjs` that spawns `tsc --noEmit` (output buffered) and `vite build` (stdio inherited) concurrently via `Promise.all`. Both `build` and `wails:build` scripts updated. Build fails if either process exits non-zero.
+**Actual result:** Warm build: 0.558s → 0.399s — **28% faster**. Cold build: 1.042s → 0.882s — **15% faster**. Warm case dominates dev iteration loops.
+**How to test:** Run `node ./scripts/parallel-build.mjs` in `frontend/` — vite output streams live while tsc runs concurrently; tsc errors flush after vite completes.
 
 ### Step 13.5: Tree-Shake Unused Exports
 
@@ -743,7 +744,7 @@ If a walk fails, `trackedBytes` is reset to -1 (unknown) to force a retry. The `
 | 12.3 (HTTP server timeouts) ✅ | Low | Low | None | **P3** |
 | 13.2 (Vite code splitting) ✅ | Medium | Low | None | **P3** |
 | 13.3 (TS incremental) ✅ | Medium | Low | None | **P3** |
-| 13.4 (Parallel builds) | Medium | Low | None | **P3** |
+| 13.4 (Parallel builds) ✅ | Medium | Low | None | **P3** |
 
 ---
 
