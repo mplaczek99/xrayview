@@ -354,9 +354,15 @@ export async function validateDesktopLaunch({
     }
   }
 
+  // The desktop shell defaults to an in-process embedded backend with no TCP
+  // socket. Force the sidecar path by exporting XRAYVIEW_BACKEND_URL when the
+  // smoke test expects to poll a real loopback listener.
+  const launchBaseEnv = expectSidecar
+    ? { ...process.env, XRAYVIEW_BACKEND_URL: runtimeConfig.backendBaseUrl }
+    : process.env;
   const { child, logs } = startLaunchProcess(
     executablePath,
-    applyFrontendRuntimeEnv(process.env),
+    applyFrontendRuntimeEnv(launchBaseEnv),
   );
   try {
     try {
