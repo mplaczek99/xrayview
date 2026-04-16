@@ -673,12 +673,13 @@ If a walk fails, `trackedBytes` is reset to -1 (unknown) to force a retry. The `
 **Actual result:** Cache-key correctness fix. Local proxy: cold build 4.69s → warm build 0.32s (93% reduction), demonstrating the build-cache effect the CI config now correctly preserves across runs. Real CI speedup is CI-only and requires a run with primed cache to measure.
 **How to test:** Inspect CI run after two consecutive pushes — second run's "Set up Go" step should report a cache hit for both `desktop/go.sum` and `backend/go.sum`.
 
-### Step 13.2: Enable Vite Code Splitting and Minification
+### Step 13.2: Enable Vite Code Splitting and Minification ✅
 
-**File:** `frontend/vite.config.ts`
-**What it does:** Currently bundles all frontend code with minimal build optimization.
-**Optimization:** Add manual chunks for vendor dependencies (React, etc.) vs. application code. Use `React.lazy()` for `ProcessingTab`. Add `cssCodeSplit: true`.
-**Expected improvement:** 20-40% reduction in initial bundle. Faster subsequent loads via vendor chunk caching.
+**Files:** `frontend/vite.config.ts`, `frontend/src/app/App.tsx`
+**What it does:** Previously bundled all frontend code into a single 214.69 kB / 65.54 kB gzip chunk with no separation between vendor and app code.
+**Optimization:** Added `manualChunks` (function form — required by Vite 8/rolldown) to split react+react-dom into a stable `vendor` chunk. Added `cssCodeSplit: true`. Converted `ProcessingTab` import to `React.lazy()` + `Suspense` so the processing tab chunk is deferred until first use.
+**Actual result:** Bundle now splits into 3 JS chunks: `vendor` (139.99 kB / 45.36 kB gzip, stable across app deploys), `index` (65.62 kB / 18.58 kB gzip), `ProcessingTab` (10.36 kB / 3.01 kB gzip, deferred). Initial load: 64.29 kB gzip. Per-deploy incremental re-download (with cached vendor): 18.93 kB gzip vs 65.54 kB baseline — **71% reduction** for returning users after a deploy. Total gzip slightly higher (+1.76 kB) due to rolldown runtime overhead, which is offset by the caching win.
+**How to test:** `npm run build` in `frontend/` — output should show `vendor-*.js`, `index-*.js`, and `ProcessingTab-*.js` chunks.
 
 ### Step 13.3: Enable TypeScript Incremental Compilation
 
@@ -739,7 +740,7 @@ If a walk fails, `trackedBytes` is reset to -1 (unknown) to force a retry. The `
 | 9.8 (Container event listeners) | Low | Low | None | **P3** |
 | 12.2 (HTTP connection pooling) ✅ | Low | Low | None | **P3** |
 | 12.3 (HTTP server timeouts) ✅ | Low | Low | None | **P3** |
-| 13.2 (Vite code splitting) | Medium | Low | None | **P3** |
+| 13.2 (Vite code splitting) ✅ | Medium | Low | None | **P3** |
 | 13.3 (TS incremental) | Medium | Low | None | **P3** |
 | 13.4 (Parallel builds) | Medium | Low | None | **P3** |
 

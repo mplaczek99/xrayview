@@ -13,5 +13,15 @@ export default defineConfig({
   envPrefix: ["VITE_", "TAURI_"],
   build: {
     target: ["es2022", "chrome105", "safari13"],
+    cssCodeSplit: true,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes("node_modules/react") || id.includes("node_modules/react-dom")) {
+            return "vendor";
+          }
+        },
+      },
+    },
   },
 });

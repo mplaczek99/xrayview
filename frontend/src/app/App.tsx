@@ -1,5 +1,8 @@
-import { useEffect, useRef, useState } from "react";
-import { ProcessingTab } from "../components/processing/ProcessingTab";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
+
+const ProcessingTab = lazy(() =>
+  import("../components/processing/ProcessingTab").then((m) => ({ default: m.ProcessingTab }))
+);
 import { ViewTab } from "../components/viewer/ViewTab";
 import { JobCenter } from "../features/jobs/JobCenter";
 import { useJobs } from "../features/jobs/useJobs";
@@ -120,7 +123,7 @@ export function App() {
         role="tabpanel"
         aria-labelledby={`tab-${activeTab}`}
       >
-        {activeTab === "view" ? <ViewTab /> : <ProcessingTab />}
+        {activeTab === "view" ? <ViewTab /> : <Suspense><ProcessingTab /></Suspense>}
       </main>
 
       <div className="status-bar" role="status" aria-live="polite">
