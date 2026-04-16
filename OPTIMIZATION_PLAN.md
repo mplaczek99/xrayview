@@ -681,12 +681,13 @@ If a walk fails, `trackedBytes` is reset to -1 (unknown) to force a retry. The `
 **Actual result:** Bundle now splits into 3 JS chunks: `vendor` (139.99 kB / 45.36 kB gzip, stable across app deploys), `index` (65.62 kB / 18.58 kB gzip), `ProcessingTab` (10.36 kB / 3.01 kB gzip, deferred). Initial load: 64.29 kB gzip. Per-deploy incremental re-download (with cached vendor): 18.93 kB gzip vs 65.54 kB baseline — **71% reduction** for returning users after a deploy. Total gzip slightly higher (+1.76 kB) due to rolldown runtime overhead, which is offset by the caching win.
 **How to test:** `npm run build` in `frontend/` — output should show `vendor-*.js`, `index-*.js`, and `ProcessingTab-*.js` chunks.
 
-### Step 13.3: Enable TypeScript Incremental Compilation
+### Step 13.3: Enable TypeScript Incremental Compilation ✅
 
 **File:** `frontend/tsconfig.json`
 **What it does:** TypeScript recompiles everything on each `tsc --noEmit`.
-**Optimization:** Add `"incremental": true` to cache compilation state.
-**Expected improvement:** 20-50% faster type-checking on incremental builds.
+**Optimization:** Added `"incremental": true` to cache compilation state. TypeScript writes a `tsconfig.tsbuildinfo` file alongside the config (already covered by `frontend/*.tsbuildinfo` in `.gitignore`).
+**Actual result:** Incremental type-check: 0.980s → 0.507s — **48% faster** on unchanged builds. First run (cache write): ~1.0s (same as before). Subsequent runs with no source changes: ~0.5s.
+**How to test:** Run `npx tsc --noEmit` twice in `frontend/` — second run should be ~2x faster than first.
 
 ### Step 13.4: Parallelize Build Steps
 
@@ -741,7 +742,7 @@ If a walk fails, `trackedBytes` is reset to -1 (unknown) to force a retry. The `
 | 12.2 (HTTP connection pooling) ✅ | Low | Low | None | **P3** |
 | 12.3 (HTTP server timeouts) ✅ | Low | Low | None | **P3** |
 | 13.2 (Vite code splitting) ✅ | Medium | Low | None | **P3** |
-| 13.3 (TS incremental) | Medium | Low | None | **P3** |
+| 13.3 (TS incremental) ✅ | Medium | Low | None | **P3** |
 | 13.4 (Parallel builds) | Medium | Low | None | **P3** |
 
 ---
