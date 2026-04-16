@@ -653,13 +653,13 @@ If a walk fails, `trackedBytes` is reset to -1 (unknown) to force a retry. The `
 **Actual result:** `BenchmarkInvokeViaHTTP` before vs after: ~71-74 µs/op / 18,660 B/op / 198 allocs both runs. No measurable delta — `http.DefaultTransport` already reuses connections in benchmark context. Real benefit is production isolation (each `SidecarController` owns its own pool, no sharing with other global HTTP clients) and `IdleConnTimeout: 30s` (vs default 90s) more appropriate for a desktop app that may be idle.
 **How to test:** `BenchmarkInvokeViaHTTP` in `desktop/app_bench_test.go`.
 
-### Step 12.3: Add HTTP Server Timeouts
+### Step 12.3: Add HTTP Server Timeouts ✅
 
 **File:** `backend/internal/app/app.go:102-106`
 **What it does:** Only `ReadHeaderTimeout` is configured on the HTTP server. Missing `ReadTimeout`, `WriteTimeout`, `IdleTimeout`.
 **Optimization:** Add `ReadTimeout: 15s`, `WriteTimeout: 15s`, `IdleTimeout: 60s`, `MaxHeaderBytes: 1 << 20` to prevent resource leaks from slow/stalled clients.
-**Expected improvement:** Prevents resource exhaustion under abnormal conditions. Defense-in-depth.
-**How to test:** Integration test with intentionally slow client.
+**Actual result:** All four timeout fields + `MaxHeaderBytes` now set on `http.Server`. Defense-in-depth: prevents resource exhaustion from slow/stalled clients. No measurable throughput change (expected — this is a safety net, not a hot path).
+**How to test:** `TestNewConfiguresHTTPServerTimeouts` in `backend/internal/app/app_test.go`.
 
 ---
 
@@ -736,7 +736,7 @@ If a walk fails, `trackedBytes` is reset to -1 (unknown) to force a retry. The `
 | 9.7 (Debounce controls) | Low | Low | None | **P3** |
 | 9.8 (Container event listeners) | Low | Low | None | **P3** |
 | 12.2 (HTTP connection pooling) ✅ | Low | Low | None | **P3** |
-| 12.3 (HTTP server timeouts) | Low | Low | None | **P3** |
+| 12.3 (HTTP server timeouts) ✅ | Low | Low | None | **P3** |
 | 13.2 (Vite code splitting) | Medium | Low | None | **P3** |
 | 13.3 (TS incremental) | Medium | Low | None | **P3** |
 | 13.4 (Parallel builds) | Medium | Low | None | **P3** |
