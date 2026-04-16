@@ -44,6 +44,8 @@ const (
 	sidecarShutdownTimeout     = 4 * time.Second
 	sidecarBinaryNameBase      = "xrayview-backend"
 	sidecarStartupBenchmarkEnv = "XRAYVIEW_BENCH_LOG_SIDECAR_STARTUP"
+	sidecarIdleConnTimeout     = 30 * time.Second
+	sidecarMaxIdleConns        = 2
 )
 
 var errSidecarUnavailable = errors.New("backend is not reachable")
@@ -78,16 +80,26 @@ type SidecarController struct {
 	lastManaged bool
 }
 
+func newSidecarTransport() *http.Transport {
+	return &http.Transport{
+		MaxIdleConns:        sidecarMaxIdleConns,
+		MaxIdleConnsPerHost: sidecarMaxIdleConns,
+		IdleConnTimeout:     sidecarIdleConnTimeout,
+	}
+}
+
 func NewSidecarController() *SidecarController {
 	return &SidecarController{
 		mode:    resolveRuntimeMode(),
 		baseURL: resolveSidecarBaseURL(),
 		baseDir: resolveSidecarBaseDir(),
 		probeClient: &http.Client{
-			Timeout: sidecarProbeTimeout,
+			Timeout:   sidecarProbeTimeout,
+			Transport: newSidecarTransport(),
 		},
 		httpClient: &http.Client{
-			Timeout: sidecarRequestTimeout,
+			Timeout:   sidecarRequestTimeout,
+			Transport: newSidecarTransport(),
 		},
 	}
 }

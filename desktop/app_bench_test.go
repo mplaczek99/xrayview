@@ -149,10 +149,16 @@ func BenchmarkInvokeViaHTTP(b *testing.B) {
 	defer ts.Close()
 
 	sidecar := &SidecarController{
-		mode:        runtimeModeDesktop,
-		baseURL:     ts.URL,
-		probeClient: &http.Client{Timeout: sidecarProbeTimeout},
-		httpClient:  &http.Client{Timeout: sidecarRequestTimeout},
+		mode:    runtimeModeDesktop,
+		baseURL: ts.URL,
+		probeClient: &http.Client{
+			Timeout:   sidecarProbeTimeout,
+			Transport: newSidecarTransport(),
+		},
+		httpClient: &http.Client{
+			Timeout:   sidecarRequestTimeout,
+			Transport: newSidecarTransport(),
+		},
 	}
 	app := &DesktopApp{sidecar: sidecar}
 	command := backendapi.JobCommand{JobID: "bench-job-1"}

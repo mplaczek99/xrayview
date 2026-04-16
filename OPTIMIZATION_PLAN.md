@@ -645,13 +645,13 @@ If a walk fails, `trackedBytes` is reset to -1 (unknown) to force a retry. The `
 - **Net**: −1 alloc/op, −54 B/op visible in benchmark. The `/healthz` probe called on every `EnsureStarted` adds ~2× HTTP overhead that dilutes the signal. The actual serialization path savings are ~3 allocs + ~280 B per command; these are invisible against the probe's dominance. The code is correct and the unnecessary copies are eliminated.
 **How to test:** `BenchmarkInvokeViaHTTP` in `desktop/app_bench_test.go`.
 
-### Step 12.2: Configure HTTP Transport Connection Pooling
+### Step 12.2: Configure HTTP Transport Connection Pooling ✅
 
-**File:** `desktop/sidecar.go:86-91`
+**File:** `desktop/sidecar.go`
 **What it does:** Two `http.Client` instances use default transport with no explicit connection pool config.
-**Optimization:** Configure `http.Transport` with `MaxIdleConns: 2`, `MaxIdleConnsPerHost: 2`, `IdleConnTimeout: 30s` to ensure connection reuse and prevent connection churn.
-**Expected improvement:** 5-10% reduction in per-request latency by reusing TCP connections consistently.
-**How to test:** Monitor connection count with `ss -tnp` during active polling.
+**Optimization:** Added `newSidecarTransport()` helper returning `*http.Transport` with `MaxIdleConns: 2`, `MaxIdleConnsPerHost: 2`, `IdleConnTimeout: 30s`. Applied to both `probeClient` and `httpClient` in `NewSidecarController()`. Updated `BenchmarkInvokeViaHTTP` to use `newSidecarTransport()` so benchmark tests actual production config.
+**Actual result:** `BenchmarkInvokeViaHTTP` before vs after: ~71-74 µs/op / 18,660 B/op / 198 allocs both runs. No measurable delta — `http.DefaultTransport` already reuses connections in benchmark context. Real benefit is production isolation (each `SidecarController` owns its own pool, no sharing with other global HTTP clients) and `IdleConnTimeout: 30s` (vs default 90s) more appropriate for a desktop app that may be idle.
+**How to test:** `BenchmarkInvokeViaHTTP` in `desktop/app_bench_test.go`.
 
 ### Step 12.3: Add HTTP Server Timeouts
 
@@ -735,7 +735,7 @@ If a walk fails, `trackedBytes` is reset to -1 (unknown) to force a retry. The `
 | 9.3 (Batch state updates) | Low | Medium | Low | **P3** |
 | 9.7 (Debounce controls) | Low | Low | None | **P3** |
 | 9.8 (Container event listeners) | Low | Low | None | **P3** |
-| 12.2 (HTTP connection pooling) | Low | Low | None | **P3** |
+| 12.2 (HTTP connection pooling) ✅ | Low | Low | None | **P3** |
 | 12.3 (HTTP server timeouts) | Low | Low | None | **P3** |
 | 13.2 (Vite code splitting) | Medium | Low | None | **P3** |
 | 13.3 (TS incremental) | Medium | Low | None | **P3** |
