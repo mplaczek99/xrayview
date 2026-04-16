@@ -2,12 +2,15 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strconv"
 	"testing"
+
+	backendapi "xrayview/backend"
 )
 
 const serveAssetBenchmarkPayloadSize = 512 * 1024
@@ -112,4 +115,51 @@ func servePreviewBytes(writer http.ResponseWriter, payload []byte) {
 	writer.Header().Set("content-length", strconv.Itoa(len(payload)))
 	writer.WriteHeader(http.StatusOK)
 	_, _ = writer.Write(payload)
+}
+
+// BenchmarkInvokeViaHTTP measures the full sidecar round-trip for a
+// GetJobSnapshot call: marshal command → HTTP POST → decode JSON response.
+func BenchmarkInvokeViaHTTP(b *testing.B) {
+	snapshot := backendapi.JobSnapshot{JobID: "bench-job-1"}
+	snapshotBody, err := json.Marshal(snapshot)
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	health := backendHealth{
+		Status:    "ok",
+		Service:   expectedBackendService,
+		Transport: expectedTransportKind,
+	}
+	healthBody, err := json.Marshal(health)
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/healthz" {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(healthBody)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(snapshotBody)
+	}))
+	defer ts.Close()
+
+	sidecar := &SidecarController{
+		mode:        runtimeModeDesktop,
+		baseURL:     ts.URL,
+		probeClient: &http.Client{Timeout: sidecarProbeTimeout},
+		httpClient:  &http.Client{Timeout: sidecarRequestTimeout},
+	}
+	app := &DesktopApp{sidecar: sidecar}
+	command := backendapi.JobCommand{JobID: "bench-job-1"}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _ = app.GetJobSnapshot(command)
+	}
 }

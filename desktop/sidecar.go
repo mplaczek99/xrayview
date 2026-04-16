@@ -261,44 +261,32 @@ func (controller *SidecarController) Stop() {
 	controller.lastManaged = false
 }
 
-func (controller *SidecarController) InvokeCommand(
+// invokeCommandRaw sends a POST command with a JSON payload and returns the raw
+// HTTP response. Caller must close response.Body.
+func (controller *SidecarController) invokeCommandRaw(
 	command string,
-	payloadJSON string,
-) (backendCommandResponse, error) {
+	payload []byte,
+) (*http.Response, error) {
 	if err := controller.EnsureStarted(); err != nil {
-		return backendCommandResponse{}, err
+		return nil, err
 	}
 
 	requestURL := controller.baseURL + commandsPath + "/" + command
 	var bodyReader io.Reader
-	if strings.TrimSpace(payloadJSON) != "" {
-		bodyReader = bytes.NewBufferString(payloadJSON)
+	if len(payload) > 0 {
+		bodyReader = bytes.NewReader(payload)
 	}
 
 	request, err := http.NewRequest(http.MethodPost, requestURL, bodyReader)
 	if err != nil {
-		return backendCommandResponse{}, err
+		return nil, err
 	}
 	request.Header.Set("accept", "application/json")
 	if bodyReader != nil {
 		request.Header.Set("content-type", "application/json")
 	}
 
-	response, err := controller.httpClient.Do(request)
-	if err != nil {
-		return backendCommandResponse{}, err
-	}
-	defer response.Body.Close()
-
-	responseBody, err := io.ReadAll(response.Body)
-	if err != nil {
-		return backendCommandResponse{}, err
-	}
-
-	return backendCommandResponse{
-		Status: response.StatusCode,
-		Body:   string(responseBody),
-	}, nil
+	return controller.httpClient.Do(request)
 }
 
 func (controller *SidecarController) probeHealthLocked() (*backendHealth, error) {

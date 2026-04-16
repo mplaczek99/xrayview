@@ -22,18 +22,6 @@ const (
 	eventJobUpdate = "xrayview:job-update"
 )
 
-type backendCommandResponse struct {
-	Status int    `json:"status"`
-	Body   string `json:"body"`
-}
-
-type backendErrorPayload struct {
-	Code        string   `json:"code"`
-	Message     string   `json:"message"`
-	Details     []string `json:"details"`
-	Recoverable bool     `json:"recoverable"`
-}
-
 type DesktopApp struct {
 	ctx     context.Context
 	sidecar *SidecarController
@@ -179,33 +167,6 @@ func (app *DesktopApp) PickSaveDicomPath(defaultName string) (string, error) {
 			},
 		},
 	})
-}
-
-// invokeBackendCommand dispatches a command to the sidecar process over HTTP.
-// Only used as a fallback when the sidecar is active (hasExplicitBackendURL).
-func (app *DesktopApp) invokeBackendCommand(
-	command string,
-	payloadJSON string,
-) backendCommandResponse {
-	command = strings.TrimSpace(command)
-	if command == "" {
-		return errorResponse(http.StatusBadRequest, "backend command name is required", true)
-	}
-
-	if app.sidecar == nil || !app.sidecar.Enabled() {
-		return errorResponse(
-			http.StatusServiceUnavailable,
-			"desktop backend is not available",
-			true,
-		)
-	}
-
-	response, err := app.sidecar.InvokeCommand(command, payloadJSON)
-	if err != nil {
-		return errorResponse(http.StatusServiceUnavailable, err.Error(), true)
-	}
-
-	return response
 }
 
 func (app *DesktopApp) OpenStudy(
@@ -374,59 +335,39 @@ func (app *DesktopApp) ServeAsset(writer http.ResponseWriter, request *http.Requ
 	http.ServeContent(writer, request, info.Name(), info.ModTime(), file)
 }
 
-func errorResponse(
-	status int,
-	message string,
-	recoverable bool,
-	details ...string,
-) backendCommandResponse {
-	payload := backendErrorPayload{
-		Code:        "internal",
-		Message:     message,
-		Details:     details,
-		Recoverable: recoverable,
-	}
-	switch status {
-	case http.StatusBadRequest:
-		payload.Code = "invalidInput"
-	case http.StatusNotFound:
-		payload.Code = "notFound"
-	}
-
-	body, err := json.Marshal(payload)
-	if err != nil {
-		body = []byte(`{"code":"internal","message":"failed to encode shell error","details":[],"recoverable":false}`)
-	}
-
-	return backendCommandResponse{
-		Status: status,
-		Body:   string(body),
-	}
-}
-
 func invokeViaHTTP[T any](app *DesktopApp, command string, payload any) (T, error) {
 	var zero T
-	payloadJSON := ""
+
+	if app.sidecar == nil || !app.sidecar.Enabled() {
+		return zero, fmt.Errorf("desktop backend is not available")
+	}
+
+	var payloadBytes []byte
 	if payload != nil {
-		bytes, err := json.Marshal(payload)
+		var err error
+		payloadBytes, err = json.Marshal(payload)
 		if err != nil {
 			return zero, err
 		}
-		payloadJSON = string(bytes)
 	}
 
-	response := app.invokeBackendCommand(command, payloadJSON)
-	if response.Status >= http.StatusBadRequest {
-		var backendErr backendapi.BackendError
-		if err := json.Unmarshal([]byte(response.Body), &backendErr); err != nil {
-			return zero, fmt.Errorf("backend command %s failed with status %d", command, response.Status)
-		}
+	response, err := app.sidecar.invokeCommandRaw(command, payloadBytes)
+	if err != nil {
+		return zero, err
+	}
+	defer response.Body.Close()
 
+	dec := json.NewDecoder(response.Body)
+	if response.StatusCode >= http.StatusBadRequest {
+		var backendErr backendapi.BackendError
+		if err := dec.Decode(&backendErr); err != nil {
+			return zero, fmt.Errorf("backend command %s failed with status %d", command, response.StatusCode)
+		}
 		return zero, backendErr
 	}
 
 	var result T
-	if err := json.Unmarshal([]byte(response.Body), &result); err != nil {
+	if err := dec.Decode(&result); err != nil {
 		return zero, err
 	}
 
