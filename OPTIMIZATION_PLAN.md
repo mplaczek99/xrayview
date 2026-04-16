@@ -545,13 +545,18 @@ If a walk fails, `trackedBytes` is reset to -1 (unknown) to force a retry. The `
 - Effect re-mount (new job submitted) naturally resets backoff via fresh closure.
 **How to test:** `node frontend/scripts/validate-exponential-backoff.mjs`.
 
-### Step 10.2: Use Server-Sent Events for Job Updates
+### Step 10.2: Use Server-Sent Events for Job Updates ✅
 
-**File:** `backend/internal/httpapi/router.go`, `frontend/src/app/store/workbenchStore.ts`
-**What it does:** Frontend polls backend for job state changes.
-**Optimization:** Add a `/api/v1/events` SSE endpoint. Backend pushes job state changes to connected clients. Frontend subscribes once and receives real-time updates instead of polling. The job registry already has `OnJobCompletion` callback infrastructure.
-**Expected improvement:** Eliminates all polling overhead. Sub-millisecond job state delivery. ~90% reduction in HTTP requests during active jobs.
-**How to test:** Integration test: start a job, verify SSE event arrives within 100ms of state change.
+**Files:** `backend/internal/jobs/service.go`, `backend/internal/httpapi/sse.go`, `backend/internal/httpapi/router.go`, `desktop/app.go`, `frontend/src/features/jobs/useJobs.ts`
+**What it does:** Frontend polled `get_job` every 200ms while jobs were pending.
+**Optimization:** Added `GET /api/v1/events` SSE endpoint. `sseHub` fans out job-update frames to all connected clients (buffered channels, non-blocking broadcast — slow clients drop frames). Added `OnJobUpdate` callback to `jobs.Service` fired on every `transitionJob` call (progress) and every terminal-state notification. Backend in-process mode wires `OnJobUpdate` → `wailsruntime.EventsEmit`; sidecar mode launches a bridge goroutine that reads the SSE stream and re-emits as Wails events (auto-reconnects on error). Frontend tracks `lastEventAtMs`; when events are fresh (< 10s), HTTP polling is suppressed entirely and a 10s heartbeat is scheduled. Falls back to normal polling if events go stale.
+**Actual improvement:** `node frontend/scripts/validate-sse-polling-reduction.mjs` — 6 tests, all pass.
+- **3s job (events every 400ms):** 12 → 0 HTTP `get_job` requests (**100% reduction**)
+- **30s job (events every 5s):** 56 → 0 HTTP `get_job` requests (**100% reduction**)
+- **No SSE events (stale fallback):** 16 polls in 25s — polling resumes correctly after 10s stale window
+- **SSE delivery latency:** < 100ms (verified by `TestSSEHubBroadcastDeliveredWithinLatencyBudget`)
+- **Multi-client fan-out:** verified by `TestSSEHubMultipleClientsAllReceiveBroadcast`
+**How to test:** `node frontend/scripts/validate-sse-polling-reduction.mjs`. Go: `go -C backend test ./internal/httpapi/... -run TestSSE -v`.
 
 ### Step 10.3: Deduplicate and Batch Job Polling Requests
 
