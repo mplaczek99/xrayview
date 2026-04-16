@@ -44,7 +44,10 @@ type Service struct {
 	memoryCache            *cache.Memory
 	registry               *Registry
 	decodeCache            *studies.DecodeCache
-	concurrencyLimit       chan struct{}
+	renderQueue            chan func() // high-priority: render jobs
+	jobQueue               chan func() // normal-priority: process + analyze jobs
+	workerStop             chan struct{}
+	workerOnce             sync.Once
 	renderSourcePreview    renderSourcePreviewFunc
 	callbackMu             sync.RWMutex
 	onJobCompletion        JobCompletionCallback
@@ -164,7 +167,7 @@ func (service *Service) StartRenderJob(
 		return contracts.StartedJob{}, err
 	}
 
-	service.launchJob(ctx, func() {
+	service.launchJob(contracts.JobKindRenderStudy, func() {
 		service.executeRenderJob(ctx, outcome.Snapshot.JobID, study, fingerprint)
 	})
 
@@ -230,7 +233,7 @@ func (service *Service) StartProcessJob(
 		return contracts.StartedJob{}, err
 	}
 
-	service.launchJob(ctx, func() {
+	service.launchJob(contracts.JobKindProcessStudy, func() {
 		service.executeProcessJob(
 			ctx,
 			outcome.Snapshot.JobID,
@@ -294,7 +297,7 @@ func (service *Service) StartAnalyzeJob(
 		return contracts.StartedJob{}, err
 	}
 
-	service.launchJob(ctx, func() {
+	service.launchJob(contracts.JobKindAnalyzeStudy, func() {
 		service.executeAnalyzeJob(ctx, outcome.Snapshot.JobID, study, fingerprint, previewPath)
 	})
 
@@ -364,7 +367,7 @@ func newService(
 		jobIDFactory = generateJobID
 	}
 
-	return &Service{
+	svc := &Service{
 		supportedKinds: []contracts.JobKind{
 			contracts.JobKindRenderStudy,
 			contracts.JobKindProcessStudy,
@@ -378,9 +381,15 @@ func newService(
 		memoryCache:            cache.NewMemory(logger),
 		registry:               NewRegistry(jobIDFactory),
 		decodeCache:            studies.NewDecodeCache(0),
-		concurrencyLimit:       make(chan struct{}, maxConcurrentJobs),
+		renderQueue:            make(chan func(), 16),
+		jobQueue:               make(chan func(), 16),
+		workerStop:             make(chan struct{}),
 		renderSourcePreview:    render.RenderSourceImage,
 	}
+	for i := 0; i < maxConcurrentJobs; i++ {
+		go svc.runWorker()
+	}
+	return svc
 }
 
 func (service *Service) logDecodeStudyCall(jobKind contracts.JobKind, study contracts.StudyRecord) {
@@ -402,21 +411,39 @@ func (service *Service) logDecodeStudyCall(jobKind contracts.JobKind, study cont
 	)
 }
 
-func (service *Service) launchJob(ctx context.Context, run func()) {
-	go func() {
-		acquired := false
+// Stop shuts down the worker pool. Unstarted jobs in the queue are abandoned.
+func (service *Service) Stop() {
+	service.workerOnce.Do(func() {
+		close(service.workerStop)
+	})
+}
+
+func (service *Service) runWorker() {
+	for {
+		// Drain render queue first (priority bias).
 		select {
-		case service.concurrencyLimit <- struct{}{}:
-			acquired = true
-		case <-ctx.Done():
+		case run := <-service.renderQueue:
+			run()
+			continue
+		default:
 		}
-
-		if acquired {
-			defer func() { <-service.concurrencyLimit }()
+		select {
+		case run := <-service.renderQueue:
+			run()
+		case run := <-service.jobQueue:
+			run()
+		case <-service.workerStop:
+			return
 		}
+	}
+}
 
-		run()
-	}()
+func (service *Service) launchJob(kind contracts.JobKind, run func()) {
+	if kind == contracts.JobKindRenderStudy {
+		service.renderQueue <- run
+	} else {
+		service.jobQueue <- run
+	}
 }
 
 func (service *Service) cachedRenderSnapshot(

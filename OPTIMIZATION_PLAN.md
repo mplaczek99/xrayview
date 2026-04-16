@@ -587,13 +587,20 @@ If a walk fails, `trackedBytes` is reset to -1 (unknown) to force a retry. The `
 
 ## Phase 11: Concurrency & Job Scheduling (Backend)
 
-### Step 11.1: Use Worker Pool Instead of Goroutine-per-Job
+### Step 11.1: Use Worker Pool Instead of Goroutine-per-Job ✅
 
-**File:** `backend/internal/jobs/service.go:381-396`
-**What it does:** `launchJob` spawns a goroutine per job with a semaphore (`concurrencyLimit` channel of size 3).
-**Optimization:** Use a fixed worker pool of 3 goroutines consuming from a job queue channel. This avoids goroutine creation/destruction overhead and provides more predictable scheduling. Also allows for priority queuing (render jobs before process jobs).
-**Expected improvement:** Minor for correctness, but enables priority scheduling. ~5% reduction in per-job overhead from avoided goroutine setup.
-**How to test:** Benchmark concurrent job throughput.
+**File:** `backend/internal/jobs/service.go`
+**What it does:** `launchJob` spawned a new goroutine per job using a buffered channel as a semaphore (`concurrencyLimit chan struct{}`, size 3) to limit concurrency. Each submitted job paid goroutine-creation cost and held a blocked goroutine while waiting for the semaphore.
+**Optimization:** Replaced with a fixed worker pool: 3 persistent goroutines (`runWorker`) consume from two priority channels — `renderQueue` (render jobs, high priority) and `jobQueue` (process + analyze, normal priority). Workers drain `renderQueue` first via a priority-biased double-select before blocking on either queue. Added `Stop()` method with `sync.Once` to cleanly shut down workers (used in tests). `launchJob(kind, run)` routes to the appropriate channel; `run()` is always called (executors own terminal-state transitions via `finishCancelledIfRequested`). `concurrencyLimit` field removed.
+**Actual improvement:** `BenchmarkLaunchJobThroughput` (serial, no-op job, 2048×1536 cpu):
+- **ns/op**: ~438 → ~498 ns/op (~14% slower in serial micro-benchmark — channel roundtrip has more sync cost than goroutine+semaphore in the no-contention case)
+- **B/op**: 80 → 32 B/op (**60% reduction** — goroutine stack allocation eliminated)
+- **allocs/op**: 3 → 2 (**1 fewer alloc per job** — no goroutine created)
+- `BenchmarkFullWorkflow` (full render+process+analyze pipeline): ~344 ms/op (unchanged — pixel work dominates)
+- The ns/op increase in the serial micro-benchmark is expected: before, a single goroutine did submit+run with no channel crossing; after, work crosses to a persistent worker goroutine. Under real job load (ms-to-seconds per job with 3 concurrent workers), the per-job goroutine creation cost becomes negligible but memory overhead is eliminated — especially under burst load where many jobs queue up as blocked goroutines vs sitting in a buffered channel.
+- **Priority scheduling**: render jobs now skip the queue of pending process/analyze jobs, reducing render latency when all 3 workers are busy with lower-priority work.
+- Race detector: clean (`go test -race` passes).
+**How to test:** `BenchmarkLaunchJobThroughput` and `BenchmarkLaunchJobConcurrent` in `bench_test.go` with `-benchmem`. Existing service tests pass (`go -C backend test ./internal/jobs/...`).
 
 ### Step 11.2: Context-Aware DICOM Decoding
 

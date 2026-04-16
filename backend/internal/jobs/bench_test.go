@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -211,6 +212,43 @@ func waitBenchJob(b *testing.B, service *Service, jobID string) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	b.Fatalf("job %s did not complete before timeout", jobID)
+}
+
+// BenchmarkLaunchJobThroughput measures pure scheduling overhead: submit a no-op
+// job and wait for it to complete. Captures goroutine-per-job (before) vs
+// worker-pool (after) cost difference.
+func BenchmarkLaunchJobThroughput(b *testing.B) {
+	svc := newService(nil, nil, nil, nil, nil, nil)
+	defer svc.Stop()
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		var done sync.WaitGroup
+		done.Add(1)
+		svc.launchJob(contracts.JobKindProcessStudy, func() {
+			done.Done()
+		})
+		done.Wait()
+	}
+}
+
+func BenchmarkLaunchJobConcurrent(b *testing.B) {
+	svc := newService(nil, nil, nil, nil, nil, nil)
+	defer svc.Stop()
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			var done sync.WaitGroup
+			done.Add(1)
+			svc.launchJob(contracts.JobKindProcessStudy, func() {
+				done.Done()
+			})
+			done.Wait()
+		}
+	})
 }
 
 func loadBenchmarkStudy(b *testing.B) dicommeta.SourceStudy {
