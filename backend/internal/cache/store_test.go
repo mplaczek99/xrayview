@@ -358,7 +358,7 @@ func TestAddArtifactBytesIgnoresNonPositive(t *testing.T) {
 func BenchmarkEvictArtifactsOverLimit(b *testing.B) {
 	const (
 		fileCount  = 50
-		fileSize   = 1024     // 1 KB each → 50 KB total
+		fileSize   = 1024      // 1 KB each → 50 KB total
 		limitBytes = 30 * 1024 // keep 30 KB → ~20 files survive per walk
 	)
 

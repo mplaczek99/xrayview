@@ -618,13 +618,17 @@ If a walk fails, `trackedBytes` is reset to -1 (unknown) to force a retry. The `
 
 ## Phase 12: Build & Bundle Optimization (Tooling)
 
-### Step 11.3: Add TTL to Artifact Existence Checks in Cache
+### Step 11.3: Add TTL to Artifact Existence Checks in Cache ✅
 
 **File:** `backend/internal/cache/memory.go:226-267`
 **What it does:** `resultArtifactsExist` calls `os.Stat` on artifact files for every cache load. This is a filesystem syscall on every cache lookup.
-**Optimization:** Track a `lastCheckedAt` timestamp per entry. Only re-stat if the entry hasn't been checked in the last 60 seconds. Artifact files don't disappear spontaneously during a session.
+**Optimization:** Added `lastCheckedAt time.Time` to `resultEntry`. `loadLocked` skips `resultArtifactsExist` when `time.Since(lastCheckedAt) < 60s`. `storeLocked` sets `lastCheckedAt = time.Now()` on both insert and update so the first load after a store also skips the stat. Three invalidation tests updated to zero `lastCheckedAt` before testing stale-file detection.
 **Expected improvement:** 20-30% faster cache lookups by eliminating redundant filesystem calls.
-**How to test:** Benchmark `LoadRender` with a populated cache.
+**Actual result:** `BenchmarkLoadRender/Hit` with 2048×1536 preview:
+- **Before**: ~698 ns/op, 272 B/op, 2 allocs/op
+- **After**: ~59 ns/op, 0 B/op, 0 allocs/op
+- **11.8x speedup**, 100% allocation elimination. The predicted 20-30% underestimated the `os.Stat` cost: the syscall + `os.FileInfo` allocation dominated the hot path. `EvictArtifactsOverLimit` can still delete artifacts within the TTL window (60s stale-hit risk), documented at the const.
+**How to test:** `BenchmarkLoadRender/Hit` in `memory_test.go`; `go -C backend test ./internal/cache/... -race` passes.
 
 ---
 
@@ -720,7 +724,7 @@ If a walk fails, `trackedBytes` is reset to -1 (unknown) to force a retry. The `
 | 4.2 (Integer blur) | Medium | Medium | Low | **P2** |
 | 4.4 (Morphological sliding window) | Medium | Medium | Low | **P2** |
 | 6.3 (RWMutex for cache) | Medium | Low | None | **P2** |
-| 11.3 (TTL artifact checks) | Medium | Low | None | **P2** |
+| 11.3 (TTL artifact checks) ✅ | Medium | Low | None | **P2** |
 | 12.1 (Reduce sidecar serialization) | Medium | Medium | Low | **P2** |
 | 9.5 (GPU transforms) | Medium | Low | None | **P2** |
 | 7.1 (Pool JSON) | Low | Low | None | **P3** |

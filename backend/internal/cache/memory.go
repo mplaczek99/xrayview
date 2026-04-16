@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"sync"
+	"time"
 
 	"xrayview/backend/internal/contracts"
 	"xrayview/backend/internal/imaging"
@@ -14,6 +15,12 @@ const (
 	maxMemoryCacheEntries          = 32
 	maxSourcePreviewEntries        = 32
 	maxSourcePreviewBytes   uint64 = 64 * 1024 * 1024 // 64 MB
+
+	// artifactCheckTTL gates how often os.Stat is called per cache entry.
+	// Artifact files are written once by a job and are stable for the session;
+	// the only way they disappear is via EvictArtifactsOverLimit, which widens
+	// the TOCTOU window from nanoseconds to one TTL period (acceptable trade-off).
+	artifactCheckTTL = 60 * time.Second
 )
 
 type cachedScale struct {
@@ -22,10 +29,11 @@ type cachedScale struct {
 
 // resultEntry is a node in the result LRU doubly-linked list.
 type resultEntry struct {
-	fingerprint string
-	result      contracts.JobResult
-	prev        *resultEntry
-	next        *resultEntry
+	fingerprint   string
+	result        contracts.JobResult
+	lastCheckedAt time.Time
+	prev          *resultEntry
+	next          *resultEntry
 }
 
 // sourcePreviewEntry is a node in the source preview LRU doubly-linked list.
@@ -212,11 +220,13 @@ func (memory *Memory) storeLocked(fingerprint string, result contracts.JobResult
 	memory.mu.Lock()
 	defer memory.mu.Unlock()
 
+	now := time.Now()
 	if existing, ok := memory.entries[fingerprint]; ok {
 		existing.result = result
+		existing.lastCheckedAt = now
 		memory.moveResultToFrontLocked(existing)
 	} else {
-		entry := &resultEntry{fingerprint: fingerprint, result: result}
+		entry := &resultEntry{fingerprint: fingerprint, result: result, lastCheckedAt: now}
 		memory.entries[fingerprint] = entry
 		memory.pushResultFrontLocked(entry)
 	}
@@ -245,10 +255,13 @@ func (memory *Memory) loadLocked(
 		return contracts.JobResult{}, false
 	}
 
-	if !resultArtifactsExist(entry.result, memory.logger, fingerprint) {
-		memory.removeResultEntryLocked(entry)
-		delete(memory.entries, fingerprint)
-		return contracts.JobResult{}, false
+	if time.Since(entry.lastCheckedAt) >= artifactCheckTTL {
+		if !resultArtifactsExist(entry.result, memory.logger, fingerprint) {
+			memory.removeResultEntryLocked(entry)
+			delete(memory.entries, fingerprint)
+			return contracts.JobResult{}, false
+		}
+		entry.lastCheckedAt = time.Now()
 	}
 
 	if entry.result.Kind != expectedKind {

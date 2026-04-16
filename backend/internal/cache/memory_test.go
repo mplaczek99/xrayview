@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"xrayview/backend/internal/contracts"
 	"xrayview/backend/internal/imaging"
@@ -51,6 +52,11 @@ func TestMemoryLoadRenderInvalidatesMissingPreviewArtifact(t *testing.T) {
 		t.Fatalf("Remove returned error: %v", err)
 	}
 
+	// Expire the artifact-check TTL so the next load re-stats the missing file.
+	memory.mu.Lock()
+	memory.entries["render:1"].lastCheckedAt = time.Time{}
+	memory.mu.Unlock()
+
 	if _, ok := memory.LoadRender("render:1"); ok {
 		t.Fatal("LoadRender = hit after preview removal, want invalidated miss")
 	}
@@ -84,6 +90,11 @@ func TestMemoryLoadProcessRequiresPreviewAndDicomArtifacts(t *testing.T) {
 	if err := os.Remove(dicomPath); err != nil {
 		t.Fatalf("Remove returned error: %v", err)
 	}
+
+	// Expire the artifact-check TTL so the next load re-stats the missing file.
+	memory.mu.Lock()
+	memory.entries["process:1"].lastCheckedAt = time.Time{}
+	memory.mu.Unlock()
 
 	if _, ok := memory.LoadProcess("process:1"); ok {
 		t.Fatal("LoadProcess = hit after DICOM removal, want invalidated miss")
@@ -353,6 +364,41 @@ func TestMemorySourcePreviewEvictsByByteBudget(t *testing.T) {
 // load distinct pre-populated keys. This is the hot path during concurrent job
 // starts. RWMutex should allow all readers to proceed in parallel vs Mutex
 // serializing them.
+// BenchmarkLoadRender measures the hot-path cost of LoadRender on a cache hit:
+// the RWMutex check, artifact existence validation, and LRU promotion.
+func BenchmarkLoadRender(b *testing.B) {
+	previewPath := filepath.Join(b.TempDir(), "preview.png")
+	if err := os.WriteFile(previewPath, []byte("png"), 0o644); err != nil {
+		b.Fatalf("WriteFile: %v", err)
+	}
+
+	b.Run("Hit", func(b *testing.B) {
+		memory := NewMemory(nil)
+		memory.StoreRender("render:1", contracts.RenderStudyCommandResult{
+			StudyID:     "study-1",
+			PreviewPath: previewPath,
+		})
+		b.ResetTimer()
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			result, ok := memory.LoadRender("render:1")
+			if !ok {
+				b.Fatal("cache miss")
+			}
+			_ = result
+		}
+	})
+
+	b.Run("Miss", func(b *testing.B) {
+		memory := NewMemory(nil)
+		b.ResetTimer()
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			_, _ = memory.LoadRender("render:missing")
+		}
+	})
+}
+
 func BenchmarkConcurrentLoad(b *testing.B) {
 	const numKeys = 16
 	pixels := make([]uint8, 2048*1536)

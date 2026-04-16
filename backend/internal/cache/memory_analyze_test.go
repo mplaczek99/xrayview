@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"xrayview/backend/internal/contracts"
 )
@@ -168,6 +169,11 @@ func TestMemoryLoadAnalyzeInvalidatesMissingPreview(t *testing.T) {
 	if err := os.Remove(previewPath); err != nil {
 		t.Fatalf("Remove returned error: %v", err)
 	}
+
+	// Expire the artifact-check TTL so the next load re-stats the missing file.
+	memory.mu.Lock()
+	memory.entries["analyze:missing"].lastCheckedAt = time.Time{}
+	memory.mu.Unlock()
 
 	if _, ok := memory.LoadAnalyze("analyze:missing"); ok {
 		t.Fatal("LoadAnalyze = hit after preview removal, want invalidated miss")
