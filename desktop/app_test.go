@@ -156,6 +156,80 @@ func TestServeAssetServesPreviewArtifact(t *testing.T) {
 	}
 }
 
+func TestServeAssetSetsCacheControlAndETag(t *testing.T) {
+	app := &DesktopApp{}
+
+	previewPath := filepath.Join(t.TempDir(), "preview.png")
+	if err := os.WriteFile(previewPath, tinyPNG, 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	request := httptest.NewRequest(http.MethodGet, previewEndpointPath+"?path="+previewPath, nil)
+	recorder := httptest.NewRecorder()
+	app.ServeAsset(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("ServeAsset() status = %d, want %d", recorder.Code, http.StatusOK)
+	}
+	if cc := recorder.Header().Get("Cache-Control"); cc != "public, max-age=3600" {
+		t.Errorf("Cache-Control = %q, want %q", cc, "public, max-age=3600")
+	}
+	if etag := recorder.Header().Get("ETag"); etag == "" {
+		t.Error("ETag header missing")
+	}
+}
+
+func TestServeAssetReturns304OnMatchingETag(t *testing.T) {
+	app := &DesktopApp{}
+
+	previewPath := filepath.Join(t.TempDir(), "preview.png")
+	if err := os.WriteFile(previewPath, tinyPNG, 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	// Cold request to capture ETag.
+	cold := httptest.NewRecorder()
+	app.ServeAsset(cold, httptest.NewRequest(http.MethodGet, previewEndpointPath+"?path="+previewPath, nil))
+	etag := cold.Header().Get("ETag")
+	if etag == "" {
+		t.Fatal("cold request returned no ETag")
+	}
+
+	// Conditional request with matching ETag must return 304.
+	req := httptest.NewRequest(http.MethodGet, previewEndpointPath+"?path="+previewPath, nil)
+	req.Header.Set("If-None-Match", etag)
+	recorder := httptest.NewRecorder()
+	app.ServeAsset(recorder, req)
+
+	if recorder.Code != http.StatusNotModified {
+		t.Fatalf("ServeAsset() with matching ETag: status = %d, want %d", recorder.Code, http.StatusNotModified)
+	}
+	if recorder.Body.Len() != 0 {
+		t.Errorf("ServeAsset() 304 response body not empty (len=%d)", recorder.Body.Len())
+	}
+}
+
+func TestServeAssetReturns200OnStaleETag(t *testing.T) {
+	app := &DesktopApp{}
+
+	previewPath := filepath.Join(t.TempDir(), "preview.png")
+	if err := os.WriteFile(previewPath, tinyPNG, 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, previewEndpointPath+"?path="+previewPath, nil)
+	req.Header.Set("If-None-Match", `"stale-etag"`)
+	recorder := httptest.NewRecorder()
+	app.ServeAsset(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("ServeAsset() with stale ETag: status = %d, want %d", recorder.Code, http.StatusOK)
+	}
+	if recorder.Body.Len() == 0 {
+		t.Error("ServeAsset() stale ETag should return full body")
+	}
+}
+
 func TestNewDesktopAppUsesInProcessBackendByDefault(t *testing.T) {
 	t.Setenv(sidecarRuntimeEnvKey, "desktop")
 	t.Setenv(sidecarBaseURLEnvKey, "")

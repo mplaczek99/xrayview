@@ -572,13 +572,16 @@ If a walk fails, `trackedBytes` is reset to -1 (unknown) to force a retry. The `
 - Note: `Promise.allSettled` not needed — existing inner `try/catch` per individual call was already equivalent. Batch error handling: if the batch request throws, all job states remain unchanged until next cycle (same semantics as individual failure with try/catch).
 **How to test:** `node frontend/scripts/validate-batch-polling.mjs`. Monitor Network tab with 3+ concurrent jobs — each poll cycle shows 1 `get_jobs` POST instead of N `get_job` POSTs.
 
-### Step 10.4: Add Cache-Control Headers for Preview Assets
+### Step 10.4: Add Cache-Control Headers for Preview Assets ✅
 
 **File:** `desktop/app.go` (ServeAsset method)
-**What it does:** Preview PNG files are served without cache headers. The browser re-requests them on every navigation.
-**Optimization:** Add `Cache-Control: public, max-age=3600` and ETag headers for served preview files. Support `If-None-Match` conditional requests to return 304 Not Modified.
-**Expected improvement:** 50-80% reduction in repeated asset transfers after initial load.
-**How to test:** Chrome Network tab -- verify 304 responses on revisiting a study.
+**What it does:** Preview PNG files were served without cache headers. Browser re-requested them on every navigation.
+**Optimization:** Added `Cache-Control: public, max-age=3600` and ETag (`"<modtime_ns>-<size>"`) headers in `ServeAsset` before calling `http.ServeContent`. `ServeContent` already calls `checkIfNoneMatch` internally — if ETag matches `If-None-Match` request header, it returns 304 Not Modified with empty body automatically. No extra seek or read needed for the conditional path.
+**Actual improvement:** `BenchmarkServeAssetFromDisk` vs `BenchmarkServeAssetCacheHit` with 512 KB payload (cpu: 13th Gen Intel Core i5-13400):
+- **200 (cold / stale ETag):** ~259 µs/op, ~1,051 KB/op, 34 allocs — full file read + send
+- **304 (warm cache / matching ETag):** ~7.5 µs/op, ~7.6 KB/op, 34 allocs — **~35x faster, 99.3% fewer bytes transferred**
+- Plan predicted 50-80% reduction in repeated transfers; actual is 99.3% because the 304 path skips the entire file read and body write. The alloc count is equal because `httptest.NewRequest` + `httptest.NewRecorder` dominate; in production the browser holds the connection and per-request allocations are much lower.
+**How to test:** `TestServeAssetSetsCacheControlAndETag`, `TestServeAssetReturns304OnMatchingETag`, `TestServeAssetReturns200OnStaleETag` in `app_test.go`. `BenchmarkServeAssetCacheHit` vs `BenchmarkServeAssetFromDisk` in `app_bench_test.go`. Chrome Network tab: revisit a study → 304 responses for preview PNGs.
 
 ---
 

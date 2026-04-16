@@ -350,6 +350,11 @@ func (app *DesktopApp) ServeAsset(writer http.ResponseWriter, request *http.Requ
 		return
 	}
 
+	// Stable ETag from modtime + size — cheap, no content read needed (previews are write-once).
+	etag := fmt.Sprintf(`"%x-%x"`, info.ModTime().UnixNano(), info.Size())
+	writer.Header().Set("Cache-Control", "public, max-age=3600")
+	writer.Header().Set("ETag", etag)
+
 	contentType := mime.TypeByExtension(filepath.Ext(rawPath))
 	if contentType == "" {
 		header := make([]byte, 512)

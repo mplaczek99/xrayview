@@ -41,6 +41,43 @@ func BenchmarkServeAssetFromDisk(b *testing.B) {
 	}
 }
 
+// BenchmarkServeAssetCacheHit measures the 304 Not Modified path (warm browser
+// cache). Contrasts with BenchmarkServeAssetFromDisk (full 200 path).
+func BenchmarkServeAssetCacheHit(b *testing.B) {
+	previewPath := filepath.Join(b.TempDir(), "preview.png")
+	payload := benchmarkPreviewPayload()
+	if err := os.WriteFile(previewPath, payload, 0o644); err != nil {
+		b.Fatalf("WriteFile returned error: %v", err)
+	}
+
+	app := &DesktopApp{}
+
+	// Capture ETag from a cold request.
+	cold := httptest.NewRecorder()
+	app.ServeAsset(cold, httptest.NewRequest(
+		http.MethodGet,
+		previewEndpointPath+"?path="+previewPath,
+		nil,
+	))
+	etag := cold.Header().Get("ETag")
+	if etag == "" {
+		b.Fatal("cold request returned no ETag")
+	}
+
+	b.ReportAllocs()
+	b.SetBytes(0) // 304 body is empty
+	b.ResetTimer()
+	for index := 0; index < b.N; index++ {
+		req := httptest.NewRequest(http.MethodGet, previewEndpointPath+"?path="+previewPath, nil)
+		req.Header.Set("If-None-Match", etag)
+		recorder := httptest.NewRecorder()
+		app.ServeAsset(recorder, req)
+		if recorder.Code != http.StatusNotModified {
+			b.Fatalf("ServeAsset() cache hit status = %d, want %d", recorder.Code, http.StatusNotModified)
+		}
+	}
+}
+
 func BenchmarkServeAssetFromMemoryCandidate(b *testing.B) {
 	payload := benchmarkPreviewPayload()
 
