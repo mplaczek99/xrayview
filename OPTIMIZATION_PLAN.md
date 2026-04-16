@@ -665,11 +665,13 @@ If a walk fails, `trackedBytes` is reset to -1 (unknown) to force a retry. The `
 
 ## Phase 13: Build & Bundle Optimization (Tooling)
 
-### Step 13.1: Enable Go Build Cache in CI
+### Step 13.1: Enable Go Build Cache in CI ✅
 
-**What it does:** Ensures `GOCACHE` is persistent across CI runs.
-**Optimization:** Configure CI to cache `$GOPATH/pkg/mod` and `$HOME/.cache/go-build`. Use a persistent directory instead of `/tmp`.
-**Expected improvement:** 60-80% faster CI builds after first run.
+**Files:** `.github/workflows/build-release-artifacts.yml`, `.github/workflows/publish-release.yml`
+**What it does:** `actions/setup-go@v5` already cached both `~/go/pkg/mod` and `~/.cache/go-build` by default. However, `cache-dependency-path: desktop/go.mod` was wrong: it used `go.mod` (not `go.sum`) and omitted `backend/go.sum`, so backend dep changes didn't invalidate the cache.
+**Optimization:** Changed `cache-dependency-path` to include both `desktop/go.sum` and `backend/go.sum`. Cache key now covers both modules and uses checksums (go.sum) instead of declarations (go.mod).
+**Actual result:** Cache-key correctness fix. Local proxy: cold build 4.69s → warm build 0.32s (93% reduction), demonstrating the build-cache effect the CI config now correctly preserves across runs. Real CI speedup is CI-only and requires a run with primed cache to measure.
+**How to test:** Inspect CI run after two consecutive pushes — second run's "Set up Go" step should report a cache hit for both `desktop/go.sum` and `backend/go.sum`.
 
 ### Step 13.2: Enable Vite Code Splitting and Minification
 

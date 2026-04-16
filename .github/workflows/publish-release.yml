@@ -59,7 +59,9 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version-file: desktop/go.mod
-          cache-dependency-path: desktop/go.mod
+          cache-dependency-path: |
+            desktop/go.sum
+            backend/go.sum
 
       - name: Install frontend dependencies
         run: npm ci
