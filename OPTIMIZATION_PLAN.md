@@ -697,12 +697,13 @@ If a walk fails, `trackedBytes` is reset to -1 (unknown) to force a retry. The `
 **Actual result:** Warm build: 0.558s → 0.399s — **28% faster**. Cold build: 1.042s → 0.882s — **15% faster**. Warm case dominates dev iteration loops.
 **How to test:** Run `node ./scripts/parallel-build.mjs` in `frontend/` — vite output streams live while tsc runs concurrently; tsc errors flush after vite completes.
 
-### Step 13.5: Tree-Shake Unused Exports
+### Step 13.5: Tree-Shake Unused Exports ✅
 
 **File:** `frontend/src/lib/runtime.ts:195-204`
 **What it does:** Re-exports many symbols. Some may be unused.
-**Optimization:** Audit with `knip` or similar. Remove unused exports.
-**Expected improvement:** Smaller bundle size.
+**Optimization:** Audited with `knip`. Removed 4 unused value re-exports (`buildMockPath`, `MOCK_DICOM_PATH`, `MOCK_EXPORT_DIRECTORY`, `paletteLabel`) and 3 unused type re-exports (`BackendAPI`, `RuntimeAdapter`, `ShellAPI`) from `runtime.ts`. Also removed now-dead `import { … } from "./mockRuntime"` block and `paletteLabel` from the `./backend` import.
+**Actual result:** Bundle size unchanged (65.62 kB / 18.58 kB gzip for index chunk) — Vite/Rolldown already tree-shook these symbols at bundle time. Win is cleaner public API surface: `runtime.ts` now re-exports only 3 values actually consumed by other modules (`FALLBACK_PROCESSING_MANIFEST`, `buildOutputName`, `ensureDicomExtension`). `knip` reports zero unused exports for `runtime.ts`.
+**How to test:** `npx knip --reporter compact` in `frontend/` — no entries for `src/lib/runtime.ts`. `node ./scripts/parallel-build.mjs` — clean build, no type errors.
 
 ---
 

@@ -5,7 +5,6 @@ import {
   createDesktopBackendAPI,
   createMockBackendAPI,
   ensureDicomExtension,
-  paletteLabel,
 } from "./backend";
 import { buildDesktopPreviewUrl, isDesktopRuntime } from "./desktop";
 import type {
@@ -19,11 +18,6 @@ import type {
 import { resolveRuntimeConfiguration } from "./runtimeConfig";
 import { createDesktopShellAPI, createMockShellAPI } from "./shell";
 import type { BackendAPI, RuntimeAdapter } from "./runtimeTypes";
-import {
-  buildMockPath,
-  MOCK_DICOM_PATH,
-  MOCK_EXPORT_DIRECTORY,
-} from "./mockRuntime";
 import type {
   OpenedStudy,
   PreviewResult,
@@ -194,13 +188,4 @@ export function getRuntimeAdapter(): RuntimeAdapter {
   return activeRuntime;
 }
 
-export {
-  FALLBACK_PROCESSING_MANIFEST,
-  buildMockPath,
-  buildOutputName,
-  ensureDicomExtension,
-  MOCK_DICOM_PATH,
-  MOCK_EXPORT_DIRECTORY,
-  paletteLabel,
-};
-export type { BackendAPI, RuntimeAdapter, ShellAPI } from "./runtimeTypes";
+export { FALLBACK_PROCESSING_MANIFEST, buildOutputName, ensureDicomExtension };
