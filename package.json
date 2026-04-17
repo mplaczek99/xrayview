@@ -13,6 +13,9 @@
     "wails:build": "node ./desktop/scripts/build.mjs",
     "wails:run": "node ./desktop/scripts/run.mjs",
     "release:smoke": "npm --prefix frontend run release:smoke --",
-    "release:smoke:bundle": "npm --prefix frontend run release:smoke:bundle --"
+    "release:smoke:bundle": "npm --prefix frontend run release:smoke:bundle --",
+    "playwright": "npm --prefix frontend exec playwright",
+    "test:e2e": "PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS=1 npm --prefix frontend exec playwright test",
+    "playwright:install": "PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS=1 npm --prefix frontend exec playwright install chromium"
   }
 }
