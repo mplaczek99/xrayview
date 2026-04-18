@@ -12,7 +12,12 @@ import (
 	"xrayview/backend/internal/jobs"
 )
 
-// BackendService is the command surface shared by HTTP transport and the desktop shell.
+// BackendService is the command surface the HTTP router in internal/httpapi
+// and the desktop shell (via backend/service.go) both sit on top of. The
+// contracts package defines the wire types; this interface is what actually
+// gets invoked. Keep it in sync with httpapi.BackendService — the router
+// declares its own narrower copy so it doesn't depend on this package, and
+// the two will drift if nobody's watching.
 type BackendService interface {
 	OpenStudy(command contracts.OpenStudyCommand) (contracts.OpenStudyCommandResult, error)
 	StartRenderJob(command contracts.RenderStudyCommand) (contracts.StartedJob, error)
@@ -33,6 +38,15 @@ type BackendService interface {
 
 var _ BackendService = (*App)(nil)
 
+// OpenStudy is the canonical study-ingest path. Every DICOM file the UI
+// touches enters the backend here:
+//
+//  1. validate the input path exists and is a regular file,
+//  2. parse metadata via dicommeta (headers only, no pixel decode),
+//  3. register the study with a generated ID and measurement scale,
+//  4. record it to the on-disk catalog — best-effort only; a catalog
+//     failure is logged but does not fail the command, because the
+//     in-memory registration is the source of truth for an active session.
 func (app *App) OpenStudy(
 	command contracts.OpenStudyCommand,
 ) (contracts.OpenStudyCommandResult, error) {

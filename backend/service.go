@@ -1,3 +1,12 @@
+// Package backend is the stable, exported facade for the Go backend.
+//
+// It lives outside internal/ on purpose: the desktop (Wails) shell in
+// ../desktop is a separate Go module and can only import non-internal
+// packages from this one. Everything in here is a thin forwarder over
+// internal/app; no business logic belongs at this layer. If the HTTP
+// router and the desktop shell need to agree on a command, the contract
+// is in internal/contracts and the implementation in internal/app — this
+// file just re-exposes it for embedded callers.
 package backend
 
 import (

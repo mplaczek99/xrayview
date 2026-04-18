@@ -34,6 +34,13 @@ var jsonWriterPool = sync.Pool{New: func() any {
 	return &jsonWriterEntry{buf: buf, enc: json.NewEncoder(buf)}
 }}
 
+// BackendService is the router's view of the command surface. It is a
+// narrower mirror of app.BackendService so this package doesn't import
+// internal/app (keeps the router independent of app wiring for tests).
+// Keep the command methods in sync with app.BackendService. The extra
+// methods on that interface (job update callbacks, study count, etc.) are
+// picked up via optional type assertions further down this file rather
+// than by adding them here.
 type BackendService interface {
 	OpenStudy(command contracts.OpenStudyCommand) (contracts.OpenStudyCommandResult, error)
 	StartRenderJob(command contracts.RenderStudyCommand) (contracts.StartedJob, error)
@@ -157,6 +164,12 @@ func NewRouter(deps RouterDeps) http.Handler {
 		})
 	})
 
+	// Single dispatch table for every backend command. To add a new command:
+	// declare it in contracts/backend-contract-v1.schema.json, run
+	// `npm run contracts:generate` to refresh the TS + Go bindings, then add
+	// a case below plus a handleXxx that decodes the payload and forwards to
+	// deps.Service. Anything that isn't a POST to a known command name is
+	// rejected here before it reaches the service.
 	mux.HandleFunc(CommandsPath+"/", func(writer http.ResponseWriter, request *http.Request) {
 		commandName := strings.TrimPrefix(request.URL.Path, CommandsPath+"/")
 		if request.Method != http.MethodPost {
@@ -300,6 +313,10 @@ func writeJSON(writer http.ResponseWriter, statusCode int, payload any) {
 	jsonWriterPool.Put(je)
 }
 
+// Every handleXxx below follows the same shape: decode the request body
+// into a contracts.*Command, forward to the service, map any error through
+// writeBackendError, and otherwise write the result as JSON. If you're
+// adding a new command, copy this and swap the types.
 func handleOpenStudy(writer http.ResponseWriter, request *http.Request, deps RouterDeps) {
 	var command contracts.OpenStudyCommand
 	if err := decodeJSONRequest(request, &command); err != nil {

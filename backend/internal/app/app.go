@@ -28,10 +28,16 @@ type App struct {
 	startedAt   time.Time
 }
 
+// New builds a server-ready App. The HTTP server is wired but not listening;
+// the caller drives lifecycle by calling Run (which also runs prepare).
 func New(cfg config.Config, logger *slog.Logger) (*App, error) {
 	return newApp(cfg, logger, nil, nil, nil, true)
 }
 
+// NewService builds an embedded App with no HTTP server attached. Used by
+// backend/service.go when the desktop shell hosts the backend in-process.
+// Because there is no Run loop to lazily call prepare, cache and persistence
+// directories are created here so the returned App is immediately usable.
 func NewService(cfg config.Config, logger *slog.Logger) (*App, error) {
 	application, err := newApp(cfg, logger, nil, nil, nil, false)
 	if err != nil {
@@ -45,6 +51,9 @@ func NewService(cfg config.Config, logger *slog.Logger) (*App, error) {
 	return application, nil
 }
 
+// NewWithServices is the composition seam used by tests and by callers that
+// want to share a cache / registry / job service across App instances.
+// Anything passed as nil falls back to a default constructed from cfg.
 func NewWithServices(
 	cfg config.Config,
 	logger *slog.Logger,
@@ -113,6 +122,10 @@ func newApp(
 	return application, nil
 }
 
+// NewFromEnvironment is the production sidecar entry point used by
+// cmd/xrayviewd. Config and per-subsystem knobs (worker counts, cache sizes,
+// etc.) are read from XRAYVIEW_BACKEND_* env vars — so unlike New, callers
+// don't build a config.Config themselves.
 func NewFromEnvironment() (*App, error) {
 	cfg, err := config.Load()
 	if err != nil {
@@ -178,6 +191,10 @@ func (app *App) Run(ctx context.Context) error {
 	}
 }
 
+// prepare ensures the cache and persistence directories exist and emits the
+// "ready" log line. The log message intentionally differs between server
+// mode ("backend ready") and embedded mode ("embedded backend ready") so
+// the runtime flavor is obvious when triaging logs.
 func (app *App) prepare() error {
 	if err := app.cache.Ensure(); err != nil {
 		return err

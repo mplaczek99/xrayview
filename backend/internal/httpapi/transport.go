@@ -38,6 +38,17 @@ func (writer *statusCapturingResponseWriter) Write(body []byte) (int, error) {
 	return writer.ResponseWriter.Write(body)
 }
 
+// wrapLocalTransport is the trust boundary for the HTTP surface.
+//
+// The backend listener binds to a loopback address by default (see
+// config.ListenAddress), so in practice the only callers are the desktop
+// shell, the CLI, and a developer's browser running the frontend against
+// `npm run dev`. Requests with no Origin header are treated as same-host
+// clients and pass through. Requests with a non-loopback Origin are
+// rejected with 403 before anything reaches the command dispatch table —
+// this is what keeps a page in the user's browser from driving the local
+// backend through DNS rebinding or a stray CORS allowance. Do not relax
+// this without revisiting the threat model in CLAUDE.md.
 func wrapLocalTransport(next http.Handler, logger *slog.Logger) http.Handler {
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		startedAt := time.Now()
@@ -122,6 +133,10 @@ func addVary(header http.Header, value string) {
 	header.Add("Vary", value)
 }
 
+// isAllowedOrigin accepts only http(s) origins whose host is localhost or
+// a loopback IP (127.0.0.0/8 or ::1). Anything else — including LAN
+// addresses, file://, and custom schemes — is rejected. Keep this strict;
+// it is the Origin-side half of the loopback-only transport guarantee.
 func isAllowedOrigin(origin string) bool {
 	parsed, err := url.Parse(origin)
 	if err != nil {
