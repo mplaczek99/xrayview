@@ -1,3 +1,17 @@
+// Package jobs runs the three long-running study commands (render, process,
+// analyze) behind a small worker pool. Per job:
+//
+//	StartXJob fingerprints the request, consults the in-memory result cache,
+//	and on a miss reserves an entry in the registry. The execute closure is
+//	handed to one of two queues: renderQueue (drained first) or jobQueue
+//	(process + analyze). A worker walks the executeXJob stage machine,
+//	polling the registry for cancellation between stages, and completeXJob
+//	stores the result and fires callbacks.
+//
+// Dedupe is by fingerprint — a second StartJob for the same inputs returns
+// the in-flight snapshot rather than launching a duplicate. Cancellation is a
+// context.CancelFunc attached to the registry entry so Cancel() can unblock
+// decode and write calls immediately.
 package jobs
 
 import (
@@ -41,13 +55,13 @@ type Service struct {
 	logger                 *slog.Logger
 	newDecoder             decodeHelperFactory
 	secondaryCaptureWriter dicomexport.Writer
-	memoryCache            *cache.Memory
+	memoryCache            *cache.Memory // finished job payloads keyed by fingerprint; separate from decodeCache (source-study decode)
 	registry               *Registry
-	decodeCache            *studies.DecodeCache
-	renderQueue            chan func() // high-priority: render jobs
-	jobQueue               chan func() // normal-priority: process + analyze jobs
+	decodeCache            *studies.DecodeCache // source-study decode dedupe; separate from memoryCache (result payloads)
+	renderQueue            chan func()          // high-priority: render jobs
+	jobQueue               chan func()          // normal-priority: process + analyze jobs
 	workerStop             chan struct{}
-	workerOnce             sync.Once
+	workerOnce             sync.Once // guards against a double close of workerStop from repeated Stop() calls
 	renderSourcePreview    renderSourcePreviewFunc
 	callbackMu             sync.RWMutex
 	onJobCompletion        JobCompletionCallback
@@ -55,7 +69,15 @@ type Service struct {
 }
 
 const decodeBenchmarkEnvKey = "XRAYVIEW_BENCH_LOG_DECODES"
+
+// maxConcurrentJobs sizes the worker pool. Three CPU-bound workers fit a
+// desktop workload — render, process, and analyze all contend on the same
+// decoder cache, and more than a handful just starves the UI thread.
 const maxConcurrentJobs = 3
+
+// maxArtifactBytes is a soft upper bound on total bytes held in the on-disk
+// artifact cache. Sized for a session's worth of previews and exported
+// DICOMs; the eviction pass runs after each successful completion.
 const maxArtifactBytes int64 = 256 * 1024 * 1024 // 256 MB
 
 var decodeBenchmarkCounts = struct {
@@ -123,6 +145,12 @@ func (service *Service) OnJobUpdate(callback JobCompletionCallback) {
 	service.onJobUpdate = callback
 }
 
+// StartRenderJob hands a render request to the worker pool. All three
+// StartXJob entry points follow the same shape: validate inputs, fingerprint
+// the request, short-circuit on a memory cache hit (returning a snapshot with
+// FromCache=true), otherwise reserve a registry entry — if the same
+// fingerprint is already in-flight, the existing snapshot comes back with
+// Created=false — attach a cancel func, and launch the execute closure.
 func (service *Service) StartRenderJob(
 	command contracts.RenderStudyCommand,
 ) (contracts.StartedJob, error) {
@@ -420,7 +448,9 @@ func (service *Service) Stop() {
 
 func (service *Service) runWorker() {
 	for {
-		// Drain render queue first (priority bias).
+		// Non-blocking pull from renderQueue first; the default: branch below
+		// is the whole priority mechanism — a ready render is taken before
+		// the blocking select competes both queues against workerStop.
 		select {
 		case run := <-service.renderQueue:
 			run()
@@ -446,6 +476,11 @@ func (service *Service) launchJob(kind contracts.JobKind, run func()) {
 	}
 }
 
+// cachedRenderSnapshot synthesizes a completed snapshot from a memory cache
+// hit. A fresh job ID is minted for every hit rather than replaying an
+// earlier one — the prior job's registry entry has typically been evicted,
+// and the UI wants a clean handle to subscribe to and dispose of.
+// cachedProcessSnapshot and cachedAnalyzeSnapshot follow the same contract.
 func (service *Service) cachedRenderSnapshot(
 	fingerprint string,
 	studyID string,
@@ -518,6 +553,15 @@ func (service *Service) cachedAnalyzeSnapshot(
 	return snapshot, true, nil
 }
 
+// executeRenderJob walks the render pipeline to completion or cancellation.
+//
+// The stage names ("validating", "loadingStudy", "renderingPreview",
+// "writingPreview", and in the peers "processingPixels", "writingDicom",
+// "measuringTooth") and the percent values below are part of the frontend
+// contract — the UI labels progress from them. Renaming a stage or nudging a
+// percent breaks the UI's progress display, so update the contracts schema
+// and the frontend in lockstep. Shared convention with executeProcessJob and
+// executeAnalyzeJob.
 func (service *Service) executeRenderJob(
 	ctx context.Context,
 	jobID string,
@@ -923,6 +967,14 @@ func (service *Service) transitionJob(
 	return nil
 }
 
+// finishCancelledIfRequested is both a check and a cleanup. If the registry
+// latch or the job context says we have been asked to cancel, it removes any
+// partially written preview, drives the registry to JobStateCancelled, fires
+// the completion callback, and returns true. Callers MUST return immediately
+// on true — continuing would clobber the Cancelled terminal state with a
+// later Complete or Fail, and the preview cleanup would race whatever the
+// next stage tries to write. The name reads like a predicate; treat it as
+// "bail out here if we are done".
 func (service *Service) finishCancelledIfRequested(
 	ctx context.Context,
 	jobID string,
@@ -969,6 +1021,10 @@ func (service *Service) completeRenderJob(
 	service.evictArtifactsIfNeeded()
 }
 
+// completeProcessJob mirrors completeRenderJob but also deletes the DICOM
+// artifact on the cancellation race — process is the only variant that
+// writes a second output file, so completeRenderJob and completeAnalyzeJob
+// only clean up the preview.
 func (service *Service) completeProcessJob(
 	jobID string,
 	fingerprint string,
@@ -1148,6 +1204,11 @@ func validateInputFile(inputPath string) error {
 	return nil
 }
 
+// The Namespace string embedded in every fingerprint ("render-study-v1",
+// "process-study-v3", "analyze-study-v1") is a deliberate cache-bust key.
+// Bump the version suffix whenever the shape of what should invalidate a
+// cached result changes — without a bump, a stale entry keyed on the old
+// payload shape will be served for the new request.
 func renderFingerprint(study contracts.StudyRecord) (string, error) {
 	payload, err := json.Marshal(struct {
 		Namespace string `json:"namespace"`
@@ -1229,6 +1290,10 @@ func analyzeFingerprint(study contracts.StudyRecord) (string, error) {
 	return hex.EncodeToString(sum[:]), nil
 }
 
+// resolveProcessOutputPath picks the DICOM output path for a process job.
+// A user-supplied path wins (after parent-directory sanity checks); when nil
+// we fall back to a deterministic cache-managed artifact so repeated runs
+// against the same fingerprint overwrite in place instead of piling up.
 func (service *Service) resolveProcessOutputPath(
 	outputPath *string,
 	fingerprint string,
@@ -1261,6 +1326,11 @@ func (service *Service) resolveProcessOutputPath(
 	return resolved, nil
 }
 
+// generateJobID returns a dash-separated 16-byte hex string shaped like a
+// UUID v4. We skip the variant/version bit twiddling because crypto/rand
+// already yields uniform bytes and nothing in the system parses these as
+// canonical UUIDs — contrast with dicommeta.generateSourceStudyUID, which
+// does need to produce a spec-compliant OID.
 func generateJobID() (string, error) {
 	var raw [16]byte
 	if _, err := rand.Read(raw[:]); err != nil {

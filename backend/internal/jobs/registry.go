@@ -13,6 +13,15 @@ type StartJobOutcome struct {
 	Created  bool
 }
 
+// Registry owns the lifecycle of every job the service runs. It hands out
+// job IDs, serializes snapshot mutations under a single write lock, and
+// tracks which fingerprints are currently in flight via activeFingerprints
+// — the dedupe map. While a fingerprint has a live entry there, a second
+// StartJob with the same fingerprint returns the existing snapshot with
+// Created=false instead of launching a duplicate; entries are inserted at
+// StartJob and released by whichever path drives the job to a terminal
+// state (Complete, Fail, markCancelledLocked). Snapshots returned to callers
+// are deep-cloned so they can be read and mutated without holding the lock.
 type Registry struct {
 	mu                 sync.RWMutex
 	newJobID           idGenerator
@@ -20,13 +29,25 @@ type Registry struct {
 	activeFingerprints map[string]string
 }
 
+// maxTerminalJobs caps how many done/failed/cancelled entries we hold onto
+// so late Get() calls can still find their result. Eviction runs on every
+// terminal transition via evictOldTerminalJobsLocked.
 const maxTerminalJobs = 64
 
 type registryEntry struct {
-	fingerprint           string
+	fingerprint string
+	// cancellationRequested is a sticky latch the execute loop polls between
+	// stages. Distinct from the three JobState cancel variants:
+	// JobStateCancelling is what Cancel() writes on a running job,
+	// JobStateCancelled is the terminal state markCancelledLocked drives to,
+	// and this flag is what survives an UpdateProgress state rewrite so the
+	// worker still sees the cancellation at its next stage boundary.
 	cancellationRequested bool
 	snapshot              contracts.JobSnapshot
-	cancel                context.CancelFunc
+	// cancel is nilled by Complete, Fail, markCancelledLocked, and Cancel's
+	// queued branch — never invoke it after one of those paths has run, it
+	// is either already fired or belongs to a context we have moved past.
+	cancel context.CancelFunc
 }
 
 func NewRegistry(jobIDFactory idGenerator) *Registry {
@@ -230,6 +251,16 @@ func (registry *Registry) Fail(jobID string, err error) (contracts.JobSnapshot, 
 	return cloneJobSnapshot(entry.snapshot), nil
 }
 
+// Cancel drives a job toward cancellation. Three outcomes:
+//   - Queued: transition directly to Cancelled (the worker never ran, so no
+//     cleanup is needed).
+//   - Running or Cancelling: flip to Cancelling, set the latch, and fire the
+//     context cancel so any in-flight decode or write unblocks. The execute
+//     loop observes the latch at its next stage boundary via
+//     finishCancelledIfRequested and finalizes the Cancelled transition
+//     there — this function intentionally does not finalize.
+//   - Completed, Failed, or already Cancelled: no-op; the snapshot is
+//     returned unchanged.
 func (registry *Registry) Cancel(jobID string) (contracts.JobSnapshot, error) {
 	registry.mu.Lock()
 	defer registry.mu.Unlock()
@@ -333,6 +364,12 @@ func (registry *Registry) releaseFingerprintLocked(entry *registryEntry) {
 	entry.fingerprint = ""
 }
 
+// evictOldTerminalJobsLocked trims the jobs map back under maxTerminalJobs.
+// Only terminal entries are eligible — a running job still owns a cancel
+// func and cannot be dropped — and keepJobID is held back so the entry that
+// just transitioned is still readable by the next Get. There is no recency
+// tracking; which terminal entries go is map-iteration order, so do not
+// rely on LRU semantics.
 func (registry *Registry) evictOldTerminalJobsLocked(keepJobID string) {
 	if len(registry.jobs) <= maxTerminalJobs {
 		return
@@ -355,6 +392,10 @@ func (registry *Registry) evictOldTerminalJobsLocked(keepJobID string) {
 	}
 }
 
+// cloneJobSnapshot deep-copies a snapshot's pointer fields so returned
+// snapshots can be read and mutated outside the registry lock. Do not
+// "optimize" this into a direct return — the pointer fields would alias the
+// live entry and a later registry mutation would race the caller.
 func cloneJobSnapshot(snapshot contracts.JobSnapshot) contracts.JobSnapshot {
 	cloned := snapshot
 
