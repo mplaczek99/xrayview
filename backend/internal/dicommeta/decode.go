@@ -1,5 +1,15 @@
 package dicommeta
 
+// Full decode path. Parses a DICOM file into a ready-to-render SourceImage
+// plus the preserved tags the exporter needs to stay linked to the original
+// patient/study/series. Applies the modality rescale (slope*stored + intercept),
+// masks and sign-extends stored pixel values per BitsStored / PixelRepresentation,
+// and flips MONOCHROME1 so "high value = white" downstream. Picks up a default
+// window when the file ships one.
+//
+// Not handled: color spaces other than RGB, multi-frame encapsulated pixel
+// data, SR/waveform content.
+
 import (
 	"bytes"
 	"context"
@@ -61,10 +71,16 @@ type sourceStudyState struct {
 }
 
 var (
-	tagStudyInstanceUID     = tag{group: 0x0020, element: 0x000d}
-	tagRescaleIntercept     = tag{group: 0x0028, element: 0x1052}
-	tagRescaleSlope         = tag{group: 0x0028, element: 0x1053}
-	tagItem                 = tag{group: 0xfffe, element: 0xe000}
+	tagStudyInstanceUID = tag{group: 0x0020, element: 0x000d}
+	tagRescaleIntercept = tag{group: 0x0028, element: 0x1052}
+	tagRescaleSlope     = tag{group: 0x0028, element: 0x1053}
+	tagItem             = tag{group: 0xfffe, element: 0xe000}
+	// preservedSourceTagOrder / preservedSourceTagVRs together define which
+	// identifier and calibration tags we round-trip into the secondary-capture
+	// exporter in export/. The slice order is purely how we emit them in the
+	// preserved-elements JSON — grouped logically (patient, study, series,
+	// calibration). The exporter re-sorts into ascending tag order on write.
+	// If you add a tag to the slice, add its VR to the map.
 	preservedSourceTagOrder = []tag{
 		{group: 0x0010, element: 0x0010},
 		{group: 0x0010, element: 0x0020},
@@ -464,6 +480,13 @@ func (state *sourceStudyState) decodeEncapsulatedPixelData(
 	source readerAtSeeker,
 	syntax transferSyntax,
 ) (imaging.SourceImage, error) {
+	// Encapsulated pixel data layout (PS3.5 Annex A.4):
+	//   Item(BasicOffsetTable) — required, often empty for single-frame
+	//   Item(Fragment), Item(Fragment), ...
+	//   SequenceDelimitationItem
+	// We skip the offset table, concatenate the fragments, and let
+	// image.Decode work out the compression. JPEG and PNG support comes
+	// from the blank imports at the top of the file.
 	if state.metadata.NumberOfFrames > 1 {
 		return imaging.SourceImage{}, fmt.Errorf(
 			"unsupported multi-frame encapsulated source decode: %d frames",
@@ -560,6 +583,7 @@ func (state *sourceStudyState) decodeU8Color(
 	var minVal, maxVal float32
 	switch state.metadata.PlanarConfiguration {
 	case 0:
+		// Interleaved: R0 G0 B0 R1 G1 B1 ...
 		if chunkOffset := 0; chunkOffset+2 < len(samples) {
 			first := float32(grayFromRGB8(samples[chunkOffset], samples[chunkOffset+1], samples[chunkOffset+2]))
 			pixels[0] = first
@@ -576,6 +600,8 @@ func (state *sourceStudyState) decodeU8Color(
 			}
 		}
 	case 1:
+		// Planar: all R samples, then all G, then all B. Mostly legacy but
+		// still shows up in older exports.
 		if len(samples) < framePixels*3 {
 			return nil, 0, 0, fmt.Errorf(
 				"dicom frame sample count %d does not match image size %d",
@@ -621,6 +647,9 @@ func (state *sourceStudyState) resolveDecodeConfig() sourceDecodeConfig {
 		}
 	}
 
+	// MONOCHROME1 reverses the usual convention — low stored value means
+	// white. We flag it here and let the render LUT do the flip at the end
+	// rather than rewriting every sample on decode.
 	return sourceDecodeConfig{
 		bitsStored:          bitsStored,
 		pixelRepresentation: state.metadata.PixelRepresentation,
@@ -873,6 +902,9 @@ func readU32Samples(raw []byte, byteOrder binary.ByteOrder) []uint32 {
 	return samples
 }
 
+// grayFromRGB8 is the BT.601 luma formula (.299 R + .587 G + .114 B) in
+// Q16 fixed-point. The 1<<15 bias rounds to nearest; the >>24 brings the
+// result back to 8-bit after the 16-bit channel replication.
 func grayFromRGB8(red uint8, green uint8, blue uint8) uint8 {
 	redValue := uint32(red)
 	greenValue := uint32(green)
@@ -884,6 +916,12 @@ func grayFromRGB8(red uint8, green uint8, blue uint8) uint8 {
 	return uint8((19595*redValue + 38470*greenValue + 7471*blueValue + (1 << 15)) >> 24)
 }
 
+// decodeStoredPixelValue unpacks a raw pixel sample.
+//
+// DICOM packs BitsStored bits into a BitsAllocated slot, so the high bits
+// are padding and have to be masked off. For signed samples
+// (PixelRepresentation == 1) the sign bit is at position BitsStored-1; if
+// it's set, extend it through the upper padding bits before the int32 cast.
 func decodeStoredPixelValue(rawValue uint32, bitsStored uint16, pixelRepresentation uint16) int32 {
 	if bitsStored == 0 || bitsStored > 32 {
 		bitsStored = 32
@@ -908,6 +946,10 @@ func decodeStoredPixelValue(rawValue uint32, bitsStored uint16, pixelRepresentat
 	return int32(masked | ^mask)
 }
 
+// scaledStoredPixelValue applies the DICOM modality LUT: stored value ->
+// modality value via slope*stored + intercept. Hounsfield on CT, raw OD on
+// X-ray. Slope defaults to 1 and intercept to 0 when the source didn't ship
+// a rescale pair.
 func scaledStoredPixelValue(rawValue uint32, cfg sourceDecodeConfig) float32 {
 	return float32(decodeStoredPixelValue(rawValue, cfg.bitsStored, cfg.pixelRepresentation))*cfg.slope +
 		cfg.intercept
@@ -927,12 +969,20 @@ func parseStringValues(value []byte) []string {
 	return values
 }
 
+// generateSourceStudyUID synthesizes a StudyInstanceUID for sources that
+// didn't ship (0020,000d). OID root 2.25 (per ITU-T X.667) lets us encode
+// a UUID v4 as its decimal form without registering an enterprise OID.
+// The "2.25.0" branch is the crypto/rand-failure survival path — it
+// shouldn't happen in practice, but returning a valid-shape OID beats
+// killing the decode over a field whose exact value doesn't matter
+// downstream.
 func generateSourceStudyUID() string {
 	var raw [16]byte
 	if _, err := rand.Read(raw[:]); err != nil {
 		return "2.25.0"
 	}
 
+	// Set the UUID v4 version and variant bits before decimal encoding.
 	raw[6] = (raw[6] & 0x0f) | 0x40
 	raw[8] = (raw[8] & 0x3f) | 0x80
 

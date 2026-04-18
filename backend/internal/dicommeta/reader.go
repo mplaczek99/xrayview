@@ -1,5 +1,10 @@
 package dicommeta
 
+// Metadata-only reader. Walks the dataset far enough to classify pixel
+// encoding and pull the handful of tags we actually use, then stops the
+// moment it hits PixelData. decode.go continues past that point and
+// materializes the image.
+
 import (
 	"encoding/binary"
 	"fmt"
@@ -150,6 +155,10 @@ func Read(source readerAtSeeker) (Metadata, error) {
 	return metadata, nil
 }
 
+// MeasurementScale returns the best available pixel-spacing calibration, or
+// nil if none were usable. Prefers PixelSpacing (calibrated) over
+// ImagerPixelSpacing and NominalScannedPixelSpacing (hardware geometry
+// fallback); the order matches DICOM's own preference.
 func (metadata Metadata) MeasurementScale() *contracts.MeasurementScale {
 	candidates := []struct {
 		pair   *SpacingPair
@@ -184,6 +193,10 @@ func loadTransferSyntaxUID(source readerAtSeeker) (string, error) {
 		return "", err
 	}
 
+	// Plenty of DICOM files in the wild skip the Part 10 preamble entirely
+	// (older writers, raw dataset dumps). Those are implicit VR little
+	// endian by convention — the one syntax that doesn't need an explicit
+	// declaration.
 	if !hasPart10 {
 		if _, err := source.Seek(0, io.SeekStart); err != nil {
 			return "", fmt.Errorf("seek raw DICOM dataset: %w", err)
@@ -195,6 +208,9 @@ func loadTransferSyntaxUID(source readerAtSeeker) (string, error) {
 		return "", fmt.Errorf("seek file meta: %w", err)
 	}
 
+	// File meta is always group 0x0002 and always encoded as explicit VR
+	// little endian, regardless of what the dataset syntax eventually turns
+	// out to be. Read until we hit a tag from a different group.
 	transferSyntaxUID := ""
 	for {
 		nextGroup, err := peekGroup(source, binary.LittleEndian)
@@ -360,6 +376,8 @@ func syntaxFromUID(uid string) (transferSyntax, error) {
 	case explicitBigEndianTransferSyntax:
 		return transferSyntax{byteOrder: binary.BigEndian, explicit: true}, nil
 	case deflatedTransferSyntax:
+		// Deflated LE wraps the whole dataset in zlib. Not worth
+		// transparently inflating every read just for a metadata scan.
 		return transferSyntax{}, fmt.Errorf("unsupported deflated transfer syntax for metadata reader: %s", uid)
 	case "":
 		return transferSyntax{}, fmt.Errorf("invalid DICOM metadata: empty transfer syntax UID")
@@ -497,6 +515,9 @@ func skipUndefinedValue(source readerAtSeeker, syntax transferSyntax) error {
 	return nil
 }
 
+// VRs whose payload can exceed 64 KB — large binary blobs and sequences.
+// These use the 4-byte length form (with a 2-byte reserved gap); every
+// other explicit-VR element uses the short 2-byte length. PS3.5 Table 7.1-1.
 func uses32BitLength(vr string) bool {
 	switch vr {
 	case "OB", "OD", "OF", "OL", "OV", "OW", "SQ", "UC", "UR", "UT", "UN":
