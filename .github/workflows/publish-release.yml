@@ -60,7 +60,14 @@ jobs:
         working-directory: frontend
 
       - name: Build and smoke-test release archive
+        if: runner.os != 'Windows'
         run: npm run release:smoke
+
+      - name: Build Windows release archive
+        if: runner.os == 'Windows'
+        run: |
+          npm run contracts:check
+          npm run wails:build
 
       - name: Stage release payload
         run: |
