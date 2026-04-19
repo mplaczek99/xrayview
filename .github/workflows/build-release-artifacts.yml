@@ -82,16 +82,19 @@ jobs:
             payload_dir="$RUNNER_TEMP/xrayview-v${version}-${{ matrix.archive_platform }}-x64"
             archive_name="$(basename "$payload_dir").${{ matrix.archive_extension }}"
           fi
+          archive_path="$RUNNER_TEMP/$archive_name"
 
           node ./desktop/scripts/stage-release-payload.mjs --output "$payload_dir"
 
           if [ "${{ runner.os }}" = "Linux" ]; then
-            tar -C "$RUNNER_TEMP" -czf "$RUNNER_TEMP/$archive_name" "$(basename "$payload_dir")"
+            tar -C "$RUNNER_TEMP" -czf "$archive_path" "$(basename "$payload_dir")"
           else
-            tar -a -C "$RUNNER_TEMP" -cf "$RUNNER_TEMP/$archive_name" "$(basename "$payload_dir")"
+            runner_temp_posix="$(cygpath -u "$RUNNER_TEMP")"
+            archive_path_posix="$(cygpath -u "$archive_path")"
+            tar -a -C "$runner_temp_posix" -cf "$archive_path_posix" "$(basename "$payload_dir")"
           fi
 
-          printf 'ARCHIVE_PATH=%s\n' "$RUNNER_TEMP/$archive_name" >> "$GITHUB_ENV"
+          printf 'ARCHIVE_PATH=%s\n' "$archive_path" >> "$GITHUB_ENV"
 
       - name: Upload desktop archive artifact
         uses: actions/upload-artifact@v4
