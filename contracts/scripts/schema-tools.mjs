@@ -234,6 +234,7 @@ export function renderGoValidationBindings(
 ) {
   const goPackage = schema["x-go-package"];
   invariant(typeof goPackage === "string" && goPackage.length > 0, "schema is missing x-go-package");
+  const normalizedSchemaSource = schemaSource.replaceAll("\r\n", "\n").replaceAll("\r", "\n");
 
   const definitionRefs = schemaEntries(schema)
     .map(([name]) => `\t${renderGoStringLiteral(name)}: ${renderGoStringLiteral(`#/$defs/${name}`)},`)
@@ -248,7 +249,7 @@ const BackendContractVersion = ${schema["x-contract-version"]}
 const BackendContractSchemaID = ${renderGoStringLiteral(schema.$id)}
 
 // BackendContractSchemaJSON is the authoritative contract schema for future Go validation.
-const BackendContractSchemaJSON = \`${schemaSource.trimEnd()}\`
+const BackendContractSchemaJSON = \`${normalizedSchemaSource.trimEnd()}\`
 
 var DefinitionRefs = map[string]string{
 ${definitionRefs}
