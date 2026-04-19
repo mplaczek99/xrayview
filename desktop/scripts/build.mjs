@@ -1,5 +1,6 @@
 import { mkdirSync } from "node:fs";
 import { spawnSync } from "node:child_process";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { applyFrontendRuntimeEnv } from "../../frontend/scripts/runtime-env.mjs";
@@ -8,15 +9,15 @@ const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, "..", "..");
 const desktopDir = path.join(repoRoot, "desktop");
 const buildBinDir = path.join(desktopDir, "build", "bin");
-const defaultGoPath = process.env.HOME
-  ? path.join(process.env.HOME, "go")
-  : undefined;
+const homeDir = process.env.HOME ?? process.env.USERPROFILE;
+const tempDir = process.env.RUNNER_TEMP ?? os.tmpdir();
+const defaultGoPath = homeDir ? path.join(homeDir, "go") : undefined;
 const buildEnv = {
   ...applyFrontendRuntimeEnv(process.env),
-  GOCACHE: process.env.GOCACHE ?? path.join("/tmp", "xrayview-go-build-cache"),
+  GOCACHE: process.env.GOCACHE ?? path.join(tempDir, "xrayview-go-build-cache"),
   GOMODCACHE:
     process.env.GOMODCACHE ?? (defaultGoPath ? path.join(defaultGoPath, "pkg", "mod") : undefined),
-  GOTMPDIR: process.env.GOTMPDIR ?? path.join("/tmp", "xrayview-go-tmp"),
+  GOTMPDIR: process.env.GOTMPDIR ?? path.join(tempDir, "xrayview-go-tmp"),
 };
 
 function run(command, args, options = {}) {
