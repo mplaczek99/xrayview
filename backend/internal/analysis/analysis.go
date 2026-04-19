@@ -1,5 +1,26 @@
 package analysis
 
+// Tooth-candidate detector. Not ML — a pipeline of cheap image ops tuned
+// against the fixtures in images/.
+//
+// AnalyzeGrayscalePixels is the whole show. It stretches contrast (2nd/98th
+// percentile, so metal restorations don't flatten the histogram), runs two
+// Gaussian blurs — σ=1.4 for sensor noise, σ=9.0 for the bone/gum background
+// — and folds their difference, a local gradient, and the normalized
+// intensity into a per-pixel "toothness" score. Then: threshold toothness
+// and intensity at per-region percentiles with hard floors (so dim panoramics
+// don't drop into noise), a 3×3 close+open to fuse and despeckle, BFS
+// connected components, and a score pass that picks one primary tooth.
+//
+// selectPrimaryCandidate prefers anything that clears the strict
+// area/aspect gates; if nothing does, it falls back to the best relaxed
+// candidate and the caller tags the output with a warning. The Warnings
+// slice is UI contract — the frontend renders those strings verbatim, so
+// don't rewrite them casually.
+//
+// measurementScale is optional. Pixel measurements always come back; mm
+// values ride along only when the caller has spacing.
+
 import (
 	"fmt"
 	"math"
@@ -69,6 +90,9 @@ func AnalyzeGrayscalePixels(
 
 	search := defaultSearchRegion(width, height)
 	normalized := normalizePixels(pixels)
+	// Band-pass pair. σ=1.4 suppresses sensor noise; σ=9.0 approximates the
+	// slowly-varying bone/gum background. Their difference is what survives
+	// into the toothness map.
 	smallBlur, largeBlur := dualGaussianBlurGray(normalized, width, height, 1.4, 9.0)
 	toothness := buildToothnessMap(normalized, smallBlur, largeBlur, width, height)
 
@@ -76,6 +100,12 @@ func AnalyzeGrayscalePixels(
 	bufpool.PutUint8(smallBlur)
 	bufpool.PutUint8(largeBlur)
 
+	// Percentiles + hard floors, both tuned against the fixtures in images/.
+	// The percentiles keep recall on thin-crown molars; the floors stop dim
+	// panoramics (where the 79th-percentile toothness is still nearly zero)
+	// from collapsing into an all-noise mask. Bump these carefully — raising
+	// either percentile loses recall, lowering either floor pulls in gum and
+	// bone shadow.
 	toothnessThreshold := maxUint8(percentileInRegion(toothness, width, search, 0.79), 118)
 	intensityThreshold := maxUint8(percentileInRegion(normalized, width, search, 0.69), 82)
 
@@ -138,6 +168,11 @@ func AnalyzeGrayscalePixels(
 	}, nil
 }
 
+// buildToothCandidate packages a single component as a
+// contracts.ToothCandidate. Pixel measurements are always present;
+// Calibrated is non-nil only when the caller supplied a measurementScale,
+// in which case the frontend shows mm labels. Without it, the UI falls
+// back to "px" off the Pixel bundle.
 func buildToothCandidate(
 	candidate componentCandidate,
 	measurementScale *contracts.MeasurementScale,
@@ -175,6 +210,12 @@ func buildToothCandidate(
 	}
 }
 
+// defaultSearchRegion trims the image down to where teeth actually live.
+// Panoramic dental X-rays park the crowns in the vertical middle and pad
+// the frame with patient-ID text, radiographer initials, and heavy jaw
+// shadow. Clipping the top ~20% and bottom ~22%, plus a one-eighth
+// horizontal margin on each side, keeps those regions out of the
+// connected-component pass.
 func defaultSearchRegion(width, height uint32) searchRegion {
 	xMargin := maxUint32(width/8, 8)
 	topMargin := maxUint32(uint32(math.Round(float64(height)*0.20)), 8)
@@ -188,6 +229,11 @@ func defaultSearchRegion(width, height uint32) searchRegion {
 	}
 }
 
+// normalizePixels is a 2nd/98th-percentile contrast stretch into 0..255.
+// Percentiles rather than min/max so a handful of saturated pixels (metal
+// restorations, film-edge glare) don't flatten the rest of the histogram.
+// If the percentile window collapses, returns a straight copy — the
+// thresholding stage still has something to work against.
 func normalizePixels(pixels []uint8) []uint8 {
 	var histogram [256]uint32
 	for _, value := range pixels {
@@ -219,6 +265,11 @@ func normalizePixels(pixels []uint8) []uint8 {
 	return normalized
 }
 
+// buildToothnessMap produces the per-pixel "toothness" score that drives
+// one half of the mask threshold. Weighted mix of normalized intensity
+// (×5), the band-pass local contrast between the two blurs (×4), and a
+// cheap local gradient (×2), averaged back down into a uint8 so the
+// thresholding below can share a histogram with the raw intensity path.
 func buildToothnessMap(
 	normalized []uint8,
 	smallBlur []uint8,
@@ -574,6 +625,13 @@ func selectDetectedCandidates(candidates []componentCandidate) []componentCandid
 	return detectedCandidates
 }
 
+// selectPrimaryCandidate picks the tooth we surface as "the" primary.
+// Strict first — any component that passed isStrictToothCandidate's
+// area/aspect/size gates — and if nothing qualifies we fall back to the
+// best-scoring relaxed candidate. The fallback is deliberate: detection
+// never returns "no tooth found" while any plausible component exists,
+// but the caller (AnalyzeGrayscalePixels) appends a relaxed-candidate
+// warning to the output so the UI can say so. That warning is contract.
 func selectPrimaryCandidate(candidates []componentCandidate) *componentCandidate {
 	var bestStrict *componentCandidate
 	for index := range candidates {
