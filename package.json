@@ -1,7 +1,7 @@
 {
   "name": "xrayview",
   "private": true,
-  "version": "0.2.2",
+  "version": "0.3.0",
   "scripts": {
     "contracts:generate": "node ./contracts/scripts/generate-contract-bindings.mjs",
     "contracts:check": "node ./contracts/scripts/generate-contract-bindings.mjs --check",

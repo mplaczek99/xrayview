@@ -1,0 +1,4 @@
+#!/bin/sh
+HERE="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+export PATH="$HERE/usr/bin${PATH:+:$PATH}"
+exec "$HERE/usr/bin/xrayview" "$@"

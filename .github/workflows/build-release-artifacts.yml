@@ -22,15 +22,11 @@ jobs:
             artifact_name: xrayview-linux-desktop-archive
             archive_platform: linux
             archive_extension: tar.gz
-            shell_binary: xrayview
-            sidecar_binary: xrayview-backend
           - os: windows-latest
             label: Windows
             artifact_name: xrayview-windows-desktop-archive
             archive_platform: windows
             archive_extension: zip
-            shell_binary: xrayview.exe
-            sidecar_binary: xrayview-backend.exe
 
     defaults:
       run:
@@ -68,21 +64,26 @@ jobs:
       - name: Build and smoke-test desktop release
         run: npm run release:smoke
 
-      - name: Archive desktop binaries
+      - name: Archive desktop payload
         run: |
           version="$(grep -oP '"version":\s*"\K[^"]+' package.json)"
           if [ "${{ runner.os }}" = "Linux" ]; then
             arch="$(uname -m)"
-            archive_name="xrayview-v${version}-${{ matrix.archive_platform }}-${arch}.${{ matrix.archive_extension }}"
-            tar -C desktop/build/bin -czf "$RUNNER_TEMP/$archive_name" \
-              "${{ matrix.shell_binary }}" \
-              "${{ matrix.sidecar_binary }}"
+            payload_dir="$RUNNER_TEMP/xrayview-v${version}-${{ matrix.archive_platform }}-${arch}"
+            archive_name="$(basename "$payload_dir").${{ matrix.archive_extension }}"
           else
-            archive_name="xrayview-v${version}-${{ matrix.archive_platform }}-x64.${{ matrix.archive_extension }}"
-            tar -a -C desktop/build/bin -cf "$RUNNER_TEMP/$archive_name" \
-              "${{ matrix.shell_binary }}" \
-              "${{ matrix.sidecar_binary }}"
+            payload_dir="$RUNNER_TEMP/xrayview-v${version}-${{ matrix.archive_platform }}-x64"
+            archive_name="$(basename "$payload_dir").${{ matrix.archive_extension }}"
           fi
+
+          node ./desktop/scripts/stage-release-payload.mjs --output "$payload_dir"
+
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            tar -C "$RUNNER_TEMP" -czf "$RUNNER_TEMP/$archive_name" "$(basename "$payload_dir")"
+          else
+            tar -a -C "$RUNNER_TEMP" -cf "$RUNNER_TEMP/$archive_name" "$(basename "$payload_dir")"
+          fi
+
           printf 'ARCHIVE_PATH=%s\n' "$RUNNER_TEMP/$archive_name" >> "$GITHUB_ENV"
 
       - name: Upload desktop archive artifact

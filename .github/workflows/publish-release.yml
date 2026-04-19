@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   build-release-package:
-    name: Build release archive (${{ matrix.label }})
+    name: Build release asset (${{ matrix.label }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -22,17 +22,9 @@ jobs:
           - os: ubuntu-latest
             label: Linux
             artifact_name: xrayview-linux-release-asset
-            archive_platform: linux
-            archive_extension: tar.gz
-            shell_binary: xrayview
-            sidecar_binary: xrayview-backend
           - os: windows-latest
             label: Windows
             artifact_name: xrayview-windows-release-asset
-            archive_platform: windows
-            archive_extension: zip
-            shell_binary: xrayview.exe
-            sidecar_binary: xrayview-backend.exe
 
     defaults:
       run:
@@ -70,22 +62,98 @@ jobs:
       - name: Build and smoke-test release archive
         run: npm run release:smoke
 
-      - name: Archive release binaries
+      - name: Stage release payload
         run: |
           version="${GITHUB_REF_NAME#v}"
           if [ "${{ runner.os }}" = "Linux" ]; then
             arch="$(uname -m)"
-            archive_name="xrayview-v${version}-${{ matrix.archive_platform }}-${arch}.${{ matrix.archive_extension }}"
-            tar -C desktop/build/bin -czf "$RUNNER_TEMP/$archive_name" \
-              "${{ matrix.shell_binary }}" \
-              "${{ matrix.sidecar_binary }}"
+            stage_dir="$RUNNER_TEMP/xrayview-v${version}-linux-${arch}"
           else
-            archive_name="xrayview-v${version}-${{ matrix.archive_platform }}-x64.${{ matrix.archive_extension }}"
-            tar -a -C desktop/build/bin -cf "$RUNNER_TEMP/$archive_name" \
-              "${{ matrix.shell_binary }}" \
-              "${{ matrix.sidecar_binary }}"
+            stage_dir="$RUNNER_TEMP/xrayview-v${version}-windows-x64"
           fi
-          printf 'ASSET_PATH=%s\n' "$RUNNER_TEMP/$archive_name" >> "$GITHUB_ENV"
+
+          node ./desktop/scripts/stage-release-payload.mjs --output "$stage_dir"
+          printf 'STAGE_DIR=%s\n' "$stage_dir" >> "$GITHUB_ENV"
+
+      - name: Prepare Linux AppDir
+        if: runner.os == 'Linux'
+        run: |
+          appdir="$RUNNER_TEMP/xrayview.AppDir"
+          mkdir -p "$appdir/usr"
+          cp -R "$STAGE_DIR/." "$appdir/usr/"
+          install -Dm755 desktop/packaging/linux/AppRun "$appdir/AppRun"
+          install -Dm644 desktop/packaging/linux/xrayview.desktop "$appdir/xrayview.desktop"
+          install -Dm644 frontend/app-icon.png "$appdir/xrayview.png"
+          chmod +x "$appdir/usr/bin/xrayview" "$appdir/usr/bin/xrayview-backend"
+          printf 'APPDIR=%s\n' "$appdir" >> "$GITHUB_ENV"
+
+      - name: Install AppImage tooling
+        if: runner.os == 'Linux'
+        run: |
+          tool_dir="$RUNNER_TEMP/linuxdeploy"
+          mkdir -p "$tool_dir"
+          curl -fsSL -o "$tool_dir/linuxdeploy-x86_64.AppImage" \
+            https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          curl -fsSL -o "$tool_dir/linuxdeploy-plugin-gtk.sh" \
+            https://raw.githubusercontent.com/tauri-apps/linuxdeploy-plugin-gtk/master/linuxdeploy-plugin-gtk.sh
+          chmod +x "$tool_dir/linuxdeploy-x86_64.AppImage" "$tool_dir/linuxdeploy-plugin-gtk.sh"
+          printf 'LINUXDEPLOY_DIR=%s\n' "$tool_dir" >> "$GITHUB_ENV"
+
+      - name: Build Linux AppImage
+        if: runner.os == 'Linux'
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          arch="$(uname -m)"
+          asset_name="xrayview-v${version}-linux-${arch}.AppImage"
+          (
+            cd "$RUNNER_TEMP"
+            export LDAI_OUTPUT="$asset_name"
+            "$LINUXDEPLOY_DIR/linuxdeploy-x86_64.AppImage" --appimage-extract-and-run \
+              --appdir "$APPDIR" \
+              --desktop-file "$APPDIR/xrayview.desktop" \
+              --icon-file "$APPDIR/xrayview.png" \
+              --executable "$APPDIR/usr/bin/xrayview" \
+              --executable "$APPDIR/usr/bin/xrayview-backend" \
+              --plugin gtk \
+              --output appimage
+          )
+          printf 'ASSET_PATH=%s\n' "$RUNNER_TEMP/$asset_name" >> "$GITHUB_ENV"
+
+      - name: Install WiX Toolset
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if (-not (Get-Command candle.exe -ErrorAction SilentlyContinue)) {
+            choco install wixtoolset --no-progress -y
+          }
+
+          $wixDir = Get-ChildItem "${env:ProgramFiles(x86)}" -Directory -Filter "WiX Toolset v*" |
+            Sort-Object Name -Descending |
+            Select-Object -First 1
+
+          if (-not $wixDir) {
+            throw "WiX Toolset installation directory was not found."
+          }
+
+          Add-Content -Path $env:GITHUB_PATH -Value (Join-Path $wixDir.FullName "bin")
+
+      - name: Build Windows MSI
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $version = $env:GITHUB_REF_NAME.Substring(1)
+          $wixBuildDir = Join-Path $env:RUNNER_TEMP "wix-build"
+          New-Item -ItemType Directory -Force -Path $wixBuildDir | Out-Null
+          Copy-Item "desktop/packaging/windows/Product.wxs" (Join-Path $wixBuildDir "Product.wxs")
+
+          Push-Location $wixBuildDir
+          & heat.exe dir $env:STAGE_DIR -cg AppFiles -dr INSTALLDIR -ag -scom -sreg -srd -var var.StageDir -out AppFiles.wxs
+          & candle.exe -nologo "-dStageDir=$env:STAGE_DIR" "-dProductVersion=$version" -arch x64 Product.wxs AppFiles.wxs
+          $msiPath = Join-Path $env:RUNNER_TEMP "xrayview-v$version-windows-x64.msi"
+          & light.exe -nologo -out $msiPath Product.wixobj AppFiles.wixobj
+          Pop-Location
+
+          Add-Content -Path $env:GITHUB_ENV -Value "ASSET_PATH=$msiPath"
 
       - name: Upload release asset artifact
         uses: actions/upload-artifact@v4

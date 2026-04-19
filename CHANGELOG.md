@@ -5,6 +5,75 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-04-18
+
+### Added
+
+- Go backend service (`backend/`) replacing the Rust crate, organized into `internal/` packages: `analysis`, `annotations`, `app`, `bufpool`, `cache`, `config`, `contracts`, `dicommeta`, `export`, `httpapi`, `imaging`, `jobs`, `logging`, `persistence`, `processing`, `render`, `studies`
+- Dedicated HTTP server entrypoint (`backend/cmd/xrayviewd`) and headless CLI (`backend/cmd/xrayview-cli`) sharing the `internal/` library
+- Wails-based desktop shell (`desktop/`) replacing the Tauri shell, with sidecar lifecycle management and local `/preview` artifact serving
+- Shared `contracts/` Go module with `backend-contract-v1.schema.json` as the language-neutral source of truth, generating both TypeScript (`frontend/src/lib/generated/contracts.ts`) and Go (`contracts/contractv1/bindings.go`) bindings via `npm run contracts:generate`
+- Loopback HTTP transport (`127.0.0.1:38181`) between desktop shell and backend, replacing the in-process Tauri command bridge
+- Server-Sent Events stream for job progress updates, replacing HTTP long-polling
+- Job request batching and deduplication at the frontend command layer
+- Exponential backoff for any remaining job-status polling fallback
+- Fixed-size worker pool for job execution, replacing per-job goroutines
+- Context-aware DICOM decode cancellation honoring job cancel requests mid-decode
+- Configurable HTTP server timeouts on the backend
+- Explicit HTTP transport with connection pooling on the desktop sidecar client
+- TTL-gated `os.Stat` calls on cache hits to reduce filesystem syscalls
+- HTTP cache-control headers for preview artifacts
+- BMP and TIFF study import support alongside DICOM
+- Frontend runtime selector (`runtime.ts`, `runtimeConfig.ts`) for `mock` vs `desktop` modes, with `XRAYVIEW_BACKEND_RUNTIME` / `XRAYVIEW_BACKEND_URL` overrides
+- `desktop/` benchmark suite (`app_bench_test.go`) and Go backend benchmark fixtures (`jobs/bench_test.go`)
+- Frontend validation scripts under `frontend/scripts/validate-*.mjs` covering selectors, batched updates, debounce controls, GPU transforms, exponential backoff, SSE polling reduction, and annotation memoization
+- Release launch smoke test (`frontend/scripts/release-launch-smoke.mjs`) for Wails packaged builds
+- Parallel build orchestration (`frontend/scripts/parallel-build.mjs`) running `tsc` and Vite concurrently
+- TypeScript incremental compilation (`tsconfig.json` with `incremental: true`)
+- Vite vendor/app chunk splitting and lazy-loaded `ProcessingTab`
+- Pre-recorded analyze and process snapshot fixtures under `images/sample-dental-radiograph/` for browser-only mock mode
+- Recent-studies catalog seeded with `recent-study-catalog.json`
+- Playwright CLI tooling configuration (`frontend/.playwright/cli.config.json`)
+
+### Changed
+
+- Migrated the entire backend from Rust to Go; backend, desktop, and contracts are now three independent Go modules wired via `replace` directives (no `go.work`)
+- Migrated the desktop shell from Tauri to Wails v2, with native dialogs and window lifecycle owned by `desktop/app.go`
+- Replaced in-process Tauri command invocation with HTTP command dispatch over a loopback-only listener
+- Reworked `frontend/src/lib/backend.ts` around the HTTP transport and generated contract types
+- Restructured `frontend/src/app/store/workbenchStore.ts` to consume SSE job updates and batched state writes
+- Memoized `AnnotationLayer` rendering and selector reads to reduce `ViewTab` re-renders
+- Debounced processing-control updates to coalesce rapid slider changes into a single job dispatch
+- Routed CSS image positioning through GPU-accelerated transforms instead of layout-affecting properties
+- Sorted detection results once at the source instead of re-sorting per consumer
+- Pre-allocated maps in hot paths (analysis aggregation) to avoid growth churn
+- Tightened cache key derivation so equivalent processing requests collapse into a single cached artifact
+- Updated `README.md` to document the Wails/Go architecture, repository layout, and setup steps
+- Reformatted the Go backend with `gofmt`
+- Updated GitHub Actions workflows (`build-release-artifacts.yml`, `publish-release.yml`) for the Go/Wails toolchain
+- Fixed CI Go build cache key to cover both `backend/` and `desktop/` modules
+- Documentation pass added human-style comments across `analysis`, `jobs`, `dicommeta`, `export`, `service`, and HTTP transport packages
+
+### Performance
+
+Performed MANY optimizations, including...
+- Eliminated string/bytes copies in the HTTP command request/response path on the desktop sidecar
+- Reused buffer pool (`backend/internal/bufpool`) for hot allocation sites
+- TTL-gated cache stat calls to skip redundant `os.Stat` on warm cache hits
+- Connection pooling via explicit `http.Transport` on the sidecar client
+- Worker-pool job execution avoiding unbounded goroutine spawn under burst load
+- Frontend bundle split into vendor and app chunks with `ProcessingTab` lazy-loaded on demand
+- TypeScript incremental builds and parallelized `tsc` + Vite to shorten frontend build wall time
+
+### Removed
+
+- Rust backend crate (`backend/src/**`, `backend/Cargo.toml`, `backend/Cargo.lock`, `backend/tests/cli.rs`)
+- Tauri desktop shell (`frontend/src-tauri/`, including `Cargo.toml`, `Cargo.lock`, `tauri.conf.json`, capabilities, icons, `src/main.rs`, `build.rs`)
+- Tauri build/dev orchestration scripts (`frontend/scripts/tauri-build.mjs`, `frontend/scripts/tauri-dev.mjs`, `frontend/scripts/prepare-tauri-target.mjs`)
+- Go workspace file (no `go.work`); cross-module deps now use `replace` directives
+- HTTP long-polling for job state (superseded by SSE)
+- `BUGFIX_ROADMAP.md`, `OPTIMIZATION_PLAN.md`, and the commenting plan documents (work merged into the codebase)
+
 ## [0.2.2] - 2026-04-04
 
 ### Added

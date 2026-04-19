@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=XRayView
+Comment=DICOM X-ray visualization and analysis workstation
+Exec=xrayview
+Icon=xrayview
+Terminal=false
+Categories=Graphics;Science;
