@@ -3,15 +3,14 @@ package main
 import (
 	"context"
 	"log"
-	"os"
 	"os/signal"
-	"syscall"
 
 	"xrayview/backend/internal/app"
+	"xrayview/backend/internal/shutdown"
 )
 
 func main() {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(context.Background(), shutdown.Signals()...)
 	defer stop()
 
 	application, err := app.NewFromEnvironment()

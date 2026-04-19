@@ -20,7 +20,6 @@ import (
 	"os/signal"
 	"strconv"
 	"strings"
-	"syscall"
 
 	"xrayview/backend/internal/app"
 	"xrayview/backend/internal/config"
@@ -30,6 +29,7 @@ import (
 	"xrayview/backend/internal/imaging"
 	"xrayview/backend/internal/processing"
 	"xrayview/backend/internal/render"
+	"xrayview/backend/internal/shutdown"
 )
 
 func main() {
@@ -89,7 +89,7 @@ func runWithIO(args []string, stdout, stderr io.Writer) error {
 }
 
 func serve() error {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(context.Background(), shutdown.Signals()...)
 	defer stop()
 
 	application, err := app.NewFromEnvironment()
