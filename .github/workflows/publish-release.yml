@@ -103,7 +103,12 @@ jobs:
             https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
           curl -fsSL -o "$tool_dir/linuxdeploy-plugin-gtk.sh" \
             https://raw.githubusercontent.com/tauri-apps/linuxdeploy-plugin-gtk/master/linuxdeploy-plugin-gtk.sh
-          chmod +x "$tool_dir/linuxdeploy-x86_64.AppImage" "$tool_dir/linuxdeploy-plugin-gtk.sh"
+          curl -fsSL -o "$tool_dir/appimagetool-x86_64.AppImage" \
+            https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x \
+            "$tool_dir/linuxdeploy-x86_64.AppImage" \
+            "$tool_dir/linuxdeploy-plugin-gtk.sh" \
+            "$tool_dir/appimagetool-x86_64.AppImage"
           printf 'LINUXDEPLOY_DIR=%s\n' "$tool_dir" >> "$GITHUB_ENV"
 
       - name: Build Linux AppImage
@@ -112,18 +117,21 @@ jobs:
           version="${GITHUB_REF_NAME#v}"
           arch="$(uname -m)"
           asset_name="xrayview-v${version}-linux-${arch}.AppImage"
+          backend_bin="$RUNNER_TEMP/xrayview-backend"
+          mv "$APPDIR/usr/bin/xrayview-backend" "$backend_bin"
           (
             cd "$RUNNER_TEMP"
-            export LDAI_OUTPUT="$asset_name"
             "$LINUXDEPLOY_DIR/linuxdeploy-x86_64.AppImage" --appimage-extract-and-run \
               --appdir "$APPDIR" \
               --desktop-file "$APPDIR/xrayview.desktop" \
               --icon-file "$APPDIR/xrayview.png" \
               --executable "$APPDIR/usr/bin/xrayview" \
-              --executable "$APPDIR/usr/bin/xrayview-backend" \
-              --plugin gtk \
-              --output appimage
+              --plugin gtk
           )
+          install -Dm755 "$backend_bin" "$APPDIR/usr/bin/xrayview-backend"
+          ARCH="$arch" \
+            "$LINUXDEPLOY_DIR/appimagetool-x86_64.AppImage" --appimage-extract-and-run \
+            "$APPDIR" "$RUNNER_TEMP/$asset_name"
           printf 'ASSET_PATH=%s\n' "$RUNNER_TEMP/$asset_name" >> "$GITHUB_ENV"
 
       - name: Install WiX Toolset
