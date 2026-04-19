@@ -38,14 +38,49 @@ function run(command, args, options = {}) {
   }
 }
 
+function hasPkgConfigPackage(name) {
+  const probe = spawnSync("pkg-config", ["--exists", name], {
+    cwd: repoRoot,
+    shell: false,
+  });
+  return (probe.status ?? 1) === 0;
+}
+
+function ensureLinuxDesktopPrereqs() {
+  if (process.platform !== "linux") {
+    return;
+  }
+
+  const hasGtk3 = hasPkgConfigPackage("gtk+-3.0");
+  const hasWebkit41 = hasPkgConfigPackage("webkit2gtk-4.1");
+  const hasWebkit40 = hasPkgConfigPackage("webkit2gtk-4.0");
+
+  if (hasGtk3 && (hasWebkit41 || hasWebkit40)) {
+    return;
+  }
+
+  const missingPackages = [];
+  if (!hasGtk3) {
+    missingPackages.push("gtk+-3.0");
+  }
+  if (!hasWebkit41 && !hasWebkit40) {
+    missingPackages.push("webkit2gtk-4.1 or webkit2gtk-4.0");
+  }
+
+  process.stderr.write(
+    [
+      "Missing Linux desktop build prerequisites.",
+      `Install ${missingPackages.join(" and ")} before running npm run wails:build.`,
+      "On Debian/Ubuntu this is typically provided by libgtk-3-dev plus either libwebkit2gtk-4.1-dev or libwebkit2gtk-4.0-dev.",
+    ].join("\n") + "\n",
+  );
+  process.exit(1);
+}
+
 function detectWailsTags() {
   const tags = ["desktop", "production"];
   if (process.platform === "linux") {
-    const probe = spawnSync("pkg-config", ["--exists", "webkit2gtk-4.1"], {
-      cwd: repoRoot,
-      shell: false,
-    });
-    if ((probe.status ?? 1) === 0) {
+    if (hasPkgConfigPackage("webkit2gtk-4.1")) {
       tags.push("webkit2_41");
     }
   }
@@ -73,6 +108,7 @@ run("go", [
   path.join(buildBinDir, binaryName("xrayview-backend")),
   "./cmd/xrayviewd",
 ]);
+ensureLinuxDesktopPrereqs();
 run("go", [
   "-C",
   desktopDir,

@@ -49,8 +49,9 @@ xrayview/
 ### Prerequisites
 
 - [Go](https://go.dev/) 1.22+
-- [Node.js](https://nodejs.org/) 20+
-- [Wails](https://wails.io/) v2 (for desktop builds)
+- [Node.js](https://nodejs.org/) 18.18+ or 20+
+- Linux desktop builds require GTK/WebKit development packages
+  On Debian/Ubuntu: `libgtk-3-dev` plus either `libwebkit2gtk-4.1-dev` or `libwebkit2gtk-4.0-dev`
 
 ### Install & verify
 
