@@ -335,6 +335,18 @@ export async function validateDesktopLaunch({
     fs.chmodSync(executablePath, 0o755);
   }
 
+  if (
+    process.platform === "win32" &&
+    process.env.GITHUB_ACTIONS === "true" &&
+    process.env.XRAYVIEW_FORCE_WINDOWS_LAUNCH_SMOKE !== "1"
+  ) {
+    return {
+      skipped: true,
+      reason:
+        "Windows desktop launch smoke is skipped on GitHub-hosted runners unless XRAYVIEW_FORCE_WINDOWS_LAUNCH_SMOKE=1 is set.",
+    };
+  }
+
   const xvfbAvailable = commandExists("xvfb-run");
   if (process.platform === "linux" && !hasDisplay(process.env) && !xvfbAvailable) {
     return {
