@@ -18,6 +18,10 @@ type WindowLevel struct {
 	Width  float32 `json:"width"`
 }
 
+// SourceImage is the decode-side type: float32 modality values
+// (post-rescale, pre-window) as produced by dicommeta. One sample per
+// pixel — color source images aren't modeled here. This is the input
+// the render pipeline consumes.
 type SourceImage struct {
 	Width         uint32       `json:"width"`
 	Height        uint32       `json:"height"`
@@ -29,6 +33,9 @@ type SourceImage struct {
 	Invert        bool         `json:"invert"`
 }
 
+// PreviewImage is the display-side type: uint8 bytes ready for PNG/JPEG
+// encoding or secondary-capture export. Emitted by render and processing;
+// Format tells grayscale (1 byte/px) apart from RGBA (4).
 type PreviewImage struct {
 	Width  uint32      `json:"width"`
 	Height uint32      `json:"height"`

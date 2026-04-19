@@ -6,6 +6,11 @@ import (
 	"xrayview/backend/internal/contracts"
 )
 
+// SuggestedAnnotations turns a tooth analysis into the line + rectangle
+// annotations the UI renders. IDs embed the 1-based tooth index
+// (auto-tooth-N-width / -height / -bounding-box) and stay stable across
+// re-analyses so the frontend can diff-patch existing annotations
+// instead of wiping and recreating them on every run.
 func SuggestedAnnotations(analysis *contracts.ToothAnalysis) contracts.AnnotationBundle {
 	if analysis == nil || len(analysis.Teeth) == 0 {
 		return emptyAnnotationBundle()

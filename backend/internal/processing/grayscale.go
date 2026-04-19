@@ -156,6 +156,12 @@ func applyLookupInPlace(pixels []uint8, lookup *[256]uint8) {
 	}
 }
 
+// equalizeHistogramInPlace is a textbook histogram-equalization CDF remap:
+// new = round(((cdf(v) - cdfMin) * 255 + denom/2) / denom), where denom
+// is total - cdfMin. The cdfMin baseline anchors to the first non-empty
+// bin so a large solid-black border doesn't squash the useful part of
+// the output range. No-ops if every pixel falls in the first non-empty
+// bin (the denom would be zero).
 func equalizeHistogramInPlace(pixels []uint8) {
 	if len(pixels) == 0 {
 		return

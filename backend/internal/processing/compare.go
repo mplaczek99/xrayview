@@ -25,6 +25,9 @@ func CombineComparison(
 	if left.Width != right.Width || left.Height != right.Height {
 		return imaging.PreviewImage{}, fmt.Errorf("compare preview requires matching image dimensions")
 	}
+	// Guard so combinedWidth = left.Width * 2 below doesn't wrap past
+	// uint32. Rare in practice, but a "cleanup" pass might be tempted
+	// to strip this — don't.
 	if left.Width > ^uint32(0)/2 {
 		return imaging.PreviewImage{}, fmt.Errorf("compare preview width overflow")
 	}

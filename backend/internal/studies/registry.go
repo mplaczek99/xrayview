@@ -70,6 +70,11 @@ func (registry *Registry) Count() int {
 	return len(registry.studies)
 }
 
+// evictOldestLocked is misnamed — the registry doesn't track recency, so
+// this just walks the map and drops the first non-kept entry it hits.
+// Fine for the 32-slot cap we enforce (Register calls it right after
+// inserting a new record, so at most one entry goes), but don't rewire
+// callers on the assumption this is LRU.
 func (registry *Registry) evictOldestLocked(keepStudyID string) {
 	if len(registry.studies) <= maxRegisteredStudies {
 		return

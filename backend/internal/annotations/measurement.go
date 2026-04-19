@@ -36,6 +36,9 @@ func MeasureLine(
 	return measurement
 }
 
+// roundMeasurement snaps to one decimal place for label stability.
+// Changing the granularity here shifts every measurement label the UI
+// shows — users notice, and saved annotations drift on re-open.
 func roundMeasurement(value float64) float64 {
 	return math.Round(value*10.0) / 10.0
 }

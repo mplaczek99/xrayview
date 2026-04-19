@@ -1,5 +1,11 @@
 package bufpool
 
+// sync.Pool wrappers for the hot pixel-buffer paths (render, process,
+// analysis). GetUint8/Uint16/Float32 always return a slice of exactly
+// length n — if the pool hands back a buffer with cap >= n we reslice,
+// otherwise we allocate. Put* hands capacity back; don't touch the
+// slice after calling it.
+
 import "sync"
 
 var uint8Pool = sync.Pool{}

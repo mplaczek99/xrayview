@@ -54,6 +54,12 @@ func EncodePreviewPNG(writer io.Writer, preview imaging.PreviewImage) error {
 	return nil
 }
 
+// previewImage wraps preview.Pixels in a std-lib image.Image for the
+// encoders. The returned image *aliases* the pixel slice — no copy —
+// so on hot paths where preview.Pixels came from bufpool, the buffer
+// must not be returned to the pool until after the encoder is done
+// reading. Encode* callers here are synchronous, so "return the buffer
+// once the encoder call returns" is enough.
 func previewImage(preview imaging.PreviewImage) (image.Image, error) {
 	rect := image.Rect(0, 0, int(preview.Width), int(preview.Height))
 

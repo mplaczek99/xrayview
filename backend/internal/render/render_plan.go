@@ -21,6 +21,11 @@ func RenderGrayscalePixels(source imaging.SourceImage, plan RenderPlan) []uint8 
 	pixels := bufpool.GetUint8(len(source.Pixels))
 	window := ResolveWindow(source, plan.Window)
 
+	// LUT fast path. When the source's modality values fit a uint16 index
+	// we precompute a 65k-entry table once and turn each per-pixel
+	// window/invert/map into a single cache-friendly read. The else branch
+	// below handles sources whose range doesn't fit (signed CT, rescaled
+	// PET) with the old branchy per-pixel path.
 	if source.MinValue >= 0 && source.MaxValue <= 65535 {
 		lut := buildRenderLUT(source, window)
 		for index, value := range source.Pixels {

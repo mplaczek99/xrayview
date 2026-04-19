@@ -190,6 +190,10 @@ func executeLegacyCLI(options legacyCLIOptions, stdout io.Writer) error {
 	return processLegacyStudy(inputPath, outputPath, previewOutput, options, stdout)
 }
 
+// validateLegacyModeSelection enforces "pick at most one backend mode":
+// describe-presets, describe-study, and analyze-tooth are mutually
+// exclusive on a single invocation. Zero is fine — we fall through to
+// the processing path.
 func validateLegacyModeSelection(options legacyCLIOptions) error {
 	modeCount := 0
 	for _, enabled := range []bool{
@@ -368,6 +372,10 @@ func defaultLegacyOutputPath(inputPath string) string {
 	return filepath.Join(filepath.Dir(inputPath), stem+"_processed.dcm")
 }
 
+// isPlainPreviewRequest is true when the caller asked for a preview and
+// didn't touch anything that would pull the call into the processing
+// pipeline. That lets us short-circuit to a straight render and skip
+// the resolve/process/export dance.
 func isPlainPreviewRequest(options legacyCLIOptions) bool {
 	return strings.TrimSpace(options.previewOutput) != "" &&
 		strings.TrimSpace(options.output) == "" &&

@@ -1,5 +1,15 @@
 package main
 
+// xrayview-cli has two entry shapes, dispatched on args[0]:
+//
+//   - subcommand form — "xrayview-cli serve", "print-config",
+//     "render-preview", etc. Handled by the switch in runWithIO;
+//     adding a new one means adding a case there.
+//   - legacy workflow-flags form — "xrayview-cli --input … --preset …".
+//     A "-"-prefixed first arg routes everything to runLegacyCLI in
+//     legacy_cli.go, where the old flag-based interface still lives.
+//     Adding a new workflow flag means editing parseLegacyCLIArgs.
+
 import (
 	"context"
 	"encoding/json"

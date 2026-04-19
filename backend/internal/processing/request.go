@@ -14,6 +14,11 @@ type ResolvedProcessStudy struct {
 	Compare  bool
 }
 
+// ResolveProcessStudyCommand merges the caller's ProcessStudyCommand with
+// the preset it names. Scalar fields (Brightness, Contrast, Palette) take
+// the command value when the caller set one, otherwise the preset's.
+// Boolean toggles (Invert, Equalize) are ORed — either source can turn
+// them on, and neither can turn them off once the other enabled them.
 func ResolveProcessStudyCommand(
 	command contracts.ProcessStudyCommand,
 ) (ResolvedProcessStudy, error) {

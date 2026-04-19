@@ -14,6 +14,10 @@ import (
 	"xrayview/backend/internal/contracts"
 )
 
+// Env-var keys. The Legacy* aliases are the pre-rename
+// XRAYVIEW_GO_BACKEND_* names — still honored so existing installs
+// and scripts don't break silently. lookupFirst reads the canonical
+// key first, then falls back to the legacy one.
 const (
 	HostEnvKey                  = "XRAYVIEW_BACKEND_HOST"
 	LegacyHostEnvKey            = "XRAYVIEW_GO_BACKEND_HOST"

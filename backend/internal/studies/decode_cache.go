@@ -38,9 +38,12 @@ type DecodeCache struct {
 	maxBytes   uint64
 	totalBytes uint64
 	entries    map[string]*decodeCacheEntry
-	inflight   map[string]*decodeInflight
-	head       *decodeCacheEntry
-	tail       *decodeCacheEntry
+	// inflight collapses duplicate decodes. If a second GetOrDecode lands
+	// on the same path while the first is still running, it finds the
+	// entry here and waits on done instead of kicking off a second decode.
+	inflight map[string]*decodeInflight
+	head     *decodeCacheEntry
+	tail     *decodeCacheEntry
 }
 
 func NewDecodeCache(capacity int) *DecodeCache {

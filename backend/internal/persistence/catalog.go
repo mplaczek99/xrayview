@@ -64,6 +64,11 @@ func (catalog *Catalog) Ensure() error {
 	return os.MkdirAll(catalog.rootDir, 0o755)
 }
 
+// Load reads the persisted study catalog. A missing file is the expected
+// first-run state — we swallow the error and return an empty catalog so
+// nothing upstream has to special-case it. Corrupt JSON is different:
+// we rename the bad file to *.corrupt first, then surface the error.
+// That keeps the next save() from silently overwriting the evidence.
 func (catalog *Catalog) Load() (StudyCatalog, error) {
 	contents, err := os.ReadFile(catalog.path)
 	if err != nil {
