@@ -73,7 +73,7 @@ jobs:
 
       - name: Archive desktop payload
         run: |
-          version="$(grep -oP '"version":\s*"\K[^"]+' package.json)"
+          version="$(node -p "require('./package.json').version")"
           if [ "${{ runner.os }}" = "Linux" ]; then
             arch="$(uname -m)"
             payload_dir="$RUNNER_TEMP/xrayview-v${version}-${{ matrix.archive_platform }}-${arch}"
