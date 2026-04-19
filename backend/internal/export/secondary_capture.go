@@ -1,5 +1,18 @@
 package export
 
+// Writes a DICOM Secondary Capture Image SOP instance (Class
+// 1.2.840.10008.5.1.4.1.1.7) carrying the processed preview as its Pixel
+// Data. Output is always explicit VR little endian with the Part 10 layout:
+//
+//	128-byte preamble | "DICM" | file meta group (prefixed by its group-length
+//	element) | dataset in ascending tag order
+//
+// Patient/study/series tags extracted by dicommeta on the decode side are
+// round-tripped through sourceMeta.PreservedElements so the derived file
+// stays linked to its source. Pixel data is written in native form — Gray8
+// into a MONOCHROME2 element, RGBA8 packed down to interleaved RGB — no
+// compression, no multi-frame encapsulation.
+
 import (
 	"bytes"
 	"crypto/rand"
@@ -15,8 +28,11 @@ import (
 )
 
 const (
-	secondaryCaptureSOPClassUID  = "1.2.840.10008.5.1.4.1.1.7"
-	explicitVRLittleEndianUID    = "1.2.840.10008.1.2.1"
+	secondaryCaptureSOPClassUID = "1.2.840.10008.5.1.4.1.1.7"
+	explicitVRLittleEndianUID   = "1.2.840.10008.1.2.1"
+	// Writer identity — stamped into (0002,0012) and (0002,0013) on every
+	// emitted file. These identify the xrayview build that produced the
+	// output, not the study; treat changes as release-level metadata.
 	implementationClassUID       = "2.25.302043790172249692526321623266752743501"
 	implementationVersionName    = "XRAYVIEW_GO_1_0"
 	defaultProcessedSeriesDesc   = "XRayView Processed"
@@ -98,24 +114,24 @@ func encodeSecondaryCapture(
 	timeValue := now.Format("150405")
 
 	datasetElements := make([]element, 0, 32)
-	insertElement(&datasetElements, stringElement(0x00080016, "UI", secondaryCaptureSOPClassUID))
-	insertElement(&datasetElements, stringElement(0x00080018, "UI", sopInstanceUID))
-	insertElement(&datasetElements, stringElement(0x00080060, "CS", "OT"))
-	insertElement(&datasetElements, multiStringElement(0x00080008, "CS", []string{"DERIVED", "SECONDARY"}))
-	insertElement(&datasetElements, stringElement(0x00080064, "CS", "WSD"))
-	insertElement(&datasetElements, stringElement(0x00080012, "DA", dateValue))
-	insertElement(&datasetElements, stringElement(0x00080013, "TM", timeValue))
-	insertElement(&datasetElements, stringElement(0x00080023, "DA", dateValue))
-	insertElement(&datasetElements, stringElement(0x00080033, "TM", timeValue))
-	insertElement(&datasetElements, stringElement(0x0008103e, "LO", defaultProcessedSeriesDesc))
-	insertElement(&datasetElements, stringElement(0x00082111, "ST", defaultDerivationDescription))
-	insertElement(&datasetElements, stringElement(0x00080070, "LO", defaultManufacturer))
-	insertElement(&datasetElements, stringElement(0x00081090, "LO", defaultManufacturerModelName))
-	insertElement(&datasetElements, stringElement(0x00181020, "LO", defaultSoftwareVersions))
-	insertElement(&datasetElements, stringElement(0x0020000d, "UI", studyInstanceUID))
-	insertElement(&datasetElements, stringElement(0x0020000e, "UI", seriesInstanceUID))
-	insertElement(&datasetElements, stringElement(0x00200011, "IS", "999"))
-	insertElement(&datasetElements, stringElement(0x00200013, "IS", "1"))
+	insertElement(&datasetElements, stringElement(0x00080016, "UI", secondaryCaptureSOPClassUID))           // SOP Class UID
+	insertElement(&datasetElements, stringElement(0x00080018, "UI", sopInstanceUID))                        // SOP Instance UID
+	insertElement(&datasetElements, stringElement(0x00080060, "CS", "OT"))                                  // Modality — "OT" (Other)
+	insertElement(&datasetElements, multiStringElement(0x00080008, "CS", []string{"DERIVED", "SECONDARY"})) // Image Type
+	insertElement(&datasetElements, stringElement(0x00080064, "CS", "WSD"))                                 // Conversion Type — workstation
+	insertElement(&datasetElements, stringElement(0x00080012, "DA", dateValue))                             // Instance Creation Date
+	insertElement(&datasetElements, stringElement(0x00080013, "TM", timeValue))                             // Instance Creation Time
+	insertElement(&datasetElements, stringElement(0x00080023, "DA", dateValue))                             // Content Date
+	insertElement(&datasetElements, stringElement(0x00080033, "TM", timeValue))                             // Content Time
+	insertElement(&datasetElements, stringElement(0x0008103e, "LO", defaultProcessedSeriesDesc))            // Series Description
+	insertElement(&datasetElements, stringElement(0x00082111, "ST", defaultDerivationDescription))          // Derivation Description
+	insertElement(&datasetElements, stringElement(0x00080070, "LO", defaultManufacturer))                   // Manufacturer
+	insertElement(&datasetElements, stringElement(0x00081090, "LO", defaultManufacturerModelName))          // Manufacturer's Model Name
+	insertElement(&datasetElements, stringElement(0x00181020, "LO", defaultSoftwareVersions))               // Software Versions
+	insertElement(&datasetElements, stringElement(0x0020000d, "UI", studyInstanceUID))                      // Study Instance UID
+	insertElement(&datasetElements, stringElement(0x0020000e, "UI", seriesInstanceUID))                     // Series Instance UID
+	insertElement(&datasetElements, stringElement(0x00200011, "IS", "999"))                                 // Series Number
+	insertElement(&datasetElements, stringElement(0x00200013, "IS", "1"))                                   // Instance Number
 
 	for _, preserved := range sourceMeta.PreservedElements {
 		encoded, err := preservedElement(preserved)
@@ -129,16 +145,21 @@ func encodeSecondaryCapture(
 		insertElement(&datasetElements, encoded)
 	}
 
-	// metaElements is defined in ascending tag order; no sort needed.
+	// File meta group (group 0002). Listed in ascending tag order so we can
+	// skip insertElement; the (0002,0000) group-length element is written
+	// separately at the head of the group with groupLength as its value.
 	metaElements := []element{
-		binaryElement(0x00020001, "OB", []byte{0x00, 0x01}),
-		stringElement(0x00020002, "UI", secondaryCaptureSOPClassUID),
-		stringElement(0x00020003, "UI", sopInstanceUID),
-		stringElement(0x00020010, "UI", explicitVRLittleEndianUID),
-		stringElement(0x00020012, "UI", implementationClassUID),
-		stringElement(0x00020013, "SH", implementationVersionName),
+		binaryElement(0x00020001, "OB", []byte{0x00, 0x01}),          // File Meta Information Version
+		stringElement(0x00020002, "UI", secondaryCaptureSOPClassUID), // Media Storage SOP Class UID
+		stringElement(0x00020003, "UI", sopInstanceUID),              // Media Storage SOP Instance UID
+		stringElement(0x00020010, "UI", explicitVRLittleEndianUID),   // Transfer Syntax UID
+		stringElement(0x00020012, "UI", implementationClassUID),      // Implementation Class UID
+		stringElement(0x00020013, "SH", implementationVersionName),   // Implementation Version Name
 	}
 
+	// (0002,0000) carries the byte total of every meta element that follows
+	// it — sum the encoded lengths up-front so the header can be written
+	// before the elements themselves.
 	groupLength := 0
 	for _, encoded := range metaElements {
 		length, err := encodedElementLength(encoded)
@@ -199,6 +220,13 @@ func preservedElement(source dicommeta.PreservedElement) (element, error) {
 	return multiStringElement(tagValue(source.TagGroup, source.TagElement), vr, source.Values), nil
 }
 
+// pixelElements emits Pixel Data plus the Image Pixel module attributes the
+// Secondary Capture IOD requires (PS3.3 C.8.6.1 / C.7.6.3). Bits Allocated =
+// Bits Stored = 8 and High Bit = 7 are fixed at this point because we are
+// writing previews, not original acquisition. Grayscale uses MONOCHROME2
+// plus a centered default window over 0..255 so a viewer without its own
+// window defaults still renders the image; color uses interleaved RGB
+// (PlanarConfiguration = 0).
 func pixelElements(preview imaging.PreviewImage) []element {
 	width := uint16(preview.Width)
 	height := uint16(preview.Height)
@@ -289,6 +317,10 @@ func binaryElement(tag uint32, vr string, value []byte) element {
 	}
 }
 
+// encodeStringValues joins a multi-valued VR with the DICOM "\" separator
+// and pads to even byte length. Padding byte is NUL for UI (per PS3.5
+// Table 6.2-1) and space for every other string VR; either is stripped by
+// the reader on the way back in.
 func encodeStringValues(vr string, values []string) []byte {
 	joined := strings.Join(values, "\\")
 	padding := byte(' ')
@@ -316,7 +348,12 @@ func isSupportedStringVR(vr string) bool {
 	}
 }
 
-
+// encodedElementLength computes the on-wire byte count of an element under
+// explicit VR little endian. The VR list below is the 32-bit-length class
+// (large binary blobs + sequences): tag(4) + VR(2) + reserved(2) + length(4)
+// + value. Every other VR uses the short form: tag(4) + VR(2) + length(2) +
+// value. writeElement branches on the same list — keep it in sync with
+// uses32BitLength in dicommeta/reader.go so round-trip decode/encode agrees.
 func encodedElementLength(encoded element) (int, error) {
 	switch normalizedVR(encoded.vr) {
 	case "OB", "OD", "OF", "OL", "OW", "SQ", "UC", "UR", "UT", "UN":
