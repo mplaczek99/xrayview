@@ -1362,7 +1362,8 @@ func actualBMPPath(t *testing.T) string {
 		t.Fatal("runtime.Caller returned no file path")
 	}
 
-	return filepath.Clean(
+	return requireOptionalActualFixture(
+		t,
 		filepath.Join(filepath.Dir(currentFile), "..", "..", "..", "images", "BMP", "xrays1.bmp"),
 	)
 }
@@ -1375,9 +1376,28 @@ func actualTIFFPath(t *testing.T) string {
 		t.Fatal("runtime.Caller returned no file path")
 	}
 
-	return filepath.Clean(
+	return requireOptionalActualFixture(
+		t,
 		filepath.Join(filepath.Dir(currentFile), "..", "..", "..", "images", "TIF", "xrays1.tif"),
 	)
+}
+
+func requireOptionalActualFixture(t *testing.T, inputPath string) string {
+	t.Helper()
+
+	inputPath = filepath.Clean(inputPath)
+	info, err := os.Stat(inputPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			t.Skipf("optional local image fixture not available: %s", inputPath)
+		}
+		t.Fatalf("Stat returned error for %s: %v", inputPath, err)
+	}
+	if info.IsDir() {
+		t.Fatalf("expected optional local image fixture to be a file: %s", inputPath)
+	}
+
+	return inputPath
 }
 
 func copySampleDicom(t *testing.T, name string) string {
