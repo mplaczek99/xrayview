@@ -1,0 +1,99 @@
+- generic [ref=e3]:
+  - heading "XRayView" [level=1] [ref=e4]
+  - tablist "Main tabs" [ref=e5]:
+    - tab "View" [selected] [ref=e6] [cursor=pointer]
+    - tab "Processing" [ref=e7] [cursor=pointer]
+  - tabpanel "View" [ref=e378]:
+    - generic [ref=e379]:
+      - heading "View" [level=2] [ref=e380]
+      - generic [ref=e381]:
+        - button "Open Study" [ref=e383] [cursor=pointer]:
+          - img [ref=e384]
+          - text: Open Study
+        - generic [ref=e387]:
+          - button "Pan" [ref=e388] [cursor=pointer]:
+            - img [ref=e389]
+            - text: Pan
+          - button "Measure line" [ref=e391] [cursor=pointer]:
+            - img [ref=e392]
+            - text: Measure line
+        - generic [ref=e397]:
+          - button "Re-run detection" [ref=e398] [cursor=pointer]:
+            - img [ref=e399]
+            - text: Re-run detection
+          - button "Remove selected" [disabled] [ref=e402]:
+            - img [ref=e403]
+            - text: Remove selected
+        - generic [ref=e405]: mock-dental-study.dcm
+      - generic [ref=e406]:
+        - generic [ref=e408]:
+          - generic [ref=e409]:
+            - generic [ref=e410]: 100%
+            - button "Reset view" [ref=e411] [cursor=pointer]
+          - generic [ref=e412]:
+            - img "DICOM preview"
+            - img [ref=e413]:
+              - generic [ref=e414]:
+                - generic [ref=e418]:
+                  - generic: Tooth 1 height · 200.0 px
+                - generic [ref=e419]:
+                  - generic: Tooth 2 width · 123.0 px
+                - generic [ref=e420]:
+                  - generic: Tooth 2 height · 193.0 px
+        - complementary [ref=e423]:
+          - generic [ref=e424]:
+            - heading "Viewer Tools" [level=3] [ref=e425]
+            - paragraph [ref=e426]: Drag to pan, use the mouse wheel to zoom, then switch to Measure line to place calibrated annotations in source pixel space.
+          - generic [ref=e430]:
+            - heading "Line Annotations" [level=3] [ref=e431]
+            - generic [ref=e432]:
+              - button "Tooth 1 height" [ref=e437]:
+                - generic [ref=e438]: Tooth 1 height
+                - generic [ref=e439]: Auto tooth
+                - generic [ref=e440]: 200.0 px
+              - button "Tooth 2 width" [ref=e441]:
+                - generic [ref=e442]: Tooth 2 width
+                - generic [ref=e443]: Auto tooth
+                - generic [ref=e444]: 123.0 px
+              - button "Tooth 2 height" [ref=e445]:
+                - generic [ref=e446]: Tooth 2 height
+                - generic [ref=e447]: Auto tooth
+                - generic [ref=e448]: 193.0 px
+          - generic [ref=e449]:
+            - heading "Automatic Measurements" [level=3] [ref=e450]
+            - generic [ref=e451]:
+              - generic [ref=e452]:
+                - generic [ref=e453]: Detected teeth
+                - generic [ref=e454]: "2"
+              - generic [ref=e455]:
+                - generic [ref=e456]: Confidence
+                - generic [ref=e457]: 74%
+              - generic [ref=e458]:
+                - generic [ref=e459]: Inspecting
+                - generic [ref=e460]: Top candidate
+              - generic [ref=e461]:
+                - generic [ref=e462]: Mask area
+                - generic [ref=e463]: 18,492 px
+            - paragraph [ref=e464]: Select an auto-tooth line to inspect a specific tooth; overlay guides stay editable in the viewer.
+            - generic [ref=e465]:
+              - generic [ref=e466]:
+                - heading "Active tooth pixels" [level=3] [ref=e467]
+                - generic [ref=e468]:
+                  - generic [ref=e469]:
+                    - generic [ref=e470]: Tooth width
+                    - generic [ref=e471]: 133 px
+                  - generic [ref=e472]:
+                    - generic [ref=e473]: Tooth height
+                    - generic [ref=e474]: 201 px
+                  - generic [ref=e475]:
+                    - generic [ref=e476]: BBox width
+                    - generic [ref=e477]: 140 px
+                  - generic [ref=e478]:
+                    - generic [ref=e479]: BBox height
+                    - generic [ref=e480]: 220 px
+              - generic [ref=e481]:
+                - heading "Backend notes" [level=3] [ref=e482]
+                - paragraph [ref=e484]: Calibration metadata unavailable; returning pixel measurements only.
+  - status [ref=e19]:
+    - img [ref=e356]
+    - generic [ref=e23]: Annotation removed.

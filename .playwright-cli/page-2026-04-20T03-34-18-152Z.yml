@@ -1,0 +1,58 @@
+- generic [ref=e3]:
+  - heading "XRayView" [level=1] [ref=e4]
+  - tablist "Main tabs" [ref=e5]:
+    - tab "View" [selected] [ref=e6] [cursor=pointer]
+    - tab "Processing" [ref=e7] [cursor=pointer]
+  - tabpanel "View" [ref=e378]:
+    - generic [ref=e379]:
+      - heading "View" [level=2] [ref=e380]
+      - generic [ref=e381]:
+        - button "Open Study" [ref=e383] [cursor=pointer]:
+          - img [ref=e384]
+          - text: Open Study
+        - generic [ref=e387]:
+          - button "Pan" [ref=e388] [cursor=pointer]:
+            - img [ref=e389]
+            - text: Pan
+          - button "Measure line" [ref=e391] [cursor=pointer]:
+            - img [ref=e392]
+            - text: Measure line
+        - generic [ref=e397]:
+          - button "Measure teeth" [ref=e506] [cursor=pointer]:
+            - img [ref=e399]
+            - text: Measure teeth
+          - button "Remove selected" [disabled] [ref=e402]:
+            - img [ref=e403]
+            - text: Remove selected
+        - generic [ref=e507]: mock-dental-study.dcm
+      - generic [ref=e406]:
+        - generic [ref=e408]:
+          - generic [ref=e409]:
+            - generic [ref=e508]: 100%
+            - button "Reset view" [active] [ref=e509] [cursor=pointer]
+          - generic [ref=e510]:
+            - img "DICOM preview"
+            - img [ref=e511]
+        - complementary [ref=e423]:
+          - generic [ref=e424]:
+            - heading "Viewer Tools" [level=3] [ref=e425]
+            - paragraph [ref=e426]: Drag to pan, use the mouse wheel to zoom, then switch to Measure line to place calibrated annotations in source pixel space.
+          - generic [ref=e430]:
+            - heading "Line Annotations" [level=3] [ref=e431]
+            - paragraph [ref=e512]: No line annotations yet. Draw one to store a manual measurement, or run Measure teeth to load editable suggestions.
+  - status [ref=e19]:
+    - img [ref=e356]
+    - generic [ref=e23]: Study loaded. Drag to pan, scroll to zoom, or draw a line measurement.
+  - region "Background jobs" [ref=e514]:
+    - generic [ref=e515]:
+      - button "▶ Jobs" [expanded] [ref=e516] [cursor=pointer]:
+        - generic [ref=e517]: ▶
+        - generic [ref=e518]: Jobs
+      - button "Clear finished" [ref=e519] [cursor=pointer]
+    - article [ref=e521]:
+      - generic [ref=e522]:
+        - generic [ref=e523]:
+          - generic [ref=e524]: Render Preview
+          - generic [ref=e525]: Completed • mock-dental-study.dcm
+        - button "Dismiss" [ref=e526] [cursor=pointer]: ✕
+      - paragraph [ref=e529]: Completed

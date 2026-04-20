@@ -1,0 +1,94 @@
+- generic [ref=e3]:
+  - heading "XRayView" [level=1] [ref=e4]
+  - tablist "Main tabs" [ref=e5]:
+    - tab "View" [ref=e6] [cursor=pointer]
+    - tab "Processing" [selected] [ref=e7] [cursor=pointer]
+  - tabpanel "Processing" [ref=e153]:
+    - heading "Processing" [level=2] [ref=e154]
+    - generic [ref=e155]:
+      - generic [ref=e156]:
+        - generic [ref=e196]:
+          - button "Original" [ref=e197] [cursor=pointer]
+          - button "Processed" [ref=e198] [cursor=pointer]
+          - button "Split" [active] [ref=e199] [cursor=pointer]
+        - generic [ref=e217]:
+          - generic [ref=e218]:
+            - generic [ref=e219]: Original
+            - img "DICOM preview" [ref=e222]
+          - generic [ref=e223]:
+            - generic [ref=e224]: Processed
+            - img "DICOM preview" [ref=e227]
+      - generic [ref=e160]:
+        - generic [ref=e161]:
+          - generic [ref=e162]: Save Destination
+          - paragraph [ref=e163]: No save destination selected. Processing will keep the DICOM in an app-managed temp path until you choose one.
+          - button "Choose Save Location" [ref=e165] [cursor=pointer]
+        - generic [ref=e166]:
+          - generic [ref=e167]: Preset
+          - combobox "Preset" [ref=e168]:
+            - option "Neutral"
+            - option "Bone Focus" [selected]
+            - option "High Contrast"
+          - paragraph [ref=e169]: Bone palette with added punch and equalized detail.
+        - generic [ref=e170]:
+          - generic [ref=e171]: Grayscale Controls
+          - generic [ref=e172] [cursor=pointer]:
+            - checkbox "Invert" [ref=e173]
+            - generic [ref=e174]: Invert
+          - generic [ref=e175]:
+            - generic [ref=e176]: Brightness
+            - slider [ref=e177]: "10"
+            - spinbutton "Brightness" [ref=e178]: "10"
+          - generic [ref=e179]:
+            - generic [ref=e180]: Contrast
+            - slider [ref=e181]: "1.4"
+            - spinbutton "Contrast" [ref=e182]: "1.4"
+          - generic [ref=e183] [cursor=pointer]:
+            - checkbox "Equalize" [checked] [ref=e184]
+            - generic [ref=e185]: Equalize
+        - generic [ref=e186]:
+          - generic [ref=e187]: Palette
+          - combobox "Palette" [ref=e188]:
+            - option "none"
+            - option "hot"
+            - option "bone" [selected]
+        - generic [ref=e189]:
+          - generic [ref=e190] [cursor=pointer]:
+            - checkbox "Compare" [ref=e191]
+            - generic [ref=e192]: Compare
+          - paragraph [ref=e193]: Write side-by-side comparison output into the processed DICOM.
+        - generic [ref=e194]:
+          - button "Run Processing" [ref=e195] [cursor=pointer]
+          - generic [ref=e203]: Processing complete.
+        - paragraph [ref=e205]: mock-data/mock-dental-study_processed.dcm
+  - status [ref=e19]:
+    - img [ref=e206]
+    - generic [ref=e23]: Processing complete.
+  - region "Background jobs" [ref=e65]:
+    - generic [ref=e66]:
+      - button "▶ Jobs" [expanded] [ref=e67] [cursor=pointer]:
+        - generic [ref=e68]: ▶
+        - generic [ref=e69]: Jobs
+      - button "Clear finished" [ref=e70] [cursor=pointer]
+    - generic [ref=e71]:
+      - article [ref=e208]:
+        - generic [ref=e209]:
+          - generic [ref=e210]:
+            - generic [ref=e211]: Process Study
+            - generic [ref=e212]: Completed • mock-dental-study.dcm
+          - button "Dismiss" [ref=e213] [cursor=pointer]: ✕
+        - paragraph [ref=e216]: Completed
+      - article [ref=e144]:
+        - generic [ref=e145]:
+          - generic [ref=e146]:
+            - generic [ref=e147]: Measure Tooth
+            - generic [ref=e148]: Completed • mock-dental-study.dcm
+          - button "Dismiss" [ref=e149] [cursor=pointer]: ✕
+        - paragraph [ref=e152]: Completed
+      - article [ref=e72]:
+        - generic [ref=e73]:
+          - generic [ref=e74]:
+            - generic [ref=e75]: Render Preview
+            - generic [ref=e76]: Completed • mock-dental-study.dcm
+          - button "Dismiss" [ref=e77] [cursor=pointer]: ✕
+        - paragraph [ref=e80]: Completed

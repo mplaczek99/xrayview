@@ -1,0 +1,66 @@
+- generic [ref=e3]:
+  - heading "XRayView" [level=1] [ref=e4]
+  - tablist "Main tabs" [ref=e5]:
+    - tab "View" [ref=e6] [cursor=pointer]
+    - tab "Processing" [selected] [ref=e7] [cursor=pointer]
+  - tabpanel "Processing" [ref=e531]:
+    - heading "Processing" [level=2] [ref=e532]
+    - generic [ref=e533]:
+      - img "DICOM preview" [ref=e537]
+      - generic [ref=e538]:
+        - generic [ref=e539]:
+          - generic [ref=e540]: Save Destination
+          - paragraph [ref=e541]: No save destination selected. Processing will keep the DICOM in an app-managed temp path until you choose one.
+          - button "Choose Save Location" [ref=e543] [cursor=pointer]
+        - generic [ref=e544]:
+          - generic [ref=e545]: Preset
+          - combobox "Preset" [ref=e546]:
+            - option "Neutral"
+            - option "Bone Focus"
+            - option "High Contrast"
+            - option "Custom" [selected]
+          - paragraph [ref=e547]: Custom controls. The backend will use the default preset plus the explicit overrides shown below.
+        - generic [ref=e548]:
+          - generic [ref=e549]: Grayscale Controls
+          - generic [ref=e550] [cursor=pointer]:
+            - checkbox "Invert" [ref=e551]
+            - generic [ref=e552]: Invert
+          - generic [ref=e553]:
+            - generic [ref=e554]: Brightness
+            - slider [ref=e555]: "100"
+            - spinbutton "Brightness" [ref=e556]: "100"
+          - generic [ref=e557]:
+            - generic [ref=e558]: Contrast
+            - slider [ref=e559]: "1"
+            - spinbutton "Contrast" [active] [ref=e560]: "1"
+          - generic [ref=e561] [cursor=pointer]:
+            - checkbox "Equalize" [ref=e562]
+            - generic [ref=e563]: Equalize
+        - generic [ref=e564]:
+          - generic [ref=e565]: Palette
+          - combobox "Palette" [ref=e566]:
+            - option "none" [selected]
+            - option "hot"
+            - option "bone"
+        - generic [ref=e567]:
+          - generic [ref=e568] [cursor=pointer]:
+            - checkbox "Compare" [ref=e569]
+            - generic [ref=e570]: Compare
+          - paragraph [ref=e571]: Write side-by-side comparison output into the processed DICOM.
+        - button "Run Processing" [ref=e573] [cursor=pointer]
+  - status [ref=e19]:
+    - img [ref=e356]
+    - generic [ref=e23]: Study loaded. Drag to pan, scroll to zoom, or draw a line measurement.
+  - region "Background jobs" [ref=e514]:
+    - generic [ref=e515]:
+      - button "▶ Jobs" [expanded] [ref=e516] [cursor=pointer]:
+        - generic [ref=e517]: ▶
+        - generic [ref=e518]: Jobs
+      - button "Clear finished" [ref=e519] [cursor=pointer]
+    - article [ref=e521]:
+      - generic [ref=e522]:
+        - generic [ref=e523]:
+          - generic [ref=e524]: Render Preview
+          - generic [ref=e525]: Completed • mock-dental-study.dcm
+        - button "Dismiss" [ref=e526] [cursor=pointer]: ✕
+      - paragraph [ref=e529]: Completed
