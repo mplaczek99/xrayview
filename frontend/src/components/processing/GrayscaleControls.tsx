@@ -15,10 +15,12 @@ const CONTRAST_MIN = 0.1;
 const CONTRAST_MAX = 3.0;
 
 // clamp keeps spinbutton input inside the slider's range so the two stay in
-// sync and we never ship an out-of-range value to the backend.
-function clamp(value: number, min: number, max: number): number {
+// sync and we never ship an out-of-range value to the backend. Returns null
+// for NaN (empty field, lone "-" or ".") so mid-edit states don't yank the
+// value to min while the user is still typing a negative or decimal.
+function clamp(value: number, min: number, max: number): number | null {
   if (Number.isNaN(value)) {
-    return min;
+    return null;
   }
   return Math.min(max, Math.max(min, value));
 }
@@ -70,16 +72,16 @@ export function GrayscaleControls({
           max={BRIGHTNESS_MAX}
           value={controls.brightness}
           step={1}
-          onChange={(event) =>
-            onUpdateControl(
-              "brightness",
-              clamp(
-                parseInt(event.target.value, 10),
-                BRIGHTNESS_MIN,
-                BRIGHTNESS_MAX,
-              ),
-            )
-          }
+          onChange={(event) => {
+            const next = clamp(
+              parseInt(event.target.value, 10),
+              BRIGHTNESS_MIN,
+              BRIGHTNESS_MAX,
+            );
+            if (next !== null) {
+              onUpdateControl("brightness", next);
+            }
+          }}
           disabled={busy}
         />
       </div>
@@ -112,16 +114,16 @@ export function GrayscaleControls({
           step={0.1}
           min={CONTRAST_MIN}
           max={CONTRAST_MAX}
-          onChange={(event) =>
-            onUpdateControl(
-              "contrast",
-              clamp(
-                parseFloat(event.target.value),
-                CONTRAST_MIN,
-                CONTRAST_MAX,
-              ),
-            )
-          }
+          onChange={(event) => {
+            const next = clamp(
+              parseFloat(event.target.value),
+              CONTRAST_MIN,
+              CONTRAST_MAX,
+            );
+            if (next !== null) {
+              onUpdateControl("contrast", next);
+            }
+          }}
           disabled={busy}
         />
       </div>
