@@ -17,6 +17,7 @@ AGENTS.md
 CLAUDE.md
 .DS_Store
 *.log
+.playwright-cli/
 
 # My personal images
 images/BMP/
