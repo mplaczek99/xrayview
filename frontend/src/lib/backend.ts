@@ -6,11 +6,11 @@ import type {
   MeasureLineAnnotationCommandResult,
   OpenStudyCommandResult,
   PaletteName,
-  ProcessStudyCommand,
   ProcessingManifest,
   StartedJob,
 } from "./generated/contracts";
 import { normalizeBackendError } from "./backendErrors";
+import { buildProcessStudyCommand } from "./commandBuilders";
 import { MOCK_PROCESSED_DICOM_PATH } from "./mockRuntime";
 import { MOCK_PROCESSING_MANIFEST } from "./mockProcessingManifest";
 import {
@@ -49,32 +49,6 @@ function nextMockStudyId(): string {
 function nextMockJobId(): string {
   mockJobSequence += 1;
   return `mock-job-${mockJobSequence}`;
-}
-
-function buildProcessStudyCommand(
-  studyId: string,
-  request: ProcessingRequest,
-): ProcessStudyCommand {
-  return {
-    studyId,
-    outputPath: request.outputPath,
-    presetId: request.presetId,
-    invert: request.controls.invert && !request.presetControls.invert,
-    brightness:
-      request.controls.brightness !== request.presetControls.brightness
-        ? request.controls.brightness
-        : null,
-    contrast:
-      request.controls.contrast !== request.presetControls.contrast
-        ? request.controls.contrast
-        : null,
-    equalize: request.controls.equalize && !request.presetControls.equalize,
-    compare: request.compare,
-    palette:
-      request.controls.palette !== request.presetControls.palette
-        ? request.controls.palette
-        : null,
-  };
 }
 
 function buildMockJobSnapshot(

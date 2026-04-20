@@ -52,6 +52,7 @@ export function GrayscaleControls({
           id="proc-brightness-range"
           className="form-range"
           type="range"
+          data-testid="action-set-brightness"
           min={BRIGHTNESS_MIN}
           max={BRIGHTNESS_MAX}
           step={1}
@@ -94,6 +95,7 @@ export function GrayscaleControls({
           id="proc-contrast-range"
           className="form-range"
           type="range"
+          data-testid="action-set-contrast"
           min={CONTRAST_MIN}
           max={CONTRAST_MAX}
           step={0.1}

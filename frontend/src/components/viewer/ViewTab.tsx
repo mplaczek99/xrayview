@@ -88,6 +88,7 @@ export function ViewTab() {
               <button
                 className="button button--primary empty-state__cta"
                 type="button"
+                data-testid="action-open-study"
                 onClick={() => void workbenchActions.openStudy()}
               >
                 Open Study
@@ -107,6 +108,7 @@ export function ViewTab() {
           <button
             className="button button--primary"
             type="button"
+            data-testid="action-open-study"
             onClick={() => void workbenchActions.openStudy()}
             disabled={isOpeningStudy}
           >
@@ -123,6 +125,7 @@ export function ViewTab() {
           <button
             className={`button button--ghost${viewerTool === "pan" ? " viewer-tool--active" : ""}`}
             type="button"
+            data-testid="action-tool-pan"
             onClick={() => workbenchActions.setViewerTool("pan")}
           >
             <svg className="button__icon" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -133,6 +136,7 @@ export function ViewTab() {
           <button
             className={`button button--ghost${viewerTool === "measureLine" ? " viewer-tool--active" : ""}`}
             type="button"
+            data-testid="action-tool-measure-line"
             onClick={() => workbenchActions.setViewerTool("measureLine")}
           >
             <svg className="button__icon" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -150,6 +154,7 @@ export function ViewTab() {
           <button
             className="button button--ghost"
             type="button"
+            data-testid="action-measure-teeth"
             onClick={() => void workbenchActions.measureActiveStudy()}
             disabled={isMeasuring}
           >
@@ -168,6 +173,7 @@ export function ViewTab() {
           <button
             className="button button--ghost"
             type="button"
+            data-testid="action-remove-annotation"
             onClick={() => workbenchActions.deleteSelectedAnnotation()}
             disabled={!selectedAnnotationId}
           >
