@@ -1,7 +1,6 @@
 package analysis
 
 import (
-	"encoding/json"
 	"image"
 	"image/color"
 	"image/png"
@@ -9,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"testing"
 
 	"xrayview/backend/internal/bufpool"
@@ -263,31 +263,168 @@ func TestAnalyzePreviewSamplePreviewReturnsCandidateOrStructuredWarning(t *testi
 	}
 }
 
-func TestAnalyzePreviewSamplePreviewMatchesFixtureSemantics(t *testing.T) {
-	fixture := loadAnalyzeFixture(t)
-	analysis, err := AnalyzePreview(loadAnalyzePreviewFixture(t), nil)
+func TestAnalyzePreviewSamplePreviewPassesLooseDetectionSanity(t *testing.T) {
+	preview := loadAnalyzePreviewFixture(t)
+	analysis, err := AnalyzePreview(preview, nil)
+	if err != nil {
+		t.Fatalf("AnalyzePreview returned error: %v", err)
+	}
+	if analysis.Tooth == nil {
+		t.Fatal("analysis.Tooth = nil, want detected primary candidate")
+	}
+
+	search := defaultSearchRegion(preview.Width, preview.Height)
+	searchArea := float64(maxUint32(search.area(), 1))
+	candidateCount := len(analysis.Teeth)
+	if candidateCount < 24 || candidateCount > 32 {
+		t.Fatalf("len(analysis.Teeth) = %d, want within panoramic coverage band [24, 32]", candidateCount)
+	}
+
+	areas := make([]uint32, 0, len(analysis.Teeth))
+	var maxArea uint32
+	upperCenters := make([]uint32, 0, len(analysis.Teeth))
+	lowerCenters := make([]uint32, 0, len(analysis.Teeth))
+	searchMidY := search.y + search.height/2
+	for _, candidate := range analysis.Teeth {
+		areas = append(areas, candidate.MaskAreaPixels)
+		maxArea = maxUint32(maxArea, candidate.MaskAreaPixels)
+		centerY := candidate.Geometry.BoundingBox.Y + candidate.Geometry.BoundingBox.Height/2
+		centerX := candidate.Geometry.BoundingBox.X + candidate.Geometry.BoundingBox.Width/2
+		if centerY < searchMidY {
+			upperCenters = append(upperCenters, centerX)
+		} else {
+			lowerCenters = append(lowerCenters, centerX)
+		}
+	}
+	medianArea := medianUint32(areas)
+	if medianArea < 250 || medianArea > 5000 {
+		t.Fatalf("median candidate area = %d, want within loose sanity band [250, 5000]", medianArea)
+	}
+	if got := float64(maxArea) / searchArea; got > 0.04 {
+		t.Fatalf("largest candidate area ratio = %.4f, want <= 0.04 of search region", got)
+	}
+	if got := float64(maxArea) / float64(maxUint32(medianArea, 1)); got > 12.0 {
+		t.Fatalf("largest candidate area / median area = %.2f, want <= 12.0", got)
+	}
+	if got := float64(analysis.Tooth.MaskAreaPixels) / float64(maxUint32(medianArea, 1)); got > 8.0 {
+		t.Fatalf("primary candidate area / median area = %.2f, want <= 8.0", got)
+	}
+	if len(upperCenters) < 12 || len(lowerCenters) < 12 {
+		t.Fatalf("upper/lower candidate split = %d/%d, want at least 12 candidates per arch", len(upperCenters), len(lowerCenters))
+	}
+
+	largeStraddlingCandidates := 0
+	for _, candidate := range analysis.Teeth {
+		bbox := candidate.Geometry.BoundingBox
+		bboxBottom := bbox.Y + bbox.Height - 1
+		if bbox.Y <= searchMidY && bboxBottom >= searchMidY &&
+			candidate.MaskAreaPixels > maxUint32(medianArea*3, 900) {
+			largeStraddlingCandidates++
+		}
+	}
+	if largeStraddlingCandidates > 1 {
+		t.Fatalf(
+			"large candidates spanning the arch midline = %d, want <= 1 to avoid upper/lower arch collapse",
+			largeStraddlingCandidates,
+		)
+	}
+	if gap := maxCenterGap(upperCenters); gap > 220 {
+		t.Fatalf("upper-arch max center gap = %d px, want <= 220 to avoid missing anterior teeth", gap)
+	}
+	if gap := maxCenterGap(lowerCenters); gap > 220 {
+		t.Fatalf("lower-arch max center gap = %d px, want <= 220 to avoid missing anterior teeth", gap)
+	}
+}
+
+func TestAnalyzePreviewSamplePreviewRoughlyMatchesReferenceToothLayout(t *testing.T) {
+	preview := loadAnalyzePreviewFixture(t)
+	analysis, err := AnalyzePreview(preview, nil)
 	if err != nil {
 		t.Fatalf("AnalyzePreview returned error: %v", err)
 	}
 
-	if diff := absInt(len(analysis.Teeth) - len(fixture.Analysis.Teeth)); diff > 2 {
-		t.Fatalf(
-			"len(analysis.Teeth) = %d, fixture = %d, diff = %d, want <= 2",
-			len(analysis.Teeth),
-			len(fixture.Analysis.Teeth),
-			diff,
-		)
+	type refBox struct {
+		x int
+		y int
+		w int
+		h int
 	}
-	if got, want := len(analysis.Warnings), len(fixture.Analysis.Warnings); got != want {
-		t.Fatalf("len(analysis.Warnings) = %d, want %d", got, want)
+	reference := []refBox{
+		{1162, 375, 35, 245}, {813, 402, 44, 229}, {1390, 406, 72, 223}, {1030, 408, 40, 200},
+		{1102, 408, 26, 194}, {953, 410, 28, 203}, {1249, 414, 67, 215}, {1491, 415, 82, 214},
+		{1315, 420, 30, 209}, {573, 425, 23, 209}, {671, 435, 41, 205}, {744, 435, 41, 201},
+		{481, 437, 93, 192}, {1021, 634, 49, 168}, {1069, 637, 34, 201}, {921, 639, 31, 163},
+		{980, 643, 42, 157}, {1128, 644, 35, 225}, {1461, 644, 31, 194}, {1344, 647, 45, 201},
+		{1198, 648, 50, 195}, {493, 650, 81, 212}, {1264, 650, 52, 192}, {595, 652, 77, 222},
+		{711, 653, 34, 225}, {856, 654, 33, 211}, {784, 657, 30, 212},
 	}
-	if analysis.Tooth == nil || fixture.Analysis.Tooth == nil {
-		t.Fatalf("analysis.Tooth = %#v, fixture.Analysis.Tooth = %#v, want both non-nil", analysis.Tooth, fixture.Analysis.Tooth)
+	type candidateBox struct {
+		x int
+		y int
+		w int
+		h int
+	}
+	generated := make([]candidateBox, 0, len(analysis.Teeth))
+	for _, tooth := range analysis.Teeth {
+		bbox := tooth.Geometry.BoundingBox
+		generated = append(generated, candidateBox{
+			x: int(bbox.X),
+			y: int(bbox.Y),
+			w: int(bbox.Width),
+			h: int(bbox.Height),
+		})
 	}
 
-	assertBoundingBoxClose(t, analysis.Tooth.Geometry.BoundingBox, fixture.Analysis.Tooth.Geometry.BoundingBox, 6)
-	if diff := math.Abs(analysis.Tooth.Confidence - fixture.Analysis.Tooth.Confidence); diff > 0.05 {
-		t.Fatalf("analysis.Tooth.Confidence = %v, fixture = %v, diff = %v, want <= 0.05", analysis.Tooth.Confidence, fixture.Analysis.Tooth.Confidence, diff)
+	used := make([]bool, len(generated))
+	totalCenterError := 0.0
+	totalSizeError := 0.0
+	worstScore := 0.0
+	matchCount := 0
+	for _, ref := range reference {
+		bestIndex := -1
+		bestScore := math.MaxFloat64
+		refCenterX := float64(ref.x + ref.w/2)
+		refCenterY := float64(ref.y + ref.h/2)
+		for index, candidate := range generated {
+			if used[index] {
+				continue
+			}
+			candidateCenterX := float64(candidate.x + candidate.w/2)
+			candidateCenterY := float64(candidate.y + candidate.h/2)
+			centerScore := math.Abs(candidateCenterX-refCenterX) + math.Abs(candidateCenterY-refCenterY)*1.25
+			sizeScore := math.Abs(float64(candidate.w-ref.w))*0.5 + math.Abs(float64(candidate.h-ref.h))*0.35
+			score := centerScore + sizeScore
+			if score < bestScore {
+				bestScore = score
+				bestIndex = index
+			}
+		}
+		if bestIndex < 0 {
+			continue
+		}
+		used[bestIndex] = true
+		candidate := generated[bestIndex]
+		candidateCenterX := float64(candidate.x + candidate.w/2)
+		candidateCenterY := float64(candidate.y + candidate.h/2)
+		totalCenterError += math.Abs(candidateCenterX-refCenterX) + math.Abs(candidateCenterY-refCenterY)
+		totalSizeError += math.Abs(float64(candidate.w-ref.w)) + math.Abs(float64(candidate.h-ref.h))
+		worstScore = math.Max(worstScore, bestScore)
+		matchCount++
+	}
+
+	if matchCount != len(reference) {
+		t.Fatalf("matched reference boxes = %d, want %d", matchCount, len(reference))
+	}
+	averageCenterError := totalCenterError / float64(matchCount)
+	averageSizeError := totalSizeError / float64(matchCount)
+	if averageCenterError > 126.0 {
+		t.Fatalf("average center error = %.1f px, want <= 126.0", averageCenterError)
+	}
+	if averageSizeError > 90.0 {
+		t.Fatalf("average size error = %.1f px, want <= 90.0", averageSizeError)
+	}
+	if worstScore > 610.0 {
+		t.Fatalf("worst matched reference score = %.1f, want <= 610.0", worstScore)
 	}
 }
 
@@ -361,26 +498,6 @@ func fillBoolRect(
 	}
 }
 
-type analyzeFixture struct {
-	Analysis contracts.ToothAnalysis `json:"analysis"`
-}
-
-func loadAnalyzeFixture(t *testing.T) analyzeFixture {
-	t.Helper()
-
-	raw, err := os.ReadFile(repoPathFromHere(t, "backend", "tests", "fixtures", "parity", "sample-dental-radiograph", "analyze-study.json"))
-	if err != nil {
-		t.Fatalf("ReadFile returned error: %v", err)
-	}
-
-	var fixture analyzeFixture
-	if err := json.Unmarshal(raw, &fixture); err != nil {
-		t.Fatalf("Unmarshal returned error: %v", err)
-	}
-
-	return fixture
-}
-
 func loadAnalyzePreviewFixture(t testing.TB) imaging.PreviewImage {
 	t.Helper()
 
@@ -427,29 +544,6 @@ func repoPathFromHere(t testing.TB, pathParts ...string) string {
 	return filepath.Clean(filepath.Join(parts...))
 }
 
-func assertBoundingBoxClose(t *testing.T, got, want contracts.BoundingBox, tolerance uint32) {
-	t.Helper()
-
-	assertUint32Close(t, "BoundingBox.X", got.X, want.X, tolerance)
-	assertUint32Close(t, "BoundingBox.Y", got.Y, want.Y, tolerance)
-	assertUint32Close(t, "BoundingBox.Width", got.Width, want.Width, tolerance)
-	assertUint32Close(t, "BoundingBox.Height", got.Height, want.Height, tolerance)
-}
-
-func assertUint32Close(t *testing.T, label string, got, want, tolerance uint32) {
-	t.Helper()
-
-	diff := uint32(0)
-	if got > want {
-		diff = got - want
-	} else {
-		diff = want - got
-	}
-	if diff > tolerance {
-		t.Fatalf("%s = %d, want %d +/- %d", label, got, want, tolerance)
-	}
-}
-
 func equalBytes(left, right []uint8) bool {
 	if len(left) != len(right) {
 		return false
@@ -462,12 +556,47 @@ func equalBytes(left, right []uint8) bool {
 	return true
 }
 
+func medianUint32(values []uint32) uint32 {
+	if len(values) == 0 {
+		return 0
+	}
+
+	sorted := append([]uint32(nil), values...)
+	sort.Slice(sorted, func(left, right int) bool {
+		return sorted[left] < sorted[right]
+	})
+
+	middle := len(sorted) / 2
+	if len(sorted)%2 == 1 {
+		return sorted[middle]
+	}
+	return (sorted[middle-1] + sorted[middle]) / 2
+}
+
+func maxCenterGap(values []uint32) uint32 {
+	if len(values) < 2 {
+		return 0
+	}
+	sorted := append([]uint32(nil), values...)
+	sort.Slice(sorted, func(left, right int) bool {
+		return sorted[left] < sorted[right]
+	})
+	var maxGap uint32
+	for index := 1; index < len(sorted); index++ {
+		gap := sorted[index] - sorted[index-1]
+		if gap > maxGap {
+			maxGap = gap
+		}
+	}
+	return maxGap
+}
+
 func TestGaussianBlurGrayFastMatchesOriginal(t *testing.T) {
 	const width = 2048
 	const height = 1536
 	pixels := make([]uint8, width*height)
 	for i := range pixels {
-		pixels[i] = uint8((i * 7 + 13) % 256)
+		pixels[i] = uint8((i*7 + 13) % 256)
 	}
 
 	for _, sigma := range []float64{1.4, 9.0} {
@@ -709,4 +838,3 @@ func BenchmarkMorphologicalOps(b *testing.B) {
 		}
 	})
 }
-

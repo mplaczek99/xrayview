@@ -1083,6 +1083,12 @@ button {
   stroke-width: 2;
 }
 
+.annotation-layer__quad {
+  fill: rgba(37, 181, 167, 0.08);
+  stroke: rgba(82, 226, 190, 0.92);
+  stroke-width: 2;
+}
+
 .annotation-layer__line {
   stroke-linecap: round;
   stroke-width: 3;

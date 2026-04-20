@@ -21,3 +21,6 @@ CLAUDE.md
 # My personal images
 images/BMP/
 images/TIF/
+
+# Local analysis debug artifacts
+backend/internal/analysis/_debug/

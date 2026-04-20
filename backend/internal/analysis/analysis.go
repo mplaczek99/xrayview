@@ -34,6 +34,8 @@ import (
 const (
 	pixelUnits      = "px"
 	millimeterUnits = "mm"
+	toothnessFloor  = 96
+	intensityFloor  = 82
 
 	// minDetectedArea is the minimum pixel area for a connected component to be
 	// included in analysis output. Used by both collectCandidates (to decide
@@ -61,6 +63,42 @@ type componentCandidate struct {
 	strict bool
 }
 
+type analysisDebugSnapshot struct {
+	SearchRegion            searchRegion
+	UpperSearchRegion       searchRegion
+	LowerSearchRegion       searchRegion
+	OcclusalSplitY          uint32
+	ToothnessThreshold      uint8
+	IntensityThreshold      uint8
+	UpperToothnessThreshold uint8
+	UpperIntensityThreshold uint8
+	LowerToothnessThreshold uint8
+	LowerIntensityThreshold uint8
+	Normalized              []uint8
+	SmallBlur               []uint8
+	LargeBlur               []uint8
+	SmallMinusLarge         []int16
+	LocalContrastLegacy     []uint8
+	LocalContrast           []uint8
+	Gradient                []uint8
+	Toothness               []uint8
+	PostThresholdMask       []uint8
+	PostCloseMask           []uint8
+	PostOpenMask            []uint8
+	MaskCoverageRatio       float64
+	UpperMaskCoverageRatio  float64
+	LowerMaskCoverageRatio  float64
+	DetectedCandidates      []componentCandidate
+	AllCandidates           []componentCandidate
+}
+
+type regionThresholdResult struct {
+	mask               []uint8
+	toothnessThreshold uint8
+	intensityThreshold uint8
+	coverageRatio      float64
+}
+
 func AnalyzePreview(
 	preview imaging.PreviewImage,
 	measurementScale *contracts.MeasurementScale,
@@ -77,6 +115,15 @@ func AnalyzeGrayscalePixels(
 	pixels []uint8,
 	measurementScale *contracts.MeasurementScale,
 ) (contracts.ToothAnalysis, error) {
+	return analyzeGrayscalePixelsWithDebug(width, height, pixels, measurementScale, nil)
+}
+
+func analyzeGrayscalePixelsWithDebug(
+	width, height uint32,
+	pixels []uint8,
+	measurementScale *contracts.MeasurementScale,
+	debug *analysisDebugSnapshot,
+) (contracts.ToothAnalysis, error) {
 	expectedLen := int(width) * int(height)
 	if len(pixels) != expectedLen {
 		return contracts.ToothAnalysis{}, fmt.Errorf(
@@ -89,12 +136,22 @@ func AnalyzeGrayscalePixels(
 	}
 
 	search := defaultSearchRegion(width, height)
+	if debug != nil {
+		debug.SearchRegion = search
+	}
 	normalized := normalizePixels(pixels)
+	if debug != nil {
+		debug.Normalized = cloneUint8Slice(normalized)
+	}
 	// Band-pass pair. σ=1.4 suppresses sensor noise; σ=9.0 approximates the
 	// slowly-varying bone/gum background. Their difference is what survives
 	// into the toothness map.
 	smallBlur, largeBlur := dualGaussianBlurGray(normalized, width, height, 1.4, 9.0)
-	toothness := buildToothnessMap(normalized, smallBlur, largeBlur, width, height)
+	if debug != nil {
+		debug.SmallBlur = cloneUint8Slice(smallBlur)
+		debug.LargeBlur = cloneUint8Slice(largeBlur)
+	}
+	toothness := buildToothnessMap(normalized, smallBlur, largeBlur, width, height, debug)
 
 	// Return blur buffers — no longer needed after toothness map is built.
 	bufpool.PutUint8(smallBlur)
@@ -106,47 +163,125 @@ func AnalyzeGrayscalePixels(
 	// from collapsing into an all-noise mask. Bump these carefully — raising
 	// either percentile loses recall, lowering either floor pulls in gum and
 	// bone shadow.
-	toothnessThreshold := maxUint8(percentileInRegion(toothness, width, search, 0.79), 118)
-	intensityThreshold := maxUint8(percentileInRegion(normalized, width, search, 0.69), 82)
+	upperSearch := search
+	lowerSearch := searchRegion{}
+	splitY := search.y + search.height/2
+	var upperThreshold regionThresholdResult
+	var lowerThreshold regionThresholdResult
+	var mask []uint8
+	var closedMask []uint8
+	if width < 512 {
+		toothnessThreshold := maxUint8(percentileInRegion(toothness, width, search, 0.79), toothnessFloor)
+		intensityThreshold := maxUint8(percentileInRegion(normalized, width, search, 0.60), intensityFloor)
+		mask = make([]uint8, len(normalized))
+		for y := search.y; y < search.y+search.height; y++ {
+			rowStart := int(y * width)
+			for x := search.x; x < search.x+search.width; x++ {
+				index := rowStart + int(x)
+				if toothness[index] >= toothnessThreshold && normalized[index] >= intensityThreshold {
+					mask[index] = 1
+				}
+			}
+		}
+		upperThreshold = regionThresholdResult{
+			mask:               cloneUint8Slice(mask),
+			toothnessThreshold: toothnessThreshold,
+			intensityThreshold: intensityThreshold,
+			coverageRatio:      float64(countMaskPixels(mask)) / float64(maxUint32(search.area(), 1)),
+		}
+		closedMask = closeBinaryMask(mask, int(width), int(height))
+		mask = openBinaryMask(closedMask, int(width), int(height))
+	} else {
+		upperSearch, lowerSearch, splitY = splitSearchRegionByOcclusalGap(normalized, toothness, width, search)
+		upperThreshold = thresholdMaskForRegion(normalized, toothness, width, upperSearch, 0.76, 0.52)
+		if upperThreshold.coverageRatio < 0.012 {
+			upperThreshold = thresholdMaskForRegion(normalized, toothness, width, upperSearch, 0.68, 0.45)
+		}
+		lowerThreshold = thresholdMaskForRegion(normalized, toothness, width, lowerSearch, 0.76, 0.52)
+		if lowerThreshold.coverageRatio < 0.012 {
+			lowerThreshold = thresholdMaskForRegion(normalized, toothness, width, lowerSearch, 0.68, 0.45)
+		}
+		mask = orMasks(upperThreshold.mask, lowerThreshold.mask)
+		closedUpperMask := closeBinaryMask(upperThreshold.mask, int(width), int(height))
+		closedLowerMask := closeBinaryMask(lowerThreshold.mask, int(width), int(height))
+		closedMask = orMasks(closedUpperMask, closedLowerMask)
+		mask = orMasks(
+			openBinaryMask(closedUpperMask, int(width), int(height)),
+			openBinaryMask(closedLowerMask, int(width), int(height)),
+		)
+	}
+	maskPixelCount := countMaskPixels(mask)
+	if debug != nil {
+		debug.OcclusalSplitY = splitY
+		debug.UpperSearchRegion = upperSearch
+		debug.LowerSearchRegion = lowerSearch
+		debug.ToothnessThreshold = minNonZeroUint8(upperThreshold.toothnessThreshold, lowerThreshold.toothnessThreshold)
+		debug.IntensityThreshold = minNonZeroUint8(upperThreshold.intensityThreshold, lowerThreshold.intensityThreshold)
+		debug.UpperToothnessThreshold = upperThreshold.toothnessThreshold
+		debug.UpperIntensityThreshold = upperThreshold.intensityThreshold
+		debug.LowerToothnessThreshold = lowerThreshold.toothnessThreshold
+		debug.LowerIntensityThreshold = lowerThreshold.intensityThreshold
+		debug.PostThresholdMask = cloneUint8Slice(upperThreshold.mask)
+		if width >= 512 {
+			debug.PostThresholdMask = cloneUint8Slice(orMasks(upperThreshold.mask, lowerThreshold.mask))
+		}
+		debug.MaskCoverageRatio = float64(maskPixelCount) / float64(maxUint32(search.area(), 1))
+		debug.UpperMaskCoverageRatio = upperThreshold.coverageRatio
+		debug.LowerMaskCoverageRatio = lowerThreshold.coverageRatio
+		debug.PostCloseMask = cloneUint8Slice(closedMask)
+		debug.PostOpenMask = cloneUint8Slice(mask)
+	}
 
-	mask := make([]uint8, len(normalized))
-	for y := search.y; y < search.y+search.height; y++ {
-		rowStart := int(y * width)
-		for x := search.x; x < search.x+search.width; x++ {
-			index := rowStart + int(x)
-			if toothness[index] >= toothnessThreshold && normalized[index] >= intensityThreshold {
-				mask[index] = 1
+	candidates := collectCandidates(mask, normalized, toothness, width, height, search)
+	seedCandidates := selectDetectedCandidates(candidates)
+	finalCandidates := seedCandidates
+	finalGeometries := make([]contracts.ToothGeometry, len(seedCandidates))
+	for index, candidate := range seedCandidates {
+		finalGeometries[index] = geometryFromPixels(candidate.pixels, candidate.bbox, width)
+	}
+	if width >= 512 {
+		panoramicCandidates, panoramicGeometries := buildPanoramicProfileCandidates(normalized, toothness, mask, width, search, splitY)
+		if len(panoramicCandidates) > 0 {
+			finalCandidates = panoramicCandidates
+			finalGeometries = panoramicGeometries
+		}
+	}
+	primaryCandidate := selectPrimaryCandidate(finalCandidates)
+	primaryIndex := -1
+	if primaryCandidate != nil {
+		for index := range finalCandidates {
+			if &finalCandidates[index] == primaryCandidate {
+				primaryIndex = index
+				break
 			}
 		}
 	}
 
-	mask = openBinaryMask(closeBinaryMask(mask, int(width), int(height)), int(width), int(height))
-
-	candidates := collectCandidates(mask, normalized, toothness, width, height, search)
-
 	// Return analysis buffers — candidates hold pixel indices, not buffer refs.
 	bufpool.PutUint8(normalized)
 	bufpool.PutUint8(toothness)
-	detectedCandidates := selectDetectedCandidates(candidates)
-	primaryCandidate := selectPrimaryCandidate(detectedCandidates)
+	if debug != nil {
+		debug.AllCandidates = cloneComponentCandidates(candidates)
+		debug.DetectedCandidates = cloneComponentCandidates(finalCandidates)
+	}
 
 	warnings := make([]string, 0, 2)
 	if measurementScale == nil {
 		warnings = append(warnings, "Calibration metadata unavailable; returning pixel measurements only.")
 	}
 
-	if len(detectedCandidates) > 0 && primaryCandidate != nil && !primaryCandidate.strict {
+	if len(finalCandidates) > 0 && primaryCandidate != nil && !primaryCandidate.strict {
 		warnings = append(warnings, "No component met the primary tooth filters; using relaxed tooth candidates.")
 	}
 
-	teeth := make([]contracts.ToothCandidate, 0, len(detectedCandidates))
-	for _, candidate := range detectedCandidates {
-		teeth = append(teeth, buildToothCandidate(candidate, measurementScale, width))
+	teeth := make([]contracts.ToothCandidate, 0, len(finalCandidates))
+	for index, candidate := range finalCandidates {
+		teeth = append(teeth, buildToothCandidate(candidate, finalGeometries[index], measurementScale))
 	}
 
 	var tooth *contracts.ToothCandidate
-	if primaryCandidate != nil {
-		candidate := buildToothCandidate(*primaryCandidate, measurementScale, width)
+	if primaryCandidate != nil && primaryIndex >= 0 {
+		candidate := buildToothCandidate(*primaryCandidate, finalGeometries[primaryIndex], measurementScale)
 		tooth = &candidate
 	} else {
 		warnings = append(warnings, "The backend could not isolate a tooth candidate from this study.")
@@ -175,15 +310,14 @@ func AnalyzeGrayscalePixels(
 // back to "px" off the Pixel bundle.
 func buildToothCandidate(
 	candidate componentCandidate,
+	geometry contracts.ToothGeometry,
 	measurementScale *contracts.MeasurementScale,
-	imageWidth uint32,
 ) contracts.ToothCandidate {
-	geometry := geometryFromPixels(candidate.pixels, candidate.bbox, imageWidth)
 	pixel := contracts.ToothMeasurementValues{
 		ToothWidth:        float64(lineSegmentLength(geometry.WidthLine)),
 		ToothHeight:       float64(lineSegmentLength(geometry.HeightLine)),
-		BoundingBoxWidth:  float64(candidate.bbox.Width),
-		BoundingBoxHeight: float64(candidate.bbox.Height),
+		BoundingBoxWidth:  float64(geometry.BoundingBox.Width),
+		BoundingBoxHeight: float64(geometry.BoundingBox.Height),
 		Units:             pixelUnits,
 	}
 
@@ -218,8 +352,8 @@ func buildToothCandidate(
 // connected-component pass.
 func defaultSearchRegion(width, height uint32) searchRegion {
 	xMargin := maxUint32(width/8, 8)
-	topMargin := maxUint32(uint32(math.Round(float64(height)*0.20)), 8)
-	bottom := maxUint32(uint32(math.Round(float64(height)*0.78)), topMargin+1)
+	topMargin := maxUint32(uint32(math.Round(float64(height)*0.16)), 8)
+	bottom := maxUint32(uint32(math.Round(float64(height)*0.84)), topMargin+1)
 
 	return searchRegion{
 		x:      xMargin,
@@ -275,20 +409,48 @@ func buildToothnessMap(
 	smallBlur []uint8,
 	largeBlur []uint8,
 	width, height uint32,
+	debug *analysisDebugSnapshot,
 ) []uint8 {
 	toothness := bufpool.GetUint8(len(normalized))
+	var smallMinusLarge []int16
+	var localContrastLegacy []uint8
+	var localContrast []uint8
+	var gradientMap []uint8
+	if debug != nil {
+		smallMinusLarge = make([]int16, len(normalized))
+		localContrastLegacy = make([]uint8, len(normalized))
+		localContrast = make([]uint8, len(normalized))
+		gradientMap = make([]uint8, len(normalized))
+	}
 	for y := uint32(0); y < height; y++ {
 		for x := uint32(0); x < width; x++ {
 			index := int(y*width + x)
 			small := int16(smallBlur[index])
 			large := int16(largeBlur[index])
-			localContrast := clampUint8FromInt(128 + int(small-large))
+			smallLargeDelta := int(small - large)
+			legacyContrast := clampUint8FromInt(128 + smallLargeDelta)
+			// Use only structure magnitude in the live score so flat bright
+			// regions do not inherit a high baseline toothness.
+			structuralContrast := clampUint8FromInt(absInt(smallLargeDelta))
 			gradient := localGradient(normalized, width, height, x, y)
-			combined := (uint16(normalized[index])*5 +
-				uint16(localContrast)*4 +
+			combined := (uint16(normalized[index])*4 +
+				uint16(structuralContrast)*5 +
 				uint16(gradient)*2) / 11
 			toothness[index] = uint8(combined)
+			if debug != nil {
+				smallMinusLarge[index] = int16(smallLargeDelta)
+				localContrastLegacy[index] = legacyContrast
+				localContrast[index] = structuralContrast
+				gradientMap[index] = gradient
+			}
 		}
+	}
+	if debug != nil {
+		debug.SmallMinusLarge = smallMinusLarge
+		debug.LocalContrastLegacy = localContrastLegacy
+		debug.LocalContrast = localContrast
+		debug.Gradient = gradientMap
+		debug.Toothness = cloneUint8Slice(toothness)
 	}
 
 	return toothness
@@ -318,6 +480,92 @@ func percentileInRegion(values []uint8, width uint32, region searchRegion, perce
 	}
 
 	return histogramPercentile(histogram, total, percentile)
+}
+
+func thresholdMaskForRegion(
+	normalized []uint8,
+	toothness []uint8,
+	width uint32,
+	region searchRegion,
+	toothnessPercentile float64,
+	intensityPercentile float64,
+) regionThresholdResult {
+	mask := make([]uint8, len(normalized))
+	if region.width == 0 || region.height == 0 {
+		return regionThresholdResult{mask: mask}
+	}
+
+	toothnessThreshold := maxUint8(percentileInRegion(toothness, width, region, toothnessPercentile), toothnessFloor)
+	intensityThreshold := maxUint8(percentileInRegion(normalized, width, region, intensityPercentile), intensityFloor)
+	maskPixels := 0
+	for y := region.y; y < region.y+region.height; y++ {
+		rowStart := int(y * width)
+		for x := region.x; x < region.x+region.width; x++ {
+			index := rowStart + int(x)
+			if toothness[index] >= toothnessThreshold && normalized[index] >= intensityThreshold {
+				mask[index] = 1
+				maskPixels++
+			}
+		}
+	}
+
+	return regionThresholdResult{
+		mask:               mask,
+		toothnessThreshold: toothnessThreshold,
+		intensityThreshold: intensityThreshold,
+		coverageRatio:      float64(maskPixels) / float64(maxUint32(region.area(), 1)),
+	}
+}
+
+func splitSearchRegionByOcclusalGap(normalized []uint8, toothness []uint8, width uint32, search searchRegion) (searchRegion, searchRegion, uint32) {
+	if search.height <= 2 {
+		return search, searchRegion{}, search.y
+	}
+
+	xInset := maxUint32(search.width/5, 24)
+	if xInset*2 >= search.width {
+		xInset = search.width / 8
+	}
+	profileX := search.x + xInset
+	profileWidth := maxUint32(saturatingSubUint32(search.width, xInset*2), 1)
+	toothnessThreshold := maxUint8(percentileInRegion(toothness, width, search, 0.70), toothnessFloor)
+	intensityThreshold := maxUint8(percentileInRegion(normalized, width, search, 0.48), intensityFloor)
+	rowProfile := make([]float64, search.height)
+	for y := search.y; y < search.y+search.height; y++ {
+		rowStart := int(y * width)
+		var hits float64
+		for x := profileX; x < profileX+profileWidth; x++ {
+			index := rowStart + int(x)
+			if toothness[index] >= toothnessThreshold && normalized[index] >= intensityThreshold {
+				hits++
+			}
+		}
+		rowProfile[y-search.y] = hits
+	}
+	smoothed := smoothFloatProfile(rowProfile, 11)
+	if len(smoothed) == 0 {
+		return search, searchRegion{}, search.y + search.height/2
+	}
+	height := len(smoothed)
+	windowStart := clampInt(int(math.Round(float64(height)*0.58)), 0, height-1)
+	windowEnd := clampInt(int(math.Round(float64(height)*0.86)), windowStart+1, height)
+	bestY := uint32(argminFloatSlice(smoothed[windowStart:windowEnd])+windowStart) + search.y
+
+	upperHeight := maxUint32(saturatingSubUint32(bestY, search.y), 1)
+	lowerY := minUint32(bestY+1, search.y+search.height-1)
+	lowerHeight := maxUint32(saturatingSubUint32(search.y+search.height, lowerY), 1)
+
+	return searchRegion{
+			x:      search.x,
+			y:      search.y,
+			width:  search.width,
+			height: upperHeight,
+		}, searchRegion{
+			x:      search.x,
+			y:      lowerY,
+			width:  search.width,
+			height: lowerHeight,
+		}, bestY
 }
 
 func histogramPercentile(histogram [256]uint32, total uint32, percentile float64) uint8 {
@@ -684,6 +932,1294 @@ func candidateCenterY(candidate componentCandidate) uint64 {
 	return uint64(candidate.bbox.Y)*2 + uint64(candidate.bbox.Height)
 }
 
+type indexedCandidate struct {
+	index     int
+	candidate componentCandidate
+}
+
+func buildPanoramicProfileCandidates(
+	normalized []uint8,
+	toothness []uint8,
+	mask []uint8,
+	imageWidth uint32,
+	search searchRegion,
+	splitY uint32,
+) ([]componentCandidate, []contracts.ToothGeometry) {
+	xInset := maxUint32(search.width/16, 48)
+	profileX := search.x + xInset
+	profileWidth := maxUint32(saturatingSubUint32(search.width, xInset*2), 1)
+	upperProfileBand := searchRegion{
+		x:      profileX,
+		y:      search.y + uint32(math.Round(float64(search.height)*0.18)),
+		width:  profileWidth,
+		height: uint32(math.Round(float64(search.height) * 0.16)),
+	}
+	lowerProfileBand := searchRegion{
+		x:      profileX,
+		y:      search.y + uint32(math.Round(float64(search.height)*0.52)),
+		width:  profileWidth,
+		height: uint32(math.Round(float64(search.height) * 0.14)),
+	}
+	upperBoxBand := searchRegion{
+		x:      profileX,
+		y:      search.y + uint32(math.Round(float64(search.height)*0.17)),
+		width:  profileWidth,
+		height: uint32(math.Round(float64(search.height) * 0.31)),
+	}
+	lowerBoxBand := searchRegion{
+		x:      profileX,
+		y:      search.y + uint32(math.Round(float64(search.height)*0.43)),
+		width:  profileWidth,
+		height: uint32(math.Round(float64(search.height) * 0.34)),
+	}
+	spans := buildPanoramicSharedSpans(normalized, toothness, imageWidth, upperProfileBand, lowerProfileBand)
+	if len(spans) == 0 {
+		return nil, nil
+	}
+
+	upperCandidates, upperGeometries := buildArchProfileCandidates(
+		normalized,
+		toothness,
+		mask,
+		imageWidth,
+		search,
+		upperProfileBand,
+		upperBoxBand,
+		splitY,
+		true,
+		spans,
+	)
+	lowerCandidates, lowerGeometries := buildArchProfileCandidates(
+		normalized,
+		toothness,
+		mask,
+		imageWidth,
+		search,
+		lowerProfileBand,
+		lowerBoxBand,
+		splitY,
+		false,
+		spans,
+	)
+
+	type pairedCandidate struct {
+		candidate componentCandidate
+		geometry  contracts.ToothGeometry
+	}
+	paired := make([]pairedCandidate, 0, len(upperCandidates)+len(lowerCandidates))
+	for index := range upperCandidates {
+		paired = append(paired, pairedCandidate{candidate: upperCandidates[index], geometry: upperGeometries[index]})
+	}
+	for index := range lowerCandidates {
+		paired = append(paired, pairedCandidate{candidate: lowerCandidates[index], geometry: lowerGeometries[index]})
+	}
+	sort.SliceStable(paired, func(left, right int) bool {
+		if candidateCenterX(paired[left].candidate) != candidateCenterX(paired[right].candidate) {
+			return candidateCenterX(paired[left].candidate) < candidateCenterX(paired[right].candidate)
+		}
+		return candidateCenterY(paired[left].candidate) < candidateCenterY(paired[right].candidate)
+	})
+
+	candidates := make([]componentCandidate, len(paired))
+	geometries := make([]contracts.ToothGeometry, len(paired))
+	for index, entry := range paired {
+		candidates[index] = entry.candidate
+		geometries[index] = entry.geometry
+	}
+	return candidates, geometries
+}
+
+func buildArchProfileCandidates(
+	normalized []uint8,
+	toothness []uint8,
+	mask []uint8,
+	imageWidth uint32,
+	search searchRegion,
+	profileBand searchRegion,
+	boxBand searchRegion,
+	splitY uint32,
+	isUpper bool,
+	spans []profileSpan,
+) ([]componentCandidate, []contracts.ToothGeometry) {
+	if len(spans) == 0 {
+		return nil, nil
+	}
+	archSpans := buildArchAdjustedSpans(normalized, toothness, imageWidth, profileBand, spans, isUpper)
+	if len(archSpans) == 0 {
+		archSpans = spans
+	}
+	candidates := make([]componentCandidate, 0, len(spans))
+	geometries := make([]contracts.ToothGeometry, 0, len(spans))
+	for _, span := range archSpans {
+		left := profileBand.x + uint32(span.start)
+		right := profileBand.x + uint32(span.end)
+		bbox := refinePanoramicToothBox(
+			normalized,
+			toothness,
+			mask,
+			imageWidth,
+			search,
+			profileBand,
+			boxBand,
+			splitY,
+			left,
+			right,
+			isUpper,
+		)
+		geometry := panoramicGeometryFromBox(bbox)
+
+		profileValue := meanPanoramicProfileValue(normalized, toothness, imageWidth, profileBand, span)
+		area := bbox.Width * maxUint32(minUint32(bbox.Height/5, 60), 36)
+		strict := isStrictToothCandidate(area, bbox, search)
+		score := scoreCandidate(area, bbox, search, profileValue, profileValue, strict)
+		candidates = append(candidates, componentCandidate{
+			bbox:   bbox,
+			area:   area,
+			score:  score,
+			strict: strict,
+		})
+		geometries = append(geometries, geometry)
+	}
+
+	return candidates, geometries
+}
+
+func panoramicGeometryFromBox(
+	bbox contracts.BoundingBox,
+) contracts.ToothGeometry {
+	centerX := bbox.X + bbox.Width/2
+	lineY := bbox.Y + bbox.Height/2
+
+	return contracts.ToothGeometry{
+		BoundingBox: bbox,
+		WidthLine: contracts.LineSegment{
+			Start: contracts.Point{X: bbox.X, Y: lineY},
+			End:   contracts.Point{X: bbox.X + bbox.Width - 1, Y: lineY},
+		},
+		HeightLine: contracts.LineSegment{
+			Start: contracts.Point{X: centerX, Y: bbox.Y},
+			End:   contracts.Point{X: centerX, Y: bbox.Y + bbox.Height - 1},
+		},
+	}
+}
+
+func refinePanoramicToothBox(
+	normalized []uint8,
+	toothness []uint8,
+	mask []uint8,
+	imageWidth uint32,
+	search searchRegion,
+	profileBand searchRegion,
+	boxBand searchRegion,
+	splitY uint32,
+	left uint32,
+	right uint32,
+	isUpper bool,
+) contracts.BoundingBox {
+	if right < left {
+		right = left
+	}
+	centerX := estimatePanoramicCenterX(normalized, toothness, imageWidth, profileBand, left, right)
+	centerY := estimatePanoramicSeedY(normalized, toothness, mask, imageWidth, profileBand, left, right)
+	refinedLeft, refinedRight := refinePanoramicHorizontalBounds(
+		normalized,
+		toothness,
+		mask,
+		imageWidth,
+		profileBand,
+		left,
+		right,
+		centerX,
+		centerY,
+	)
+	refinedTop, refinedBottom := refinePanoramicVerticalBounds(
+		normalized,
+		toothness,
+		mask,
+		imageWidth,
+			search,
+			boxBand,
+			splitY,
+			refinedLeft,
+			refinedRight,
+			centerY,
+		isUpper,
+	)
+
+	return contracts.BoundingBox{
+		X:      refinedLeft,
+		Y:      refinedTop,
+		Width:  maxUint32(saturatingSubUint32(refinedRight, refinedLeft)+1, 1),
+		Height: maxUint32(saturatingSubUint32(refinedBottom, refinedTop)+1, 1),
+	}
+}
+
+func estimatePanoramicCenterX(
+	normalized []uint8,
+	toothness []uint8,
+	imageWidth uint32,
+	band searchRegion,
+	left uint32,
+	right uint32,
+) uint32 {
+	if right <= left {
+		return left
+	}
+	targetX := left + (right-left)/2
+	bestX := targetX
+	bestScore := -1.0
+	for x := left; x <= right; x++ {
+		var sum float64
+		for y := band.y; y < band.y+band.height; y++ {
+			index := int(y*imageWidth + x)
+			sum += float64(normalized[index])*0.35 + float64(toothness[index])*0.65
+		}
+		score := sum - float64(absInt(int(x)-int(targetX)))*8.0
+		if score > bestScore {
+			bestScore = score
+			bestX = x
+		}
+	}
+	return bestX
+}
+
+func estimatePanoramicSeedY(
+	normalized []uint8,
+	toothness []uint8,
+	mask []uint8,
+	imageWidth uint32,
+	band searchRegion,
+	left uint32,
+	right uint32,
+) uint32 {
+	bestY := band.y + band.height/2
+	bestScore := -1.0
+	for y := band.y; y < band.y+band.height; y++ {
+		var sum float64
+		var count float64
+		for x := left; x <= right; x++ {
+			index := int(y*imageWidth + x)
+			sum += float64(normalized[index])*0.30 + float64(toothness[index])*0.50 + float64(mask[index])*90.0
+			count++
+		}
+		if count == 0 {
+			continue
+		}
+		score := sum / count
+		if score > bestScore {
+			bestScore = score
+			bestY = y
+		}
+	}
+	return bestY
+}
+
+func refinePanoramicHorizontalBounds(
+	normalized []uint8,
+	toothness []uint8,
+	mask []uint8,
+	imageWidth uint32,
+	profileBand searchRegion,
+	initialLeft uint32,
+	initialRight uint32,
+	centerX uint32,
+	centerY uint32,
+) (uint32, uint32) {
+	windowTop := maxUint32(centerY-18, profileBand.y)
+	windowBottom := minUint32(centerY+18, profileBand.y+profileBand.height-1)
+	searchLeft := maxUint32(saturatingSubUint32(initialLeft, 4), profileBand.x)
+	searchRight := minUint32(initialRight+4, profileBand.x+profileBand.width-1)
+	initialWidth := int(maxUint32(saturatingSubUint32(initialRight, initialLeft)+1, 1))
+	profile := make([]float64, profileBand.width)
+	for x := searchLeft; x <= searchRight; x++ {
+		var sum float64
+		var count float64
+		for y := windowTop; y <= windowBottom; y++ {
+			index := int(y*imageWidth + x)
+			sum += float64(normalized[index])*0.30 + float64(toothness[index])*0.50 + float64(mask[index])*90.0
+			count++
+		}
+		if count > 0 {
+			profile[x-profileBand.x] = sum / count
+		}
+	}
+	centerIndex := int(saturatingSubUint32(centerX, profileBand.x))
+	centerIndex = clampInt(centerIndex, int(searchLeft-profileBand.x), int(searchRight-profileBand.x))
+	searchSlice := append([]float64(nil), profile[searchLeft-profileBand.x:searchRight-profileBand.x+1]...)
+	baseline := percentileFloat64(searchSlice, 0.22)
+	peak := profile[centerIndex]
+	threshold := baseline + (peak-baseline)*0.32
+	leftIndex := centerIndex
+	minIndex := int(searchLeft - profileBand.x)
+	maxIndex := int(searchRight - profileBand.x)
+	for leftIndex > minIndex && profile[leftIndex-1] >= threshold {
+		leftIndex--
+	}
+	rightIndex := centerIndex
+	for rightIndex < maxIndex && profile[rightIndex+1] >= threshold {
+		rightIndex++
+	}
+	minWidth := maxInt(int(math.Round(float64(initialWidth)*0.82)), 36)
+	maxWidth := minInt(int(math.Round(float64(initialWidth)*0.98)), maxInt(initialWidth+4, 48))
+	width := rightIndex - leftIndex + 1
+	if width < minWidth {
+		leftIndex = maxInt(centerIndex-minWidth/2, minIndex)
+		rightIndex = minInt(leftIndex+minWidth-1, maxIndex)
+		leftIndex = maxInt(rightIndex-minWidth+1, minIndex)
+	}
+	if width > maxWidth {
+		leftIndex = maxInt(centerIndex-maxWidth/2, minIndex)
+		rightIndex = minInt(leftIndex+maxWidth-1, maxIndex)
+		leftIndex = maxInt(rightIndex-maxWidth+1, minIndex)
+	}
+	return profileBand.x + uint32(leftIndex), profileBand.x + uint32(rightIndex)
+}
+
+func refinePanoramicVerticalBounds(
+	normalized []uint8,
+	toothness []uint8,
+	mask []uint8,
+	imageWidth uint32,
+	search searchRegion,
+	boxBand searchRegion,
+	splitY uint32,
+	left uint32,
+	right uint32,
+	seedY uint32,
+	isUpper bool,
+) (uint32, uint32) {
+	laneWidth := maxUint32(saturatingSubUint32(right, left)+1, 1)
+	innerInset := minUint32(maxUint32(laneWidth/8, 2), 10)
+	innerLeft := minUint32(left+innerInset, right)
+	innerRight := maxUint32(right-innerInset, innerLeft)
+	flankWidth := minUint32(maxUint32(laneWidth/2, 14), 64)
+	leftOuterStart := maxUint32(saturatingSubUint32(left, flankWidth), search.x)
+	leftOuterEnd := left
+	if leftOuterEnd > search.x {
+		leftOuterEnd--
+	}
+	rightOuterStart := minUint32(right+1, search.x+search.width-1)
+	rightOuterEnd := minUint32(right+flankWidth, search.x+search.width-1)
+	var fitBand searchRegion
+	if isUpper {
+		fitStart := search.y + uint32(math.Round(float64(search.height)*0.24))
+		fitBand = searchRegion{
+			x:      left,
+			y:      fitStart,
+			width:  maxUint32(saturatingSubUint32(right, left)+1, 1),
+			height: maxUint32(saturatingSubUint32(splitY, fitStart), 1),
+		}
+	} else {
+		fitBand = searchRegion{
+			x:      left,
+			y:      maxUint32(splitY, search.y+uint32(math.Round(float64(search.height)*0.36))),
+			width:  maxUint32(saturatingSubUint32(right, left)+1, 1),
+			height: maxUint32(saturatingSubUint32(search.y+search.height, maxUint32(splitY, search.y+uint32(math.Round(float64(search.height)*0.36)))), 1),
+		}
+	}
+	fitBand = clampSearchRegionToSearch(fitBand, search)
+	rowProfile := make([]float64, fitBand.height)
+	for y := fitBand.y; y < fitBand.y+fitBand.height; y++ {
+		var innerNorm float64
+		var innerToothness float64
+		var innerMask float64
+		var innerCount float64
+		for x := innerLeft; x <= innerRight; x++ {
+			index := int(y*imageWidth + x)
+			innerNorm += float64(normalized[index])
+			innerToothness += float64(toothness[index])
+			innerMask += float64(mask[index])
+			innerCount++
+		}
+		if innerCount == 0 {
+			continue
+		}
+		outerNorm := 0.0
+		outerCount := 0.0
+		for x := leftOuterStart; x <= leftOuterEnd && leftOuterStart <= leftOuterEnd; x++ {
+			index := int(y*imageWidth + x)
+			outerNorm += float64(normalized[index])
+			outerCount++
+		}
+		for x := rightOuterStart; x <= rightOuterEnd && rightOuterStart <= rightOuterEnd; x++ {
+			index := int(y*imageWidth + x)
+			outerNorm += float64(normalized[index])
+			outerCount++
+		}
+		innerNorm /= innerCount
+		innerToothness /= innerCount
+		innerMask /= innerCount
+		if outerCount > 0 {
+			outerNorm /= outerCount
+		}
+		rowProfile[y-fitBand.y] = innerNorm*0.58 + innerToothness*0.28 + innerMask*35.0 - outerNorm*0.46
+	}
+	seedIndex := clampInt(int(saturatingSubUint32(seedY, fitBand.y)), 0, len(rowProfile)-1)
+	peak := rowProfile[seedIndex]
+	baseline := percentileFloat64(rowProfile, 0.20)
+	threshold := baseline + (peak-baseline)*0.12
+	minHeight := 150
+	maxHeight := 300
+	if isUpper {
+		minHeight = 180
+		maxHeight = 320
+	}
+
+	topIndex := seedIndex
+	misses := 0
+	for topIndex > 0 {
+		next := topIndex - 1
+		if rowProfile[next] < threshold {
+			misses++
+			if misses >= 6 {
+				break
+			}
+		} else {
+			misses = 0
+		}
+		topIndex = next
+	}
+	bottomIndex := seedIndex
+	misses = 0
+	for bottomIndex+1 < len(rowProfile) {
+		next := bottomIndex + 1
+		if rowProfile[next] < threshold {
+			misses++
+			if misses >= 8 {
+				break
+			}
+		} else {
+			misses = 0
+		}
+		bottomIndex = next
+	}
+	height := bottomIndex - topIndex + 1
+	if height < minHeight {
+		needed := minHeight - height
+		topIndex = maxInt(topIndex-needed/3, 0)
+		bottomIndex = minInt(bottomIndex+(needed-needed/3), len(rowProfile)-1)
+	}
+	if bottomIndex-topIndex+1 > maxHeight {
+		if isUpper {
+			bottomIndex = minInt(topIndex+maxHeight-1, len(rowProfile)-1)
+		} else {
+			topIndex = maxInt(bottomIndex-maxHeight+1, 0)
+		}
+	}
+	top := fitBand.y + uint32(topIndex)
+	bottom := fitBand.y + uint32(bottomIndex)
+	if isUpper {
+		top = maxUint32(saturatingSubUint32(top, 6), boxBand.y)
+		minBottom := maxUint32(splitY+8, top+1)
+		bottom = maxUint32(bottom+18, minBottom)
+		bottom = minUint32(bottom, search.y+search.height-1)
+	} else {
+		top = minUint32(top, splitY+18)
+		top = maxUint32(saturatingSubUint32(top, 12), search.y)
+		bottom = minUint32(bottom+18, search.y+search.height-1)
+	}
+	return top, bottom
+}
+
+func clampSearchRegionToSearch(region searchRegion, search searchRegion) searchRegion {
+	if region.x < search.x {
+		region.x = search.x
+	}
+	if region.y < search.y {
+		region.y = search.y
+	}
+	searchRight := search.x + search.width
+	searchBottom := search.y + search.height
+	regionRight := region.x + region.width
+	regionBottom := region.y + region.height
+	if regionRight > searchRight {
+		region.width = maxUint32(saturatingSubUint32(searchRight, region.x), 1)
+	}
+	if regionBottom > searchBottom {
+		region.height = maxUint32(saturatingSubUint32(searchBottom, region.y), 1)
+	}
+	return region
+}
+
+type profileSpan struct {
+	start int
+	end   int
+}
+
+func buildPanoramicSharedSpans(
+	normalized []uint8,
+	toothness []uint8,
+	imageWidth uint32,
+	upperProfileBand searchRegion,
+	lowerProfileBand searchRegion,
+) []profileSpan {
+	upperProfile := buildArchColumnProfile(normalized, toothness, imageWidth, upperProfileBand)
+	lowerProfile := buildArchColumnProfile(normalized, toothness, imageWidth, lowerProfileBand)
+	if len(upperProfile) == 0 || len(lowerProfile) == 0 || len(upperProfile) != len(lowerProfile) {
+		return nil
+	}
+
+	combined := make([]float64, len(upperProfile))
+	for index := range combined {
+		combined[index] = upperProfile[index]*0.52 + lowerProfile[index]*0.48
+	}
+	smoothed := smoothFloatProfile(combined, 17)
+	archStart, archEnd := estimateArchSpan(smoothed)
+	if archEnd-archStart+1 < 320 {
+		return nil
+	}
+	centerGap := estimateArchCenterGap(smoothed, archStart, archEnd)
+	return buildTemplateToothSpans(smoothed, archStart, archEnd, centerGap)
+}
+
+func meanPanoramicProfileValue(
+	normalized []uint8,
+	toothness []uint8,
+	imageWidth uint32,
+	profileBand searchRegion,
+	span profileSpan,
+) float64 {
+	if span.end < span.start || profileBand.height == 0 {
+		return 0
+	}
+	left := profileBand.x + uint32(span.start)
+	right := profileBand.x + uint32(span.end)
+	var sum float64
+	var count float64
+	for y := profileBand.y; y < profileBand.y+profileBand.height; y++ {
+		rowStart := int(y * imageWidth)
+		for x := left; x <= right; x++ {
+			index := rowStart + int(x)
+			sum += float64(normalized[index])*0.65 + float64(toothness[index])*0.35
+			count++
+		}
+	}
+	if count == 0 {
+		return 0
+	}
+	return sum / count
+}
+
+func buildArchAdjustedSpans(
+	normalized []uint8,
+	toothness []uint8,
+	imageWidth uint32,
+	profileBand searchRegion,
+	templateSpans []profileSpan,
+	isUpper bool,
+) []profileSpan {
+	if len(templateSpans) == 0 {
+		return nil
+	}
+	profile := buildArchColumnProfile(normalized, toothness, imageWidth, profileBand)
+	if len(profile) == 0 {
+		return nil
+	}
+	smoothed := smoothFloatProfile(profile, 9)
+	centers := make([]int, len(templateSpans))
+	halfWidths := make([]int, len(templateSpans))
+	for index, span := range templateSpans {
+		targetCenter := (span.start + span.end) / 2
+		targetWidth := span.end - span.start + 1
+		halfWidths[index] = maxInt(targetWidth/2, 14)
+		searchRadius := minInt(maxInt(targetWidth/5, 8), 22)
+		distancePenalty := 1.8
+		if !isUpper {
+			searchRadius = minInt(maxInt(targetWidth/3, 12), 34)
+			distancePenalty = 1.1
+		}
+		bestIndex := clampInt(targetCenter, 0, len(smoothed)-1)
+		bestScore := smoothed[bestIndex]
+		for candidate := maxInt(targetCenter-searchRadius, 0); candidate <= minInt(targetCenter+searchRadius, len(smoothed)-1); candidate++ {
+			score := smoothed[candidate] - float64(absInt(candidate-targetCenter))*distancePenalty
+			if score > bestScore {
+				bestIndex = candidate
+				bestScore = score
+			}
+		}
+		centers[index] = bestIndex
+	}
+	minDistance := 28
+	if !isUpper {
+		minDistance = 24
+	}
+	for index := 1; index < len(centers); index++ {
+		if centers[index]-centers[index-1] < minDistance {
+			centers[index] = minInt(centers[index-1]+minDistance, len(smoothed)-1)
+		}
+	}
+	for index := len(centers) - 2; index >= 0; index-- {
+		if centers[index+1]-centers[index] < minDistance {
+			centers[index] = maxInt(centers[index+1]-minDistance, 0)
+		}
+	}
+
+	boundaries := make([]int, len(centers)+1)
+	boundaries[0] = templateSpans[0].start
+	boundaries[len(boundaries)-1] = templateSpans[len(templateSpans)-1].end
+	for index := 1; index < len(centers); index++ {
+		leftCenter := centers[index-1]
+		rightCenter := centers[index]
+		searchStart := minInt(maxInt(leftCenter+4, 0), len(smoothed)-1)
+		searchEnd := maxInt(minInt(rightCenter-4, len(smoothed)-1), searchStart)
+		boundary := (leftCenter + rightCenter) / 2
+		bestValue := smoothed[clampInt(boundary, 0, len(smoothed)-1)]
+		for candidate := searchStart; candidate <= searchEnd; candidate++ {
+			if smoothed[candidate] < bestValue {
+				bestValue = smoothed[candidate]
+				boundary = candidate
+			}
+		}
+		boundaries[index] = boundary
+	}
+
+	spans := make([]profileSpan, 0, len(centers))
+	for index, center := range centers {
+		leftBound := boundaries[index]
+		if index > 0 {
+			leftBound++
+		}
+		rightBound := boundaries[index+1]
+		width := rightBound - leftBound + 1
+		targetWidth := minInt(maxInt(halfWidths[index]*2, 28), maxInt(width, 28))
+		left := maxInt(center-targetWidth/2, leftBound)
+		right := minInt(left+targetWidth-1, rightBound)
+		left = maxInt(right-targetWidth+1, leftBound)
+		if right-left+1 < 28 {
+			left = maxInt(center-14, leftBound)
+			right = minInt(left+27, rightBound)
+			left = maxInt(right-27, leftBound)
+		}
+		spans = append(spans, profileSpan{start: left, end: right})
+	}
+	return spans
+}
+
+func estimateArchSpan(values []float64) (int, int) {
+	if len(values) == 0 {
+		return 0, -1
+	}
+
+	baseline := percentileFloat64(values, 0.18)
+	peak := percentileFloat64(values, 0.88)
+	threshold := baseline + (peak-baseline)*0.22
+	start := 0
+	for start < len(values)-1 && values[start] < threshold {
+		start++
+	}
+	end := len(values) - 1
+	for end > start && values[end] < threshold {
+		end--
+	}
+	start = maxInt(start+10, 0)
+	end = minInt(end-10, len(values)-1)
+	return start, end
+}
+
+func estimateArchCenterGap(values []float64, archStart int, archEnd int) int {
+	if len(values) == 0 {
+		return 0
+	}
+	center := (archStart + archEnd) / 2
+	windowRadius := minInt(maxInt((archEnd-archStart)/10, 28), 96)
+	windowStart := maxInt(center-windowRadius, archStart)
+	windowEnd := minInt(center+windowRadius, archEnd)
+	bestIndex := center
+	bestValue := values[center]
+	for index := windowStart; index <= windowEnd; index++ {
+		if values[index] < bestValue {
+			bestIndex = index
+			bestValue = values[index]
+		}
+	}
+	return bestIndex
+}
+
+func buildTemplateToothSpans(values []float64, archStart int, archEnd int, centerGap int) []profileSpan {
+	if archEnd <= archStart {
+		return nil
+	}
+
+	edgeInset := maxInt((archEnd-archStart)/16, 52)
+	archStart = minInt(archStart+edgeInset, archEnd)
+	archEnd = maxInt(archEnd-edgeInset, archStart)
+	gapHalfWidth := maxInt((archEnd-archStart)/96, 2)
+	leftEnd := maxInt(centerGap-gapHalfWidth, archStart+80)
+	rightStart := minInt(centerGap+gapHalfWidth, archEnd-80)
+	if leftEnd-archStart < 180 || archEnd-rightStart < 180 {
+		leftEnd = (archStart + archEnd) / 2
+		rightStart = leftEnd + 1
+	}
+
+	posteriorToAnteriorWeights := []float64{1.08, 1.04, 1.00, 0.98, 0.96, 0.94, 0.92}
+	spans := make([]profileSpan, 0, 10)
+	spans = append(spans, buildHalfArchTemplateSpans(values, archStart, leftEnd, posteriorToAnteriorWeights, false)...)
+	spans = append(spans, buildHalfArchTemplateSpans(values, rightStart, archEnd, posteriorToAnteriorWeights, true)...)
+	return spans
+}
+
+func buildHalfArchTemplateSpans(
+	values []float64,
+	start int,
+	end int,
+	weights []float64,
+	towardRight bool,
+) []profileSpan {
+	if end <= start || len(weights) == 0 {
+		return nil
+	}
+
+	orderedWeights := append([]float64(nil), weights...)
+	if towardRight {
+		reverseFloat64s(orderedWeights)
+	}
+	centers := buildWeightedTemplateCenters(values, start, end, orderedWeights)
+	if len(centers) == 0 {
+		return nil
+	}
+
+	boundaries := make([]int, len(centers)+1)
+	boundaries[0] = start
+	boundaries[len(boundaries)-1] = end
+	for index := 1; index < len(centers); index++ {
+		leftCenter := centers[index-1]
+		rightCenter := centers[index]
+		searchStart := minInt(maxInt(leftCenter+4, start), end)
+		searchEnd := maxInt(minInt(rightCenter-4, end), searchStart)
+		boundary := (leftCenter + rightCenter) / 2
+		bestValue := values[clampInt(boundary, start, end)]
+		for candidate := searchStart; candidate <= searchEnd; candidate++ {
+			if values[candidate] < bestValue {
+				bestValue = values[candidate]
+				boundary = candidate
+			}
+		}
+		boundaries[index] = boundary
+	}
+
+	spans := make([]profileSpan, 0, len(centers))
+	for index, center := range centers {
+		slotStart := boundaries[index]
+		if index > 0 {
+			slotStart++
+		}
+		slotEnd := boundaries[index+1]
+		if slotEnd <= slotStart {
+			slotEnd = minInt(slotStart+31, end)
+		}
+		slotWidth := slotEnd - slotStart + 1
+		left := slotStart
+		right := slotEnd
+		if slotWidth > 96 {
+			targetWidth := minInt(maxInt(int(math.Round(float64(slotWidth)*0.86)), 42), 96)
+			left = maxInt(center-targetWidth/2, slotStart)
+			right = minInt(left+targetWidth-1, slotEnd)
+			left = maxInt(right-targetWidth+1, slotStart)
+		} else {
+			edgeInset := minInt(maxInt(slotWidth/24, 1), 3)
+			left = minInt(left+edgeInset, right)
+			right = maxInt(right-edgeInset, left)
+		}
+		if right-left+1 < 28 {
+			left = maxInt(center-14, start)
+			right = minInt(left+27, end)
+			left = maxInt(right-27, start)
+		}
+		spans = append(spans, profileSpan{start: left, end: right})
+	}
+	return spans
+}
+
+func buildWeightedTemplateCenters(values []float64, start int, end int, weights []float64) []int {
+	if end <= start || len(weights) == 0 {
+		return nil
+	}
+	totalWidth := end - start + 1
+	weightSum := 0.0
+	for _, weight := range weights {
+		weightSum += weight
+	}
+	if weightSum <= 0 {
+		return nil
+	}
+
+	centers := make([]int, len(weights))
+	offset := 0.0
+	for index, weight := range weights {
+		slotStart := float64(start) + (offset/weightSum)*float64(totalWidth)
+		offset += weight
+		slotEnd := float64(start) + (offset/weightSum)*float64(totalWidth)
+		targetCenter := int(math.Round((slotStart + slotEnd - 1) / 2.0))
+		searchRadius := minInt(maxInt(int(math.Round((slotEnd-slotStart)/10.0)), 4), 8)
+		bestIndex := clampInt(targetCenter, start, end)
+		bestScore := values[bestIndex]
+		for candidate := maxInt(bestIndex-searchRadius, start); candidate <= minInt(bestIndex+searchRadius, end); candidate++ {
+			score := values[candidate] - float64(absInt(candidate-targetCenter))*2.5
+			if score > bestScore {
+				bestIndex = candidate
+				bestScore = score
+			}
+		}
+		centers[index] = bestIndex
+	}
+
+	minDistance := maxInt(totalWidth/(len(weights)*3), 32)
+	for index := 1; index < len(centers); index++ {
+		if centers[index]-centers[index-1] < minDistance {
+			centers[index] = minInt(centers[index-1]+minDistance, end)
+		}
+	}
+	for index := len(centers) - 2; index >= 0; index-- {
+		if centers[index+1]-centers[index] < minDistance {
+			centers[index] = maxInt(centers[index+1]-minDistance, start)
+		}
+	}
+	return centers
+}
+
+func refineArchVerticalBounds(
+	normalized []uint8,
+	toothness []uint8,
+	mask []uint8,
+	imageWidth uint32,
+	boxBand searchRegion,
+	left uint32,
+	right uint32,
+	isUpper bool,
+) (uint32, uint32) {
+	if boxBand.height == 0 {
+		return boxBand.y, boxBand.y
+	}
+
+	xInset := minUint32(maxUint32((right-left+1)/6, 2), 12)
+	sampleLeft := minUint32(left+xInset, right)
+	sampleRight := maxUint32(right-xInset, sampleLeft)
+	profile := make([]float64, boxBand.height)
+	for offsetY := uint32(0); offsetY < boxBand.height; offsetY++ {
+		y := boxBand.y + offsetY
+		rowStart := int(y * imageWidth)
+		var sum float64
+		var count float64
+		for x := sampleLeft; x <= sampleRight; x++ {
+			index := rowStart + int(x)
+			sum += float64(normalized[index])*0.45 + float64(toothness[index])*0.40 + float64(mask[index])*90.0
+			count++
+		}
+		if count > 0 {
+			profile[offsetY] = sum / count
+		}
+	}
+	smoothed := smoothFloatProfile(profile, 7)
+	start, end := longestHighRun(smoothed)
+	if end <= start {
+		return boxBand.y, boxBand.y + boxBand.height - 1
+	}
+
+	topPad := uint32(18)
+	bottomPad := uint32(22)
+	if isUpper {
+		top := maxUint32(boxBand.y+uint32(start), boxBand.y)
+		top = saturatingSubUint32(top, topPad)
+		bottom := minUint32(boxBand.y+uint32(end)+bottomPad, boxBand.y+boxBand.height-1)
+		return top, bottom
+	}
+
+	top := maxUint32(boxBand.y+uint32(start), boxBand.y)
+	top = saturatingSubUint32(top, 8)
+	bottom := minUint32(boxBand.y+uint32(end)+28, boxBand.y+boxBand.height-1)
+	return top, bottom
+}
+
+func longestHighRun(values []float64) (int, int) {
+	if len(values) == 0 {
+		return 0, -1
+	}
+	baseline := percentileFloat64(values, 0.18)
+	peak := percentileFloat64(values, 0.86)
+	threshold := baseline + (peak-baseline)*0.34
+	bestStart := 0
+	bestEnd := -1
+	start := -1
+	for index, value := range values {
+		if value >= threshold {
+			if start < 0 {
+				start = index
+			}
+			continue
+		}
+		if start >= 0 && index-start > bestEnd-bestStart+1 {
+			bestStart = start
+			bestEnd = index - 1
+		}
+		start = -1
+	}
+	if start >= 0 && len(values)-start > bestEnd-bestStart+1 {
+		bestStart = start
+		bestEnd = len(values) - 1
+	}
+	return bestStart, bestEnd
+}
+
+func percentileFloat64(values []float64, percentile float64) float64 {
+	if len(values) == 0 {
+		return 0
+	}
+	sorted := append([]float64(nil), values...)
+	sort.Float64s(sorted)
+	index := int(math.Round(float64(len(sorted)-1) * percentile))
+	index = clampInt(index, 0, len(sorted)-1)
+	return sorted[index]
+}
+
+func meanFloatSlice(values []float64) float64 {
+	if len(values) == 0 {
+		return 0
+	}
+	sum := 0.0
+	for _, value := range values {
+		sum += value
+	}
+	return sum / float64(len(values))
+}
+
+func reverseFloat64s(values []float64) {
+	for left, right := 0, len(values)-1; left < right; left, right = left+1, right-1 {
+		values[left], values[right] = values[right], values[left]
+	}
+}
+
+func clampInt(value int, minValue int, maxValue int) int {
+	if value < minValue {
+		return minValue
+	}
+	if value > maxValue {
+		return maxValue
+	}
+	return value
+}
+
+func buildArchColumnProfile(
+	normalized []uint8,
+	toothness []uint8,
+	imageWidth uint32,
+	band searchRegion,
+) []float64 {
+	if band.width == 0 || band.height == 0 {
+		return nil
+	}
+
+	profile := make([]float64, band.width)
+	denominator := float64(maxUint32(band.height, 1))
+	for xOffset := uint32(0); xOffset < band.width; xOffset++ {
+		x := band.x + xOffset
+		var sum float64
+		for y := band.y; y < band.y+band.height; y++ {
+			index := int(y*imageWidth + x)
+			sum += float64(normalized[index])*0.65 + float64(toothness[index])*0.35
+		}
+		profile[xOffset] = sum / denominator
+	}
+	return profile
+}
+
+func smoothFloatProfile(values []float64, radius int) []float64 {
+	if len(values) == 0 {
+		return nil
+	}
+	if radius <= 0 {
+		return append([]float64(nil), values...)
+	}
+
+	prefix := make([]float64, len(values)+1)
+	for index, value := range values {
+		prefix[index+1] = prefix[index] + value
+	}
+	smoothed := make([]float64, len(values))
+	for index := range values {
+		start := maxInt(index-radius, 0)
+		end := minInt(index+radius+1, len(values))
+		smoothed[index] = (prefix[end] - prefix[start]) / float64(end-start)
+	}
+	return smoothed
+}
+
+func buildToothBandRowProfile(
+	normalized []uint8,
+	toothness []uint8,
+	imageWidth uint32,
+	band searchRegion,
+) []float64 {
+	if band.width == 0 || band.height == 0 {
+		return nil
+	}
+
+	profile := make([]float64, band.height)
+	histogram := make([]uint32, 256)
+	for yOffset := uint32(0); yOffset < band.height; yOffset++ {
+		for index := range histogram {
+			histogram[index] = 0
+		}
+		y := band.y + yOffset
+		rowStart := int(y * imageWidth)
+		for x := band.x; x < band.x+band.width; x++ {
+			index := rowStart + int(x)
+			value := uint8(math.Round(float64(normalized[index])*0.30 + float64(toothness[index])*0.70))
+			histogram[value]++
+		}
+		threshold := histogramPercentileFromUint32(histogram, band.width, 0.72)
+		var sum float64
+		var count float64
+		for x := band.x; x < band.x+band.width; x++ {
+			index := rowStart + int(x)
+			value := uint8(math.Round(float64(normalized[index])*0.30 + float64(toothness[index])*0.70))
+			if value < threshold {
+				continue
+			}
+			sum += float64(value)
+			count++
+		}
+		if count == 0 {
+			profile[yOffset] = float64(threshold)
+			continue
+		}
+		profile[yOffset] = sum / count
+	}
+	return profile
+}
+
+func histogramPercentileFromUint32(histogram []uint32, total uint32, percentile float64) uint8 {
+	if total == 0 {
+		return 0
+	}
+	targetRank := uint32(math.Round(percentile * float64(total-1)))
+	var cumulative uint32
+	for value, count := range histogram {
+		cumulative += count
+		if cumulative > targetRank {
+			return uint8(value)
+		}
+	}
+	return uint8(len(histogram) - 1)
+}
+
+func argmaxFloatSlice(values []float64) int {
+	if len(values) == 0 {
+		return 0
+	}
+	bestIndex := 0
+	bestValue := values[0]
+	for index := 1; index < len(values); index++ {
+		if values[index] > bestValue {
+			bestIndex = index
+			bestValue = values[index]
+		}
+	}
+	return bestIndex
+}
+
+func argminFloatSlice(values []float64) int {
+	if len(values) == 0 {
+		return 0
+	}
+	bestIndex := 0
+	bestValue := values[0]
+	for index := 1; index < len(values); index++ {
+		if values[index] < bestValue {
+			bestIndex = index
+			bestValue = values[index]
+		}
+	}
+	return bestIndex
+}
+
+func detectProfilePeaks(values []float64, minPeaks, maxPeaks, minDistance int) []int {
+	if len(values) == 0 {
+		return nil
+	}
+	type peak struct {
+		index int
+		value float64
+	}
+	allPeaks := make([]peak, 0)
+	for index := 1; index < len(values)-1; index++ {
+		if values[index] >= values[index-1] && values[index] >= values[index+1] {
+			allPeaks = append(allPeaks, peak{index: index, value: values[index]})
+		}
+	}
+	if len(allPeaks) == 0 {
+		return nil
+	}
+
+	sort.Slice(allPeaks, func(left, right int) bool {
+		return allPeaks[left].value > allPeaks[right].value
+	})
+	selected := make([]peak, 0, len(allPeaks))
+	for _, candidate := range allPeaks {
+		keep := true
+		for _, existing := range selected {
+			if absInt(candidate.index-existing.index) < minDistance {
+				keep = false
+				break
+			}
+		}
+		if keep {
+			selected = append(selected, candidate)
+		}
+	}
+
+	if len(selected) > maxPeaks {
+		selected = selected[:maxPeaks]
+	}
+	if len(selected) < minPeaks {
+		for _, candidate := range allPeaks {
+			found := false
+			for _, existing := range selected {
+				if existing.index == candidate.index {
+					found = true
+					break
+				}
+			}
+			if found {
+				continue
+			}
+			selected = append(selected, candidate)
+			if len(selected) >= minPeaks {
+				break
+			}
+		}
+	}
+
+	sort.Slice(selected, func(left, right int) bool {
+		return selected[left].index < selected[right].index
+	})
+	indices := make([]int, len(selected))
+	for index, peak := range selected {
+		indices[index] = peak.index
+	}
+	return indices
+}
+
+func mergeProfilePeaks(values []float64, peaks []int, mergeDistance int, shallowValleyRatio float64) []int {
+	if len(peaks) <= 1 {
+		return peaks
+	}
+
+	merged := make([]int, 0, len(peaks))
+	cluster := []int{peaks[0]}
+	flush := func() {
+		if len(cluster) == 0 {
+			return
+		}
+		bestPeak := cluster[0]
+		bestValue := values[bestPeak]
+		var weightedIndex float64
+		var weightSum float64
+		for _, peak := range cluster {
+			weight := math.Max(values[peak], 1.0)
+			weightedIndex += float64(peak) * weight
+			weightSum += weight
+			if values[peak] > bestValue {
+				bestPeak = peak
+				bestValue = values[peak]
+			}
+		}
+		if weightSum > 0 {
+			candidate := int(math.Round(weightedIndex / weightSum))
+			candidate = minInt(maxInt(candidate, 0), len(values)-1)
+			if values[candidate] >= bestValue*0.98 {
+				bestPeak = candidate
+			}
+		}
+		merged = append(merged, bestPeak)
+		cluster = cluster[:0]
+	}
+
+	for index := 1; index < len(peaks); index++ {
+		prev := cluster[len(cluster)-1]
+		current := peaks[index]
+		merge := false
+		if current-prev <= mergeDistance {
+			merge = true
+		} else {
+			valley := minFloatSlice(values[prev : current+1])
+			ceiling := math.Min(values[prev], values[current])
+			if ceiling > 0 && valley/ceiling >= shallowValleyRatio {
+				merge = true
+			}
+		}
+
+		if merge {
+			cluster = append(cluster, current)
+			continue
+		}
+
+		flush()
+		cluster = append(cluster, current)
+	}
+	flush()
+	return merged
+}
+
+func restoreProfilePeaks(values []float64, peaks []int, originalPeaks []int, targetCount int, minDistance int) []int {
+	if len(peaks) >= targetCount || len(originalPeaks) == 0 {
+		return peaks
+	}
+
+	selected := append([]int(nil), peaks...)
+	type scoredPeak struct {
+		index int
+		value float64
+	}
+	candidates := make([]scoredPeak, 0, len(originalPeaks))
+	for _, peak := range originalPeaks {
+		found := false
+		for _, existing := range selected {
+			if existing == peak {
+				found = true
+				break
+			}
+		}
+		if found {
+			continue
+		}
+		candidates = append(candidates, scoredPeak{index: peak, value: values[peak]})
+	}
+	sort.Slice(candidates, func(left, right int) bool {
+		return candidates[left].value > candidates[right].value
+	})
+	for _, candidate := range candidates {
+		tooClose := false
+		for _, existing := range selected {
+			if absInt(existing-candidate.index) < minDistance {
+				tooClose = true
+				break
+			}
+		}
+		if tooClose {
+			continue
+		}
+		selected = append(selected, candidate.index)
+		if len(selected) >= targetCount {
+			break
+		}
+	}
+	sort.Ints(selected)
+	return selected
+}
+
+func minFloatSlice(values []float64) float64 {
+	if len(values) == 0 {
+		return 0
+	}
+	minValue := values[0]
+	for _, value := range values[1:] {
+		if value < minValue {
+			minValue = value
+		}
+	}
+	return minValue
+}
+
 func geometryFromPixels(
 	pixels []int,
 	bbox contracts.BoundingBox,
@@ -791,10 +2327,9 @@ func geometryFromPixels(
 }
 
 func lineSegmentLength(line contracts.LineSegment) uint32 {
-	if line.Start.Y == line.End.Y {
-		return line.End.X - line.Start.X + 1
-	}
-	return line.End.Y - line.Start.Y + 1
+	dx := math.Abs(float64(line.End.X) - float64(line.Start.X))
+	dy := math.Abs(float64(line.End.Y) - float64(line.Start.Y))
+	return uint32(math.Round(math.Hypot(dx, dy))) + 1
 }
 
 func roundMeasurement(value float64) float64 {
@@ -1271,6 +2806,59 @@ func maxUint8(left, right uint8) uint8 {
 		return left
 	}
 	return right
+}
+
+func minNonZeroUint8(left, right uint8) uint8 {
+	switch {
+	case left == 0:
+		return right
+	case right == 0:
+		return left
+	case left < right:
+		return left
+	default:
+		return right
+	}
+}
+
+func cloneUint8Slice(values []uint8) []uint8 {
+	cloned := make([]uint8, len(values))
+	copy(cloned, values)
+	return cloned
+}
+
+func cloneComponentCandidates(candidates []componentCandidate) []componentCandidate {
+	cloned := make([]componentCandidate, len(candidates))
+	for index, candidate := range candidates {
+		cloned[index] = candidate
+		if len(candidate.pixels) > 0 {
+			cloned[index].pixels = append([]int(nil), candidate.pixels...)
+		}
+	}
+	return cloned
+}
+
+func orMasks(left, right []uint8) []uint8 {
+	if len(left) != len(right) {
+		return nil
+	}
+	combined := make([]uint8, len(left))
+	for index := range left {
+		if left[index] != 0 || right[index] != 0 {
+			combined[index] = 1
+		}
+	}
+	return combined
+}
+
+func countMaskPixels(mask []uint8) int {
+	count := 0
+	for _, value := range mask {
+		if value != 0 {
+			count++
+		}
+	}
+	return count
 }
 
 func minInt(left, right int) int {
