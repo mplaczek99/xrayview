@@ -2350,26 +2350,38 @@ func attachClosestOutlines(
 			continue
 		}
 
-		bestOutline := []contracts.Point{}
-		bestScore := -1.0
-		for _, candidate := range outlined {
-			if len(candidate.Outline) == 0 {
-				continue
-			}
-			score := outlineMatchScore(result[index].BoundingBox, candidate.BoundingBox)
-			if score > bestScore {
-				bestScore = score
-				bestOutline = candidate.Outline
-			}
-		}
+		bestOutline := bestMatchingOutline(result[index].BoundingBox, outlined)
 		if len(bestOutline) == 0 {
 			continue
 		}
 
-		result[index].Outline = clonePointSlice(bestOutline)
+		result[index].Outline = bestOutline
 	}
 
 	return result
+}
+
+func bestMatchingOutline(
+	target contracts.BoundingBox,
+	outlined []contracts.ToothGeometry,
+) []contracts.Point {
+	bestOutline := []contracts.Point{}
+	bestScore := -1.0
+	for _, candidate := range outlined {
+		if len(candidate.Outline) == 0 {
+			continue
+		}
+		score := outlineMatchScore(target, candidate.BoundingBox)
+		if score > bestScore {
+			bestScore = score
+			bestOutline = candidate.Outline
+		}
+	}
+	if len(bestOutline) == 0 {
+		return []contracts.Point{}
+	}
+
+	return clonePointSlice(bestOutline)
 }
 
 func outlineMatchScore(target contracts.BoundingBox, source contracts.BoundingBox) float64 {

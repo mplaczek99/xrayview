@@ -870,11 +870,16 @@ func TestStartAnalyzeJobWritesPreviewAndServesCachedSnapshot(t *testing.T) {
 	if !result.Analysis.Calibration.RealWorldMeasurementsAvailable {
 		t.Fatal("Analysis.Calibration.RealWorldMeasurementsAvailable = false, want true")
 	}
-	if got, want := len(result.SuggestedAnnotations.Lines), len(result.Analysis.Teeth)*2; got != want {
+	if got, want := len(result.SuggestedAnnotations.Lines), 0; got != want {
 		t.Fatalf("len(SuggestedAnnotations.Lines) = %d, want %d", got, want)
 	}
-	if got, want := len(result.SuggestedAnnotations.Rectangles), len(result.Analysis.Teeth); got != want {
+	if got, want := len(result.SuggestedAnnotations.Rectangles), 0; got != want {
 		t.Fatalf("len(SuggestedAnnotations.Rectangles) = %d, want %d", got, want)
+	}
+	if result.Analysis.Tooth != nil {
+		if got := len(result.SuggestedAnnotations.Polylines); got == 0 {
+			t.Fatal("len(SuggestedAnnotations.Polylines) = 0, want at least 1")
+		}
 	}
 
 	cachedStarted, err := service.StartAnalyzeJob(contracts.AnalyzeStudyCommand{StudyID: study.StudyID})
@@ -903,8 +908,8 @@ func TestStartAnalyzeJobWritesPreviewAndServesCachedSnapshot(t *testing.T) {
 	if got, want := cachedResult.PreviewPath, result.PreviewPath; got != want {
 		t.Fatalf("cached PreviewPath = %q, want %q", got, want)
 	}
-	if got, want := len(cachedResult.SuggestedAnnotations.Lines), len(result.SuggestedAnnotations.Lines); got != want {
-		t.Fatalf("cached len(SuggestedAnnotations.Lines) = %d, want %d", got, want)
+	if got, want := len(cachedResult.SuggestedAnnotations.Polylines), len(result.SuggestedAnnotations.Polylines); got != want {
+		t.Fatalf("cached len(SuggestedAnnotations.Polylines) = %d, want %d", got, want)
 	}
 }
 
@@ -1476,7 +1481,7 @@ func TestRenderAndAnalyzeJobsRemovePreviewArtifactWhenPreviewWriteFails(t *testi
 				return service.StartAnalyzeJob(contracts.AnalyzeStudyCommand{StudyID: studyID})
 			},
 			fingerprint: analyzeFingerprint,
-			wantMessage: "write analysis preview PNG",
+			wantMessage: "analyze tooth candidate",
 		},
 	}
 

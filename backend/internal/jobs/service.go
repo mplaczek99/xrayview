@@ -903,30 +903,7 @@ func (service *Service) executeAnalyzeJob(
 	if err := service.transitionJob(
 		jobID,
 		contracts.JobStateRunning,
-		75,
-		"writingPreview",
-		"Writing analysis preview",
-	); err != nil {
-		service.failJob(jobID, err)
-		return
-	}
-
-	if err := render.SavePreviewPNG(previewPath, preview); err != nil {
-		cleanupPaths(previewPath)
-		service.failJob(jobID, contracts.Internal(fmt.Sprintf("write analysis preview PNG: %v", err)))
-		return
-	}
-	if info, err := os.Stat(previewPath); err == nil {
-		service.cache.AddArtifactBytes(info.Size())
-	}
-	if service.finishCancelledIfRequested(ctx, jobID, "writingPreview", previewPath) {
-		return
-	}
-
-	if err := service.transitionJob(
-		jobID,
-		contracts.JobStateRunning,
-		88,
+		78,
 		"analyzingTooth",
 		"Analyzing tooth boundary",
 	); err != nil {
@@ -940,6 +917,34 @@ func (service *Service) executeAnalyzeJob(
 		return
 	}
 
+	if err := service.transitionJob(
+		jobID,
+		contracts.JobStateRunning,
+		88,
+		"writingPreview",
+		"Writing analysis preview",
+	); err != nil {
+		service.failJob(jobID, err)
+		return
+	}
+
+	overlayPreview, err := analysis.OverlayPreviewWithToothTrace(preview, toothAnalysis)
+	if err != nil {
+		service.failJob(jobID, contracts.Internal(fmt.Sprintf("overlay analysis preview: %v", err)))
+		return
+	}
+	if err := render.SavePreviewPNG(previewPath, overlayPreview); err != nil {
+		cleanupPaths(previewPath)
+		service.failJob(jobID, contracts.Internal(fmt.Sprintf("write analysis preview PNG: %v", err)))
+		return
+	}
+	if info, err := os.Stat(previewPath); err == nil {
+		service.cache.AddArtifactBytes(info.Size())
+	}
+	if service.finishCancelledIfRequested(ctx, jobID, "writingPreview", previewPath) {
+		return
+	}
+
 	service.completeAnalyzeJob(
 		jobID,
 		fingerprint,
@@ -947,7 +952,7 @@ func (service *Service) executeAnalyzeJob(
 			StudyID:              study.StudyID,
 			PreviewPath:          previewPath,
 			Analysis:             toothAnalysis,
-			SuggestedAnnotations: annotations.SuggestedAnnotations(&toothAnalysis),
+			SuggestedAnnotations: annotations.SuggestedAnnotations(preview, &toothAnalysis),
 		},
 	)
 }

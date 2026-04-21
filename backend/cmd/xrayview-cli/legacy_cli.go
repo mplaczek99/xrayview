@@ -251,15 +251,18 @@ func analyzeLegacyStudy(inputPath, previewOutput string, stdout io.Writer) error
 	}
 
 	preview := render.RenderSourceImage(study.Image, render.DefaultRenderPlan())
-	if previewOutput != "" {
-		if err := render.SavePreviewPNG(previewOutput, preview); err != nil {
-			return err
-		}
-	}
-
 	toothAnalysis, err := analysis.AnalyzePreview(preview, study.MeasurementScale)
 	if err != nil {
 		return err
+	}
+	if previewOutput != "" {
+		overlayPreview, err := analysis.OverlayPreviewWithToothTrace(preview, toothAnalysis)
+		if err != nil {
+			return err
+		}
+		if err := render.SavePreviewPNG(previewOutput, overlayPreview); err != nil {
+			return err
+		}
 	}
 
 	return writeJSON(stdout, normalizeLegacyToothAnalysis(toothAnalysis))
