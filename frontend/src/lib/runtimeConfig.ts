@@ -1,21 +1,15 @@
 import type { RuntimeMode } from "./types";
 
 const BACKEND_RUNTIME_ENV_KEY = "VITE_XRAYVIEW_BACKEND_RUNTIME";
-const BACKEND_URL_ENV_KEY = "VITE_XRAYVIEW_BACKEND_URL";
-const DEFAULT_HTTP_BASE_URL = "http://127.0.0.1:38181";
 
 export interface RuntimeConfiguration {
   mode: RuntimeMode;
   selectionSource: "default" | "env";
   warnings: string[];
-  // httpBaseUrl is defined only when mode === "http". It points at the loopback
-  // backend the agent harness spawned (or an explicit VITE_XRAYVIEW_BACKEND_URL
-  // override). Other modes leave it undefined.
-  httpBaseUrl?: string;
 }
 
 function isRuntimeMode(value: string): value is RuntimeMode {
-  return value === "mock" || value === "desktop" || value === "http";
+  return value === "mock" || value === "desktop";
 }
 
 function normalizeRuntimeMode(value: string): RuntimeMode | null {
@@ -44,13 +38,12 @@ export function resolveRuntimeConfiguration(
     const modeOverride = normalizeRuntimeMode(normalizedMode);
     if (!modeOverride) {
       warnings.push(
-        `${BACKEND_RUNTIME_ENV_KEY} must be one of mock, desktop, or http. Falling back to ${defaultMode}.`,
+        `${BACKEND_RUNTIME_ENV_KEY} must be one of mock or desktop. Falling back to ${defaultMode}.`,
       );
     } else if (!isDesktopRuntime && modeOverride === "desktop") {
       // desktop mode relies on the Wails JS bridge that only exists inside
-      // the packaged shell. In a plain browser (including the agent harness)
-      // fall back to mock so the page still boots — the harness selects
-      // "http" explicitly when a live backend is reachable.
+      // the packaged shell. In a plain browser fall back to mock so the page
+      // still boots.
       warnings.push(
         `${modeOverride} requires the desktop shell. Falling back to mock in browser mode.`,
       );
@@ -60,18 +53,9 @@ export function resolveRuntimeConfiguration(
     }
   }
 
-  const config: RuntimeConfiguration = {
+  return {
     mode,
     selectionSource,
     warnings,
   };
-
-  if (mode === "http") {
-    const rawBaseUrl = import.meta.env[BACKEND_URL_ENV_KEY];
-    const trimmed =
-      typeof rawBaseUrl === "string" ? rawBaseUrl.trim() : "";
-    config.httpBaseUrl = trimmed || DEFAULT_HTTP_BASE_URL;
-  }
-
-  return config;
 }

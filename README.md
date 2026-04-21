@@ -155,8 +155,7 @@ subcommands** and **legacy workflow flags**.
 ### Utility subcommands
 
 ```bash
-# Server & info
-go -C backend run ./cmd/xrayview-cli serve            # start the HTTP backend
+# Info
 go -C backend run ./cmd/xrayview-cli print-config      # resolved config as JSON
 go -C backend run ./cmd/xrayview-cli version           # service + contract version
 go -C backend run ./cmd/xrayview-cli list-commands     # supported backend commands

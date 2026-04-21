@@ -1,7 +1,6 @@
 const SUPPORTED_BACKEND_RUNTIMES = new Set([
   "mock",
   "desktop",
-  "http",
 ]);
 
 function isLoopbackHostname(hostname) {
@@ -41,7 +40,7 @@ export function applyFrontendRuntimeEnv(env = process.env) {
     const normalizedMode = rawMode.toLowerCase();
     if (!SUPPORTED_BACKEND_RUNTIMES.has(normalizedMode)) {
       throw new Error(
-        "XRAYVIEW_BACKEND_RUNTIME must be one of mock, desktop, or http.",
+        "XRAYVIEW_BACKEND_RUNTIME must be one of mock or desktop.",
       );
     }
 

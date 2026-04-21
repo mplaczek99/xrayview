@@ -149,10 +149,10 @@ func NewRouter(deps RouterDeps) http.Handler {
 		writeRuntimeJSON(writer)
 	})
 
-	// /preview serves cached preview artifacts to the browser-hosted frontend
-	// when it runs against the live backend (see httpBackend.ts on the
-	// frontend side). The desktop shell has its own /preview handler with
-	// different trust assumptions; do not reuse that implementation here.
+	// /preview serves cached preview artifacts to browser clients that talk to
+	// the loopback backend directly. The desktop shell has its own /preview
+	// handler with different trust assumptions; do not reuse that implementation
+	// here.
 	mux.HandleFunc("GET "+PreviewPath, newPreviewHandler(deps.Cache, deps.Config))
 
 	mux.HandleFunc("GET "+RuntimePath, func(writer http.ResponseWriter, request *http.Request) {

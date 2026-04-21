@@ -15,8 +15,6 @@ import type {
   ProcessStudyCommandResult,
   RenderStudyCommandResult,
 } from "./generated/contracts";
-import { createHttpBackendAPI } from "./httpBackend";
-import { createHttpShellAPI } from "./httpShell";
 import { resolveRuntimeConfiguration } from "./runtimeConfig";
 import { createDesktopShellAPI, createMockShellAPI } from "./shell";
 import type { BackendAPI, RuntimeAdapter } from "./runtimeTypes";
@@ -29,31 +27,12 @@ import type {
   ToothAnalysisResult,
 } from "./types";
 
-// activeHttpBaseUrl is set once when the http runtime adapter is created.
-// resolvePreviewUrl reads it so a job snapshot produced outside of the
-// adapter's closure (notably the useJobs poller) can still rebuild the
-// browser-usable preview URL from a backend-supplied filesystem path.
-let activeHttpBaseUrl: string | undefined;
-
 function resolvePreviewUrl(
   previewPath: string,
   runtime: RuntimeMode,
 ): string {
   if (runtime === "desktop") {
     return buildDesktopPreviewUrl(previewPath);
-  }
-
-  if (runtime === "http") {
-    if (!activeHttpBaseUrl) {
-      // The adapter sets this during construction. If it is missing the
-      // runtime wiring is broken, not the caller — surface loudly rather
-      // than rendering a raw filesystem path the browser cannot load.
-      throw new Error(
-        "http runtime selected but base URL is unset. Is the agent harness configured?",
-      );
-    }
-
-    return `${activeHttpBaseUrl}${buildDesktopPreviewUrl(previewPath)}`;
   }
 
   return previewPath;
@@ -159,25 +138,12 @@ function createRuntimeAdapter(
 ): RuntimeAdapter {
   const { mode } = configuration;
 
-  activeHttpBaseUrl =
-    mode === "http" ? configuration.httpBaseUrl : undefined;
-
   let shell;
   let backend: BackendAPI;
   switch (mode) {
     case "mock":
       shell = createMockShellAPI();
       backend = createMockBackendAPI();
-      break;
-    case "http":
-      if (!configuration.httpBaseUrl) {
-        // Should never fire — resolveRuntimeConfiguration guarantees a base
-        // URL whenever mode === "http". The branch exists so future changes
-        // to the configuration shape cannot silently produce a dead adapter.
-        throw new Error("http runtime selected but httpBaseUrl is unset");
-      }
-      shell = createHttpShellAPI();
-      backend = createHttpBackendAPI(configuration.httpBaseUrl);
       break;
     case "desktop":
     default:

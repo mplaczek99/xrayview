@@ -13,7 +13,6 @@
     "backend:build": "go -C backend build ./cmd/xrayviewd ./cmd/xrayview-cli",
     "backend:serve": "go -C backend run ./cmd/xrayviewd",
     "backend:test": "go -C backend test ./...",
-    "agent:serve": "node scripts/agent-harness.mjs",
     "wails:build": "node ./desktop/scripts/build.mjs",
     "wails:run": "node ./desktop/scripts/run.mjs",
     "release:smoke": "npm --prefix frontend run release:smoke --",

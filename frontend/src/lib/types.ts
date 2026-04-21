@@ -8,7 +8,7 @@ import type {
 
 export type Palette = PaletteName;
 export type ViewerMode = "original" | "processed" | "compare";
-export type RuntimeMode = "mock" | "desktop" | "http";
+export type RuntimeMode = "mock" | "desktop";
 export type ActiveTab = "view" | "processing";
 
 export interface ProcessingPresetOption {
