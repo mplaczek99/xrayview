@@ -1,0 +1,160 @@
+package analysis
+
+// OverlayPreviewWithRegions paints a translucent highlight over the pixels
+// in each supplied region. Used by the debug-dump build to visualize the
+// connected components the detector produced; not part of the production
+// analyze path. Regions come from the debug-snapshot variant of the
+// pipeline, which keeps per-component pixel indices alive.
+
+import (
+	"fmt"
+	"math"
+
+	"xrayview/backend/internal/imaging"
+)
+
+var toothOverlayColor = [3]uint8{255, 238, 0}
+
+// overlayRegion carries the flat pixel indices (row-major) belonging to a
+// single component. Kept internal — callers build regions from debug data.
+type overlayRegion struct {
+	pixels []int
+}
+
+func OverlayPreviewWithRegions(
+	preview imaging.PreviewImage,
+	regions []overlayRegion,
+) (imaging.PreviewImage, error) {
+	if err := preview.Validate(); err != nil {
+		return imaging.PreviewImage{}, fmt.Errorf("validate preview image: %w", err)
+	}
+
+	rgba, err := rgbaPixelsFromPreview(preview)
+	if err != nil {
+		return imaging.PreviewImage{}, err
+	}
+	if len(regions) == 0 {
+		return imaging.RGBAPreview(preview.Width, preview.Height, rgba), nil
+	}
+
+	width := int(preview.Width)
+	height := int(preview.Height)
+	mask := make([]uint8, width*height)
+	for _, region := range regions {
+		for _, index := range region.pixels {
+			if index >= 0 && index < len(mask) {
+				mask[index] = 1
+			}
+		}
+	}
+	// Two closes smooth jagged component edges before feathering; one open
+	// despeckles the stray single-pixel hits left by the threshold pass.
+	mask = closeBinaryMask(mask, width, height)
+	mask = closeBinaryMask(mask, width, height)
+	mask = openBinaryMask(mask, width, height)
+
+	blendHighlightMask(rgba, mask, width, height)
+
+	return imaging.RGBAPreview(preview.Width, preview.Height, rgba), nil
+}
+
+func blendHighlightMask(rgba []uint8, mask []uint8, width, height int) {
+	feathered := blurBinaryMask(mask, width, height, 3)
+	for index, strength := range feathered {
+		if strength == 0 {
+			continue
+		}
+		alpha := 0.94 * float64(strength) / 255.0
+		if alpha < 0.03 {
+			continue
+		}
+
+		base := index * 4
+		rgba[base+0] = blendChannel(rgba[base+0], toothOverlayColor[0], alpha)
+		rgba[base+1] = blendChannel(rgba[base+1], toothOverlayColor[1], alpha)
+		rgba[base+2] = blendChannel(rgba[base+2], toothOverlayColor[2], alpha)
+		rgba[base+3] = 255
+	}
+}
+
+func rgbaPixelsFromPreview(preview imaging.PreviewImage) ([]uint8, error) {
+	switch preview.Format {
+	case imaging.FormatRGBA8:
+		return append([]uint8(nil), preview.Pixels...), nil
+	case imaging.FormatGray8:
+		rgba := make([]uint8, len(preview.Pixels)*4)
+		for index, value := range preview.Pixels {
+			base := index * 4
+			rgba[base+0] = value
+			rgba[base+1] = value
+			rgba[base+2] = value
+			rgba[base+3] = 255
+		}
+		return rgba, nil
+	default:
+		return nil, fmt.Errorf("unsupported preview format %q", preview.Format)
+	}
+}
+
+// blurBinaryMask runs a separable box blur of the given radius over a
+// 0/1 mask, returning a grayscale feather used to soften the highlight edge.
+func blurBinaryMask(mask []uint8, width, height, radius int) []uint8 {
+	if radius <= 0 || len(mask) == 0 {
+		return append([]uint8(nil), mask...)
+	}
+
+	window := radius*2 + 1
+	expanded := make([]uint16, len(mask))
+	for index, value := range mask {
+		if value != 0 {
+			expanded[index] = 255
+		}
+	}
+
+	horizontal := make([]uint16, len(mask))
+	for y := 0; y < height; y++ {
+		row := y * width
+		var sum uint32
+		for x := -radius; x <= radius; x++ {
+			sum += uint32(expanded[row+clampInt(x, 0, width-1)])
+		}
+		for x := 0; x < width; x++ {
+			horizontal[row+x] = uint16(sum / uint32(window))
+			left := clampInt(x-radius, 0, width-1)
+			right := clampInt(x+radius+1, 0, width-1)
+			sum += uint32(expanded[row+right])
+			sum -= uint32(expanded[row+left])
+		}
+	}
+
+	blurred := make([]uint8, len(mask))
+	for x := 0; x < width; x++ {
+		var sum uint32
+		for y := -radius; y <= radius; y++ {
+			sum += uint32(horizontal[clampInt(y, 0, height-1)*width+x])
+		}
+		for y := 0; y < height; y++ {
+			blurred[y*width+x] = uint8(sum / uint32(window))
+			top := clampInt(y-radius, 0, height-1)
+			bottom := clampInt(y+radius+1, 0, height-1)
+			sum += uint32(horizontal[bottom*width+x])
+			sum -= uint32(horizontal[top*width+x])
+		}
+	}
+
+	return blurred
+}
+
+func blendChannel(base uint8, overlay uint8, alpha float64) uint8 {
+	return uint8(math.Round(float64(base)*(1.0-alpha) + float64(overlay)*alpha))
+}
+
+func clampInt(value, low, high int) int {
+	if value < low {
+		return low
+	}
+	if value > high {
+		return high
+	}
+	return value
+}
