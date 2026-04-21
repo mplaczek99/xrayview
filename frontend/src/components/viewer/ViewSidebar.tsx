@@ -99,7 +99,7 @@ export function ViewSidebar({
         ) : (
           <p className="measurement-card__copy">
             No manual line annotations yet. Draw one to store a measurement,
-            or run Analyze Tooth to overlay the red trace.
+            or run Analyze to overlay the red trace.
           </p>
         )}
       </section>

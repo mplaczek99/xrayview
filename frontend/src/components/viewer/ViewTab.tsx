@@ -168,7 +168,7 @@ export function ViewTab() {
                 : "Analyzing..."
               : teeth.length
                 ? "Re-run analysis"
-                : "Analyze Tooth"}
+                : "Analyze"}
           </button>
           <button
             className="button button--ghost"
