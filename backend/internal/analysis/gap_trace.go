@@ -39,23 +39,16 @@ func extractBlackGapTraces(width, height uint32, pixels []uint8) ([]BoundaryTrac
 	normalized := normalizePixels(pixels)
 	defer bufpool.PutUint8(normalized)
 
-	search := defaultSearchRegion(width, height)
-	search = searchRegion{
+	search := searchRegion{
 		x:      0,
-		y:      search.y,
+		y:      0,
 		width:  width,
-		height: search.height,
-	}
-	if search.y >= height || search.height == 0 {
-		return nil, nil
-	}
-	if search.y+search.height > height {
-		search.height = height - search.y
+		height: height,
 	}
 
-	blackThreshold := maxUint8(percentileInRegion(normalized, width, search, 0.08), 20)
-	if blackThreshold > 52 {
-		blackThreshold = 52
+	blackThreshold := maxUint8(percentileInRegion(normalized, width, search, 0.04), 12)
+	if blackThreshold > 36 {
+		blackThreshold = 36
 	}
 
 	blackMask := make([]uint8, len(normalized))
@@ -78,13 +71,19 @@ func extractBlackGapTraces(width, height uint32, pixels []uint8) ([]BoundaryTrac
 		if !shouldKeepBlackGapComponent(component, search) {
 			continue
 		}
-		componentTraces := traceBlackComponentBoundaries(component, blackMask, width, height, search)
+		componentTraces := traceBlackComponentBoundaries(
+			component,
+			blackMask,
+			width,
+			height,
+			search,
+		)
 		for _, trace := range componentTraces {
 			minPoints := 2
 			if trace.Closed {
 				minPoints = 3
 			}
-			if len(trace.Points) < minPoints || pathLength(trace.Points) < 12 {
+			if len(trace.Points) < minPoints || pathLength(trace.Points) < 18 {
 				continue
 			}
 			traces = append(traces, trace)
@@ -215,7 +214,10 @@ func traceBlackComponentBoundaries(
 	isFilled := func(x, y int) bool {
 		return x >= 0 && x < localWidth && y >= 0 && y < localHeight && localMask[y*localWidth+x]
 	}
-	isTraceNeighbor := func(x, y int) bool {
+	shouldTraceBoundaryNeighbor := func(x, y int) bool {
+		if x < 0 || x >= widthInt || y < 0 || y >= int(height) {
+			return true
+		}
 		if x < int(search.x) || x >= int(search.x+search.width) || y < int(search.y) || y >= int(search.y+search.height) {
 			return false
 		}
@@ -230,16 +232,16 @@ func traceBlackComponentBoundaries(
 
 			globalX := int(component.bbox.X) + x
 			globalY := int(component.bbox.Y) + y
-			if !isFilled(x, y-1) && isTraceNeighbor(globalX, globalY-1) {
+			if !isFilled(x, y-1) && shouldTraceBoundaryNeighbor(globalX, globalY-1) {
 				addSegment(uint32(x), uint32(y), uint32(x+1), uint32(y))
 			}
-			if !isFilled(x+1, y) && isTraceNeighbor(globalX+1, globalY) {
+			if !isFilled(x+1, y) && shouldTraceBoundaryNeighbor(globalX+1, globalY) {
 				addSegment(uint32(x+1), uint32(y), uint32(x+1), uint32(y+1))
 			}
-			if !isFilled(x, y+1) && isTraceNeighbor(globalX, globalY+1) {
+			if !isFilled(x, y+1) && shouldTraceBoundaryNeighbor(globalX, globalY+1) {
 				addSegment(uint32(x+1), uint32(y+1), uint32(x), uint32(y+1))
 			}
-			if !isFilled(x-1, y) && isTraceNeighbor(globalX-1, globalY) {
+			if !isFilled(x-1, y) && shouldTraceBoundaryNeighbor(globalX-1, globalY) {
 				addSegment(uint32(x), uint32(y+1), uint32(x), uint32(y))
 			}
 		}

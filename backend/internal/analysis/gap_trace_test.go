@@ -29,17 +29,27 @@ func TestExtractBlackGapTracesFollowsBlackBandInterfaces(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ExtractBlackGapTraces returned error: %v", err)
 	}
-	if len(traces) < 2 {
-		t.Fatalf("len(traces) = %d, want at least 2", len(traces))
+	if len(traces) == 0 {
+		t.Fatal("len(traces) = 0, want at least 1")
 	}
 
-	openCount := 0
+	closedCount := 0
+	edgeTouchCount := 0
 	for _, trace := range traces {
-		if !trace.Closed {
-			openCount++
+		if trace.Closed {
+			closedCount++
+		}
+		for _, point := range trace.Points {
+			if point.X == 0 || point.Y == 0 || point.X == width || point.Y == height {
+				edgeTouchCount++
+				break
+			}
 		}
 	}
-	if openCount < 1 {
-		t.Fatalf("openCount = %d, want at least 1", openCount)
+	if closedCount < 1 {
+		t.Fatalf("closedCount = %d, want at least 1", closedCount)
+	}
+	if edgeTouchCount < 1 {
+		t.Fatalf("edgeTouchCount = %d, want at least 1", edgeTouchCount)
 	}
 }
