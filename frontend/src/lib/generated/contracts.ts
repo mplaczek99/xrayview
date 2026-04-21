@@ -65,9 +65,20 @@ export interface RectangleAnnotation {
   confidence?: number | null;
 }
 
+export interface PolylineAnnotation {
+  id: string;
+  label: string;
+  source: AnnotationSource;
+  points: AnnotationPoint[];
+  closed: boolean;
+  editable: boolean;
+  confidence?: number | null;
+}
+
 export interface AnnotationBundle {
   lines: LineAnnotation[];
   rectangles: RectangleAnnotation[];
+  polylines: PolylineAnnotation[];
 }
 
 export type BackendErrorCode = "invalidInput" | "notFound" | "cancelled" | "conflict" | "cacheCorrupted" | "internal";
@@ -198,6 +209,7 @@ export interface ToothGeometry {
   boundingBox: BoundingBox;
   widthLine: LineSegment;
   heightLine: LineSegment;
+  outline: Point[];
 }
 
 export interface BoundingBox {

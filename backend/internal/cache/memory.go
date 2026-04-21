@@ -572,6 +572,7 @@ func cloneToothCandidates(candidates []contracts.ToothCandidate) []contracts.Too
 
 func cloneToothCandidate(candidate contracts.ToothCandidate) contracts.ToothCandidate {
 	candidate.Measurements.Calibrated = cloneToothMeasurementValues(candidate.Measurements.Calibrated)
+	candidate.Geometry.Outline = clonePointSlice(candidate.Geometry.Outline)
 	return candidate
 }
 
@@ -590,6 +591,7 @@ func cloneAnnotationBundle(bundle contracts.AnnotationBundle) contracts.Annotati
 	return contracts.AnnotationBundle{
 		Lines:      cloneLineAnnotations(bundle.Lines),
 		Rectangles: cloneRectangleAnnotations(bundle.Rectangles),
+		Polylines:  clonePolylineAnnotations(bundle.Polylines),
 	}
 }
 
@@ -627,6 +629,21 @@ func cloneRectangleAnnotations(rectangles []contracts.RectangleAnnotation) []con
 	return cloned
 }
 
+func clonePolylineAnnotations(polylines []contracts.PolylineAnnotation) []contracts.PolylineAnnotation {
+	if polylines == nil {
+		return nil
+	}
+
+	cloned := make([]contracts.PolylineAnnotation, len(polylines))
+	for index, polyline := range polylines {
+		cloned[index] = polyline
+		cloned[index].Points = append([]contracts.AnnotationPoint(nil), polyline.Points...)
+		cloned[index].Confidence = cloneFloat64Pointer(polyline.Confidence)
+	}
+
+	return cloned
+}
+
 func cloneLineMeasurement(measurement *contracts.LineMeasurement) *contracts.LineMeasurement {
 	if measurement == nil {
 		return nil
@@ -644,4 +661,14 @@ func cloneFloat64Pointer(value *float64) *float64 {
 
 	cloned := *value
 	return &cloned
+}
+
+func clonePointSlice(points []contracts.Point) []contracts.Point {
+	if points == nil {
+		return nil
+	}
+
+	cloned := make([]contracts.Point, len(points))
+	copy(cloned, points)
+	return cloned
 }

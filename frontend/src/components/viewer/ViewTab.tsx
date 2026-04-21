@@ -29,7 +29,7 @@ export function ViewTab() {
       null,
     [study?.analysis?.calibration.measurementScale, study?.measurementScale, study?.originalPreview?.measurementScale],
   );
-  const isMeasuring =
+  const isAnalyzing =
     analysisJob?.state === "queued" ||
     analysisJob?.state === "running" ||
     analysisJob?.state === "cancelling";
@@ -46,7 +46,7 @@ export function ViewTab() {
     [study?.originalPreview?.imageSize, study?.analysis],
   );
   const annotations = useMemo(
-    () => study?.annotations ?? { lines: [], rectangles: [] },
+    () => study?.annotations ?? { lines: [], rectangles: [], polylines: [] },
     [study?.annotations],
   );
   const selectedAnnotationId = study?.viewer.selectedAnnotationId ?? null;
@@ -83,7 +83,7 @@ export function ViewTab() {
               <p className="empty-state__copy">
                 Open a DICOM study or BMP/TIFF image to inspect it, pan and
                 zoom, draw manual line measurements, or run automatic tooth
-                analysis.
+                analysis tracing.
               </p>
               <button
                 className="button button--primary empty-state__cta"
@@ -156,19 +156,19 @@ export function ViewTab() {
             type="button"
             data-testid="action-measure-teeth"
             onClick={() => void workbenchActions.measureActiveStudy()}
-            disabled={isMeasuring}
+            disabled={isAnalyzing}
           >
             <svg className="button__icon" viewBox="0 0 16 16" fill="none" aria-hidden="true">
               <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.5" />
               <path d="M8 5v6M5 8h6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
             </svg>
-            {isMeasuring
+            {isAnalyzing
               ? analysisJob?.state === "cancelling"
                 ? "Cancelling..."
-                : "Measuring..."
+                : "Analyzing..."
               : teeth.length
-                ? "Re-run detection"
-                : "Measure teeth"}
+                ? "Re-run analysis"
+                : "Analyze Tooth"}
           </button>
           <button
             className="button button--ghost"

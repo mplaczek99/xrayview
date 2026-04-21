@@ -29,6 +29,7 @@ const BackendContractSchemaJSON = `{
     "LineMeasurement",
     "LineAnnotation",
     "RectangleAnnotation",
+    "PolylineAnnotation",
     "AnnotationBundle",
     "BackendErrorCode",
     "BackendError",
@@ -171,6 +172,25 @@ const BackendContractSchemaJSON = `{
       },
       "required": ["id", "label", "source", "x", "y", "width", "height", "editable"]
     },
+    "PolylineAnnotation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "label": { "type": "string" },
+        "source": { "$ref": "#/$defs/AnnotationSource" },
+        "points": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/AnnotationPoint" }
+        },
+        "closed": { "type": "boolean" },
+        "editable": { "type": "boolean" },
+        "confidence": {
+          "type": ["number", "null"]
+        }
+      },
+      "required": ["id", "label", "source", "points", "closed", "editable"]
+    },
     "AnnotationBundle": {
       "type": "object",
       "additionalProperties": false,
@@ -182,9 +202,13 @@ const BackendContractSchemaJSON = `{
         "rectangles": {
           "type": "array",
           "items": { "$ref": "#/$defs/RectangleAnnotation" }
+        },
+        "polylines": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/PolylineAnnotation" }
         }
       },
-      "required": ["lines", "rectangles"]
+      "required": ["lines", "rectangles", "polylines"]
     },
     "BackendErrorCode": {
       "enum": [
@@ -465,9 +489,13 @@ const BackendContractSchemaJSON = `{
       "properties": {
         "boundingBox": { "$ref": "#/$defs/BoundingBox" },
         "widthLine": { "$ref": "#/$defs/LineSegment" },
-        "heightLine": { "$ref": "#/$defs/LineSegment" }
+        "heightLine": { "$ref": "#/$defs/LineSegment" },
+        "outline": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/Point" }
+        }
       },
-      "required": ["boundingBox", "widthLine", "heightLine"]
+      "required": ["boundingBox", "widthLine", "heightLine", "outline"]
     },
     "BoundingBox": {
       "type": "object",
@@ -590,6 +618,7 @@ var DefinitionRefs = map[string]string{
 	"LineMeasurement": "#/$defs/LineMeasurement",
 	"LineAnnotation": "#/$defs/LineAnnotation",
 	"RectangleAnnotation": "#/$defs/RectangleAnnotation",
+	"PolylineAnnotation": "#/$defs/PolylineAnnotation",
 	"AnnotationBundle": "#/$defs/AnnotationBundle",
 	"BackendErrorCode": "#/$defs/BackendErrorCode",
 	"BackendError": "#/$defs/BackendError",

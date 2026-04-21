@@ -1089,6 +1089,17 @@ button {
   stroke-width: 2;
 }
 
+.annotation-layer__polyline {
+  fill: rgba(232, 57, 70, 0.08);
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  stroke-width: 3;
+}
+
+.annotation-layer__polyline--autoTooth {
+  stroke: rgba(255, 72, 72, 0.96);
+}
+
 .annotation-layer__line {
   stroke-linecap: round;
   stroke-width: 3;

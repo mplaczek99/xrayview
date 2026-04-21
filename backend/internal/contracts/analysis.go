@@ -47,6 +47,7 @@ type ToothGeometry struct {
 	BoundingBox BoundingBox `json:"boundingBox"`
 	WidthLine   LineSegment `json:"widthLine"`
 	HeightLine  LineSegment `json:"heightLine"`
+	Outline     []Point     `json:"outline"`
 }
 
 type BoundingBox struct {

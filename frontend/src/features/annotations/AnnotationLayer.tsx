@@ -1,7 +1,6 @@
 import { memo, useMemo } from "react";
 import type {
   AnnotationBundle,
-  AnnotationPoint,
   LineAnnotation,
 } from "../../lib/generated/contracts";
 import type { ViewerTransform } from "../viewer/viewport";
@@ -27,68 +26,10 @@ interface LineAnnotationItemProps {
   onSelectAnnotation: (annotationId: string) => void;
 }
 
-interface ToothOutline {
-  id: string;
-  points: AnnotationPoint[];
-}
-
-const autoToothLinePattern = /^auto-tooth-(\d+)-(width|height)$/;
-const autoToothRectPattern = /^auto-tooth-(\d+)-bounding-box$/;
-
 function midpoint(line: LineAnnotation) {
   return {
     x: (line.start.x + line.end.x) / 2,
     y: (line.start.y + line.end.y) / 2,
-  };
-}
-
-function lineMidpoint(line: LineAnnotation): AnnotationPoint {
-  return {
-    x: (line.start.x + line.end.x) / 2,
-    y: (line.start.y + line.end.y) / 2,
-  };
-}
-
-function buildToothOutline(
-  id: string,
-  widthLine: LineAnnotation,
-  heightLine: LineAnnotation,
-): ToothOutline {
-  const widthMid = lineMidpoint(widthLine);
-  const heightMid = lineMidpoint(heightLine);
-  const center = {
-    x: (widthMid.x + heightMid.x) / 2,
-    y: (widthMid.y + heightMid.y) / 2,
-  };
-  const widthVector = {
-    x: (widthLine.end.x - widthLine.start.x) / 2,
-    y: (widthLine.end.y - widthLine.start.y) / 2,
-  };
-  const heightVector = {
-    x: (heightLine.end.x - heightLine.start.x) / 2,
-    y: (heightLine.end.y - heightLine.start.y) / 2,
-  };
-
-  return {
-    id,
-    points: [
-      {
-        x: center.x - widthVector.x - heightVector.x,
-        y: center.y - widthVector.y - heightVector.y,
-      },
-      {
-        x: center.x + widthVector.x - heightVector.x,
-        y: center.y + widthVector.y - heightVector.y,
-      },
-      {
-        x: center.x + widthVector.x + heightVector.x,
-        y: center.y + widthVector.y + heightVector.y,
-      },
-      {
-        x: center.x - widthVector.x + heightVector.x,
-        y: center.y - widthVector.y + heightVector.y,
-      },
-    ],
   };
 }
 
@@ -191,33 +132,6 @@ export const AnnotationLayer = memo(
       [annotations.lines, selectedAnnotationId],
     );
     const handleRadius = 7 / Math.max(transform.scale, 1);
-    const autoToothOutlines = useMemo(() => {
-      const grouped = new Map<string, { width?: LineAnnotation; height?: LineAnnotation }>();
-      for (const annotation of annotations.lines) {
-        const match = autoToothLinePattern.exec(annotation.id);
-        if (!match) {
-          continue;
-        }
-        const toothId = match[1];
-        const axis = match[2];
-        const entry = grouped.get(toothId) ?? {};
-        if (axis === "width") {
-          entry.width = annotation;
-        } else {
-          entry.height = annotation;
-        }
-        grouped.set(toothId, entry);
-      }
-      return Array.from(grouped.entries()).flatMap(([toothId, entry]) =>
-        entry.width && entry.height
-          ? [buildToothOutline(toothId, entry.width, entry.height)]
-          : [],
-      );
-    }, [annotations.lines]);
-    const visibleRectangles = useMemo(
-      () => annotations.rectangles.filter((annotation) => !autoToothRectPattern.test(annotation.id)),
-      [annotations.rectangles],
-    );
 
     return (
       <svg
@@ -230,7 +144,7 @@ export const AnnotationLayer = memo(
         <g
           transform={`translate(${transform.offsetX} ${transform.offsetY}) scale(${transform.scale})`}
         >
-          {visibleRectangles.map((annotation) => (
+          {annotations.rectangles.map((annotation) => (
             <rect
               key={annotation.id}
               className="annotation-layer__rect"
@@ -242,14 +156,24 @@ export const AnnotationLayer = memo(
             />
           ))}
 
-          {autoToothOutlines.map((outline) => (
-            <polygon
-              key={`auto-tooth-${outline.id}-outline`}
-              className="annotation-layer__quad"
-              points={outline.points.map((point) => `${point.x},${point.y}`).join(" ")}
-              vectorEffect="non-scaling-stroke"
-            />
-          ))}
+          {annotations.polylines.map((annotation) =>
+            annotation.closed ? (
+              <polygon
+                key={annotation.id}
+                className={`annotation-layer__polyline annotation-layer__polyline--${annotation.source}`}
+                points={annotation.points.map((point) => `${point.x},${point.y}`).join(" ")}
+                vectorEffect="non-scaling-stroke"
+              />
+            ) : (
+              <polyline
+                key={annotation.id}
+                className={`annotation-layer__polyline annotation-layer__polyline--${annotation.source}`}
+                points={annotation.points.map((point) => `${point.x},${point.y}`).join(" ")}
+                vectorEffect="non-scaling-stroke"
+                fill="none"
+              />
+            ),
+          )}
 
           {annotations.lines.map((annotation) => (
             <LineAnnotationItem

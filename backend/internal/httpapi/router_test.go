@@ -1330,9 +1330,9 @@ func TestAnalyzeJobEndpointCompletesPreview(t *testing.T) {
 			if !ok {
 				t.Fatalf("suggestedAnnotations type = %T, want map[string]any", payload["suggestedAnnotations"])
 			}
-			lines, ok := suggestedAnnotations["lines"].([]any)
-			if !ok || len(lines) == 0 {
-				t.Fatalf("suggestedAnnotations.lines = %#v, want non-empty array", suggestedAnnotations["lines"])
+			polylines, ok := suggestedAnnotations["polylines"].([]any)
+			if !ok || len(polylines) == 0 {
+				t.Fatalf("suggestedAnnotations.polylines = %#v, want non-empty array", suggestedAnnotations["polylines"])
 			}
 			return
 		}

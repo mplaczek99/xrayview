@@ -10,7 +10,7 @@ function titleForJob(kind: string): string {
     case "processStudy":
       return "Process Study";
     case "analyzeStudy":
-      return "Measure Tooth";
+      return "Analyze Tooth";
     default:
       return kind;
   }

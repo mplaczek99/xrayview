@@ -234,11 +234,12 @@ func analyzeGrayscalePixelsWithDebug(
 
 	candidates := collectCandidates(mask, normalized, toothness, width, height, search)
 	seedCandidates := selectDetectedCandidates(candidates)
-	finalCandidates := seedCandidates
-	finalGeometries := make([]contracts.ToothGeometry, len(seedCandidates))
+	seedGeometries := make([]contracts.ToothGeometry, len(seedCandidates))
 	for index, candidate := range seedCandidates {
-		finalGeometries[index] = geometryFromPixels(candidate.pixels, candidate.bbox, width)
+		seedGeometries[index] = geometryFromPixels(candidate.pixels, candidate.bbox, width)
 	}
+	finalCandidates := seedCandidates
+	finalGeometries := append([]contracts.ToothGeometry(nil), seedGeometries...)
 	if width >= 512 {
 		panoramicCandidates, panoramicGeometries := buildPanoramicProfileCandidates(normalized, toothness, mask, width, search, splitY)
 		if len(panoramicCandidates) > 0 {
@@ -246,6 +247,7 @@ func analyzeGrayscalePixelsWithDebug(
 			finalGeometries = panoramicGeometries
 		}
 	}
+	finalGeometries = attachClosestOutlines(finalGeometries, seedGeometries)
 	primaryCandidate := selectPrimaryCandidate(finalCandidates)
 	primaryIndex := -1
 	if primaryCandidate != nil {
@@ -1100,6 +1102,7 @@ func panoramicGeometryFromBox(
 			Start: contracts.Point{X: centerX, Y: bbox.Y},
 			End:   contracts.Point{X: centerX, Y: bbox.Y + bbox.Height - 1},
 		},
+		Outline: []contracts.Point{},
 	}
 }
 
@@ -1137,12 +1140,12 @@ func refinePanoramicToothBox(
 		toothness,
 		mask,
 		imageWidth,
-			search,
-			boxBand,
-			splitY,
-			refinedLeft,
-			refinedRight,
-			centerY,
+		search,
+		boxBand,
+		splitY,
+		refinedLeft,
+		refinedRight,
+		centerY,
 		isUpper,
 	)
 
@@ -2323,7 +2326,340 @@ func geometryFromPixels(
 		BoundingBox: bbox,
 		WidthLine:   widthLine,
 		HeightLine:  heightLine,
+		Outline:     traceOutlineFromPixels(pixels, bbox, imageWidth),
 	}
+}
+
+type outlineSegment struct {
+	start contracts.Point
+	end   contracts.Point
+}
+
+func attachClosestOutlines(
+	geometries []contracts.ToothGeometry,
+	outlined []contracts.ToothGeometry,
+) []contracts.ToothGeometry {
+	if len(geometries) == 0 || len(outlined) == 0 {
+		return geometries
+	}
+
+	result := make([]contracts.ToothGeometry, len(geometries))
+	copy(result, geometries)
+	for index := range result {
+		if len(result[index].Outline) > 0 {
+			continue
+		}
+
+		bestOutline := []contracts.Point{}
+		bestScore := -1.0
+		for _, candidate := range outlined {
+			if len(candidate.Outline) == 0 {
+				continue
+			}
+			score := outlineMatchScore(result[index].BoundingBox, candidate.BoundingBox)
+			if score > bestScore {
+				bestScore = score
+				bestOutline = candidate.Outline
+			}
+		}
+		if len(bestOutline) == 0 {
+			continue
+		}
+
+		result[index].Outline = clonePointSlice(bestOutline)
+	}
+
+	return result
+}
+
+func outlineMatchScore(target contracts.BoundingBox, source contracts.BoundingBox) float64 {
+	intersectionWidth := intersectionLength(target.X, target.Width, source.X, source.Width)
+	intersectionHeight := intersectionLength(target.Y, target.Height, source.Y, source.Height)
+	intersectionArea := float64(intersectionWidth * intersectionHeight)
+	sourceArea := float64(maxUint32(source.Width*source.Height, 1))
+	overlapScore := 0.0
+	if sourceArea > 0 {
+		overlapScore = intersectionArea / sourceArea
+	}
+
+	targetCenterX := float64(target.X) + float64(target.Width)/2.0
+	targetCenterY := float64(target.Y) + float64(target.Height)/2.0
+	sourceCenterX := float64(source.X) + float64(source.Width)/2.0
+	sourceCenterY := float64(source.Y) + float64(source.Height)/2.0
+	distance := math.Hypot(targetCenterX-sourceCenterX, targetCenterY-sourceCenterY)
+	scale := math.Hypot(float64(maxUint32(target.Width, source.Width)), float64(maxUint32(target.Height, source.Height)))
+	if scale <= 0 {
+		scale = 1
+	}
+	centerScore := 1.0 / (1.0 + distance/scale)
+
+	return overlapScore*3.0 + centerScore
+}
+
+func intersectionLength(startA, lengthA, startB, lengthB uint32) uint32 {
+	endA := startA + lengthA
+	endB := startB + lengthB
+	start := maxUint32(startA, startB)
+	end := minUint32(endA, endB)
+	if end <= start {
+		return 0
+	}
+	return end - start
+}
+
+func traceOutlineFromPixels(
+	pixels []int,
+	bbox contracts.BoundingBox,
+	imageWidth uint32,
+) []contracts.Point {
+	if len(pixels) == 0 || bbox.Width == 0 || bbox.Height == 0 {
+		return []contracts.Point{}
+	}
+
+	localWidth := int(bbox.Width)
+	localHeight := int(bbox.Height)
+	localMask := make([]bool, localWidth*localHeight)
+	imageWidthInt := int(imageWidth)
+	for _, index := range pixels {
+		x := uint32(index % imageWidthInt)
+		y := uint32(index / imageWidthInt)
+		localX := int(x - bbox.X)
+		localY := int(y - bbox.Y)
+		if localX < 0 || localX >= localWidth || localY < 0 || localY >= localHeight {
+			continue
+		}
+		localMask[localY*localWidth+localX] = true
+	}
+
+	segments := make([]outlineSegment, 0, len(pixels)*2)
+	addSegment := func(startX, startY, endX, endY uint32) {
+		segments = append(segments, outlineSegment{
+			start: contracts.Point{X: bbox.X + startX, Y: bbox.Y + startY},
+			end:   contracts.Point{X: bbox.X + endX, Y: bbox.Y + endY},
+		})
+	}
+	isFilled := func(x, y int) bool {
+		return x >= 0 && x < localWidth && y >= 0 && y < localHeight && localMask[y*localWidth+x]
+	}
+
+	for y := 0; y < localHeight; y++ {
+		for x := 0; x < localWidth; x++ {
+			if !localMask[y*localWidth+x] {
+				continue
+			}
+
+			if !isFilled(x, y-1) {
+				addSegment(uint32(x), uint32(y), uint32(x+1), uint32(y))
+			}
+			if !isFilled(x+1, y) {
+				addSegment(uint32(x+1), uint32(y), uint32(x+1), uint32(y+1))
+			}
+			if !isFilled(x, y+1) {
+				addSegment(uint32(x+1), uint32(y+1), uint32(x), uint32(y+1))
+			}
+			if !isFilled(x-1, y) {
+				addSegment(uint32(x), uint32(y+1), uint32(x), uint32(y))
+			}
+		}
+	}
+
+	loops := traceOutlineLoops(segments)
+	if len(loops) == 0 {
+		return []contracts.Point{}
+	}
+
+	bestLoop := loops[0]
+	bestArea := polygonAreaTwice(bestLoop)
+	for _, loop := range loops[1:] {
+		area := polygonAreaTwice(loop)
+		if area > bestArea || (area == bestArea && len(loop) > len(bestLoop)) {
+			bestLoop = loop
+			bestArea = area
+		}
+	}
+
+	return simplifyClosedPointLoop(bestLoop)
+}
+
+func traceOutlineLoops(segments []outlineSegment) [][]contracts.Point {
+	if len(segments) == 0 {
+		return nil
+	}
+
+	adjacency := make(map[uint64][]int, len(segments))
+	for index, segment := range segments {
+		adjacency[pointKey(segment.start)] = append(adjacency[pointKey(segment.start)], index)
+	}
+
+	used := make([]bool, len(segments))
+	loops := make([][]contracts.Point, 0, 1)
+	for startIndex, segment := range segments {
+		if used[startIndex] {
+			continue
+		}
+
+		used[startIndex] = true
+		loop := []contracts.Point{segment.start, segment.end}
+		prevDirection := segmentDirection(segment)
+		current := segment.end
+		startKey := pointKey(segment.start)
+
+		for {
+			if pointKey(current) == startKey {
+				break
+			}
+
+			nextIndex := chooseNextOutlineSegment(current, prevDirection, adjacency, segments, used)
+			if nextIndex < 0 {
+				loop = nil
+				break
+			}
+
+			used[nextIndex] = true
+			nextSegment := segments[nextIndex]
+			loop = append(loop, nextSegment.end)
+			prevDirection = segmentDirection(nextSegment)
+			current = nextSegment.end
+		}
+
+		if len(loop) >= 4 {
+			loops = append(loops, loop)
+		}
+	}
+
+	return loops
+}
+
+func chooseNextOutlineSegment(
+	current contracts.Point,
+	prevDirection int,
+	adjacency map[uint64][]int,
+	segments []outlineSegment,
+	used []bool,
+) int {
+	options := adjacency[pointKey(current)]
+	bestIndex := -1
+	bestRank := len(options) + 5
+	for _, candidateIndex := range options {
+		if used[candidateIndex] {
+			continue
+		}
+		candidateDirection := segmentDirection(segments[candidateIndex])
+		rank := directionTurnRank(prevDirection, candidateDirection)
+		if rank < bestRank {
+			bestRank = rank
+			bestIndex = candidateIndex
+		}
+	}
+	return bestIndex
+}
+
+func segmentDirection(segment outlineSegment) int {
+	dx := int(segment.end.X) - int(segment.start.X)
+	dy := int(segment.end.Y) - int(segment.start.Y)
+	switch {
+	case dx > 0:
+		return 0
+	case dy > 0:
+		return 1
+	case dx < 0:
+		return 2
+	default:
+		return 3
+	}
+}
+
+func directionTurnRank(previous, candidate int) int {
+	turn := (candidate - previous + 4) % 4
+	switch turn {
+	case 1:
+		return 0
+	case 0:
+		return 1
+	case 3:
+		return 2
+	default:
+		return 3
+	}
+}
+
+func polygonAreaTwice(points []contracts.Point) uint64 {
+	if len(points) < 3 {
+		return 0
+	}
+
+	var area int64
+	for index := range points {
+		next := points[(index+1)%len(points)]
+		current := points[index]
+		area += int64(current.X)*int64(next.Y) - int64(next.X)*int64(current.Y)
+	}
+	if area < 0 {
+		return uint64(-area)
+	}
+	return uint64(area)
+}
+
+func simplifyClosedPointLoop(points []contracts.Point) []contracts.Point {
+	if len(points) == 0 {
+		return []contracts.Point{}
+	}
+
+	simplified := make([]contracts.Point, 0, len(points))
+	for _, point := range points {
+		if len(simplified) == 0 || simplified[len(simplified)-1] != point {
+			simplified = append(simplified, point)
+		}
+	}
+	if len(simplified) > 1 && simplified[0] == simplified[len(simplified)-1] {
+		simplified = simplified[:len(simplified)-1]
+	}
+	if len(simplified) < 3 {
+		return simplified
+	}
+
+	for {
+		changed := false
+		next := make([]contracts.Point, 0, len(simplified))
+		for index := range simplified {
+			prev := simplified[(index-1+len(simplified))%len(simplified)]
+			current := simplified[index]
+			following := simplified[(index+1)%len(simplified)]
+			if isCollinear(prev, current, following) {
+				changed = true
+				continue
+			}
+			next = append(next, current)
+		}
+		simplified = next
+		if !changed || len(simplified) < 3 {
+			break
+		}
+	}
+
+	return simplified
+}
+
+func isCollinear(left, middle, right contracts.Point) bool {
+	ax := int64(middle.X) - int64(left.X)
+	ay := int64(middle.Y) - int64(left.Y)
+	bx := int64(right.X) - int64(middle.X)
+	by := int64(right.Y) - int64(middle.Y)
+	return ax*by-ay*bx == 0
+}
+
+func pointKey(point contracts.Point) uint64 {
+	return uint64(point.X)<<32 | uint64(point.Y)
+}
+
+func clonePointSlice(points []contracts.Point) []contracts.Point {
+	if len(points) == 0 {
+		return []contracts.Point{}
+	}
+
+	cloned := make([]contracts.Point, len(points))
+	copy(cloned, points)
+	return cloned
 }
 
 func lineSegmentLength(line contracts.LineSegment) uint32 {

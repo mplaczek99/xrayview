@@ -13,6 +13,7 @@ export function emptyAnnotationBundle(): AnnotationBundle {
   return {
     lines: [],
     rectangles: [],
+    polylines: [],
   };
 }
 
@@ -47,6 +48,10 @@ export function replaceSuggestedAnnotations(
       ...current.rectangles.filter((annotation) => annotation.source === "manual"),
       ...suggested.rectangles,
     ],
+    polylines: [
+      ...current.polylines.filter((annotation) => annotation.source === "manual"),
+      ...suggested.polylines,
+    ],
   };
 }
 
@@ -70,6 +75,9 @@ export function removeAnnotation(
   return {
     lines: current.lines.filter((annotation) => annotation.id !== annotationId),
     rectangles: current.rectangles.filter(
+      (annotation) => annotation.id !== annotationId,
+    ),
+    polylines: current.polylines.filter(
       (annotation) => annotation.id !== annotationId,
     ),
   };
@@ -117,5 +125,5 @@ export function formatSecondaryMeasurement(
 }
 
 export function annotationSourceLabel(source: LineAnnotation["source"]): string {
-  return source === "manual" ? "Manual" : "Auto tooth";
+  return source === "manual" ? "Manual" : "Auto analysis";
 }

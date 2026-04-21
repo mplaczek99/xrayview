@@ -125,7 +125,7 @@ func parseLegacyCLIArgs(args []string, stderr io.Writer) (legacyCLIOptions, erro
 	flagSet.StringVar(&options.previewOutput, "preview-output", "", "PNG preview output path")
 	flagSet.BoolVar(&options.describePresets, "describe-presets", false, "Print processing preset metadata as JSON")
 	flagSet.BoolVar(&options.describeStudy, "describe-study", false, "Print study measurement metadata as JSON")
-	flagSet.BoolVar(&options.analyzeTooth, "analyze-tooth", false, "Analyze the study and return automatic tooth measurements as JSON")
+	flagSet.BoolVar(&options.analyzeTooth, "analyze-tooth", false, "Analyze the study and return automatic tooth analysis as JSON")
 	flagSet.StringVar(&options.preset, "preset", contracts.DefaultProcessingPresetID, "Processing preset")
 	flagSet.BoolVar(&options.invert, "invert", false, "Invert grayscale")
 	flagSet.Var(&options.brightness, "brightness", "Brightness adjustment (-256 to 256)")

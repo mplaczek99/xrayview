@@ -41,6 +41,12 @@ func TestMemoryStoreAndLoadAnalyzeRoundTrip(t *testing.T) {
 					},
 					Geometry: contracts.ToothGeometry{
 						BoundingBox: contracts.BoundingBox{X: 100, Y: 50, Width: 44, Height: 90},
+						Outline: []contracts.Point{
+							{X: 100, Y: 50},
+							{X: 144, Y: 50},
+							{X: 144, Y: 140},
+							{X: 100, Y: 140},
+						},
 					},
 				},
 			},
@@ -50,18 +56,20 @@ func TestMemoryStoreAndLoadAnalyzeRoundTrip(t *testing.T) {
 			},
 		},
 		SuggestedAnnotations: contracts.AnnotationBundle{
-			Lines: []contracts.LineAnnotation{
+			Lines:      []contracts.LineAnnotation{},
+			Rectangles: []contracts.RectangleAnnotation{},
+			Polylines: []contracts.PolylineAnnotation{
 				{
-					ID:     "auto-tooth-1-width",
-					Label:  "Tooth 1 width",
+					ID:     "auto-tooth-trace",
+					Label:  "Tooth trace",
 					Source: contracts.AnnotationSourceAutoTooth,
-				},
-			},
-			Rectangles: []contracts.RectangleAnnotation{
-				{
-					ID:     "auto-tooth-1-bounding-box",
-					Label:  "Tooth 1 bounding box",
-					Source: contracts.AnnotationSourceAutoTooth,
+					Points: []contracts.AnnotationPoint{
+						{X: 100, Y: 50},
+						{X: 144, Y: 50},
+						{X: 144, Y: 140},
+						{X: 100, Y: 140},
+					},
+					Closed: true,
 				},
 			},
 		},
@@ -82,11 +90,14 @@ func TestMemoryStoreAndLoadAnalyzeRoundTrip(t *testing.T) {
 	if got, want := result.Analysis.Tooth.Confidence, 0.85; got != want {
 		t.Fatalf("Tooth.Confidence = %v, want %v", got, want)
 	}
-	if got, want := len(result.SuggestedAnnotations.Lines), 1; got != want {
+	if got, want := len(result.SuggestedAnnotations.Lines), 0; got != want {
 		t.Fatalf("len(Lines) = %d, want %d", got, want)
 	}
-	if got, want := len(result.SuggestedAnnotations.Rectangles), 1; got != want {
+	if got, want := len(result.SuggestedAnnotations.Rectangles), 0; got != want {
 		t.Fatalf("len(Rectangles) = %d, want %d", got, want)
+	}
+	if got, want := len(result.SuggestedAnnotations.Polylines), 1; got != want {
+		t.Fatalf("len(Polylines) = %d, want %d", got, want)
 	}
 }
 
@@ -123,6 +134,14 @@ func TestMemoryLoadAnalyzeClonesData(t *testing.T) {
 					Confidence: &confidence,
 				},
 			},
+			Polylines: []contracts.PolylineAnnotation{
+				{
+					ID:         "trace-1",
+					Points:     []contracts.AnnotationPoint{{X: 1, Y: 2}, {X: 3, Y: 4}, {X: 5, Y: 6}},
+					Closed:     true,
+					Confidence: &confidence,
+				},
+			},
 		},
 	})
 
@@ -136,6 +155,10 @@ func TestMemoryLoadAnalyzeClonesData(t *testing.T) {
 	if result.SuggestedAnnotations.Lines[0].Confidence != nil {
 		*result.SuggestedAnnotations.Lines[0].Confidence = 0.0
 	}
+	if result.SuggestedAnnotations.Polylines[0].Confidence != nil {
+		*result.SuggestedAnnotations.Polylines[0].Confidence = 0.0
+	}
+	result.SuggestedAnnotations.Polylines[0].Points[0].X = 99
 
 	// Reload and verify original is intact
 	reloaded, ok := memory.LoadAnalyze("analyze:clone")
@@ -150,6 +173,15 @@ func TestMemoryLoadAnalyzeClonesData(t *testing.T) {
 	}
 	if got, want := *reloaded.SuggestedAnnotations.Lines[0].Confidence, 0.9; got != want {
 		t.Fatalf("reloaded Lines[0].Confidence = %v, want %v", got, want)
+	}
+	if reloaded.SuggestedAnnotations.Polylines[0].Confidence == nil {
+		t.Fatal("reloaded Polylines[0].Confidence = nil, want non-nil")
+	}
+	if got, want := *reloaded.SuggestedAnnotations.Polylines[0].Confidence, 0.9; got != want {
+		t.Fatalf("reloaded Polylines[0].Confidence = %v, want %v", got, want)
+	}
+	if got, want := reloaded.SuggestedAnnotations.Polylines[0].Points[0].X, 1.0; got != want {
+		t.Fatalf("reloaded Polylines[0].Points[0].X = %v, want %v", got, want)
 	}
 }
 

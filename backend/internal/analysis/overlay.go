@@ -116,12 +116,12 @@ func blurBinaryMask(mask []uint8, width, height, radius int) []uint8 {
 		row := y * width
 		var sum uint32
 		for x := -radius; x <= radius; x++ {
-			sum += uint32(expanded[row+clampInt(x, 0, width-1)])
+			sum += uint32(expanded[row+clampOverlayInt(x, 0, width-1)])
 		}
 		for x := 0; x < width; x++ {
 			horizontal[row+x] = uint16(sum / uint32(window))
-			left := clampInt(x-radius, 0, width-1)
-			right := clampInt(x+radius+1, 0, width-1)
+			left := clampOverlayInt(x-radius, 0, width-1)
+			right := clampOverlayInt(x+radius+1, 0, width-1)
 			sum += uint32(expanded[row+right])
 			sum -= uint32(expanded[row+left])
 		}
@@ -131,12 +131,12 @@ func blurBinaryMask(mask []uint8, width, height, radius int) []uint8 {
 	for x := 0; x < width; x++ {
 		var sum uint32
 		for y := -radius; y <= radius; y++ {
-			sum += uint32(horizontal[clampInt(y, 0, height-1)*width+x])
+			sum += uint32(horizontal[clampOverlayInt(y, 0, height-1)*width+x])
 		}
 		for y := 0; y < height; y++ {
 			blurred[y*width+x] = uint8(sum / uint32(window))
-			top := clampInt(y-radius, 0, height-1)
-			bottom := clampInt(y+radius+1, 0, height-1)
+			top := clampOverlayInt(y-radius, 0, height-1)
+			bottom := clampOverlayInt(y+radius+1, 0, height-1)
 			sum += uint32(horizontal[bottom*width+x])
 			sum -= uint32(horizontal[top*width+x])
 		}
@@ -149,7 +149,7 @@ func blendChannel(base uint8, overlay uint8, alpha float64) uint8 {
 	return uint8(math.Round(float64(base)*(1.0-alpha) + float64(overlay)*alpha))
 }
 
-func clampInt(value, low, high int) int {
+func clampOverlayInt(value, low, high int) int {
 	if value < low {
 		return low
 	}

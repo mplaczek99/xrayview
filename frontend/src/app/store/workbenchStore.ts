@@ -73,18 +73,14 @@ function detectedToothCount(analysis: WorkbenchStudy["analysis"]): number {
 
 function formatAnalyzeStatus(toothCount: number, fromCache: boolean): string {
   if (toothCount === 0) {
-    return "Measurement completed, but the backend could not isolate a tooth candidate.";
+    return "Analysis completed, but the backend could not isolate a tooth candidate.";
   }
 
   if (fromCache) {
-    return toothCount === 1
-      ? "Tooth suggestions loaded from cache."
-      : `${toothCount} tooth suggestions loaded from cache.`;
+    return "Tooth analysis loaded from cache.";
   }
 
-  return toothCount === 1
-    ? "Tooth measurement complete. Suggestions are ready to edit."
-    : `${toothCount} teeth measured. Suggestions are ready to edit.`;
+  return "Tooth analysis complete. Red trace is ready.";
 }
 
 // Returns true if the incoming backend snapshot has no meaningful change vs what
@@ -192,6 +188,17 @@ function applyAnalyzeJob(study: WorkbenchStudy, job: JobSnapshot): WorkbenchStud
       }
 
       const toothCount = detectedToothCount(job.result.payload.analysis);
+      const nextAnnotations = replaceSuggestedAnnotations(
+        study.annotations,
+        job.result.payload.suggestedAnnotations,
+      );
+      const nextSelectedAnnotationId =
+        study.viewer.selectedAnnotationId &&
+        nextAnnotations.lines.some(
+          (annotation) => annotation.id === study.viewer.selectedAnnotationId,
+        )
+          ? study.viewer.selectedAnnotationId
+          : null;
       return {
         ...study,
         analysisJobId: job.jobId,
@@ -211,10 +218,11 @@ function applyAnalyzeJob(study: WorkbenchStudy, job: JobSnapshot): WorkbenchStud
         measurementScale:
           job.result.payload.analysis.calibration.measurementScale ?? study.measurementScale,
         analysis: job.result.payload.analysis,
-        annotations: replaceSuggestedAnnotations(
-          study.annotations,
-          job.result.payload.suggestedAnnotations,
-        ),
+        annotations: nextAnnotations,
+        viewer: {
+          ...study.viewer,
+          selectedAnnotationId: nextSelectedAnnotationId,
+        },
         status: formatAnalyzeStatus(toothCount, job.fromCache),
       };
     }
@@ -222,13 +230,13 @@ function applyAnalyzeJob(study: WorkbenchStudy, job: JobSnapshot): WorkbenchStud
       return {
         ...study,
         analysisJobId: job.jobId,
-        status: formatBackendError(job.error, "Tooth measurement failed."),
+        status: formatBackendError(job.error, "Tooth analysis failed."),
       };
     case "cancelled":
       return {
         ...study,
         analysisJobId: job.jobId,
-        status: "Tooth measurement cancelled.",
+        status: "Tooth analysis cancelled.",
       };
   }
 }
@@ -456,14 +464,14 @@ class WorkbenchStore {
           started.jobId,
           "analyzeStudy",
           study.studyId,
-          "Queued tooth measurement...",
+          "Queued tooth analysis...",
         ),
       );
       await this.syncJob(started.jobId);
     } catch (error) {
       this.setStudyState(study.studyId, (current) => ({
         ...current,
-        status: formatBackendError(error, "Tooth measurement failed."),
+        status: formatBackendError(error, "Tooth analysis failed."),
       }));
     }
   }

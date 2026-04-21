@@ -97,6 +97,32 @@ export function createMockPreview(processed: boolean, palette: Palette): string 
 }
 
 export function createMockToothAnalysis(): ToothAnalysis {
+  const primaryOutline = [
+    { x: 436, y: 430 },
+    { x: 470, y: 418 },
+    { x: 520, y: 422 },
+    { x: 552, y: 446 },
+    { x: 560, y: 504 },
+    { x: 548, y: 584 },
+    { x: 516, y: 626 },
+    { x: 472, y: 630 },
+    { x: 440, y: 604 },
+    { x: 426, y: 542 },
+    { x: 430, y: 472 },
+  ];
+  const secondaryOutline = [
+    { x: 622, y: 418 },
+    { x: 650, y: 406 },
+    { x: 708, y: 412 },
+    { x: 738, y: 448 },
+    { x: 742, y: 506 },
+    { x: 726, y: 578 },
+    { x: 694, y: 604 },
+    { x: 650, y: 600 },
+    { x: 624, y: 566 },
+    { x: 618, y: 496 },
+    { x: 620, y: 444 },
+  ];
   const teeth: ToothAnalysis["teeth"] = [
     {
       confidence: 0.74,
@@ -126,6 +152,7 @@ export function createMockToothAnalysis(): ToothAnalysis {
           start: { x: 492, y: 420 },
           end: { x: 492, y: 620 },
         },
+        outline: primaryOutline,
       },
     },
     {
@@ -156,6 +183,7 @@ export function createMockToothAnalysis(): ToothAnalysis {
           start: { x: 676, y: 408 },
           end: { x: 676, y: 601 },
         },
+        outline: secondaryOutline,
       },
     },
   ];
@@ -180,82 +208,17 @@ export function createMockToothAnalysis(): ToothAnalysis {
 
 export function createMockSuggestedAnnotations(): AnnotationBundle {
   return {
-    lines: [
+    lines: [],
+    rectangles: [],
+    polylines: [
       {
-        id: "auto-tooth-1-width",
-        label: "Tooth 1 width",
+        id: "auto-tooth-trace",
+        label: "Tooth trace",
         source: "autoTooth",
-        start: { x: 428, y: 454 },
-        end: { x: 560, y: 454 },
-        editable: true,
-        confidence: 0.74,
-        measurement: {
-          pixelLength: 132,
-          calibratedLengthMm: null,
-        },
-      },
-      {
-        id: "auto-tooth-1-height",
-        label: "Tooth 1 height",
-        source: "autoTooth",
-        start: { x: 492, y: 420 },
-        end: { x: 492, y: 620 },
-        editable: true,
-        confidence: 0.74,
-        measurement: {
-          pixelLength: 200,
-          calibratedLengthMm: null,
-        },
-      },
-      {
-        id: "auto-tooth-2-width",
-        label: "Tooth 2 width",
-        source: "autoTooth",
-        start: { x: 618, y: 446 },
-        end: { x: 741, y: 446 },
-        editable: true,
-        confidence: 0.69,
-        measurement: {
-          pixelLength: 123,
-          calibratedLengthMm: null,
-        },
-      },
-      {
-        id: "auto-tooth-2-height",
-        label: "Tooth 2 height",
-        source: "autoTooth",
-        start: { x: 676, y: 408 },
-        end: { x: 676, y: 601 },
-        editable: true,
-        confidence: 0.69,
-        measurement: {
-          pixelLength: 193,
-          calibratedLengthMm: null,
-        },
-      },
-    ],
-    rectangles: [
-      {
-        id: "auto-tooth-1-bounding-box",
-        label: "Tooth 1 bounding box",
-        source: "autoTooth",
-        x: 422,
-        y: 414,
-        width: 140,
-        height: 220,
+        points: createMockToothAnalysis().tooth?.geometry.outline ?? [],
+        closed: true,
         editable: false,
         confidence: 0.74,
-      },
-      {
-        id: "auto-tooth-2-bounding-box",
-        label: "Tooth 2 bounding box",
-        source: "autoTooth",
-        x: 612,
-        y: 402,
-        width: 132,
-        height: 208,
-        editable: false,
-        confidence: 0.69,
       },
     ],
   };

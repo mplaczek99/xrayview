@@ -927,8 +927,8 @@ func (service *Service) executeAnalyzeJob(
 		jobID,
 		contracts.JobStateRunning,
 		88,
-		"measuringTooth",
-		"Measuring tooth candidate",
+		"analyzingTooth",
+		"Analyzing tooth boundary",
 	); err != nil {
 		service.failJob(jobID, err)
 		return
