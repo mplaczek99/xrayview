@@ -20,157 +20,125 @@ func detectCloseupCentralIncisorCandidates(
 		return nil, nil, false
 	}
 
-	enhanced := claheGray(normalized, int(width), int(height), 48, 2.5)
+	enhanced := claheGray(normalized, int(width), int(height), 48, 2.2)
 	defer bufpool.PutUint8(enhanced)
 
 	blurred := gaussianBlurGrayFast(enhanced, width, height, 1.2)
 	defer bufpool.PutUint8(blurred)
 
-	boundary, darkness := buildCloseupBoundaryMaps(blurred, width, height, search)
+	smallBlur, largeBlur := dualGaussianBlurGray(blurred, width, height, 1.5, 9.0)
+	defer bufpool.PutUint8(smallBlur)
+	defer bufpool.PutUint8(largeBlur)
+
+	gradient := gradientMagnitudeGray(blurred, width, height)
+	defer bufpool.PutUint8(gradient)
+
+	toothness, darkness := buildCloseupToothMaps(blurred, smallBlur, largeBlur, width, height, search)
+	borderPad := clampInt(int(minUint32(width, height)/80), 8, 15)
+	suppressCloseupFrame(toothness, darkness, width, height, borderPad)
 
 	crownGapBand := searchRegion{
 		x:      search.x,
-		y:      search.y + uint32(math.Round(float64(search.height)*0.50)),
+		y:      search.y + uint32(math.Round(float64(search.height)*0.56)),
 		width:  search.width,
-		height: maxUint32(uint32(math.Round(float64(search.height)*0.34)), 1),
+		height: maxUint32(uint32(math.Round(float64(search.height)*0.18)), 1),
 	}
 	crownGapBand = clampSearchRegionToSearch(crownGapBand, search)
-	gapProfile := buildCloseupColumnProfile(darkness, width, crownGapBand, search)
-	gapProfile = smoothFloatProfile(gapProfile, 9)
+	gapProfile := smoothFloatProfile(buildCloseupColumnProfile(darkness, width, crownGapBand, search), 9)
 	if len(gapProfile) == 0 {
 		return nil, nil, false
 	}
 
 	searchMidX := search.x + search.width/2
 	centerWindowHalf := maxUint32(search.width/10, 36)
-	gapLeft := maxUint32(saturatingSubUint32(searchMidX, centerWindowHalf), search.x)
-	gapRight := minUint32(searchMidX+centerWindowHalf, search.x+search.width-1)
-	gapX := pickCloseupProfilePeak(gapProfile, search, gapLeft, gapRight, searchMidX, 1.5)
+	gapX := pickCloseupProfilePeak(
+		gapProfile,
+		search,
+		maxUint32(saturatingSubUint32(searchMidX, centerWindowHalf), search.x),
+		minUint32(searchMidX+centerWindowHalf, search.x+search.width-1),
+		searchMidX,
+		1.5,
+	)
 
-	crownBand := searchRegion{
+	seedBand := searchRegion{
 		x:      search.x,
 		y:      search.y + uint32(math.Round(float64(search.height)*0.60)),
 		width:  search.width,
-		height: maxUint32(uint32(math.Round(float64(search.height)*0.24)), 1),
+		height: maxUint32(uint32(math.Round(float64(search.height)*0.26)), 1),
 	}
-	crownBand = clampSearchRegionToSearch(crownBand, search)
-	brightnessProfile := smoothFloatProfile(buildCloseupColumnProfile(blurred, width, crownBand, search), 7)
-	if len(brightnessProfile) == 0 {
+	seedBand = clampSearchRegionToSearch(seedBand, search)
+	toothProfile := smoothFloatProfile(buildCloseupColumnProfile(toothness, width, seedBand, search), 7)
+	if len(toothProfile) == 0 {
 		return nil, nil, false
 	}
 
-	expectedHalfWidth := clampInt(int(search.width/7), 70, 150)
-	peakWindowHalf := clampInt(expectedHalfWidth/2, 28, 72)
-	leftCenter := pickCloseupProfilePeak(
-		brightnessProfile,
+	expectedHalfWidth := clampInt(int(search.width/8), 60, 110)
+	leftTargetX := maxUint32(search.x, saturatingSubUint32(gapX, uint32(expectedHalfWidth)))
+	rightTargetX := minUint32(gapX+uint32(expectedHalfWidth), search.x+search.width-1)
+	leftSeedX := pickCloseupProfilePeak(
+		toothProfile,
 		search,
-		maxUint32(search.x, saturatingSubUint32(gapX, uint32(expectedHalfWidth+peakWindowHalf))),
-		maxUint32(search.x, saturatingSubUint32(gapX, uint32(maxInt(expectedHalfWidth-peakWindowHalf, 20)))),
-		saturatingSubUint32(gapX, uint32(expectedHalfWidth)),
-		0.75,
+		maxUint32(search.x, saturatingSubUint32(leftTargetX, 30)),
+		minUint32(leftTargetX+30, saturatingSubUint32(gapX, 35)),
+		leftTargetX,
+		0.7,
 	)
-	rightCenter := pickCloseupProfilePeak(
-		brightnessProfile,
+	rightSeedX := pickCloseupProfilePeak(
+		toothProfile,
 		search,
-		minUint32(gapX+uint32(maxInt(expectedHalfWidth-peakWindowHalf, 20)), search.x+search.width-1),
-		minUint32(gapX+uint32(expectedHalfWidth+peakWindowHalf), search.x+search.width-1),
-		minUint32(gapX+uint32(expectedHalfWidth), search.x+search.width-1),
-		0.75,
+		maxUint32(gapX+35, saturatingSubUint32(rightTargetX, 30)),
+		minUint32(rightTargetX+30, search.x+search.width-1),
+		rightTargetX,
+		0.7,
 	)
-	if leftCenter >= gapX || rightCenter <= gapX {
+	if leftSeedX >= gapX || rightSeedX <= gapX {
 		return nil, nil, false
 	}
 
-	rowBand := searchRegion{
-		x:      search.x,
-		y:      search.y + uint32(math.Round(float64(search.height)*0.02)),
-		width:  search.width,
-		height: maxUint32(uint32(math.Round(float64(search.height)*0.90)), 1),
-	}
-	rowBand = clampSearchRegionToSearch(rowBand, search)
-
-	gapWindowHalf := clampInt(int(search.width/32), 18, 30)
-	gapPath, gapStrength := traceCloseupVerticalPath(
-		darkness,
-		width,
-		rowBand,
-		maxUint32(search.x, saturatingSubUint32(gapX, uint32(gapWindowHalf))),
-		minUint32(gapX+uint32(gapWindowHalf), search.x+search.width-1),
-		gapX,
-		3,
-		11.0,
-		1.25,
-	)
-	if len(gapPath) == 0 || gapStrength < 72 {
+	leftSeedY, ok := pickCloseupSeedY(toothness, darkness, width, seedBand, leftSeedX)
+	if !ok {
 		return nil, nil, false
 	}
-
-	leftHalfWidth := maxUint32(saturatingSubUint32(gapX, leftCenter), 1)
-	rightHalfWidth := maxUint32(saturatingSubUint32(rightCenter, gapX), 1)
-	leftOuterTarget := maxUint32(search.x, saturatingSubUint32(leftCenter, leftHalfWidth))
-	rightOuterTarget := minUint32(rightCenter+rightHalfWidth, search.x+search.width-1)
-	outerWindowHalf := clampInt(int(search.width/24), 22, 44)
-
-	leftOuterPath, leftStrength := traceCloseupVerticalPath(
-		boundary,
-		width,
-		rowBand,
-		maxUint32(search.x, saturatingSubUint32(leftOuterTarget, uint32(outerWindowHalf))),
-		minUint32(leftOuterTarget+uint32(outerWindowHalf), gapX-4),
-		leftOuterTarget,
-		4,
-		10.0,
-		0.35,
-	)
-	rightOuterPath, rightStrength := traceCloseupVerticalPath(
-		boundary,
-		width,
-		rowBand,
-		maxUint32(gapX+4, saturatingSubUint32(rightOuterTarget, uint32(outerWindowHalf))),
-		minUint32(rightOuterTarget+uint32(outerWindowHalf), search.x+search.width-1),
-		rightOuterTarget,
-		4,
-		10.0,
-		0.35,
-	)
+	rightSeedY, ok := pickCloseupSeedY(toothness, darkness, width, seedBand, rightSeedX)
+	if !ok {
+		return nil, nil, false
+	}
 
 	candidates := make([]componentCandidate, 0, 2)
 	geometries := make([]contracts.ToothGeometry, 0, 2)
-	if leftStrength >= 42 {
-		candidate, geometry, ok := buildCloseupCandidateFromPaths(
-			normalized,
-			boundary,
-			width,
-			height,
-			search,
-			rowBand,
-			leftOuterPath,
-			gapPath,
-			gapX,
-			false,
-		)
-		if ok {
-			candidates = append(candidates, candidate)
-			geometries = append(geometries, geometry)
-		}
+	if candidate, geometry, ok := detectCloseupSeedCandidate(
+		normalized,
+		toothness,
+		darkness,
+		gradient,
+		width,
+		height,
+		search,
+		leftSeedX,
+		leftSeedY,
+		gapX,
+		false,
+		borderPad,
+	); ok {
+		candidates = append(candidates, candidate)
+		geometries = append(geometries, geometry)
 	}
-	if rightStrength >= 42 {
-		candidate, geometry, ok := buildCloseupCandidateFromPaths(
-			normalized,
-			boundary,
-			width,
-			height,
-			search,
-			rowBand,
-			gapPath,
-			rightOuterPath,
-			gapX,
-			true,
-		)
-		if ok {
-			candidates = append(candidates, candidate)
-			geometries = append(geometries, geometry)
-		}
+	if candidate, geometry, ok := detectCloseupSeedCandidate(
+		normalized,
+		toothness,
+		darkness,
+		gradient,
+		width,
+		height,
+		search,
+		rightSeedX,
+		rightSeedY,
+		gapX,
+		true,
+		borderPad,
+	); ok {
+		candidates = append(candidates, candidate)
+		geometries = append(geometries, geometry)
 	}
 	if len(candidates) == 0 {
 		return nil, nil, false
@@ -252,63 +220,69 @@ func estimateCloseupBottomY(
 	return search.y + search.height - 1
 }
 
-func buildCloseupBoundaryMaps(
+func buildCloseupToothMaps(
 	blurred []uint8,
+	smallBlur []uint8,
+	largeBlur []uint8,
 	width, height uint32,
 	search searchRegion,
 ) ([]uint8, []uint8) {
-	rawBoundary := make([]uint16, len(blurred))
-	rawDarkness := make([]uint16, len(blurred))
+	toothness := make([]uint8, len(blurred))
+	darkness := make([]uint8, len(blurred))
+
+	rawToothness := make([]float64, len(blurred))
+	maxToothness := 1.0
 	integral := buildIntegralImage(blurred, width, search)
 
-	maxBoundary := uint16(1)
-	maxDarkness := uint16(1)
 	for y := search.y; y < search.y+search.height; y++ {
 		for x := search.x; x < search.x+search.width; x++ {
 			index := int(y*width + x)
-			gx := uint16(sobelXAbsGray(blurred, width, height, x, y))
-			localMean := meanInIntegralBox(integral, search, x, y, 6, 28)
-			darkness := uint16(maxInt(localMean-int(blurred[index]), 0))
-			combined := uint16(minInt(int(math.Round(float64(gx)*0.7+float64(darkness)*1.3)), math.MaxUint16))
-			rawDarkness[index] = darkness
-			rawBoundary[index] = combined
-			if combined > maxBoundary {
-				maxBoundary = combined
+			band := maxInt(int(smallBlur[index])-int(largeBlur[index]), 0)
+			localMean := meanInIntegralBox(integral, search, x, y, 5, 22)
+			dark := maxInt(localMean-int(blurred[index]), 0)
+			score := float64(band)*1.2 + float64(blurred[index])*0.8 - float64(dark)*1.5
+			if score < 0 {
+				score = 0
 			}
-			if darkness > maxDarkness {
-				maxDarkness = darkness
+			rawToothness[index] = score
+			darkness[index] = clampUint8FromInt(dark * 3)
+			if score > maxToothness {
+				maxToothness = score
 			}
 		}
 	}
 
-	boundary := make([]uint8, len(blurred))
-	darkness := make([]uint8, len(blurred))
 	for y := search.y; y < search.y+search.height; y++ {
 		for x := search.x; x < search.x+search.width; x++ {
 			index := int(y*width + x)
-			boundary[index] = uint8((uint32(rawBoundary[index]) * 255) / uint32(maxBoundary))
-			darkness[index] = uint8((uint32(rawDarkness[index]) * 255) / uint32(maxDarkness))
+			toothness[index] = uint8(math.Round(rawToothness[index] * 255.0 / maxToothness))
 		}
 	}
 
-	return boundary, darkness
+	return toothness, darkness
 }
 
-func sobelXAbsGray(pixels []uint8, width, height, x, y uint32) int {
-	leftX := saturatingSubUint32(x, 1)
-	rightX := minUint32(x+1, width-1)
-	topY := saturatingSubUint32(y, 1)
-	bottomY := minUint32(y+1, height-1)
-
-	topLeft := int(pixels[int(topY*width+leftX)])
-	midLeft := int(pixels[int(y*width+leftX)])
-	bottomLeft := int(pixels[int(bottomY*width+leftX)])
-	topRight := int(pixels[int(topY*width+rightX)])
-	midRight := int(pixels[int(y*width+rightX)])
-	bottomRight := int(pixels[int(bottomY*width+rightX)])
-
-	gx := -topLeft - 2*midLeft - bottomLeft + topRight + 2*midRight + bottomRight
-	return absInt(gx)
+func suppressCloseupFrame(
+	toothness []uint8,
+	darkness []uint8,
+	width, height uint32,
+	borderPad int,
+) {
+	if borderPad <= 0 {
+		return
+	}
+	heightInt := int(height)
+	widthInt := int(width)
+	for y := 0; y < heightInt; y++ {
+		for x := 0; x < widthInt; x++ {
+			if x >= borderPad && x < widthInt-borderPad && y >= borderPad && y < heightInt-borderPad {
+				continue
+			}
+			index := y*widthInt + x
+			toothness[index] = 0
+			darkness[index] = 255
+		}
+	}
 }
 
 func meanInIntegralBox(
@@ -385,152 +359,114 @@ func pickCloseupProfilePeak(
 	return search.x + uint32(bestIndex)
 }
 
-func traceCloseupVerticalPath(
-	response []uint8,
+func pickCloseupSeedY(
+	toothness []uint8,
+	darkness []uint8,
 	width uint32,
-	region searchRegion,
-	minX, maxX, targetX uint32,
-	maxStep int,
-	jumpPenalty float64,
-	centerPenalty float64,
-) ([]uint32, float64) {
-	if region.width == 0 || region.height == 0 {
-		return nil, 0
-	}
-	if maxX < minX {
-		return nil, 0
+	band searchRegion,
+	centerX uint32,
+) (uint32, bool) {
+	if band.height == 0 {
+		return 0, false
 	}
 
-	minX = maxUint32(minX, region.x)
-	maxX = minUint32(maxX, region.x+region.width-1)
-	if maxX < minX {
-		return nil, 0
-	}
-
-	cols := int(maxX-minX) + 1
-	rows := int(region.height)
-	back := make([]int, rows*cols)
-	prev := make([]float64, cols)
-	curr := make([]float64, cols)
-	for index := range prev {
-		prev[index] = math.Inf(1)
-		curr[index] = math.Inf(1)
-	}
-
-	for col := 0; col < cols; col++ {
-		x := minX + uint32(col)
-		responseValue := response[int(region.y*width+x)]
-		prev[col] = float64(255-responseValue) + math.Abs(float64(int(x)-int(targetX)))*centerPenalty
-		back[col] = -1
-	}
-
-	for row := 1; row < rows; row++ {
-		y := region.y + uint32(row)
-		for col := 0; col < cols; col++ {
-			x := minX + uint32(col)
-			unary := float64(255-response[int(y*width+x)]) + math.Abs(float64(int(x)-int(targetX)))*centerPenalty
-			bestCost := math.Inf(1)
-			bestPrev := col
-			prevStart := maxInt(col-maxStep, 0)
-			prevEnd := minInt(col+maxStep, cols-1)
-			for prevCol := prevStart; prevCol <= prevEnd; prevCol++ {
-				cost := prev[prevCol] + unary + float64(absInt(col-prevCol))*jumpPenalty
-				if cost < bestCost {
-					bestCost = cost
-					bestPrev = prevCol
-				}
+	windowHalf := uint32(8)
+	bestY := band.y
+	bestScore := -1.0
+	for y := band.y; y < band.y+band.height; y++ {
+		sum := 0.0
+		count := 0.0
+		for yy := maxUint32(y-4, band.y); yy <= minUint32(y+4, band.y+band.height-1); yy++ {
+			for xx := maxUint32(centerX-windowHalf, band.x); xx <= minUint32(centerX+windowHalf, band.x+band.width-1); xx++ {
+				index := int(yy*width + xx)
+				sum += float64(toothness[index]) - float64(darkness[index])*0.9
+				count++
 			}
-			curr[col] = bestCost
-			back[row*cols+col] = bestPrev
 		}
-		prev, curr = curr, prev
-		for index := range curr {
-			curr[index] = math.Inf(1)
+		if count == 0 {
+			continue
 		}
-	}
-
-	bestCol := 0
-	bestCost := prev[0]
-	for col := 1; col < cols; col++ {
-		if prev[col] < bestCost {
-			bestCost = prev[col]
-			bestCol = col
+		score := sum / count
+		if score > bestScore {
+			bestScore = score
+			bestY = y
 		}
 	}
 
-	path := make([]uint32, rows)
-	col := bestCol
-	totalResponse := 0.0
-	for row := rows - 1; row >= 0; row-- {
-		x := minX + uint32(col)
-		path[row] = x
-		y := region.y + uint32(row)
-		totalResponse += float64(response[int(y*width+x)])
-		if row == 0 {
-			break
-		}
-		col = back[row*cols+col]
-		if col < 0 {
-			col = 0
-		}
+	if bestScore < 0 {
+		return 0, false
 	}
-
-	return smoothCloseupPath(path, 5), totalResponse / float64(rows)
+	return bestY, true
 }
 
-func smoothCloseupPath(path []uint32, radius int) []uint32 {
-	if len(path) == 0 || radius <= 0 {
-		return append([]uint32(nil), path...)
-	}
-
-	prefix := make([]uint64, len(path)+1)
-	for index, value := range path {
-		prefix[index+1] = prefix[index] + uint64(value)
-	}
-	smoothed := make([]uint32, len(path))
-	for index := range path {
-		start := maxInt(index-radius, 0)
-		end := minInt(index+radius+1, len(path))
-		count := uint64(end - start)
-		smoothed[index] = uint32((prefix[end] - prefix[start]) / count)
-	}
-	return smoothed
-}
-
-func buildCloseupCandidateFromPaths(
+func detectCloseupSeedCandidate(
 	normalized []uint8,
-	boundary []uint8,
+	toothness []uint8,
+	darkness []uint8,
+	gradient []uint8,
 	width, height uint32,
 	search searchRegion,
-	rowBand searchRegion,
-	leftPath []uint32,
-	rightPath []uint32,
-	gapX uint32,
+	seedX, seedY, gapX uint32,
 	isRight bool,
+	borderPad int,
 ) (componentCandidate, contracts.ToothGeometry, bool) {
-	if len(leftPath) != len(rightPath) || len(leftPath) != int(rowBand.height) {
+	maxHalfWidth := maxUint32(search.width/7, 110)
+	minGrowX := search.x
+	maxGrowX := search.x + search.width - 1
+	if isRight {
+		minGrowX = gapX + 8
+		maxGrowX = minUint32(seedX+maxHalfWidth, maxGrowX)
+	} else {
+		minGrowX = maxUint32(search.x, saturatingSubUint32(seedX, maxHalfWidth))
+		maxGrowX = saturatingSubUint32(gapX, 8)
+	}
+	if maxGrowX <= minGrowX {
 		return componentCandidate{}, contracts.ToothGeometry{}, false
 	}
 
-	mask := make([]uint8, len(normalized))
-	for row := 0; row < len(leftPath); row++ {
-		y := rowBand.y + uint32(row)
-		left := minUint32(leftPath[row], rightPath[row])
-		right := maxUint32(leftPath[row], rightPath[row])
-		if right <= left+4 {
-			continue
-		}
-		if !isRight {
-			right = saturatingSubUint32(right, 1)
-		} else {
-			left = minUint32(left+1, right)
-		}
-		if right <= left+4 {
-			continue
-		}
-		for x := left; x <= right; x++ {
-			mask[int(y*width+x)] = 1
-		}
+	growRegion := searchRegion{
+		x:      minGrowX,
+		y:      search.y,
+		width:  maxUint32(saturatingSubUint32(maxGrowX, minGrowX)+1, 1),
+		height: search.height,
+	}
+	seedIndex := int(seedY*width + seedX)
+	seedToothness := toothness[seedIndex]
+	seedDarkness := darkness[seedIndex]
+	if seedToothness < 90 || seedDarkness > 150 {
+		return componentCandidate{}, contracts.ToothGeometry{}, false
+	}
+
+	growThreshold := maxUint8(
+		percentileInRegion(toothness, width, growRegion, 0.45),
+		clampUint8FromInt(int(seedToothness)-70),
+	)
+	if growThreshold < 60 {
+		growThreshold = 60
+	}
+	darkThreshold := maxUint8(percentileInRegion(darkness, width, growRegion, 0.90), 90)
+	if darkThreshold > 150 {
+		darkThreshold = 150
+	}
+	gradientThreshold := maxUint8(percentileInRegion(gradient, width, growRegion, 0.94), 90)
+
+	mask := growCloseupSeedMask(
+		toothness,
+		darkness,
+		gradient,
+		width,
+		height,
+		growRegion,
+		seedX,
+		seedY,
+		growThreshold,
+		darkThreshold,
+		gradientThreshold,
+		borderPad,
+		seedToothness,
+	)
+	if countMaskPixels(mask) == 0 {
+		return componentCandidate{}, contracts.ToothGeometry{}, false
 	}
 
 	mask = closeBinaryMask(mask, int(width), int(height))
@@ -538,66 +474,175 @@ func buildCloseupCandidateFromPaths(
 	mask = fillHolesBinaryMask(mask, int(width), int(height))
 	mask = openBinaryMask(mask, int(width), int(height))
 
-	components := collectMaskComponents(mask, width, height, search, maxUint32(search.area()/80, 4000))
+	components := collectMaskComponents(mask, width, height, growRegion, maxUint32(growRegion.area()/90, 3500))
 	if len(components) == 0 {
 		return componentCandidate{}, contracts.ToothGeometry{}, false
 	}
 
-	best := components[0]
-	for _, component := range components[1:] {
-		if component.area > best.area {
-			best = component
+	seedPixelIndex := int(seedY*width + seedX)
+	var selected *maskComponent
+	for index := range components {
+		if containsMaskPixel(components[index].pixels, seedPixelIndex) {
+			selected = &components[index]
+			break
 		}
+	}
+	if selected == nil {
+		return componentCandidate{}, contracts.ToothGeometry{}, false
+	}
+	if componentTouchesImageBorder(selected.bbox, width, height, borderPad) {
+		return componentCandidate{}, contracts.ToothGeometry{}, false
+	}
+
+	geometry := geometryFromPixels(selected.pixels, selected.bbox, width)
+	if len(geometry.Outline) < 12 {
+		return componentCandidate{}, contracts.ToothGeometry{}, false
 	}
 
 	var intensitySum uint64
-	var boundarySum uint64
-	for _, index := range best.pixels {
+	var toothnessSum uint64
+	var darknessSum uint64
+	for _, index := range selected.pixels {
 		intensitySum += uint64(normalized[index])
-		boundarySum += uint64(boundary[index])
+		toothnessSum += uint64(toothness[index])
+		darknessSum += uint64(darkness[index])
 	}
-	meanIntensity := float64(intensitySum) / float64(maxUint32(best.area, 1))
-	meanBoundary := float64(boundarySum) / float64(maxUint32(best.area, 1))
-	fillRatio := float64(best.area) / float64(maxUint32(best.bbox.Width*best.bbox.Height, 1))
-	aspectRatio := float64(best.bbox.Height) / float64(maxUint32(best.bbox.Width, 1))
-	widthRatio := float64(best.bbox.Width) / float64(maxUint32(search.width, 1))
-	heightRatio := float64(best.bbox.Height) / float64(maxUint32(search.height, 1))
-	centerX := float64(best.bbox.X) + float64(best.bbox.Width)/2.0
-	targetCenterX := float64(gapX)
-	if !isRight {
-		targetCenterX -= float64(best.bbox.Width) * 0.45
+	meanIntensity := float64(intensitySum) / float64(maxUint32(selected.area, 1))
+	meanToothness := float64(toothnessSum) / float64(maxUint32(selected.area, 1))
+	meanDarkness := float64(darknessSum) / float64(maxUint32(selected.area, 1))
+	fillRatio := float64(selected.area) / float64(maxUint32(selected.bbox.Width*selected.bbox.Height, 1))
+	aspectRatio := float64(selected.bbox.Height) / float64(maxUint32(selected.bbox.Width, 1))
+	widthRatio := float64(selected.bbox.Width) / float64(maxUint32(search.width, 1))
+	heightRatio := float64(selected.bbox.Height) / float64(maxUint32(search.height, 1))
+	centerX := float64(selected.bbox.X) + float64(selected.bbox.Width)/2.0
+	targetCenterX := float64(seedX)
+	if isRight {
+		targetCenterX = math.Max(targetCenterX, float64(gapX)+float64(selected.bbox.Width)*0.35)
 	} else {
-		targetCenterX += float64(best.bbox.Width) * 0.45
+		targetCenterX = math.Min(targetCenterX, float64(gapX)-float64(selected.bbox.Width)*0.35)
 	}
-	centerScore := 1.0 - math.Min(math.Abs(centerX-targetCenterX)/(float64(search.width)*0.22), 1.0)
-	strict := widthRatio >= 0.12 &&
-		widthRatio <= 0.38 &&
+	centerScore := 1.0 - math.Min(math.Abs(centerX-targetCenterX)/(float64(search.width)*0.18), 1.0)
+
+	strict := widthRatio >= 0.14 &&
+		widthRatio <= 0.34 &&
 		heightRatio >= 0.62 &&
 		heightRatio <= 0.98 &&
-		aspectRatio >= 2.2 &&
-		aspectRatio <= 7.0 &&
-		fillRatio >= 0.42 &&
-		fillRatio <= 0.95 &&
-		meanBoundary >= 36
-	score := scoreCloseupCandidate(meanIntensity, meanBoundary, widthRatio, heightRatio, aspectRatio, fillRatio, centerScore, strict)
-	geometry := geometryFromPixels(best.pixels, best.bbox, width)
+		aspectRatio >= 2.1 &&
+		aspectRatio <= 6.0 &&
+		fillRatio >= 0.45 &&
+		fillRatio <= 0.92 &&
+		meanDarkness <= 110 &&
+		meanToothness >= 120
 
-	if best.area < 7000 || geometry.BoundingBox.Height < search.height/2 || len(geometry.Outline) < 8 {
+	score := scoreCloseupCandidate(
+		meanIntensity,
+		meanToothness,
+		meanDarkness,
+		widthRatio,
+		heightRatio,
+		aspectRatio,
+		fillRatio,
+		centerScore,
+		strict,
+	)
+	if selected.area < 9000 ||
+		geometry.BoundingBox.Height < search.height/2 ||
+		widthRatio > 0.36 ||
+		score < 0.34 {
 		return componentCandidate{}, contracts.ToothGeometry{}, false
 	}
 
 	return componentCandidate{
-		pixels: best.pixels,
-		bbox:   best.bbox,
-		area:   best.area,
+		pixels: selected.pixels,
+		bbox:   selected.bbox,
+		area:   selected.area,
 		score:  score,
 		strict: strict,
 	}, geometry, true
 }
 
+func growCloseupSeedMask(
+	toothness []uint8,
+	darkness []uint8,
+	gradient []uint8,
+	width, height uint32,
+	region searchRegion,
+	seedX, seedY uint32,
+	growThreshold uint8,
+	darkThreshold uint8,
+	gradientThreshold uint8,
+	borderPad int,
+	seedToothness uint8,
+) []uint8 {
+	mask := make([]uint8, len(toothness))
+	visited := make([]bool, len(toothness))
+	queue := make([]int, 0, int(region.area()/8))
+
+	seedIndex := int(seedY*width + seedX)
+	queue = append(queue, seedIndex)
+	visited[seedIndex] = true
+	widthInt := int(width)
+	heightInt := int(height)
+	regionRight := region.x + region.width - 1
+	regionBottom := region.y + region.height - 1
+
+	for head := 0; head < len(queue); head++ {
+		index := queue[head]
+		x := uint32(index % widthInt)
+		y := uint32(index / widthInt)
+		if x < region.x || x > regionRight || y < region.y || y > regionBottom {
+			continue
+		}
+		if x < uint32(borderPad) || x+uint32(borderPad) >= width || y < uint32(borderPad) || y+uint32(borderPad) >= height {
+			continue
+		}
+		if toothness[index] < growThreshold {
+			continue
+		}
+		if darkness[index] > darkThreshold {
+			continue
+		}
+		if gradient[index] > gradientThreshold && toothness[index] < clampUint8FromInt(int(seedToothness)-18) {
+			continue
+		}
+
+		mask[index] = 1
+		for ny := maxInt(int(y)-1, 0); ny <= minInt(int(y)+1, heightInt-1); ny++ {
+			for nx := maxInt(int(x)-1, 0); nx <= minInt(int(x)+1, widthInt-1); nx++ {
+				neighbor := ny*widthInt + nx
+				if visited[neighbor] {
+					continue
+				}
+				visited[neighbor] = true
+				queue = append(queue, neighbor)
+			}
+		}
+	}
+
+	return mask
+}
+
+func containsMaskPixel(pixels []int, target int) bool {
+	for _, index := range pixels {
+		if index == target {
+			return true
+		}
+	}
+	return false
+}
+
+func componentTouchesImageBorder(bbox contracts.BoundingBox, width, height uint32, borderPad int) bool {
+	pad := uint32(maxInt(borderPad, 0))
+	return bbox.X <= pad ||
+		bbox.Y <= pad ||
+		bbox.X+bbox.Width >= width-pad ||
+		bbox.Y+bbox.Height >= height-pad
+}
+
 func scoreCloseupCandidate(
 	meanIntensity float64,
-	meanBoundary float64,
+	meanToothness float64,
+	meanDarkness float64,
 	widthRatio float64,
 	heightRatio float64,
 	aspectRatio float64,
@@ -605,22 +650,24 @@ func scoreCloseupCandidate(
 	centerScore float64,
 	strict bool,
 ) float64 {
-	boundaryScore := clamp01((meanBoundary - 32.0) / 96.0)
-	brightnessScore := clamp01((meanIntensity - 52.0) / 140.0)
-	widthScore := 1.0 - math.Min(math.Abs(widthRatio-0.20)/0.16, 1.0)
-	heightScore := clamp01((heightRatio - 0.55) / 0.35)
-	aspectScore := 1.0 - math.Min(math.Abs(aspectRatio-4.0)/3.0, 1.0)
-	fillScore := 1.0 - math.Min(math.Abs(fillRatio-0.68)/0.34, 1.0)
+	brightnessScore := clamp01((meanIntensity - 60.0) / 120.0)
+	toothnessScore := clamp01((meanToothness - 100.0) / 110.0)
+	darkPenalty := clamp01((meanDarkness - 70.0) / 80.0)
+	widthScore := 1.0 - math.Min(math.Abs(widthRatio-0.22)/0.14, 1.0)
+	heightScore := clamp01((heightRatio - 0.60) / 0.32)
+	aspectScore := 1.0 - math.Min(math.Abs(aspectRatio-3.7)/2.3, 1.0)
+	fillScore := 1.0 - math.Min(math.Abs(fillRatio-0.66)/0.28, 1.0)
 
-	score := 0.28*boundaryScore +
-		0.18*brightnessScore +
-		0.16*widthScore +
-		0.16*heightScore +
-		0.10*aspectScore +
-		0.07*fillScore +
-		0.05*centerScore
+	score := 0.22*brightnessScore +
+		0.24*toothnessScore +
+		0.15*widthScore +
+		0.14*heightScore +
+		0.08*aspectScore +
+		0.08*fillScore +
+		0.09*centerScore -
+		0.18*darkPenalty
 	if !strict {
-		score *= 0.88
+		score *= 0.9
 	}
-	return score
+	return clamp01(score)
 }

@@ -49,3 +49,38 @@ func TestOverlayPreviewWithToothTraceDrawsRedOutline(t *testing.T) {
 		t.Fatalf("outside pixel unexpectedly changed: rgba=%v", overlay.Pixels[outsideBase:outsideBase+4])
 	}
 }
+
+func TestOverlayPreviewWithToothTracePrefersAnalysisOutlineOverGapTraces(t *testing.T) {
+	preview := imaging.GrayPreview(8, 8, []uint8{
+		20, 20, 20, 20, 20, 20, 20, 20,
+		20, 20, 20, 20, 20, 20, 20, 20,
+		20, 0, 20, 20, 20, 20, 20, 20,
+		20, 0, 20, 20, 20, 20, 20, 20,
+		20, 0, 20, 20, 20, 20, 20, 20,
+		20, 0, 20, 20, 20, 20, 20, 20,
+		20, 20, 20, 20, 20, 20, 20, 20,
+		20, 20, 20, 20, 20, 20, 20, 20,
+	})
+	analysisResult := contracts.ToothAnalysis{
+		Tooth: &contracts.ToothCandidate{
+			Geometry: contracts.ToothGeometry{
+				Outline: []contracts.Point{
+					{X: 4, Y: 2},
+					{X: 6, Y: 2},
+					{X: 6, Y: 5},
+					{X: 4, Y: 5},
+				},
+			},
+		},
+	}
+
+	overlay, err := OverlayPreviewWithToothTrace(preview, analysisResult)
+	if err != nil {
+		t.Fatalf("OverlayPreviewWithToothTrace returned error: %v", err)
+	}
+
+	outlineBase := (2*int(overlay.Width) + 5) * 4
+	if overlay.Pixels[outlineBase+0] <= overlay.Pixels[outlineBase+1] {
+		t.Fatalf("outline pixel not tinted red enough: rgba=%v", overlay.Pixels[outlineBase:outlineBase+4])
+	}
+}

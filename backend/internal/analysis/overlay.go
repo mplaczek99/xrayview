@@ -71,6 +71,19 @@ func OverlayPreviewWithToothTrace(
 		return imaging.PreviewImage{}, err
 	}
 
+	if analysis.Tooth != nil && len(analysis.Tooth.Geometry.Outline) >= 2 {
+		drawClosedPolyline(
+			rgba,
+			int(preview.Width),
+			int(preview.Height),
+			analysis.Tooth.Geometry.Outline,
+			toothTraceColor,
+			0.96,
+			2,
+		)
+		return imaging.RGBAPreview(preview.Width, preview.Height, rgba), nil
+	}
+
 	traces, err := ExtractBlackGapTraces(preview)
 	if err == nil && len(traces) > 0 {
 		for _, trace := range traces {
@@ -96,19 +109,6 @@ func OverlayPreviewWithToothTrace(
 				)
 			}
 		}
-		return imaging.RGBAPreview(preview.Width, preview.Height, rgba), nil
-	}
-
-	if analysis.Tooth != nil && len(analysis.Tooth.Geometry.Outline) >= 2 {
-		drawClosedPolyline(
-			rgba,
-			int(preview.Width),
-			int(preview.Height),
-			analysis.Tooth.Geometry.Outline,
-			toothTraceColor,
-			0.96,
-			2,
-		)
 	}
 
 	return imaging.RGBAPreview(preview.Width, preview.Height, rgba), nil
