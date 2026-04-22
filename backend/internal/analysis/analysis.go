@@ -143,6 +143,17 @@ func analyzeGrayscalePixelsWithDebug(
 	if debug != nil {
 		debug.Normalized = cloneUint8Slice(normalized)
 	}
+	if shouldUseCloseupBoundaryAnalysis(width, height) {
+		closeupCandidates, closeupGeometries, ok := detectCloseupCentralIncisorCandidates(normalized, width, height)
+		if ok && len(closeupCandidates) > 0 {
+			if debug != nil {
+				debug.DetectedCandidates = cloneComponentCandidates(closeupCandidates)
+				debug.AllCandidates = cloneComponentCandidates(closeupCandidates)
+			}
+			bufpool.PutUint8(normalized)
+			return buildToothAnalysisResult(width, height, measurementScale, closeupCandidates, closeupGeometries), nil
+		}
+	}
 	// Band-pass pair. σ=1.4 suppresses sensor noise; σ=9.0 approximates the
 	// slowly-varying bone/gum background. Their difference is what survives
 	// into the toothness map.
@@ -248,16 +259,6 @@ func analyzeGrayscalePixelsWithDebug(
 		}
 	}
 	finalGeometries = attachClosestOutlines(finalGeometries, seedGeometries)
-	primaryCandidate := selectPrimaryCandidate(finalCandidates)
-	primaryIndex := -1
-	if primaryCandidate != nil {
-		for index := range finalCandidates {
-			if &finalCandidates[index] == primaryCandidate {
-				primaryIndex = index
-				break
-			}
-		}
-	}
 
 	// Return analysis buffers — candidates hold pixel indices, not buffer refs.
 	bufpool.PutUint8(normalized)
@@ -267,42 +268,7 @@ func analyzeGrayscalePixelsWithDebug(
 		debug.DetectedCandidates = cloneComponentCandidates(finalCandidates)
 	}
 
-	warnings := make([]string, 0, 2)
-	if measurementScale == nil {
-		warnings = append(warnings, "Calibration metadata unavailable; returning pixel measurements only.")
-	}
-
-	if len(finalCandidates) > 0 && primaryCandidate != nil && !primaryCandidate.strict {
-		warnings = append(warnings, "No component met the primary tooth filters; using relaxed tooth candidates.")
-	}
-
-	teeth := make([]contracts.ToothCandidate, 0, len(finalCandidates))
-	for index, candidate := range finalCandidates {
-		teeth = append(teeth, buildToothCandidate(candidate, finalGeometries[index], measurementScale))
-	}
-
-	var tooth *contracts.ToothCandidate
-	if primaryCandidate != nil && primaryIndex >= 0 {
-		candidate := buildToothCandidate(*primaryCandidate, finalGeometries[primaryIndex], measurementScale)
-		tooth = &candidate
-	} else {
-		warnings = append(warnings, "The backend could not isolate a tooth candidate from this study.")
-	}
-
-	return contracts.ToothAnalysis{
-		Image: contracts.ToothImageMetadata{
-			Width:  width,
-			Height: height,
-		},
-		Calibration: contracts.ToothCalibration{
-			PixelUnits:                     pixelUnits,
-			MeasurementScale:               measurementScale,
-			RealWorldMeasurementsAvailable: measurementScale != nil,
-		},
-		Tooth:    tooth,
-		Teeth:    teeth,
-		Warnings: warnings,
-	}, nil
+	return buildToothAnalysisResult(width, height, measurementScale, finalCandidates, finalGeometries), nil
 }
 
 // buildToothCandidate packages a single component as a
@@ -343,6 +309,68 @@ func buildToothCandidate(
 			Calibrated: calibrated,
 		},
 		Geometry: geometry,
+	}
+}
+
+func buildToothAnalysisResult(
+	width, height uint32,
+	measurementScale *contracts.MeasurementScale,
+	candidates []componentCandidate,
+	geometries []contracts.ToothGeometry,
+) contracts.ToothAnalysis {
+	primaryCandidate := selectPrimaryCandidate(candidates)
+	primaryIndex := -1
+	if primaryCandidate != nil {
+		for index := range candidates {
+			if &candidates[index] == primaryCandidate {
+				primaryIndex = index
+				break
+			}
+		}
+	}
+
+	warnings := make([]string, 0, 2)
+	if measurementScale == nil {
+		warnings = append(warnings, "Calibration metadata unavailable; returning pixel measurements only.")
+	}
+	if len(candidates) > 0 && primaryCandidate != nil && !primaryCandidate.strict {
+		warnings = append(warnings, "No component met the primary tooth filters; using relaxed tooth candidates.")
+	}
+
+	teeth := make([]contracts.ToothCandidate, 0, len(candidates))
+	for index, candidate := range candidates {
+		geometry := contracts.ToothGeometry{}
+		if index < len(geometries) {
+			geometry = geometries[index]
+		}
+		teeth = append(teeth, buildToothCandidate(candidate, geometry, measurementScale))
+	}
+
+	var tooth *contracts.ToothCandidate
+	if primaryCandidate != nil && primaryIndex >= 0 {
+		geometry := contracts.ToothGeometry{}
+		if primaryIndex < len(geometries) {
+			geometry = geometries[primaryIndex]
+		}
+		candidate := buildToothCandidate(*primaryCandidate, geometry, measurementScale)
+		tooth = &candidate
+	} else {
+		warnings = append(warnings, "The backend could not isolate a tooth candidate from this study.")
+	}
+
+	return contracts.ToothAnalysis{
+		Image: contracts.ToothImageMetadata{
+			Width:  width,
+			Height: height,
+		},
+		Calibration: contracts.ToothCalibration{
+			PixelUnits:                     pixelUnits,
+			MeasurementScale:               measurementScale,
+			RealWorldMeasurementsAvailable: measurementScale != nil,
+		},
+		Tooth:    tooth,
+		Teeth:    teeth,
+		Warnings: warnings,
 	}
 }
 

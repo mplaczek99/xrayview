@@ -13,7 +13,9 @@ import (
 
 	"xrayview/backend/internal/bufpool"
 	"xrayview/backend/internal/contracts"
+	"xrayview/backend/internal/dicommeta"
 	"xrayview/backend/internal/imaging"
+	"xrayview/backend/internal/render"
 )
 
 func TestLocalGradientClampsAtImageEdges(t *testing.T) {
@@ -229,6 +231,43 @@ func TestAnalyzePreviewCalibrationGeneratesMillimeterMeasurements(t *testing.T) 
 	}
 	if calibrated.ToothWidth <= 0 || calibrated.ToothHeight <= 0 {
 		t.Fatalf("calibrated = %#v, want positive millimeter measurements", calibrated)
+	}
+}
+
+func TestAnalyzePreviewXrays2PrefersCentralIncisorBoundaryTrace(t *testing.T) {
+	analysis, err := AnalyzePreview(loadXrays2PreviewFixture(t), nil)
+	if err != nil {
+		t.Fatalf("AnalyzePreview returned error: %v", err)
+	}
+	if analysis.Tooth == nil {
+		t.Fatal("analysis.Tooth = nil, want close-up incisor candidate")
+	}
+	if got, wantMin := len(analysis.Teeth), 1; got < wantMin || got > 3 {
+		t.Fatalf("len(analysis.Teeth) = %d, want between 1 and 3 central candidates", got)
+	}
+
+	bbox := analysis.Tooth.Geometry.BoundingBox
+	centerX := bbox.X + bbox.Width/2
+	if centerX < 250 || centerX > 600 {
+		t.Fatalf("primary tooth centerX = %d, want a central incisor near the middle gap", centerX)
+	}
+	if bbox.Width < 110 || bbox.Width > 300 {
+		t.Fatalf("primary tooth width = %d, want a real incisor span", bbox.Width)
+	}
+	if bbox.Height < 700 {
+		t.Fatalf("primary tooth height = %d, want a full root-to-crown trace", bbox.Height)
+	}
+	if bbox.Y > 180 {
+		t.Fatalf("primary tooth top = %d, want root traced high into the image", bbox.Y)
+	}
+	if bbox.Y+bbox.Height < 900 {
+		t.Fatalf("primary tooth bottom = %d, want crown traced near the lower image half", bbox.Y+bbox.Height)
+	}
+	if len(analysis.Tooth.Geometry.Outline) < 12 {
+		t.Fatalf("outline vertices = %d, want a traced contour", len(analysis.Tooth.Geometry.Outline))
+	}
+	if analysis.Tooth.Confidence < 0.45 {
+		t.Fatalf("primary tooth confidence = %.2f, want >= 0.45", analysis.Tooth.Confidence)
 	}
 }
 
@@ -529,6 +568,16 @@ func loadAnalyzePreviewFixture(t testing.TB) imaging.PreviewImage {
 	}
 
 	return imaging.GrayPreview(uint32(bounds.Dx()), uint32(bounds.Dy()), pixels)
+}
+
+func loadXrays2PreviewFixture(t testing.TB) imaging.PreviewImage {
+	t.Helper()
+
+	study, err := dicommeta.DecodeFile(repoPathFromHere(t, "images", "TIF", "xrays2.tif"))
+	if err != nil {
+		t.Fatalf("DecodeFile returned error: %v", err)
+	}
+	return render.RenderSourceImage(study.Image, render.DefaultRenderPlan())
 }
 
 func repoPathFromHere(t testing.TB, pathParts ...string) string {
