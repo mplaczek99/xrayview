@@ -12,7 +12,6 @@ import (
 	"strconv"
 	"strings"
 
-	"xrayview/backend/internal/analysis"
 	"xrayview/backend/internal/contracts"
 	dicommeta "xrayview/backend/internal/dicommeta"
 	dicomexport "xrayview/backend/internal/export"
@@ -26,7 +25,6 @@ type legacyCLIOptions struct {
 	previewOutput   string
 	describePresets bool
 	describeStudy   bool
-	analyzeTooth    bool
 	preset          string
 	invert          bool
 	brightness      optionalIntFlag
@@ -38,14 +36,6 @@ type legacyCLIOptions struct {
 
 type legacyStudyDescription struct {
 	MeasurementScale *contracts.MeasurementScale `json:"measurementScale,omitempty"`
-}
-
-type legacyToothAnalysis struct {
-	Image       contracts.ToothImageMetadata `json:"image"`
-	Calibration contracts.ToothCalibration   `json:"calibration"`
-	Tooth       *contracts.ToothCandidate    `json:"tooth"`
-	Teeth       []contracts.ToothCandidate   `json:"teeth"`
-	Warnings    []string                     `json:"warnings"`
 }
 
 type optionalIntFlag struct {
@@ -125,7 +115,6 @@ func parseLegacyCLIArgs(args []string, stderr io.Writer) (legacyCLIOptions, erro
 	flagSet.StringVar(&options.previewOutput, "preview-output", "", "PNG preview output path")
 	flagSet.BoolVar(&options.describePresets, "describe-presets", false, "Print processing preset metadata as JSON")
 	flagSet.BoolVar(&options.describeStudy, "describe-study", false, "Print study measurement metadata as JSON")
-	flagSet.BoolVar(&options.analyzeTooth, "analyze-tooth", false, "Analyze the study and return automatic tooth analysis as JSON")
 	flagSet.StringVar(&options.preset, "preset", contracts.DefaultProcessingPresetID, "Processing preset")
 	flagSet.BoolVar(&options.invert, "invert", false, "Invert grayscale")
 	flagSet.Var(&options.brightness, "brightness", "Brightness adjustment (-256 to 256)")
@@ -173,10 +162,6 @@ func executeLegacyCLI(options legacyCLIOptions, stdout io.Writer) error {
 		})
 	}
 
-	if options.analyzeTooth {
-		return analyzeLegacyStudy(inputPath, strings.TrimSpace(options.previewOutput), stdout)
-	}
-
 	if isPlainPreviewRequest(options) {
 		return renderLegacyPreview(inputPath, strings.TrimSpace(options.previewOutput), stdout)
 	}
@@ -191,15 +176,13 @@ func executeLegacyCLI(options legacyCLIOptions, stdout io.Writer) error {
 }
 
 // validateLegacyModeSelection enforces "pick at most one backend mode":
-// describe-presets, describe-study, and analyze-tooth are mutually
-// exclusive on a single invocation. Zero is fine — we fall through to
-// the processing path.
+// describe-presets and describe-study are mutually exclusive on a single
+// invocation. Zero is fine — we fall through to the processing path.
 func validateLegacyModeSelection(options legacyCLIOptions) error {
 	modeCount := 0
 	for _, enabled := range []bool{
 		options.describePresets,
 		options.describeStudy,
-		options.analyzeTooth,
 	} {
 		if enabled {
 			modeCount++
@@ -208,7 +191,7 @@ func validateLegacyModeSelection(options legacyCLIOptions) error {
 
 	if modeCount > 1 {
 		return fmt.Errorf(
-			"choose only one backend mode: --describe-presets, --describe-study, or --analyze-tooth",
+			"choose only one backend mode: --describe-presets or --describe-study",
 		)
 	}
 
@@ -242,30 +225,6 @@ func validateLegacyInputPath(inputPath string) error {
 	}
 
 	return nil
-}
-
-func analyzeLegacyStudy(inputPath, previewOutput string, stdout io.Writer) error {
-	study, err := decodeLegacyStudy(inputPath)
-	if err != nil {
-		return err
-	}
-
-	preview := render.RenderSourceImage(study.Image, render.DefaultRenderPlan())
-	toothAnalysis, err := analysis.AnalyzePreview(preview, study.MeasurementScale)
-	if err != nil {
-		return err
-	}
-	if previewOutput != "" {
-		overlayPreview, err := analysis.OverlayPreviewWithToothTrace(preview, toothAnalysis)
-		if err != nil {
-			return err
-		}
-		if err := render.SavePreviewPNG(previewOutput, overlayPreview); err != nil {
-			return err
-		}
-	}
-
-	return writeJSON(stdout, normalizeLegacyToothAnalysis(toothAnalysis))
 }
 
 func renderLegacyPreview(inputPath, previewOutput string, stdout io.Writer) error {
@@ -391,26 +350,6 @@ func isPlainPreviewRequest(options legacyCLIOptions) bool {
 		strings.TrimSpace(options.palette) == ""
 }
 
-func normalizeLegacyToothAnalysis(analysis contracts.ToothAnalysis) legacyToothAnalysis {
-	teeth := analysis.Teeth
-	if teeth == nil {
-		teeth = []contracts.ToothCandidate{}
-	}
-
-	warnings := analysis.Warnings
-	if warnings == nil {
-		warnings = []string{}
-	}
-
-	return legacyToothAnalysis{
-		Image:       analysis.Image,
-		Calibration: analysis.Calibration,
-		Tooth:       analysis.Tooth,
-		Teeth:       teeth,
-		Warnings:    warnings,
-	}
-}
-
 func writeJSON(stdout io.Writer, payload any) error {
 	encoder := json.NewEncoder(stdout)
 	return encoder.Encode(payload)
@@ -424,10 +363,9 @@ func printLegacyUsage(stream io.Writer) {
 	fmt.Fprintln(stream, "  --output <study.dcm>          output DICOM path")
 	fmt.Fprintln(stream, "  --preview-output <image.png>  PNG preview output path")
 	fmt.Fprintln(stream, "")
-	fmt.Fprintln(stream, "metadata / analysis:")
+	fmt.Fprintln(stream, "metadata:")
 	fmt.Fprintln(stream, "  --describe-presets            print processing preset metadata as JSON")
 	fmt.Fprintln(stream, "  --describe-study              print study measurement metadata as JSON")
-	fmt.Fprintln(stream, "  --analyze-tooth               print automatic tooth analysis as JSON")
 	fmt.Fprintln(stream, "")
 	fmt.Fprintln(stream, "processing:")
 	fmt.Fprintln(stream, "  --preset <id>                 default, xray, or high-contrast")

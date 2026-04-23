@@ -26,7 +26,6 @@ export interface BackendAPI {
     studyId: string,
     request: ProcessingRequest,
   ): Promise<StartedJob>;
-  startAnalyzeStudyJob(studyId: string): Promise<StartedJob>;
   getJob(jobId: string): Promise<ContractJobSnapshot>;
   getJobs(jobIds: string[]): Promise<ContractJobSnapshot[]>;
   cancelJob(jobId: string): Promise<ContractJobSnapshot>;
@@ -49,7 +48,6 @@ export interface RuntimeAdapter {
     studyId: string,
     request: ProcessingRequest,
   ): Promise<StartedJob>;
-  startAnalyzeStudyJob(studyId: string): Promise<StartedJob>;
   getJob(jobId: string): Promise<JobSnapshot>;
   getJobs(jobIds: string[]): Promise<JobSnapshot[]>;
   cancelJob(jobId: string): Promise<JobSnapshot>;

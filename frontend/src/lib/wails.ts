@@ -1,6 +1,5 @@
 import { normalizeBackendError } from "./backendErrors";
 import type {
-  AnalyzeStudyCommand,
   JobCommand,
   JobSnapshot,
   MeasureLineAnnotationCommand,
@@ -19,7 +18,6 @@ export interface DesktopBindings {
   OpenStudy(command: OpenStudyCommand): Promise<OpenStudyCommandResult>;
   StartRenderJob(command: RenderStudyCommand): Promise<StartedJob>;
   StartProcessJob(command: ProcessStudyCommand): Promise<StartedJob>;
-  StartAnalyzeJob(command: AnalyzeStudyCommand): Promise<StartedJob>;
   GetJobSnapshot(command: JobCommand): Promise<JobSnapshot>;
   GetJobsSnapshot(command: { jobIds: string[] }): Promise<JobSnapshot[]>;
   CancelJobByID(command: JobCommand): Promise<JobSnapshot>;
@@ -84,4 +82,3 @@ export async function pickWailsSaveDicomPath(
     throw normalizeBackendError(error);
   }
 }
-

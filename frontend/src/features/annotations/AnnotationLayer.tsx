@@ -54,7 +54,6 @@ const LineAnnotationItem = memo(
   }: LineAnnotationItemProps) {
     const mid = midpoint(annotation);
     const labelOffset = 10 / Math.max(scale, 1);
-    const showLabel = isSelected || annotation.source !== "autoTooth";
     const label = annotation.measurement
       ? `${annotation.label} · ${
           annotation.measurement.calibratedLengthMm !== null &&
@@ -66,29 +65,27 @@ const LineAnnotationItem = memo(
 
     return (
       <g>
-        {annotation.source !== "autoTooth" || isSelected ? (
-          <line
-            className={`annotation-layer__line annotation-layer__line--${annotation.source}${
-              isSelected ? " annotation-layer__line--selected" : ""
-            }`}
-            x1={annotation.start.x}
-            y1={annotation.start.y}
-            x2={annotation.end.x}
-            y2={annotation.end.y}
-            vectorEffect="non-scaling-stroke"
-            onPointerDown={(event) => {
-              event.stopPropagation();
-              onSelectAnnotation(annotation.id);
-            }}
-          />
-        ) : null}
+        <line
+          className={`annotation-layer__line annotation-layer__line--${annotation.source}${
+            isSelected ? " annotation-layer__line--selected" : ""
+          }`}
+          x1={annotation.start.x}
+          y1={annotation.start.y}
+          x2={annotation.end.x}
+          y2={annotation.end.y}
+          vectorEffect="non-scaling-stroke"
+          onPointerDown={(event) => {
+            event.stopPropagation();
+            onSelectAnnotation(annotation.id);
+          }}
+        />
         <text
           className="annotation-layer__label"
           x={mid.x}
           y={mid.y - labelOffset}
           textAnchor="middle"
           pointerEvents="none"
-          opacity={showLabel ? 1 : 0}
+          opacity={1}
         >
           {label}
         </text>

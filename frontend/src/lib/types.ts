@@ -1,9 +1,7 @@
 import type {
-  AnnotationBundle,
   MeasurementScale,
   PaletteName,
   ProcessingControls,
-  ToothAnalysis,
 } from "./generated/contracts";
 
 export type Palette = PaletteName;
@@ -45,12 +43,4 @@ export interface PreviewResult {
 export interface ProcessResult extends PreviewResult {
   dicomPath: string;
   mode: string;
-}
-
-export interface ToothAnalysisResult {
-  studyId: string;
-  previewUrl: string;
-  analysis: ToothAnalysis;
-  suggestedAnnotations: AnnotationBundle;
-  runtime: RuntimeMode;
 }

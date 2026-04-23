@@ -3,8 +3,6 @@ package backend
 import internalcontracts "xrayview/backend/internal/contracts"
 
 type (
-	AnalyzeStudyCommand                = internalcontracts.AnalyzeStudyCommand
-	AnalyzeStudyCommandResult          = internalcontracts.AnalyzeStudyCommandResult
 	AnnotationBundle                   = internalcontracts.AnnotationBundle
 	AnnotationPoint                    = internalcontracts.AnnotationPoint
 	AnnotationSource                   = internalcontracts.AnnotationSource
@@ -37,8 +35,7 @@ type (
 )
 
 const (
-	AnnotationSourceManual    = internalcontracts.AnnotationSourceManual
-	AnnotationSourceAutoTooth = internalcontracts.AnnotationSourceAutoTooth
+	AnnotationSourceManual = internalcontracts.AnnotationSourceManual
 
 	BackendErrorCodeInvalidInput   = internalcontracts.BackendErrorCodeInvalidInput
 	BackendErrorCodeNotFound       = internalcontracts.BackendErrorCodeNotFound
@@ -49,7 +46,6 @@ const (
 
 	JobKindRenderStudy  = internalcontracts.JobKindRenderStudy
 	JobKindProcessStudy = internalcontracts.JobKindProcessStudy
-	JobKindAnalyzeStudy = internalcontracts.JobKindAnalyzeStudy
 
 	JobStateQueued     = internalcontracts.JobStateQueued
 	JobStateRunning    = internalcontracts.JobStateRunning

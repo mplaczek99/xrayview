@@ -1,7 +1,7 @@
 <h1 align="center">xrayview</h1>
 
 <p align="center">
-  A DICOM X-ray visualization and analysis workstation<br>
+  A DICOM X-ray visualization workstation<br>
   built with a <strong>Wails</strong> desktop shell, a <strong>React/TypeScript</strong> frontend, and a <strong>Go</strong> backend.
 </p>
 
@@ -18,9 +18,8 @@
 - Render PNG previews for the workstation viewer
 - Apply grayscale processing, palettes, and side-by-side comparison
 - Export processed results as DICOM Secondary Capture files
-- Run background render, process, and analyze jobs with cancellation
+- Run background render and process jobs with cancellation
 - Measure line annotations with calibration-aware distances when pixel spacing metadata is available
-- Suggest tooth annotations from the Go analysis pipeline
 - Persist a recent-studies catalog
 
 > The user-facing workflow is **DICOM in, DICOM out**. PNG previews are an
@@ -140,7 +139,6 @@ in mock mode.
 | `open_study` | Open a DICOM study |
 | `start_render_job` | Render a preview |
 | `start_process_job` | Run processing pipeline |
-| `start_analyze_job` | Run analysis pipeline |
 | `get_job` | Poll job state |
 | `cancel_job` | Cancel a running job |
 | `measure_line_annotation` | Calibration-aware line measurement |
@@ -179,7 +177,6 @@ go -C backend run ./cmd/xrayview-cli export-secondary-capture --palette hot ../i
 ```bash
 go -C backend run ./cmd/xrayview-cli -- --describe-presets
 go -C backend run ./cmd/xrayview-cli -- --input ../images/sample-dental-radiograph.dcm --describe-study
-go -C backend run ./cmd/xrayview-cli -- --input ../images/sample-dental-radiograph.dcm --analyze-tooth
 go -C backend run ./cmd/xrayview-cli -- --input ../images/sample-dental-radiograph.dcm --preview-output /tmp/preview.png
 ```
 
@@ -216,7 +213,7 @@ directives for local dependencies.
 |---|---|
 | `frontend/` | Workstation UI and mock-mode behavior |
 | `desktop/` | Native shell: window lifecycle, dialogs, preview serving, sidecar management |
-| `backend/` | DICOM decode, render, processing, analysis, annotations, export, jobs, cache, persistence |
+| `backend/` | DICOM decode, render, processing, annotations, export, jobs, cache, persistence |
 | `contracts/` | Shared command payload shapes via JSON schema |
 
 ```

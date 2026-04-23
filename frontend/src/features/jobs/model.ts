@@ -7,7 +7,6 @@ import type {
 import type {
   PreviewResult,
   ProcessResult,
-  ToothAnalysisResult,
 } from "../../lib/types";
 
 export interface JobProgressSample {
@@ -27,8 +26,7 @@ export interface JobProgressTiming {
 
 export type JobResultPayload =
   | { kind: "renderStudy"; payload: PreviewResult }
-  | { kind: "processStudy"; payload: ProcessResult }
-  | { kind: "analyzeStudy"; payload: ToothAnalysisResult };
+  | { kind: "processStudy"; payload: ProcessResult };
 
 export interface JobSnapshot {
   jobId: string;

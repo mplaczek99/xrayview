@@ -1,10 +1,10 @@
-// Package jobs runs the three long-running study commands (render, process,
-// analyze) behind a small worker pool. Per job:
+// Package jobs runs the long-running render and process study commands behind
+// a small worker pool. Per job:
 //
 //	StartXJob fingerprints the request, consults the in-memory result cache,
 //	and on a miss reserves an entry in the registry. The execute closure is
 //	handed to one of two queues: renderQueue (drained first) or jobQueue
-//	(process + analyze). A worker walks the executeXJob stage machine,
+//	(process). A worker walks the executeXJob stage machine,
 //	polling the registry for cancellation between stages, and completeXJob
 //	stores the result and fires callbacks.
 //
@@ -27,8 +27,6 @@ import (
 	"strings"
 	"sync"
 
-	"xrayview/backend/internal/analysis"
-	"xrayview/backend/internal/annotations"
 	"xrayview/backend/internal/cache"
 	"xrayview/backend/internal/contracts"
 	"xrayview/backend/internal/dicommeta"
@@ -59,7 +57,7 @@ type Service struct {
 	registry               *Registry
 	decodeCache            *studies.DecodeCache // source-study decode dedupe; separate from memoryCache (result payloads)
 	renderQueue            chan func()          // high-priority: render jobs
-	jobQueue               chan func()          // normal-priority: process + analyze jobs
+	jobQueue               chan func()          // normal-priority: process jobs
 	workerStop             chan struct{}
 	workerOnce             sync.Once // guards against a double close of workerStop from repeated Stop() calls
 	renderSourcePreview    renderSourcePreviewFunc
@@ -71,7 +69,7 @@ type Service struct {
 const decodeBenchmarkEnvKey = "XRAYVIEW_BENCH_LOG_DECODES"
 
 // maxConcurrentJobs sizes the worker pool. Three CPU-bound workers fit a
-// desktop workload — render, process, and analyze all contend on the same
+// desktop workload — render and process both contend on the same
 // decoder cache, and more than a handful just starves the UI thread.
 const maxConcurrentJobs = 3
 
@@ -276,62 +274,6 @@ func (service *Service) StartProcessJob(
 	return contracts.StartedJob{JobID: outcome.Snapshot.JobID}, nil
 }
 
-func (service *Service) StartAnalyzeJob(
-	command contracts.AnalyzeStudyCommand,
-) (contracts.StartedJob, error) {
-	studyID := strings.TrimSpace(command.StudyID)
-	if studyID == "" {
-		return contracts.StartedJob{}, contracts.InvalidInput("studyId is required")
-	}
-
-	study, ok := service.studies.Get(studyID)
-	if !ok {
-		return contracts.StartedJob{}, contracts.NotFound(fmt.Sprintf("study not found: %s", studyID))
-	}
-
-	fingerprint, err := analyzeFingerprint(study)
-	if err != nil {
-		return contracts.StartedJob{}, contracts.Internal(
-			fmt.Sprintf("serialize analyze job fingerprint: %v", err),
-		)
-	}
-
-	if snapshot, ok, err := service.cachedAnalyzeSnapshot(fingerprint, study.StudyID); err != nil {
-		return contracts.StartedJob{}, err
-	} else if ok {
-		return contracts.StartedJob{JobID: snapshot.JobID}, nil
-	}
-
-	previewPath, err := service.cache.ArtifactPath("analyze", fingerprint, "png")
-	if err != nil {
-		return contracts.StartedJob{}, err
-	}
-
-	outcome, err := service.registry.StartJob(
-		contracts.JobKindAnalyzeStudy,
-		study.StudyID,
-		fingerprint,
-	)
-	if err != nil {
-		return contracts.StartedJob{}, err
-	}
-	if !outcome.Created {
-		return contracts.StartedJob{JobID: outcome.Snapshot.JobID}, nil
-	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	if err := service.registry.AttachCancel(outcome.Snapshot.JobID, cancel); err != nil {
-		cancel()
-		return contracts.StartedJob{}, err
-	}
-
-	service.launchJob(contracts.JobKindAnalyzeStudy, func() {
-		service.executeAnalyzeJob(ctx, outcome.Snapshot.JobID, study, fingerprint, previewPath)
-	})
-
-	return contracts.StartedJob{JobID: outcome.Snapshot.JobID}, nil
-}
-
 func (service *Service) GetJob(command contracts.JobCommand) (contracts.JobSnapshot, error) {
 	jobID := strings.TrimSpace(command.JobID)
 	if jobID == "" {
@@ -399,7 +341,6 @@ func newService(
 		supportedKinds: []contracts.JobKind{
 			contracts.JobKindRenderStudy,
 			contracts.JobKindProcessStudy,
-			contracts.JobKindAnalyzeStudy,
 		},
 		cache:                  cacheStore,
 		studies:                studyRegistry,
@@ -480,7 +421,7 @@ func (service *Service) launchJob(kind contracts.JobKind, run func()) {
 // hit. A fresh job ID is minted for every hit rather than replaying an
 // earlier one — the prior job's registry entry has typically been evicted,
 // and the UI wants a clean handle to subscribe to and dispose of.
-// cachedProcessSnapshot and cachedAnalyzeSnapshot follow the same contract.
+// cachedProcessSnapshot follows the same contract.
 func (service *Service) cachedRenderSnapshot(
 	fingerprint string,
 	studyID string,
@@ -529,39 +470,14 @@ func (service *Service) cachedProcessSnapshot(
 	return snapshot, true, nil
 }
 
-func (service *Service) cachedAnalyzeSnapshot(
-	fingerprint string,
-	studyID string,
-) (contracts.JobSnapshot, bool, error) {
-	cached, ok := service.memoryCache.LoadAnalyze(fingerprint)
-	if !ok {
-		return contracts.JobSnapshot{}, false, nil
-	}
-
-	snapshot, err := service.registry.CreateCachedJob(
-		contracts.JobKindAnalyzeStudy,
-		studyID,
-		contracts.JobResult{
-			Kind:    contracts.JobKindAnalyzeStudy,
-			Payload: cached,
-		},
-	)
-	if err != nil {
-		return contracts.JobSnapshot{}, false, err
-	}
-
-	return snapshot, true, nil
-}
-
 // executeRenderJob walks the render pipeline to completion or cancellation.
 //
 // The stage names ("validating", "loadingStudy", "renderingPreview",
-// "writingPreview", and in the peers "processingPixels", "writingDicom",
-// "measuringTooth") and the percent values below are part of the frontend
+// "writingPreview", and in the peer "processingPixels" / "writingDicom")
+// and the percent values below are part of the frontend
 // contract — the UI labels progress from them. Renaming a stage or nudging a
 // percent breaks the UI's progress display, so update the contracts schema
-// and the frontend in lockstep. Shared convention with executeProcessJob and
-// executeAnalyzeJob.
+// and the frontend in lockstep. Shared convention with executeProcessJob.
 func (service *Service) executeRenderJob(
 	ctx context.Context,
 	jobID string,
@@ -820,143 +736,6 @@ func (service *Service) executeProcessJob(
 	)
 }
 
-func (service *Service) executeAnalyzeJob(
-	ctx context.Context,
-	jobID string,
-	study contracts.StudyRecord,
-	fingerprint string,
-	previewPath string,
-) {
-	if service.finishCancelledIfRequested(ctx, jobID, "queued", previewPath) {
-		return
-	}
-
-	if err := service.transitionJob(
-		jobID,
-		contracts.JobStateRunning,
-		10,
-		"validating",
-		"Validating analysis request",
-	); err != nil {
-		service.failJob(jobID, err)
-		return
-	}
-
-	if err := validateInputFile(study.InputPath); err != nil {
-		service.failJob(jobID, err)
-		return
-	}
-	if service.finishCancelledIfRequested(ctx, jobID, "validating", previewPath) {
-		return
-	}
-
-	var preview imaging.PreviewImage
-	var measurementScale *contracts.MeasurementScale
-
-	cachedPreview, previewHit := service.memoryCache.LoadSourcePreview(study.InputPath)
-	cachedScale, scaleHit := service.memoryCache.LoadMeasurementScale(study.InputPath)
-
-	if previewHit && scaleHit {
-		preview = cachedPreview
-		measurementScale = cachedScale
-	} else {
-		if err := service.transitionJob(
-			jobID,
-			contracts.JobStateRunning,
-			35,
-			"loadingStudy",
-			"Loading source study",
-		); err != nil {
-			service.failJob(jobID, err)
-			return
-		}
-
-		sourceStudy, err := service.loadSourceStudy(ctx, contracts.JobKindAnalyzeStudy, study)
-		if err != nil {
-			if service.finishCancelledIfRequested(ctx, jobID, "loadingStudy", previewPath) {
-				return
-			}
-			service.failJob(jobID, err)
-			return
-		}
-		if service.finishCancelledIfRequested(ctx, jobID, "loadingStudy", previewPath) {
-			return
-		}
-
-		service.memoryCache.StoreMeasurementScale(study.InputPath, sourceStudy.MeasurementScale)
-		measurementScale = sourceStudy.MeasurementScale
-
-		if err := service.transitionJob(
-			jobID,
-			contracts.JobStateRunning,
-			65,
-			"renderingPreview",
-			"Rendering analysis preview",
-		); err != nil {
-			service.failJob(jobID, err)
-			return
-		}
-
-		preview = service.loadOrRenderSourcePreview(study.InputPath, sourceStudy.Image)
-	}
-
-	if err := service.transitionJob(
-		jobID,
-		contracts.JobStateRunning,
-		78,
-		"analyzingTooth",
-		"Analyzing tooth boundary",
-	); err != nil {
-		service.failJob(jobID, err)
-		return
-	}
-
-	toothAnalysis, err := analysis.AnalyzePreview(preview, cloneMeasurementScale(measurementScale))
-	if err != nil {
-		service.failJob(jobID, contracts.Internal(fmt.Sprintf("analyze tooth candidate: %v", err)))
-		return
-	}
-
-	if err := service.transitionJob(
-		jobID,
-		contracts.JobStateRunning,
-		88,
-		"writingPreview",
-		"Writing analysis preview",
-	); err != nil {
-		service.failJob(jobID, err)
-		return
-	}
-
-	overlayPreview, err := analysis.OverlayPreviewWithToothTrace(preview, toothAnalysis)
-	if err != nil {
-		service.failJob(jobID, contracts.Internal(fmt.Sprintf("overlay analysis preview: %v", err)))
-		return
-	}
-	if err := render.SavePreviewPNG(previewPath, overlayPreview); err != nil {
-		cleanupPaths(previewPath)
-		service.failJob(jobID, contracts.Internal(fmt.Sprintf("write analysis preview PNG: %v", err)))
-		return
-	}
-	if info, err := os.Stat(previewPath); err == nil {
-		service.cache.AddArtifactBytes(info.Size())
-	}
-	if service.finishCancelledIfRequested(ctx, jobID, "writingPreview", previewPath) {
-		return
-	}
-
-	service.completeAnalyzeJob(
-		jobID,
-		fingerprint,
-		contracts.AnalyzeStudyCommandResult{
-			StudyID:              study.StudyID,
-			PreviewPath:          previewPath,
-			Analysis:             toothAnalysis,
-			SuggestedAnnotations: annotations.SuggestedAnnotations(preview, &toothAnalysis),
-		},
-	)
-}
-
 func (service *Service) transitionJob(
 	jobID string,
 	state contracts.JobState,
@@ -1028,8 +807,7 @@ func (service *Service) completeRenderJob(
 
 // completeProcessJob mirrors completeRenderJob but also deletes the DICOM
 // artifact on the cancellation race — process is the only variant that
-// writes a second output file, so completeRenderJob and completeAnalyzeJob
-// only clean up the preview.
+// writes a second output file.
 func (service *Service) completeProcessJob(
 	jobID string,
 	fingerprint string,
@@ -1048,28 +826,6 @@ func (service *Service) completeProcessJob(
 		return
 	}
 	service.memoryCache.StoreProcess(fingerprint, result)
-	service.notifyJobCompletion(snapshot)
-	service.evictArtifactsIfNeeded()
-}
-
-func (service *Service) completeAnalyzeJob(
-	jobID string,
-	fingerprint string,
-	result contracts.AnalyzeStudyCommandResult,
-) {
-	snapshot, err := service.registry.Complete(jobID, contracts.JobResult{
-		Kind:    contracts.JobKindAnalyzeStudy,
-		Payload: result,
-	})
-	if err != nil {
-		return
-	}
-	if snapshot.State == contracts.JobStateCancelled {
-		_ = os.Remove(result.PreviewPath)
-		service.notifyJobCompletion(snapshot)
-		return
-	}
-	service.memoryCache.StoreAnalyze(fingerprint, result)
 	service.notifyJobCompletion(snapshot)
 	service.evictArtifactsIfNeeded()
 }
@@ -1210,7 +966,7 @@ func validateInputFile(inputPath string) error {
 }
 
 // The Namespace string embedded in every fingerprint ("render-study-v1",
-// "process-study-v3", "analyze-study-v1") is a deliberate cache-bust key.
+// "process-study-v3") is a deliberate cache-bust key.
 // Bump the version suffix whenever the shape of what should invalidate a
 // cached result changes — without a bump, a stale entry keyed on the old
 // payload shape will be served for the new request.
@@ -1277,22 +1033,6 @@ func (decoder benchmarkingDecoder) DecodeStudy(
 	}
 
 	return decoder.delegate.DecodeStudy(ctx, path)
-}
-
-func analyzeFingerprint(study contracts.StudyRecord) (string, error) {
-	payload, err := json.Marshal(struct {
-		Namespace string `json:"namespace"`
-		InputPath string `json:"inputPath"`
-	}{
-		Namespace: "analyze-study-v1",
-		InputPath: study.InputPath,
-	})
-	if err != nil {
-		return "", err
-	}
-
-	sum := sha256.Sum256(payload)
-	return hex.EncodeToString(sum[:]), nil
 }
 
 // resolveProcessOutputPath picks the DICOM output path for a process job.

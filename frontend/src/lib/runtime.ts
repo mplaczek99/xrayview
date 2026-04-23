@@ -8,7 +8,6 @@ import {
 } from "./backend";
 import { buildDesktopPreviewUrl, isDesktopRuntime } from "./desktop";
 import type {
-  AnalyzeStudyCommandResult,
   JobResult,
   JobSnapshot as ContractJobSnapshot,
   OpenStudyCommandResult,
@@ -24,7 +23,6 @@ import type {
   ProcessResult,
   ProcessingRequest,
   RuntimeMode,
-  ToothAnalysisResult,
 } from "./types";
 
 function resolvePreviewUrl(
@@ -78,19 +76,6 @@ function asProcessResult(
   };
 }
 
-function asToothAnalysisResult(
-  payload: AnalyzeStudyCommandResult,
-  runtime: RuntimeMode,
-): ToothAnalysisResult {
-  return {
-    studyId: payload.studyId,
-    previewUrl: resolvePreviewUrl(payload.previewPath, runtime),
-    analysis: payload.analysis,
-    suggestedAnnotations: payload.suggestedAnnotations,
-    runtime,
-  };
-}
-
 function normalizeJobResultPayload(
   result: JobResult,
   runtime: RuntimeMode,
@@ -105,11 +90,6 @@ function normalizeJobResultPayload(
       return {
         kind: "processStudy",
         payload: asProcessResult(result.payload, runtime),
-      };
-    case "analyzeStudy":
-      return {
-        kind: "analyzeStudy",
-        payload: asToothAnalysisResult(result.payload, runtime),
       };
   }
 }
@@ -164,7 +144,6 @@ function createRuntimeAdapter(
     startRenderStudyJob: (studyId) => backend.startRenderStudyJob(studyId),
     startProcessStudyJob: (studyId, request) =>
       backend.startProcessStudyJob(studyId, request),
-    startAnalyzeStudyJob: (studyId) => backend.startAnalyzeStudyJob(studyId),
     getJob: async (jobId) =>
       normalizeJobSnapshot(await backend.getJob(jobId), mode),
     getJobs: async (jobIds) =>

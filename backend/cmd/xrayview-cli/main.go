@@ -425,7 +425,6 @@ func printUsage(stream io.Writer) {
 	fmt.Fprintln(stream, "workflow flags:")
 	fmt.Fprintln(stream, "  --describe-presets                          print processing preset metadata as JSON")
 	fmt.Fprintln(stream, "  --input <study.dcm> --describe-study       print study metadata as JSON")
-	fmt.Fprintln(stream, "  --input <study.dcm> --analyze-tooth        print automatic tooth analysis as JSON")
 	fmt.Fprintln(stream, "  --input <study.dcm> --preview-output <png> render a grayscale preview PNG")
 	fmt.Fprintln(stream, "  --input <study.dcm> [processing flags]     write processed preview/DICOM output")
 	fmt.Fprintln(stream, "")

@@ -35,26 +35,6 @@ export function createManualLineAnnotation(
   };
 }
 
-export function replaceSuggestedAnnotations(
-  current: AnnotationBundle,
-  suggested: AnnotationBundle,
-): AnnotationBundle {
-  return {
-    lines: [
-      ...current.lines.filter((annotation) => annotation.source === "manual"),
-      ...suggested.lines,
-    ],
-    rectangles: [
-      ...current.rectangles.filter((annotation) => annotation.source === "manual"),
-      ...suggested.rectangles,
-    ],
-    polylines: [
-      ...current.polylines.filter((annotation) => annotation.source === "manual"),
-      ...suggested.polylines,
-    ],
-  };
-}
-
 export function upsertLineAnnotation(
   current: AnnotationBundle,
   line: LineAnnotation,
@@ -125,5 +105,5 @@ export function formatSecondaryMeasurement(
 }
 
 export function annotationSourceLabel(source: LineAnnotation["source"]): string {
-  return source === "manual" ? "Manual" : "Auto analysis";
+  return source === "manual" ? "Manual" : source;
 }

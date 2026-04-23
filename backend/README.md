@@ -14,7 +14,7 @@ provides the supported headless workflow surface.
 - render previews in Go with embedded/manual/full-range window handling
 - apply grayscale processing, palettes, and compare output in Go
 - write DICOM Secondary Capture export output in Go
-- execute render, process, and analyze jobs with dedupe, cancellation, and cache hits
+- execute render and process jobs with dedupe, cancellation, and cache hits
 - recompute line measurements in Go
 - own recent-study catalog persistence
 - publish runtime metadata for the desktop shell
@@ -33,7 +33,6 @@ go run ./cmd/xrayview-cli -- --describe-presets
 go run ./cmd/xrayview-cli -- --input ../images/sample-dental-radiograph.dcm --describe-study
 go run ./cmd/xrayview-cli -- --input ../images/sample-dental-radiograph.dcm --preview-output /tmp/xrayview-preview.png
 go run ./cmd/xrayview-cli -- --input ../images/sample-dental-radiograph.dcm --output /tmp/xrayview-output.dcm --preset xray
-go run ./cmd/xrayview-cli -- --input ../images/sample-dental-radiograph.dcm --analyze-tooth --preview-output /tmp/xrayview-analysis.png
 ```
 
 Focused diagnostics remain available for backend inspection:
@@ -72,8 +71,7 @@ Current command behavior:
 - `open_study` validates metadata, returns a Go-generated study record, and updates the recent-study catalog
 - `start_render_job` runs the Go render pipeline
 - `start_process_job` runs the Go processing pipeline and writes Secondary Capture output
-- `start_analyze_job` runs the Go analysis pipeline
-- `get_job` and `cancel_job` operate on Go-owned render, process, and analyze jobs
+- `get_job` and `cancel_job` operate on Go-owned render and process jobs
 - `measure_line_annotation` recomputes pixel and calibrated lengths using registered study spacing metadata
 
 Transport guarantees:

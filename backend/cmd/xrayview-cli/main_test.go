@@ -170,49 +170,6 @@ func TestLegacyCLIPreviewAndProcessWriteExpectedArtifacts(t *testing.T) {
 	}
 }
 
-func TestLegacyCLIAnalyzeToothReturnsJSONAndPreview(t *testing.T) {
-	samplePath := sampleDicomPath(t)
-	tempDir := t.TempDir()
-	previewPath := filepath.Join(tempDir, "analysis-preview.png")
-
-	stdout, stderr, err := runLegacyCommand(
-		"--input", samplePath,
-		"--preview-output", previewPath,
-		"--analyze-tooth",
-	)
-	if err != nil {
-		t.Fatalf("analyze-tooth returned error: %v\nstderr:\n%s", err, stderr)
-	}
-	if _, err := os.Stat(previewPath); err != nil {
-		t.Fatalf("analysis preview output missing: %v", err)
-	}
-
-	var analysisPayload map[string]any
-	if err := json.Unmarshal([]byte(stdout), &analysisPayload); err != nil {
-		t.Fatalf("parse analyze stdout: %v\nstdout:\n%s", err, stdout)
-	}
-
-	imagePayload, ok := analysisPayload["image"].(map[string]any)
-	if !ok {
-		t.Fatalf("image payload = %T, want map[string]any", analysisPayload["image"])
-	}
-	if _, ok := imagePayload["width"].(float64); !ok {
-		t.Fatalf("image.width = %#v, want number", imagePayload["width"])
-	}
-	if _, ok := imagePayload["height"].(float64); !ok {
-		t.Fatalf("image.height = %#v, want number", imagePayload["height"])
-	}
-	if _, ok := analysisPayload["warnings"].([]any); !ok {
-		t.Fatalf("warnings = %#v, want array", analysisPayload["warnings"])
-	}
-	if _, ok := analysisPayload["teeth"]; !ok {
-		t.Fatalf("analysis payload missing teeth field: %#v", analysisPayload)
-	}
-	if _, ok := analysisPayload["tooth"]; !ok {
-		t.Fatalf("analysis payload missing tooth field: %#v", analysisPayload)
-	}
-}
-
 func TestLegacyCLIUsesDefaultOutputPathWhenNoOutputsProvided(t *testing.T) {
 	sourcePath := sampleDicomPath(t)
 	sourceBytes, err := os.ReadFile(sourcePath)
@@ -239,24 +196,6 @@ func TestLegacyCLIUsesDefaultOutputPathWhenNoOutputsProvided(t *testing.T) {
 	}
 	if !strings.Contains(stdout, defaultOutputPath) {
 		t.Fatalf("stdout missing default output path %q:\n%s", defaultOutputPath, stdout)
-	}
-}
-
-func TestNormalizeLegacyToothAnalysisPreservesNullAndEmptyShapes(t *testing.T) {
-	raw, err := json.Marshal(normalizeLegacyToothAnalysis(contracts.ToothAnalysis{}))
-	if err != nil {
-		t.Fatalf("marshal normalized analysis: %v", err)
-	}
-
-	encoded := string(raw)
-	if !strings.Contains(encoded, `"tooth":null`) {
-		t.Fatalf("normalized analysis missing null tooth field: %s", encoded)
-	}
-	if !strings.Contains(encoded, `"teeth":[]`) {
-		t.Fatalf("normalized analysis missing empty teeth field: %s", encoded)
-	}
-	if !strings.Contains(encoded, `"warnings":[]`) {
-		t.Fatalf("normalized analysis missing empty warnings field: %s", encoded)
 	}
 }
 

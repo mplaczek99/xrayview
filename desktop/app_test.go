@@ -27,7 +27,6 @@ type stubBackendService struct {
 	openStudyFn             func(backendapi.OpenStudyCommand) (backendapi.OpenStudyCommandResult, error)
 	startRenderJobFn        func(backendapi.RenderStudyCommand) (backendapi.StartedJob, error)
 	startProcessJobFn       func(backendapi.ProcessStudyCommand) (backendapi.StartedJob, error)
-	startAnalyzeJobFn       func(backendapi.AnalyzeStudyCommand) (backendapi.StartedJob, error)
 	getJobFn                func(backendapi.JobCommand) (backendapi.JobSnapshot, error)
 	cancelJobFn             func(backendapi.JobCommand) (backendapi.JobSnapshot, error)
 	getProcessingManifestFn func() backendapi.ProcessingManifest
@@ -61,16 +60,6 @@ func (service stubBackendService) StartProcessJob(
 ) (backendapi.StartedJob, error) {
 	if service.startProcessJobFn != nil {
 		return service.startProcessJobFn(command)
-	}
-
-	return backendapi.StartedJob{}, nil
-}
-
-func (service stubBackendService) StartAnalyzeJob(
-	command backendapi.AnalyzeStudyCommand,
-) (backendapi.StartedJob, error) {
-	if service.startAnalyzeJobFn != nil {
-		return service.startAnalyzeJobFn(command)
 	}
 
 	return backendapi.StartedJob{}, nil

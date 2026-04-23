@@ -12,7 +12,7 @@ import (
 )
 
 // PreviewPath is the endpoint the browser-hosted frontend uses to load
-// preview artifacts produced by render/process/analyze jobs. It is only
+// preview artifacts produced by render/process jobs. It is only
 // reachable through wrapLocalTransport, which already rejects non-loopback
 // Origin headers, so the trust boundary is "any local process on this
 // machine" rather than "anything on the network". Even so, the handler

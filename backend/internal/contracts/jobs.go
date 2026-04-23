@@ -5,7 +5,6 @@ type JobKind string
 const (
 	JobKindRenderStudy  JobKind = "renderStudy"
 	JobKindProcessStudy JobKind = "processStudy"
-	JobKindAnalyzeStudy JobKind = "analyzeStudy"
 )
 
 type JobState string

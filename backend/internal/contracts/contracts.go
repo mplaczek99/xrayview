@@ -9,7 +9,6 @@ const (
 	CommandOpenStudy             CommandName = "open_study"
 	CommandStartRenderJob        CommandName = "start_render_job"
 	CommandStartProcessJob       CommandName = "start_process_job"
-	CommandStartAnalyzeJob       CommandName = "start_analyze_job"
 	CommandGetJob                CommandName = "get_job"
 	CommandGetJobs               CommandName = "get_jobs"
 	CommandCancelJob             CommandName = "cancel_job"
@@ -21,7 +20,6 @@ var SupportedCommands = []CommandName{
 	CommandOpenStudy,
 	CommandStartRenderJob,
 	CommandStartProcessJob,
-	CommandStartAnalyzeJob,
 	CommandGetJob,
 	CommandGetJobs,
 	CommandCancelJob,

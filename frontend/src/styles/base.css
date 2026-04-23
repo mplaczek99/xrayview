@@ -393,7 +393,7 @@ button {
   font-size: 13px;
 }
 
-.study-analysis {
+.study-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(280px, 380px);
   gap: var(--space-4);
@@ -401,13 +401,13 @@ button {
   min-height: 0;
 }
 
-.study-analysis__viewer {
+.study-layout__viewer {
   min-height: 0;
   display: flex;
   flex-direction: column;
 }
 
-.study-analysis__sidebar {
+.study-layout__sidebar {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
@@ -423,10 +423,6 @@ button {
   border-radius: var(--radius-md);
   background: rgba(12, 17, 24, 0.82);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
-}
-
-.measurement-card--analysis {
-  gap: var(--space-3);
 }
 
 .measurement-card__eyebrow {
@@ -1096,10 +1092,6 @@ button {
   stroke-width: 3;
 }
 
-.annotation-layer__polyline--autoTooth {
-  stroke: rgba(255, 72, 72, 0.96);
-}
-
 .annotation-layer__line {
   stroke-linecap: round;
   stroke-width: 3;
@@ -1107,10 +1099,6 @@ button {
 
 .annotation-layer__line--manual {
   stroke: rgba(94, 187, 255, 0.96);
-}
-
-.annotation-layer__line--autoTooth {
-  stroke: rgba(248, 198, 78, 0.96);
 }
 
 .annotation-layer__line--selected {
@@ -1199,7 +1187,7 @@ button {
     grid-template-columns: 1fr;
   }
 
-  .study-analysis {
+  .study-layout {
     grid-template-columns: 1fr;
   }
 

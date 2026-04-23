@@ -3,8 +3,7 @@ package contracts
 type AnnotationSource string
 
 const (
-	AnnotationSourceManual    AnnotationSource = "manual"
-	AnnotationSourceAutoTooth AnnotationSource = "autoTooth"
+	AnnotationSourceManual AnnotationSource = "manual"
 )
 
 type AnnotationPoint struct {

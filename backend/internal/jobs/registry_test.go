@@ -446,7 +446,7 @@ func TestRegistryGetReturnsIndependentSnapshotCopies(t *testing.T) {
 	registry := NewRegistry(sequenceJobIDs("job-1"))
 
 	started, err := registry.StartJob(
-		contracts.JobKindAnalyzeStudy,
+		contracts.JobKindRenderStudy,
 		"study-1",
 		"fingerprint-1",
 	)
