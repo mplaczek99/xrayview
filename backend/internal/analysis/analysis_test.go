@@ -242,32 +242,147 @@ func TestAnalyzePreviewXrays2PrefersCentralIncisorBoundaryTrace(t *testing.T) {
 	if analysis.Tooth == nil {
 		t.Fatal("analysis.Tooth = nil, want close-up incisor candidate")
 	}
-	if got, wantMin := len(analysis.Teeth), 1; got < wantMin || got > 3 {
-		t.Fatalf("len(analysis.Teeth) = %d, want between 1 and 3 central candidates", got)
+	if got := len(analysis.Teeth); got != 4 {
+		t.Fatalf("len(analysis.Teeth) = %d, want 4 separator-bounded close-up bands", got)
 	}
 
 	bbox := analysis.Tooth.Geometry.BoundingBox
 	centerX := bbox.X + bbox.Width/2
-	if centerX < 250 || centerX > 600 {
+	if centerX < 300 || centerX > 520 {
 		t.Fatalf("primary tooth centerX = %d, want a central incisor near the middle gap", centerX)
 	}
-	if bbox.Width < 110 || bbox.Width > 300 {
-		t.Fatalf("primary tooth width = %d, want a real incisor span", bbox.Width)
+	if bbox.Width < 90 || bbox.Width > 170 {
+		t.Fatalf("primary tooth width = %d, want a bounded central-incisor silhouette", bbox.Width)
 	}
 	if bbox.Height < 700 {
-		t.Fatalf("primary tooth height = %d, want a full root-to-crown trace", bbox.Height)
+		t.Fatalf("primary tooth height = %d, want a crown-connected root extension", bbox.Height)
 	}
-	if bbox.Y > 180 {
-		t.Fatalf("primary tooth top = %d, want root traced high into the image", bbox.Y)
+	if bbox.Y < 170 || bbox.Y > 240 {
+		t.Fatalf("primary tooth top = %d, want the contour to extend into the upper root region without leaving the tooth band", bbox.Y)
 	}
-	if bbox.Y+bbox.Height < 900 {
-		t.Fatalf("primary tooth bottom = %d, want crown traced near the lower image half", bbox.Y+bbox.Height)
+	if bbox.Y+bbox.Height >= analysis.Image.Height-150 {
+		t.Fatalf("primary tooth bottom = %d, want the contour to stop above the bottom border/background", bbox.Y+bbox.Height)
 	}
 	if len(analysis.Tooth.Geometry.Outline) < 12 {
 		t.Fatalf("outline vertices = %d, want a traced contour", len(analysis.Tooth.Geometry.Outline))
 	}
-	if analysis.Tooth.Confidence < 0.45 {
-		t.Fatalf("primary tooth confidence = %.2f, want >= 0.45", analysis.Tooth.Confidence)
+	if analysis.Tooth.Confidence < 0.70 {
+		t.Fatalf("primary tooth confidence = %.2f, want >= 0.70", analysis.Tooth.Confidence)
+	}
+
+	centralCandidates := 0
+	edgeCandidates := 0
+	wantLabels := []string{"T1", "T2", "T3", "T4"}
+	wantRoles := []string{"partial-left", "full-left", "full-right", "partial-right"}
+	var prevCenterX uint32
+	for index, tooth := range analysis.Teeth {
+		candidateBox := tooth.Geometry.BoundingBox
+		candidateCenterX := candidateBox.X + candidateBox.Width/2
+		if index > 0 && candidateCenterX < prevCenterX {
+			t.Fatalf("candidate centerX[%d] = %d, want detections sorted left-to-right after %d", index, candidateCenterX, prevCenterX)
+		}
+		prevCenterX = candidateCenterX
+		if tooth.Label != wantLabels[index] {
+			t.Fatalf("tooth label[%d] = %q, want %q", index, tooth.Label, wantLabels[index])
+		}
+		if tooth.Ordinal != index+1 {
+			t.Fatalf("tooth ordinal[%d] = %d, want %d", index, tooth.Ordinal, index+1)
+		}
+		if tooth.Role != wantRoles[index] {
+			t.Fatalf("tooth role[%d] = %q, want %q", index, tooth.Role, wantRoles[index])
+		}
+		if candidateCenterX >= 250 && candidateCenterX <= 600 {
+			centralCandidates++
+		} else {
+			edgeCandidates++
+		}
+		minHeight := uint32(680)
+		if index == 0 {
+			minHeight = 380
+		}
+		if index == 3 {
+			minHeight = 430
+		}
+		if candidateBox.Height < minHeight {
+			t.Fatalf("candidate height[%d] = %d, want >= %d for this close-up band", index, candidateBox.Height, minHeight)
+		}
+		if candidateBox.Y+candidateBox.Height >= analysis.Image.Height-150 {
+			t.Fatalf("candidate bottom = %d, want each contour to stay off the image floor", candidateBox.Y+candidateBox.Height)
+		}
+		widthRatio, capVariation := closeupContourShapeMetrics(tooth)
+		minWidthRatio := 1.05
+		minCapVariation := uint32(4)
+		if index == 1 || index == 2 {
+			minWidthRatio = 1.15
+			minCapVariation = 6
+		}
+		if widthRatio < minWidthRatio {
+			t.Fatalf("candidate width ratio[%d] = %.2f, want >= %.2f for a tapered contour", index, widthRatio, minWidthRatio)
+		}
+		if capVariation < minCapVariation {
+			t.Fatalf("candidate cap variation[%d] = %d, want >= %d for a rounded crown/root cap", index, capVariation, minCapVariation)
+		}
+		maxShelf := uint32(52)
+		if index == 1 || index == 2 {
+			maxShelf = 42
+		}
+		shelfRun := outlineLongestLowerShelf(tooth.Geometry.Outline, tooth.Geometry.BoundingBox)
+		if shelfRun > maxShelf {
+			t.Fatalf("candidate lower shelf[%d] = %d, want <= %d for a curved lower crown contour", index, shelfRun, maxShelf)
+		}
+		maxJaggedness := 0.19
+		if index == 0 || index == 3 {
+			maxJaggedness = 0.18
+		}
+		jaggedness := outlineJaggedness(tooth.Geometry.Outline)
+		if jaggedness > maxJaggedness {
+			t.Fatalf("candidate jaggedness[%d] = %.3f, want <= %.3f after contour refinement", index, jaggedness, maxJaggedness)
+		}
+		if index == 1 || index == 2 {
+			upperWidth, midWidth, ok := closeupBodyWidthMetrics(tooth)
+			if !ok {
+				t.Fatalf("candidate body width[%d] unavailable, want upper/mid width statistics", index)
+			}
+			if midWidth < upperWidth*1.75 {
+				t.Fatalf("candidate mid-body width[%d] = %.1f, upper-root width = %.1f, want mid-body >= 1.75x upper-root", index, midWidth, upperWidth)
+			}
+			innerShift, ok := closeupInnerWallShift(tooth)
+			if !ok {
+				t.Fatalf("candidate inner wall shift[%d] unavailable, want separator-adjacent wall statistics", index)
+			}
+			if innerShift < 8.0 {
+				t.Fatalf("candidate inner wall shift[%d] = %.1f, want >= 8.0px toward the separator in the mid-body", index, innerShift)
+			}
+		} else if index == 3 {
+			upperWidth, midWidth, ok := closeupBodyWidthMetrics(tooth)
+			if !ok {
+				t.Fatalf("candidate body width[%d] unavailable, want upper/mid width statistics", index)
+			}
+			if midWidth < upperWidth*2.20 {
+				t.Fatalf("candidate mid-body width[%d] = %.1f, upper width = %.1f, want T4 mid-body >= 2.20x upper width", index, midWidth, upperWidth)
+			}
+			if float64(candidateBox.Height) < float64(candidateBox.Width)*2.5 {
+				t.Fatalf("candidate aspect[%d] = %d/%d, want T4 taller than a short rectangular partial blob", index, candidateBox.Height, candidateBox.Width)
+			}
+			if spread := closeupWidthSpreadMetric(tooth, 0.45, 0.85); spread < 50 {
+				t.Fatalf("candidate width spread[%d] = %.1f, want T4 lower/mid contour variation >= 50px", index, spread)
+			}
+		}
+	}
+	if centralCandidates < 2 {
+		t.Fatalf("central candidates = %d, want both middle incisor bands", centralCandidates)
+	}
+	if edgeCandidates < 2 {
+		t.Fatalf("edge candidates = %d, want both outer partial bands", edgeCandidates)
+	}
+	if analysis.Tooth.Label != "T2" {
+		t.Fatalf("primary tooth label = %q, want %q", analysis.Tooth.Label, "T2")
+	}
+	if analysis.Tooth.Ordinal != 2 {
+		t.Fatalf("primary tooth ordinal = %d, want %d", analysis.Tooth.Ordinal, 2)
+	}
+	if analysis.Tooth.Role != "full-left" {
+		t.Fatalf("primary tooth role = %q, want %q", analysis.Tooth.Role, "full-left")
 	}
 }
 
@@ -638,6 +753,305 @@ func maxCenterGap(values []uint32) uint32 {
 		}
 	}
 	return maxGap
+}
+
+func closeupContourShapeMetrics(tooth contracts.ToothCandidate) (float64, uint32) {
+	spans := outlineRowSpans(tooth.Geometry.Outline)
+	if len(spans) == 0 {
+		return 0, 0
+	}
+
+	bbox := tooth.Geometry.BoundingBox
+	rowWidths := make([]uint32, 0, len(spans))
+	upperWidths := make([]uint32, 0, len(spans))
+	lowerWidths := make([]uint32, 0, len(spans))
+	upperLimit := bbox.Y + bbox.Height/3
+	lowerStart := bbox.Y + (bbox.Height*2)/3
+	for y, span := range spans {
+		width := span[1] - span[0] + 1
+		rowWidths = append(rowWidths, width)
+		if y <= upperLimit {
+			upperWidths = append(upperWidths, width)
+		}
+		if y >= lowerStart {
+			lowerWidths = append(lowerWidths, width)
+		}
+	}
+	if len(upperWidths) == 0 || len(lowerWidths) == 0 {
+		return 0, 0
+	}
+	upperMedian := float64(medianUint32(upperWidths))
+	lowerMax := float64(maxUint32Slice(lowerWidths))
+	widthRatio := lowerMax / math.Max(upperMedian, 1.0)
+
+	topVariation := outlineCapVariation(tooth.Geometry.Outline, true)
+	bottomVariation := outlineCapVariation(tooth.Geometry.Outline, false)
+	capVariation := topVariation
+	if bottomVariation > capVariation {
+		capVariation = bottomVariation
+	}
+	return widthRatio, capVariation
+}
+
+func closeupBodyWidthMetrics(tooth contracts.ToothCandidate) (float64, float64, bool) {
+	spans := outlineRowSpans(tooth.Geometry.Outline)
+	if len(spans) == 0 {
+		return 0, 0, false
+	}
+	bbox := tooth.Geometry.BoundingBox
+	upperStart := bbox.Y
+	upperEnd := bbox.Y + bbox.Height/4
+	midStart := bbox.Y + (bbox.Height*2)/5
+	midEnd := bbox.Y + (bbox.Height*3)/5
+	upperWidths := collectOutlineWidthsInRange(spans, upperStart, upperEnd)
+	midWidths := collectOutlineWidthsInRange(spans, midStart, midEnd)
+	if len(upperWidths) == 0 || len(midWidths) == 0 {
+		return 0, 0, false
+	}
+	return float64(medianUint32(upperWidths)), float64(medianUint32(midWidths)), true
+}
+
+func closeupInnerWallShift(tooth contracts.ToothCandidate) (float64, bool) {
+	spans := outlineRowSpans(tooth.Geometry.Outline)
+	if len(spans) == 0 {
+		return 0, false
+	}
+	bbox := tooth.Geometry.BoundingBox
+	upperStart := bbox.Y
+	upperEnd := bbox.Y + bbox.Height/4
+	midStart := bbox.Y + (bbox.Height*2)/5
+	midEnd := bbox.Y + (bbox.Height*3)/5
+
+	upperEdges := collectOutlineEdgesInRange(spans, upperStart, upperEnd, tooth.Role == "full-left")
+	midEdges := collectOutlineEdgesInRange(spans, midStart, midEnd, tooth.Role == "full-left")
+	if len(upperEdges) == 0 || len(midEdges) == 0 {
+		return 0, false
+	}
+	upper := float64(medianUint32(upperEdges))
+	mid := float64(medianUint32(midEdges))
+	if tooth.Role == "full-left" {
+		return mid - upper, true
+	}
+	if tooth.Role == "full-right" {
+		return upper - mid, true
+	}
+	return 0, false
+}
+
+func closeupWidthSpreadMetric(tooth contracts.ToothCandidate, startFrac float64, endFrac float64) float64 {
+	spans := outlineRowSpans(tooth.Geometry.Outline)
+	if len(spans) == 0 {
+		return 0
+	}
+	bbox := tooth.Geometry.BoundingBox
+	startY := bbox.Y + uint32(math.Round(float64(bbox.Height)*startFrac))
+	endY := bbox.Y + uint32(math.Round(float64(bbox.Height)*endFrac))
+	widths := collectOutlineWidthsInRange(spans, startY, endY)
+	if len(widths) < 4 {
+		return 0
+	}
+	sort.Slice(widths, func(i, j int) bool { return widths[i] < widths[j] })
+	p10 := widths[len(widths)/10]
+	p90 := widths[(len(widths)*9)/10]
+	return float64(p90 - p10)
+}
+
+func outlineJaggedness(outline []contracts.Point) float64 {
+	if len(outline) < 3 {
+		return 0
+	}
+	excess := 0.0
+	perimeter := 0.0
+	for index, point := range outline {
+		next := outline[(index+1)%len(outline)]
+		dx := math.Abs(float64(next.X) - float64(point.X))
+		dy := math.Abs(float64(next.Y) - float64(point.Y))
+		manhattan := dx + dy
+		euclidean := math.Hypot(dx, dy)
+		excess += manhattan - euclidean
+		perimeter += euclidean
+	}
+	if perimeter == 0 {
+		return 0
+	}
+	return excess / perimeter
+}
+
+func collectOutlineWidthsInRange(spans map[uint32][2]uint32, startY uint32, endY uint32) []uint32 {
+	widths := make([]uint32, 0, len(spans))
+	for y, span := range spans {
+		if y < startY || y > endY {
+			continue
+		}
+		widths = append(widths, span[1]-span[0]+1)
+	}
+	return widths
+}
+
+func collectOutlineEdgesInRange(spans map[uint32][2]uint32, startY uint32, endY uint32, rightEdge bool) []uint32 {
+	edges := make([]uint32, 0, len(spans))
+	for y, span := range spans {
+		if y < startY || y > endY {
+			continue
+		}
+		if rightEdge {
+			edges = append(edges, span[1])
+			continue
+		}
+		edges = append(edges, span[0])
+	}
+	return edges
+}
+
+func outlineRowSpans(outline []contracts.Point) map[uint32][2]uint32 {
+	spans := make(map[uint32][2]uint32)
+	if len(outline) == 0 {
+		return spans
+	}
+	update := func(point contracts.Point) {
+		span, ok := spans[point.Y]
+		if !ok {
+			spans[point.Y] = [2]uint32{point.X, point.X}
+			return
+		}
+		if point.X < span[0] {
+			span[0] = point.X
+		}
+		if point.X > span[1] {
+			span[1] = point.X
+		}
+		spans[point.Y] = span
+	}
+	for index, point := range outline {
+		next := outline[(index+1)%len(outline)]
+		dx := absInt(int(next.X) - int(point.X))
+		dy := absInt(int(next.Y) - int(point.Y))
+		steps := maxInt(dx, dy)
+		if steps == 0 {
+			update(point)
+			continue
+		}
+		for step := 0; step <= steps; step++ {
+			t := float64(step) / float64(steps)
+			interp := contracts.Point{
+				X: uint32(math.Round((1.0-t)*float64(point.X) + t*float64(next.X))),
+				Y: uint32(math.Round((1.0-t)*float64(point.Y) + t*float64(next.Y))),
+			}
+			update(interp)
+		}
+	}
+	return spans
+}
+
+func outlineCapVariation(outline []contracts.Point, top bool) uint32 {
+	if len(outline) == 0 {
+		return 0
+	}
+
+	xExtrema := make(map[uint32]uint32)
+	for _, point := range outline {
+		value, ok := xExtrema[point.X]
+		if !ok {
+			xExtrema[point.X] = point.Y
+			continue
+		}
+		if top {
+			if point.Y < value {
+				xExtrema[point.X] = point.Y
+			}
+			continue
+		}
+		if point.Y > value {
+			xExtrema[point.X] = point.Y
+		}
+	}
+	if len(xExtrema) < 4 {
+		return 0
+	}
+
+	values := make([]uint32, 0, len(xExtrema))
+	for _, value := range xExtrema {
+		values = append(values, value)
+	}
+	return maxUint32Slice(values) - minUint32Slice(values)
+}
+
+func outlineLongestLowerShelf(outline []contracts.Point, bbox contracts.BoundingBox) uint32 {
+	if len(outline) == 0 {
+		return 0
+	}
+	xBottom := make(map[uint32]uint32)
+	lowerStart := bbox.Y + (bbox.Height*2)/3
+	for _, point := range outline {
+		if point.Y < lowerStart {
+			continue
+		}
+		value, ok := xBottom[point.X]
+		if !ok || point.Y > value {
+			xBottom[point.X] = point.Y
+		}
+	}
+	if len(xBottom) < 4 {
+		return 0
+	}
+
+	xs := make([]uint32, 0, len(xBottom))
+	for x := range xBottom {
+		xs = append(xs, x)
+	}
+	sort.Slice(xs, func(i, j int) bool { return xs[i] < xs[j] })
+
+	var longest uint32
+	var current uint32 = 1
+	for index := 1; index < len(xs); index++ {
+		prevX := xs[index-1]
+		x := xs[index]
+		if x != prevX+1 {
+			if current > longest {
+				longest = current
+			}
+			current = 1
+			continue
+		}
+		if absInt(int(xBottom[x])-int(xBottom[prevX])) <= 1 {
+			current++
+			continue
+		}
+		if current > longest {
+			longest = current
+		}
+		current = 1
+	}
+	if current > longest {
+		longest = current
+	}
+	return longest
+}
+
+func maxUint32Slice(values []uint32) uint32 {
+	if len(values) == 0 {
+		return 0
+	}
+	maxValue := values[0]
+	for _, value := range values[1:] {
+		if value > maxValue {
+			maxValue = value
+		}
+	}
+	return maxValue
+}
+
+func minUint32Slice(values []uint32) uint32 {
+	if len(values) == 0 {
+		return 0
+	}
+	minValue := values[0]
+	for _, value := range values[1:] {
+		if value < minValue {
+			minValue = value
+		}
+	}
+	return minValue
 }
 
 func TestGaussianBlurGrayFastMatchesOriginal(t *testing.T) {
