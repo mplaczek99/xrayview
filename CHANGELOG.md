@@ -5,6 +5,44 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-04-23
+
+### Added
+
+- `PolylineAnnotation` in the shared contract and an `AnnotationBundle.polylines` field, rendered by `AnnotationLayer` as either an SVG `polyline` or `polygon` depending on the `closed` flag
+- Loopback-only `GET /preview` endpoint on the Go backend (`backend/internal/httpapi/preview.go`) that serves cache artifacts, with `filepath.EvalSymlinks` + `filepath.Rel` containment checks against the configured cache root
+- Node.js 18.18+ support: `engines` field on the root and `frontend/` packages, Vite downgraded to `^5.4.18`, `@vitejs/plugin-react` downgraded to `^4.3.4`, README prerequisite updated
+- Linux desktop build prerequisite check in `desktop/scripts/build.mjs` covering `gtk+-3.0` and either `webkit2gtk-4.1` or `webkit2gtk-4.0`, with an actionable error message when packages are missing
+- Stable `data-testid` attributes across processing controls, view-tab toolbar buttons, and Job Center rows for browser automation
+- Vite dev server explicit `host: "127.0.0.1"` binding
+- Shared `frontend/src/lib/commandBuilders.ts` module owning `buildProcessStudyCommand`
+- `.gitignore` entries for `.playwright-cli/` and `backend/internal/analysis/_debug/`
+
+### Changed
+
+- `images/README.md` now documents local BMP/TIF asset directories instead of the bundled dental radiograph
+- `backend/internal/httpapi` tests reorganised around the new `preview_test.go`; the aggregated `router_test.go` suite was retired
+- `ViewTab` / `ViewSidebar` CSS renamed from `study-analysis*` to `study-layout*` to reflect the simplified layout after analysis removal
+- Backend job service worker pool comments and `bufpool` docs updated to reflect two job kinds (render, process)
+
+### Fixed
+
+- Brightness and Contrast number inputs no longer accept out-of-range values. Previously the slider clamped natively on render but the number input did not, so typing `999` left slider, state, and displayed input desynced and the backend rejected the job. Contrast also collapsed empty or negative input to `0`, below the `0.1` minimum
+- Mid-edit states on Brightness/Contrast (empty field, lone `-`, lone `.`) no longer parse as NaN and yank the slider to the minimum — partial input now preserves the last committed value while real out-of-range numbers still clamp
+- Windows release archives in `build-release-artifacts.yml` now use POSIX paths
+- Archive workflow no longer relies on `grep -P`
+
+### Removed
+
+- Legacy tooth analysis pipeline:
+  - `start_analyze_job` command, `AnalyzeStudyCommand` / `AnalyzeStudyCommandResult`, `JobKindAnalyzeStudy`, and the `autoTooth` `AnnotationSource` variant
+  - Contract types `ToothAnalysis`, `ToothImageMetadata`, `ToothCalibration`, `ToothCandidate`, `ToothMeasurementBundle`, `ToothMeasurementValues`, `ToothGeometry`, `BoundingBox`, `LineSegment`, `Point`
+  - `backend/internal/analysis/`, `backend/internal/annotations/suggestions.go`, the analyze-result memory cache, and the `--analyze-tooth` legacy CLI flag
+  - Frontend plumbing: `measureActiveStudy`, `replaceSuggestedAnnotations`, `selectActiveStudyJobs`, `applyAnalyzeJob`, `ToothAnalysisResult`, `analysisJobId` on `WorkbenchStudy`, tooth measurement sections in `ViewSidebar`, overlay rendering in `DicomViewer`, and `.viewer-stage__overlay*` / `.measurement-card--analysis` styles
+- Bundled sample DICOM fixtures: `images/sample-dental-radiograph.dcm`, `images/sample-dental-radiograph_processed.dcm`, and the pre-recorded analyze preview / study snapshot under `images/sample-dental-radiograph/`
+- `AGENT_MIDDLEWARE_PLAN.md`
+- `frontend/src/lib/wails.ts` global augmentation and related unused runtime types
+
 ## [0.3.0] - 2026-04-18
 
 ### Added

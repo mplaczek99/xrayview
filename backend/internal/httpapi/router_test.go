@@ -29,6 +29,7 @@ import (
 	"xrayview/backend/internal/jobs"
 	"xrayview/backend/internal/persistence"
 	"xrayview/backend/internal/studies"
+	"xrayview/backend/internal/testfixtures"
 )
 
 type testDeps struct {
@@ -1206,14 +1207,7 @@ func TestProcessJobEndpointCompletesPreview(t *testing.T) {
 func sampleDicomPath(t *testing.T) string {
 	t.Helper()
 
-	_, currentFile, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller returned no file path")
-	}
-
-	return filepath.Clean(
-		filepath.Join(filepath.Dir(currentFile), "..", "..", "..", "images", "sample-dental-radiograph.dcm"),
-	)
+	return testfixtures.WriteSampleDicom(t)
 }
 
 func actualBMPPath(t *testing.T) string {

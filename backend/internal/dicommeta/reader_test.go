@@ -16,10 +16,10 @@ func TestReadFileSampleDentalRadiographMetadata(t *testing.T) {
 		t.Fatalf("ReadFile returned error: %v", err)
 	}
 
-	if got, want := metadata.Rows, uint16(1088); got != want {
+	if got, want := metadata.Rows, uint16(2); got != want {
 		t.Fatalf("Rows = %d, want %d", got, want)
 	}
-	if got, want := metadata.Columns, uint16(2048); got != want {
+	if got, want := metadata.Columns, uint16(4); got != want {
 		t.Fatalf("Columns = %d, want %d", got, want)
 	}
 	if got, want := metadata.PhotometricInterpretation, "MONOCHROME2"; got != want {
@@ -72,10 +72,10 @@ func TestReadFileProcessedSampleTracksNativeDecodeMetadata(t *testing.T) {
 		t.Fatalf("ReadFile returned error: %v", err)
 	}
 
-	if got, want := metadata.Rows, uint16(1088); got != want {
+	if got, want := metadata.Rows, uint16(2); got != want {
 		t.Fatalf("Rows = %d, want %d", got, want)
 	}
-	if got, want := metadata.Columns, uint16(2048); got != want {
+	if got, want := metadata.Columns, uint16(4); got != want {
 		t.Fatalf("Columns = %d, want %d", got, want)
 	}
 	if got, want := metadata.SamplesPerPixel, uint16(1); got != want {
@@ -540,25 +540,34 @@ func BenchmarkReadFile(b *testing.B) {
 func sampleDicomPath(t *testing.T) string {
 	t.Helper()
 
-	_, currentFile, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller returned no file path")
+	path := filepath.Join(t.TempDir(), "sample-dental-radiograph.dcm")
+	if err := os.WriteFile(path, buildSampleMetadataFixture(), 0o644); err != nil {
+		t.Fatalf("WriteFile returned error: %v", err)
 	}
 
-	return filepath.Clean(
-		filepath.Join(filepath.Dir(currentFile), "..", "..", "..", "images", "sample-dental-radiograph.dcm"),
-	)
+	return path
 }
 
 func processedSampleDicomPath(t *testing.T) string {
 	t.Helper()
 
-	_, currentFile, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller returned no file path")
+	path := filepath.Join(t.TempDir(), "sample-dental-radiograph_processed.dcm")
+	if err := os.WriteFile(path, buildSampleMetadataFixture(), 0o644); err != nil {
+		t.Fatalf("WriteFile returned error: %v", err)
 	}
 
-	return filepath.Clean(
-		filepath.Join(filepath.Dir(currentFile), "..", "..", "..", "images", "sample-dental-radiograph_processed.dcm"),
-	)
+	return path
+}
+
+func buildSampleMetadataFixture() []byte {
+	return buildTestDicom(buildOptions{
+		withPart10:                true,
+		transferSyntaxUID:         "1.2.840.10008.1.2.1",
+		datasetSyntax:             transferSyntax{byteOrder: binary.LittleEndian, explicit: true},
+		rows:                      2,
+		columns:                   4,
+		photometricInterpretation: "MONOCHROME2",
+		windowCenter:              "127.5",
+		windowWidth:               "255",
+	})
 }

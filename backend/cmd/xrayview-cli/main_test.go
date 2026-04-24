@@ -5,13 +5,13 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
 	"xrayview/backend/internal/contracts"
 	"xrayview/backend/internal/processing"
 	"xrayview/backend/internal/render"
+	"xrayview/backend/internal/testfixtures"
 )
 
 func TestParseProcessPreviewArgsAcceptsPaletteAndCompare(t *testing.T) {
@@ -209,12 +209,5 @@ func runLegacyCommand(args ...string) (string, string, error) {
 func sampleDicomPath(t *testing.T) string {
 	t.Helper()
 
-	_, currentFile, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("resolve current file path")
-	}
-
-	return filepath.Clean(
-		filepath.Join(filepath.Dir(currentFile), "..", "..", "..", "images", "sample-dental-radiograph.dcm"),
-	)
+	return testfixtures.WriteSampleDicom(t)
 }
