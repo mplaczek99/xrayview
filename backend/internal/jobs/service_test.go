@@ -690,7 +690,7 @@ func TestStartProcessJobWritesPreviewAndServesCachedSnapshot(t *testing.T) {
 func TestStartProcessJobUsesCacheAcrossOutputPaths(t *testing.T) {
 	studyRegistry, study := registerTestStudy(t)
 	cacheStore := cache.New(filepath.Join(t.TempDir(), "cache"))
-	sourceStudy := syntheticAnalyzeSourceStudy()
+	sourceStudy := syntheticSourceStudy()
 	sourceStudy.Metadata = dicommeta.SourceMetadata{StudyInstanceUID: "1.2.3.4.5"}
 	service := newService(
 		cacheStore,
@@ -813,276 +813,10 @@ func TestStartProcessJobDeduplicatesActiveStudyProcessing(t *testing.T) {
 	}
 }
 
-func TestStartAnalyzeJobWritesPreviewAndServesCachedSnapshot(t *testing.T) {
+func TestWorkflowReusesDecodeAndSourcePreviewAcrossRenderAndProcessJobs(t *testing.T) {
 	studyRegistry, study := registerTestStudy(t)
 	cacheStore := cache.New(filepath.Join(t.TempDir(), "cache"))
-	sourceStudy := syntheticAnalyzeSourceStudy()
-	service := newService(
-		cacheStore,
-		studyRegistry,
-		nil,
-		dicomexport.GoWriter{},
-		func() (studyDecoder, error) { return staticDecoder{study: sourceStudy}, nil },
-		sequenceJobIDs("job-1", "job-2"),
-	)
-
-	started, err := service.StartAnalyzeJob(contracts.AnalyzeStudyCommand{StudyID: study.StudyID})
-	if err != nil {
-		t.Fatalf("StartAnalyzeJob returned error: %v", err)
-	}
-
-	snapshot := waitForTerminalJob(t, service, started.JobID)
-	if got, want := snapshot.State, contracts.JobStateCompleted; got != want {
-		t.Fatalf("State = %q, want %q", got, want)
-	}
-	if snapshot.FromCache {
-		t.Fatal("FromCache = true, want false for first analyze job")
-	}
-	if snapshot.Result == nil {
-		t.Fatal("Result = nil, want completed analyze payload")
-	}
-	if got, want := snapshot.Result.Kind, contracts.JobKindAnalyzeStudy; got != want {
-		t.Fatalf("Result.Kind = %q, want %q", got, want)
-	}
-
-	result, ok := snapshot.Result.Payload.(contracts.AnalyzeStudyCommandResult)
-	if !ok {
-		t.Fatalf("Result.Payload type = %T, want contracts.AnalyzeStudyCommandResult", snapshot.Result.Payload)
-	}
-	if got, want := result.StudyID, study.StudyID; got != want {
-		t.Fatalf("Result.StudyID = %q, want %q", got, want)
-	}
-	if !stringsHasPathPrefix(result.PreviewPath, filepath.Join(cacheStore.RootDir(), "artifacts", "analyze")) {
-		t.Fatalf("PreviewPath = %q, want cache/artifacts/analyze prefix", result.PreviewPath)
-	}
-	if info, err := os.Stat(result.PreviewPath); err != nil || info.IsDir() {
-		t.Fatalf("preview artifact missing or invalid: %v", err)
-	}
-	if result.Analysis.Tooth == nil {
-		t.Fatal("Analysis.Tooth = nil, want detected synthetic candidate")
-	}
-	if len(result.Analysis.Teeth) == 0 {
-		t.Fatal("len(Analysis.Teeth) = 0, want detected teeth")
-	}
-	if result.Analysis.Calibration.MeasurementScale == nil {
-		t.Fatal("Analysis.Calibration.MeasurementScale = nil, want decoded scale")
-	}
-	if !result.Analysis.Calibration.RealWorldMeasurementsAvailable {
-		t.Fatal("Analysis.Calibration.RealWorldMeasurementsAvailable = false, want true")
-	}
-	if got, want := len(result.SuggestedAnnotations.Lines), len(result.Analysis.Teeth)*2; got != want {
-		t.Fatalf("len(SuggestedAnnotations.Lines) = %d, want %d", got, want)
-	}
-	if got, want := len(result.SuggestedAnnotations.Rectangles), len(result.Analysis.Teeth); got != want {
-		t.Fatalf("len(SuggestedAnnotations.Rectangles) = %d, want %d", got, want)
-	}
-
-	cachedStarted, err := service.StartAnalyzeJob(contracts.AnalyzeStudyCommand{StudyID: study.StudyID})
-	if err != nil {
-		t.Fatalf("cached StartAnalyzeJob returned error: %v", err)
-	}
-	if got, want := cachedStarted.JobID, "job-2"; got != want {
-		t.Fatalf("cached JobID = %q, want %q", got, want)
-	}
-
-	cachedSnapshot, err := service.GetJob(contracts.JobCommand{JobID: cachedStarted.JobID})
-	if err != nil {
-		t.Fatalf("GetJob returned error: %v", err)
-	}
-	if got, want := cachedSnapshot.State, contracts.JobStateCompleted; got != want {
-		t.Fatalf("cached State = %q, want %q", got, want)
-	}
-	if !cachedSnapshot.FromCache {
-		t.Fatal("cached FromCache = false, want true")
-	}
-
-	cachedResult, ok := cachedSnapshot.Result.Payload.(contracts.AnalyzeStudyCommandResult)
-	if !ok {
-		t.Fatalf("cached Result.Payload type = %T, want contracts.AnalyzeStudyCommandResult", cachedSnapshot.Result.Payload)
-	}
-	if got, want := cachedResult.PreviewPath, result.PreviewPath; got != want {
-		t.Fatalf("cached PreviewPath = %q, want %q", got, want)
-	}
-	if got, want := len(cachedResult.SuggestedAnnotations.Lines), len(result.SuggestedAnnotations.Lines); got != want {
-		t.Fatalf("cached len(SuggestedAnnotations.Lines) = %d, want %d", got, want)
-	}
-}
-
-func TestStartAnalyzeJobDeduplicatesActiveStudyAnalysis(t *testing.T) {
-	studyRegistry, study := registerTestStudy(t)
-	cacheStore := cache.New(filepath.Join(t.TempDir(), "cache"))
-	decoder := &blockingDecoder{
-		started: make(chan struct{}, 1),
-	}
-	service := newService(
-		cacheStore,
-		studyRegistry,
-		nil,
-		dicomexport.GoWriter{},
-		func() (studyDecoder, error) { return decoder, nil },
-		sequenceJobIDs("job-1"),
-	)
-
-	first, err := service.StartAnalyzeJob(contracts.AnalyzeStudyCommand{StudyID: study.StudyID})
-	if err != nil {
-		t.Fatalf("StartAnalyzeJob returned error: %v", err)
-	}
-	second, err := service.StartAnalyzeJob(contracts.AnalyzeStudyCommand{StudyID: study.StudyID})
-	if err != nil {
-		t.Fatalf("second StartAnalyzeJob returned error: %v", err)
-	}
-
-	if got, want := second.JobID, first.JobID; got != want {
-		t.Fatalf("second JobID = %q, want deduped %q", got, want)
-	}
-
-	<-decoder.started
-
-	cancelled, err := service.CancelJob(contracts.JobCommand{JobID: first.JobID})
-	if err != nil {
-		t.Fatalf("CancelJob returned error: %v", err)
-	}
-	if got, want := cancelled.State, contracts.JobStateCancelling; got != want {
-		t.Fatalf("CancelJob state = %q, want %q", got, want)
-	}
-
-	snapshot := waitForTerminalJob(t, service, first.JobID)
-	if got, want := snapshot.State, contracts.JobStateCancelled; got != want {
-		t.Fatalf("terminal State = %q, want %q", got, want)
-	}
-	if snapshot.Result != nil {
-		t.Fatalf("Result = %#v, want nil for cancelled job", snapshot.Result)
-	}
-}
-
-func TestAnalyzeJobSkipsDecodeWhenSourcePreviewAndScaleCached(t *testing.T) {
-	studyRegistry, study := registerTestStudy(t)
-	cacheStore := cache.New(filepath.Join(t.TempDir(), "cache"))
-	sourceStudy := syntheticAnalyzeSourceStudy()
-	decoder := &countingServiceDecoder{study: sourceStudy}
-	service := newService(
-		cacheStore,
-		studyRegistry,
-		nil,
-		dicomexport.GoWriter{},
-		func() (studyDecoder, error) { return decoder, nil },
-		sequenceJobIDs("job-1"),
-	)
-
-	preview := render.RenderSourceImage(sourceStudy.Image, render.DefaultRenderPlan())
-	service.memoryCache.StoreSourcePreview(study.InputPath, preview)
-	service.memoryCache.StoreMeasurementScale(study.InputPath, sourceStudy.MeasurementScale)
-
-	started, err := service.StartAnalyzeJob(contracts.AnalyzeStudyCommand{StudyID: study.StudyID})
-	if err != nil {
-		t.Fatalf("StartAnalyzeJob returned error: %v", err)
-	}
-
-	snapshot := waitForTerminalJob(t, service, started.JobID)
-	if got, want := snapshot.State, contracts.JobStateCompleted; got != want {
-		t.Fatalf("State = %q, want %q", got, want)
-	}
-
-	if got := decoder.CallCount(); got != 0 {
-		t.Fatalf("DecodeStudy calls = %d, want 0 (should skip decode on cache hit)", got)
-	}
-
-	result, ok := snapshot.Result.Payload.(contracts.AnalyzeStudyCommandResult)
-	if !ok {
-		t.Fatalf("Result.Payload type = %T, want contracts.AnalyzeStudyCommandResult", snapshot.Result.Payload)
-	}
-	if result.Analysis.Tooth == nil {
-		t.Fatal("Analysis.Tooth = nil, want detected synthetic candidate")
-	}
-	if result.Analysis.Calibration.MeasurementScale == nil {
-		t.Fatal("Analysis.Calibration.MeasurementScale = nil, want cached scale")
-	}
-	if !result.Analysis.Calibration.RealWorldMeasurementsAvailable {
-		t.Fatal("Analysis.Calibration.RealWorldMeasurementsAvailable = false, want true")
-	}
-}
-
-func TestRenderThenAnalyzeSkipsDecodeOnEvictedDecodeCache(t *testing.T) {
-	studyRegistry := studies.New()
-	studyDir := t.TempDir()
-	inputPaths := make([]string, 6)
-	studyRecords := make([]contracts.StudyRecord, 6)
-	for i := range inputPaths {
-		inputPaths[i] = filepath.Join(studyDir, fmt.Sprintf("study-%d.dcm", i))
-		if err := os.WriteFile(inputPaths[i], []byte("dicom"), 0o644); err != nil {
-			t.Fatalf("WriteFile returned error: %v", err)
-		}
-		study, err := studyRegistry.Register(inputPaths[i], nil)
-		if err != nil {
-			t.Fatalf("Register returned error: %v", err)
-		}
-		studyRecords[i] = study
-	}
-
-	sourceStudy := syntheticAnalyzeSourceStudy()
-	decoder := &countingServiceDecoder{study: sourceStudy}
-	cacheStore := cache.New(filepath.Join(t.TempDir(), "cache"))
-	jobSeq := 0
-	service := newService(
-		cacheStore,
-		studyRegistry,
-		nil,
-		dicomexport.GoWriter{},
-		func() (studyDecoder, error) { return decoder, nil },
-		func() (string, error) {
-			jobSeq++
-			return fmt.Sprintf("job-%d", jobSeq), nil
-		},
-	)
-
-	renderStarted, err := service.StartRenderJob(contracts.RenderStudyCommand{StudyID: studyRecords[0].StudyID})
-	if err != nil {
-		t.Fatalf("StartRenderJob returned error: %v", err)
-	}
-	renderSnapshot := waitForTerminalJob(t, service, renderStarted.JobID)
-	if got, want := renderSnapshot.State, contracts.JobStateCompleted; got != want {
-		t.Fatalf("render State = %q, want %q", got, want)
-	}
-	decodesAfterRender := decoder.CallCount()
-
-	for i := 1; i <= 5; i++ {
-		started, err := service.StartRenderJob(contracts.RenderStudyCommand{StudyID: studyRecords[i].StudyID})
-		if err != nil {
-			t.Fatalf("StartRenderJob[%d] error: %v", i, err)
-		}
-		snap := waitForTerminalJob(t, service, started.JobID)
-		if snap.State != contracts.JobStateCompleted {
-			t.Fatalf("render[%d] State = %q", i, snap.State)
-		}
-	}
-
-	analyzeStarted, err := service.StartAnalyzeJob(contracts.AnalyzeStudyCommand{StudyID: studyRecords[0].StudyID})
-	if err != nil {
-		t.Fatalf("StartAnalyzeJob returned error: %v", err)
-	}
-	analyzeSnapshot := waitForTerminalJob(t, service, analyzeStarted.JobID)
-	if got, want := analyzeSnapshot.State, contracts.JobStateCompleted; got != want {
-		t.Fatalf("analyze State = %q, want %q", got, want)
-	}
-
-	if got := decoder.CallCount(); got != decodesAfterRender+5 {
-		t.Fatalf("DecodeStudy calls = %d, want %d (analyze should skip decode, 5 more renders fill decode cache)",
-			got, decodesAfterRender+5)
-	}
-
-	result, ok := analyzeSnapshot.Result.Payload.(contracts.AnalyzeStudyCommandResult)
-	if !ok {
-		t.Fatalf("Result.Payload type = %T, want contracts.AnalyzeStudyCommandResult", analyzeSnapshot.Result.Payload)
-	}
-	if result.Analysis.Tooth == nil {
-		t.Fatal("Analysis.Tooth = nil, want detected candidate")
-	}
-}
-
-func TestWorkflowReusesDecodeAndSourcePreviewAcrossJobs(t *testing.T) {
-	studyRegistry, study := registerTestStudy(t)
-	cacheStore := cache.New(filepath.Join(t.TempDir(), "cache"))
-	sourceStudy := syntheticAnalyzeSourceStudy()
+	sourceStudy := syntheticSourceStudy()
 	sourceStudy.Metadata = dicommeta.SourceMetadata{StudyInstanceUID: "1.2.3.4.5"}
 	decoder := &countingServiceDecoder{study: sourceStudy}
 	service := newService(
@@ -1091,7 +825,7 @@ func TestWorkflowReusesDecodeAndSourcePreviewAcrossJobs(t *testing.T) {
 		nil,
 		dicomexport.GoWriter{},
 		func() (studyDecoder, error) { return decoder, nil },
-		sequenceJobIDs("job-1", "job-2", "job-3"),
+		sequenceJobIDs("job-1", "job-2"),
 	)
 
 	var renderMu sync.Mutex
@@ -1127,15 +861,6 @@ func TestWorkflowReusesDecodeAndSourcePreviewAcrossJobs(t *testing.T) {
 		t.Fatalf("process State = %q, want %q", got, want)
 	}
 
-	analyzeStarted, err := service.StartAnalyzeJob(contracts.AnalyzeStudyCommand{StudyID: study.StudyID})
-	if err != nil {
-		t.Fatalf("StartAnalyzeJob returned error: %v", err)
-	}
-	analyzeSnapshot := waitForTerminalJob(t, service, analyzeStarted.JobID)
-	if got, want := analyzeSnapshot.State, contracts.JobStateCompleted; got != want {
-		t.Fatalf("analyze State = %q, want %q", got, want)
-	}
-
 	if got, want := decoder.CallCount(), 1; got != want {
 		t.Fatalf("DecodeStudy calls = %d, want %d", got, want)
 	}
@@ -1166,7 +891,7 @@ func TestStartRenderJobBoundsConcurrentExecutions(t *testing.T) {
 
 	release := make(chan struct{})
 	decoder := &concurrencyTrackingDecoder{
-		study:   syntheticAnalyzeSourceStudy(),
+		study:   syntheticSourceStudy(),
 		release: release,
 		started: make(chan struct{}, len(studiesUnderTest)),
 	}
@@ -1247,14 +972,6 @@ func TestServiceRejectsBlankIdentifiers(t *testing.T) {
 					StudyID:  " ",
 					PresetID: "default",
 				})
-				return err
-			},
-			wantMessage: "studyId is required",
-		},
-		{
-			name: "analyze study id",
-			run: func(service *Service) error {
-				_, err := service.StartAnalyzeJob(contracts.AnalyzeStudyCommand{StudyID: "\n"})
 				return err
 			},
 			wantMessage: "studyId is required",
@@ -1349,7 +1066,7 @@ func TestStartProcessJobRejectsInvalidOutputPath(t *testing.T) {
 				studyRegistry,
 				nil,
 				dicomexport.GoWriter{},
-				func() (studyDecoder, error) { return staticDecoder{study: syntheticAnalyzeSourceStudy()}, nil },
+				func() (studyDecoder, error) { return staticDecoder{study: syntheticSourceStudy()}, nil },
 				sequenceJobIDs("job-1"),
 			)
 
@@ -1403,12 +1120,6 @@ func TestStartJobsFailWhenRegisteredInputFileDisappears(t *testing.T) {
 				})
 			},
 		},
-		{
-			name: "analyze",
-			start: func(service *Service, studyID string) (contracts.StartedJob, error) {
-				return service.StartAnalyzeJob(contracts.AnalyzeStudyCommand{StudyID: studyID})
-			},
-		},
 	}
 
 	for _, test := range tests {
@@ -1423,7 +1134,7 @@ func TestStartJobsFailWhenRegisteredInputFileDisappears(t *testing.T) {
 				studyRegistry,
 				nil,
 				dicomexport.GoWriter{},
-				func() (studyDecoder, error) { return staticDecoder{study: syntheticAnalyzeSourceStudy()}, nil },
+				func() (studyDecoder, error) { return staticDecoder{study: syntheticSourceStudy()}, nil },
 				sequenceJobIDs("job-1"),
 			)
 
@@ -1452,7 +1163,7 @@ func TestStartJobsFailWhenRegisteredInputFileDisappears(t *testing.T) {
 	}
 }
 
-func TestRenderAndAnalyzeJobsRemovePreviewArtifactWhenPreviewWriteFails(t *testing.T) {
+func TestRenderAndProcessJobsRemovePreviewArtifactWhenPreviewWriteFails(t *testing.T) {
 	tests := []struct {
 		name        string
 		namespace   string
@@ -1469,15 +1180,6 @@ func TestRenderAndAnalyzeJobsRemovePreviewArtifactWhenPreviewWriteFails(t *testi
 			fingerprint: renderFingerprint,
 			wantMessage: "write preview PNG",
 		},
-		{
-			name:      "analyze",
-			namespace: "analyze",
-			start: func(service *Service, studyID string) (contracts.StartedJob, error) {
-				return service.StartAnalyzeJob(contracts.AnalyzeStudyCommand{StudyID: studyID})
-			},
-			fingerprint: analyzeFingerprint,
-			wantMessage: "write analysis preview PNG",
-		},
 	}
 
 	for _, test := range tests {
@@ -1489,7 +1191,7 @@ func TestRenderAndAnalyzeJobsRemovePreviewArtifactWhenPreviewWriteFails(t *testi
 				studyRegistry,
 				nil,
 				dicomexport.GoWriter{},
-				func() (studyDecoder, error) { return staticDecoder{study: syntheticAnalyzeSourceStudy()}, nil },
+				func() (studyDecoder, error) { return staticDecoder{study: syntheticSourceStudy()}, nil },
 				sequenceJobIDs("job-1"),
 			)
 			service.renderSourcePreview = func(
@@ -1548,7 +1250,7 @@ func TestStartProcessJobWriterFailureCleansUpArtifactsAndDoesNotCacheFailure(t *
 		studyRegistry,
 		nil,
 		partialFailingSecondaryCaptureWriter{err: fmt.Errorf("disk full")},
-		func() (studyDecoder, error) { return staticDecoder{study: syntheticAnalyzeSourceStudy()}, nil },
+		func() (studyDecoder, error) { return staticDecoder{study: syntheticSourceStudy()}, nil },
 		sequenceJobIDs("job-1", "job-2"),
 	)
 
@@ -1626,7 +1328,7 @@ func TestStartProcessJobCancellationDuringSecondaryCaptureWriteRemovesArtifacts(
 		studyRegistry,
 		nil,
 		writer,
-		func() (studyDecoder, error) { return staticDecoder{study: syntheticAnalyzeSourceStudy()}, nil },
+		func() (studyDecoder, error) { return staticDecoder{study: syntheticSourceStudy()}, nil },
 		sequenceJobIDs("job-1"),
 	)
 
@@ -1758,7 +1460,7 @@ func stringsHasPathPrefix(path string, prefix string) bool {
 	return err == nil && relative != ".." && relative != "." && relative != ""
 }
 
-func syntheticAnalyzeSourceStudy() dicommeta.SourceStudy {
+func syntheticSourceStudy() dicommeta.SourceStudy {
 	const width = 240
 	const height = 160
 

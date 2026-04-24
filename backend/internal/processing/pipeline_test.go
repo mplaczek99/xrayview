@@ -6,6 +6,7 @@ import (
 	"xrayview/backend/internal/dicommeta"
 	"xrayview/backend/internal/imaging"
 	"xrayview/backend/internal/render"
+	"xrayview/backend/internal/testfixtures"
 )
 
 func TestProcessRenderedPreviewCompareOutputIsRGBAAndDoubleWidth(t *testing.T) {
@@ -57,17 +58,17 @@ func TestProcessSourceImageMatchesPaletteFixture(t *testing.T) {
 		t.Fatalf("Mode = %q, want %q", got, want)
 	}
 
-	fixture := decodeRGBAPNG(t, sampleProcessedPaletteFixturePath(t))
-	if got, want := output.Preview.Width, uint32(fixture.Bounds().Dx()); got != want {
+	want := testfixtures.SamplePalettePreview()
+	if got, want := output.Preview.Width, want.Width; got != want {
 		t.Fatalf("preview width = %d, want %d", got, want)
 	}
-	if got, want := output.Preview.Height, uint32(fixture.Bounds().Dy()); got != want {
+	if got, want := output.Preview.Height, want.Height; got != want {
 		t.Fatalf("preview height = %d, want %d", got, want)
 	}
 	if got, want := output.Preview.Format, imaging.FormatRGBA8; got != want {
 		t.Fatalf("preview format = %q, want %q", got, want)
 	}
-	if got, want := output.Preview.Pixels, rgbaPixels(fixture); !equalBytes(got, want) {
+	if got, want := output.Preview.Pixels, want.Pixels; !equalBytes(got, want) {
 		t.Fatalf("processed preview does not match the palette fixture")
 	}
 }
@@ -97,17 +98,17 @@ func TestProcessSourceImageMatchesCompareFixture(t *testing.T) {
 		t.Fatalf("Mode = %q, want %q", got, want)
 	}
 
-	fixture := decodeRGBAPNG(t, sampleCompareFixturePath(t))
-	if got, want := output.Preview.Width, uint32(fixture.Bounds().Dx()); got != want {
+	want := testfixtures.SampleComparePreview()
+	if got, want := output.Preview.Width, want.Width; got != want {
 		t.Fatalf("preview width = %d, want %d", got, want)
 	}
-	if got, want := output.Preview.Height, uint32(fixture.Bounds().Dy()); got != want {
+	if got, want := output.Preview.Height, want.Height; got != want {
 		t.Fatalf("preview height = %d, want %d", got, want)
 	}
 	if got, want := output.Preview.Format, imaging.FormatRGBA8; got != want {
 		t.Fatalf("preview format = %q, want %q", got, want)
 	}
-	if got, want := output.Preview.Pixels, rgbaPixels(fixture); !equalBytes(got, want) {
+	if got, want := output.Preview.Pixels, want.Pixels; !equalBytes(got, want) {
 		t.Fatalf("processed compare preview does not match the compare fixture")
 	}
 }

@@ -3,7 +3,6 @@ import type {
   MeasurementScale,
   ProcessingControls,
   ProcessingManifest,
-  ToothAnalysis,
 } from "../../lib/generated/contracts";
 import type {
   OpenedStudy,
@@ -40,14 +39,12 @@ export interface WorkbenchStudy {
   inputName: string;
   measurementScale: MeasurementScale | null;
   originalPreview: PreviewResult | null;
-  analysis: ToothAnalysis | null;
   annotations: AnnotationBundle;
   viewer: ViewerSession;
   processing: ProcessingSession;
   runtime: RuntimeMode;
   status: string;
   renderJobId: string | null;
-  analysisJobId: string | null;
 }
 
 export interface WorkbenchState {
@@ -100,7 +97,6 @@ export function createWorkbenchStudy(
     inputName: study.inputName,
     measurementScale: study.measurementScale,
     originalPreview: null,
-    analysis: null,
     annotations: emptyAnnotationBundle(),
     viewer: {
       tool: "pan",
@@ -114,6 +110,5 @@ export function createWorkbenchStudy(
     runtime: study.runtime,
     status: "Study opened. Rendering source preview...",
     renderJobId: null,
-    analysisJobId: null,
   };
 }

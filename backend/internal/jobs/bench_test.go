@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"xrayview/backend/internal/analysis"
 	"xrayview/backend/internal/cache"
 	"xrayview/backend/internal/contracts"
 	"xrayview/backend/internal/dicommeta"
@@ -23,10 +22,9 @@ import (
 const benchmarkDicomPath = "../../../images/sample-dental-radiograph.dcm"
 
 var (
-	benchmarkDecodedStudy  dicommeta.SourceStudy
-	benchmarkPreview       imaging.PreviewImage
-	benchmarkPipeline      processing.PipelineOutput
-	benchmarkToothAnalysis contracts.ToothAnalysis
+	benchmarkDecodedStudy dicommeta.SourceStudy
+	benchmarkPreview      imaging.PreviewImage
+	benchmarkPipeline     processing.PipelineOutput
 )
 
 func BenchmarkDecodeStudy(b *testing.B) {
@@ -79,58 +77,6 @@ func BenchmarkProcessSourceImage(b *testing.B) {
 		}
 		benchmarkPipeline = output
 	}
-}
-
-func BenchmarkAnalyzePreview(b *testing.B) {
-	study := loadBenchmarkStudy(b)
-	preview := render.RenderSourceImage(study.Image, render.DefaultRenderPlan())
-
-	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		result, err := analysis.AnalyzePreview(preview, study.MeasurementScale)
-		if err != nil {
-			b.Fatal(err)
-		}
-		benchmarkToothAnalysis = result
-	}
-}
-
-func BenchmarkAnalyzeJob(b *testing.B) {
-	study := loadBenchmarkStudy(b)
-	plan := render.DefaultRenderPlan()
-
-	b.Run("WithDecode", func(b *testing.B) {
-		ctx := context.Background()
-		b.ReportAllocs()
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
-			decoded, err := dicommeta.NewDecoder().DecodeStudy(ctx, benchmarkDicomPath)
-			if err != nil {
-				b.Fatal(err)
-			}
-			preview := render.RenderSourceImage(decoded.Image, plan)
-			result, err := analysis.AnalyzePreview(preview, decoded.MeasurementScale)
-			if err != nil {
-				b.Fatal(err)
-			}
-			benchmarkToothAnalysis = result
-		}
-	})
-
-	b.Run("CacheHit", func(b *testing.B) {
-		preview := render.RenderSourceImage(study.Image, plan)
-
-		b.ReportAllocs()
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
-			result, err := analysis.AnalyzePreview(preview, study.MeasurementScale)
-			if err != nil {
-				b.Fatal(err)
-			}
-			benchmarkToothAnalysis = result
-		}
-	})
 }
 
 func BenchmarkFullWorkflow(b *testing.B) {
@@ -186,12 +132,6 @@ func BenchmarkFullWorkflow(b *testing.B) {
 		}
 		waitBenchJob(b, service, processJob.JobID)
 
-		// Analyze
-		analyzeJob, err := service.StartAnalyzeJob(contracts.AnalyzeStudyCommand{StudyID: study.StudyID})
-		if err != nil {
-			b.Fatal(err)
-		}
-		waitBenchJob(b, service, analyzeJob.JobID)
 	}
 }
 

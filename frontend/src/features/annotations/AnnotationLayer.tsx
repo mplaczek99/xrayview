@@ -85,6 +85,7 @@ const LineAnnotationItem = memo(
           y={mid.y - labelOffset}
           textAnchor="middle"
           pointerEvents="none"
+          opacity={1}
         >
           {label}
         </text>
@@ -151,6 +152,25 @@ export const AnnotationLayer = memo(
               vectorEffect="non-scaling-stroke"
             />
           ))}
+
+          {annotations.polylines.map((annotation) =>
+            annotation.closed ? (
+              <polygon
+                key={annotation.id}
+                className={`annotation-layer__polyline annotation-layer__polyline--${annotation.source}`}
+                points={annotation.points.map((point) => `${point.x},${point.y}`).join(" ")}
+                vectorEffect="non-scaling-stroke"
+              />
+            ) : (
+              <polyline
+                key={annotation.id}
+                className={`annotation-layer__polyline annotation-layer__polyline--${annotation.source}`}
+                points={annotation.points.map((point) => `${point.x},${point.y}`).join(" ")}
+                vectorEffect="non-scaling-stroke"
+                fill="none"
+              />
+            ),
+          )}
 
           {annotations.lines.map((annotation) => (
             <LineAnnotationItem

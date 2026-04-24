@@ -8,11 +8,11 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 
 	"xrayview/backend/internal/dicommeta"
 	"xrayview/backend/internal/imaging"
+	"xrayview/backend/internal/testfixtures"
 )
 
 func TestSavePreviewPNGEncodesGrayPreview(t *testing.T) {
@@ -52,15 +52,15 @@ func TestRenderSourceImageMatchesPreviewFixture(t *testing.T) {
 		t.Fatalf("Validate returned error: %v", err)
 	}
 
-	fixture := decodeGrayPNG(t, samplePreviewFixturePath(t))
-	if got, want := preview.Width, uint32(fixture.Bounds().Dx()); got != want {
+	want := testfixtures.SampleRenderedPreview()
+	if got, want := preview.Width, want.Width; got != want {
 		t.Fatalf("preview width = %d, want %d", got, want)
 	}
-	if got, want := preview.Height, uint32(fixture.Bounds().Dy()); got != want {
+	if got, want := preview.Height, want.Height; got != want {
 		t.Fatalf("preview height = %d, want %d", got, want)
 	}
 
-	if got, want := preview.Pixels, grayPixels(fixture); !equalBytes(got, want) {
+	if got, want := preview.Pixels, want.Pixels; !equalBytes(got, want) {
 		t.Fatalf("rendered preview does not match the preview fixture")
 	}
 }
@@ -68,26 +68,7 @@ func TestRenderSourceImageMatchesPreviewFixture(t *testing.T) {
 func sampleDicomPath(t *testing.T) string {
 	t.Helper()
 
-	return repoPathFromHere(t, "images", "sample-dental-radiograph.dcm")
-}
-
-func samplePreviewFixturePath(t *testing.T) string {
-	t.Helper()
-
-	return repoPathFromHere(t, "backend", "tests", "fixtures", "parity", "sample-dental-radiograph", "render-preview.png")
-}
-
-func repoPathFromHere(t *testing.T, pathParts ...string) string {
-	t.Helper()
-
-	_, currentFile, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller returned no file path")
-	}
-
-	parts := []string{filepath.Dir(currentFile), "..", "..", ".."}
-	parts = append(parts, pathParts...)
-	return filepath.Clean(filepath.Join(parts...))
+	return testfixtures.WriteSampleDicom(t)
 }
 
 func decodeGrayPNG(t *testing.T, path string) *image.Gray {

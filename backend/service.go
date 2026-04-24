@@ -21,7 +21,6 @@ type Service interface {
 	OpenStudy(command OpenStudyCommand) (OpenStudyCommandResult, error)
 	StartRenderJob(command RenderStudyCommand) (StartedJob, error)
 	StartProcessJob(command ProcessStudyCommand) (StartedJob, error)
-	StartAnalyzeJob(command AnalyzeStudyCommand) (StartedJob, error)
 	GetJob(command JobCommand) (JobSnapshot, error)
 	GetJobs(command GetJobsCommand) ([]JobSnapshot, error)
 	CancelJob(command JobCommand) (JobSnapshot, error)
@@ -70,12 +69,6 @@ func (service *embeddedService) StartProcessJob(
 	command ProcessStudyCommand,
 ) (StartedJob, error) {
 	return service.app.StartProcessJob(command)
-}
-
-func (service *embeddedService) StartAnalyzeJob(
-	command AnalyzeStudyCommand,
-) (StartedJob, error) {
-	return service.app.StartAnalyzeJob(command)
 }
 
 func (service *embeddedService) GetJob(command JobCommand) (JobSnapshot, error) {

@@ -1,17 +1,12 @@
 package processing
 
 import (
-	"image"
-	"image/color"
-	"image/png"
-	"os"
-	"path/filepath"
-	"runtime"
 	"testing"
 
 	"xrayview/backend/internal/dicommeta"
 	"xrayview/backend/internal/imaging"
 	"xrayview/backend/internal/render"
+	"xrayview/backend/internal/testfixtures"
 )
 
 func TestProcessGrayscalePixelsFixedOrderAppliesInvertBeforeBrightnessAndContrast(t *testing.T) {
@@ -129,14 +124,14 @@ func TestProcessPreviewImageMatchesGrayscaleFixture(t *testing.T) {
 		t.Fatalf("mode = %q, want %q", got, want)
 	}
 
-	fixture := decodeGrayPNG(t, sampleProcessedFixturePath(t))
-	if got, want := processed.Width, uint32(fixture.Bounds().Dx()); got != want {
+	want := testfixtures.SampleProcessedPreview()
+	if got, want := processed.Width, want.Width; got != want {
 		t.Fatalf("processed width = %d, want %d", got, want)
 	}
-	if got, want := processed.Height, uint32(fixture.Bounds().Dy()); got != want {
+	if got, want := processed.Height, want.Height; got != want {
 		t.Fatalf("processed height = %d, want %d", got, want)
 	}
-	if got, want := processed.Pixels, grayPixels(fixture); !equalBytes(got, want) {
+	if got, want := processed.Pixels, want.Pixels; !equalBytes(got, want) {
 		t.Fatalf("processed preview does not match the grayscale fixture")
 	}
 }
@@ -144,76 +139,7 @@ func TestProcessPreviewImageMatchesGrayscaleFixture(t *testing.T) {
 func sampleDicomPath(t *testing.T) string {
 	t.Helper()
 
-	return repoPathFromHere(t, "images", "sample-dental-radiograph.dcm")
-}
-
-func sampleProcessedFixturePath(t *testing.T) string {
-	t.Helper()
-
-	return repoPathFromHere(
-		t,
-		"backend",
-		"tests",
-		"fixtures",
-		"parity",
-		"sample-dental-radiograph",
-		"process-xray-grayscale-preview.png",
-	)
-}
-
-func repoPathFromHere(t *testing.T, pathParts ...string) string {
-	t.Helper()
-
-	_, currentFile, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller returned no file path")
-	}
-
-	parts := []string{filepath.Dir(currentFile), "..", "..", ".."}
-	parts = append(parts, pathParts...)
-	return filepath.Clean(filepath.Join(parts...))
-}
-
-func decodeGrayPNG(t *testing.T, path string) *image.Gray {
-	t.Helper()
-
-	file, err := os.Open(path)
-	if err != nil {
-		t.Fatalf("Open returned error: %v", err)
-	}
-	defer file.Close()
-
-	decoded, err := png.Decode(file)
-	if err != nil {
-		t.Fatalf("png.Decode returned error: %v", err)
-	}
-
-	if gray, ok := decoded.(*image.Gray); ok {
-		return gray
-	}
-
-	bounds := decoded.Bounds()
-	gray := image.NewGray(bounds)
-	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
-		for x := bounds.Min.X; x < bounds.Max.X; x++ {
-			gray.Set(x, y, color.GrayModel.Convert(decoded.At(x, y)))
-		}
-	}
-
-	return gray
-}
-
-func grayPixels(imageValue *image.Gray) []uint8 {
-	bounds := imageValue.Bounds()
-	pixels := make([]uint8, 0, bounds.Dx()*bounds.Dy())
-
-	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
-		rowStart := imageValue.PixOffset(bounds.Min.X, y)
-		rowEnd := rowStart + bounds.Dx()
-		pixels = append(pixels, imageValue.Pix[rowStart:rowEnd]...)
-	}
-
-	return pixels
+	return testfixtures.WriteSampleDicom(t)
 }
 
 func BenchmarkProcessGrayscalePixels(b *testing.B) {

@@ -45,7 +45,6 @@ type BackendService interface {
 	OpenStudy(command contracts.OpenStudyCommand) (contracts.OpenStudyCommandResult, error)
 	StartRenderJob(command contracts.RenderStudyCommand) (contracts.StartedJob, error)
 	StartProcessJob(command contracts.ProcessStudyCommand) (contracts.StartedJob, error)
-	StartAnalyzeJob(command contracts.AnalyzeStudyCommand) (contracts.StartedJob, error)
 	GetJob(command contracts.JobCommand) (contracts.JobSnapshot, error)
 	GetJobs(command contracts.GetJobsCommand) ([]contracts.JobSnapshot, error)
 	CancelJob(command contracts.JobCommand) (contracts.JobSnapshot, error)
@@ -149,6 +148,12 @@ func NewRouter(deps RouterDeps) http.Handler {
 		writeRuntimeJSON(writer)
 	})
 
+	// /preview serves cached preview artifacts to browser clients that talk to
+	// the loopback backend directly. The desktop shell has its own /preview
+	// handler with different trust assumptions; do not reuse that implementation
+	// here.
+	mux.HandleFunc("GET "+PreviewPath, newPreviewHandler(deps.Cache, deps.Config))
+
 	mux.HandleFunc("GET "+RuntimePath, func(writer http.ResponseWriter, request *http.Request) {
 		writeRuntimeJSON(writer)
 	})
@@ -213,8 +218,6 @@ func NewRouter(deps RouterDeps) http.Handler {
 			handleStartRenderJob(writer, request, deps)
 		case contracts.CommandStartProcessJob:
 			handleStartProcessJob(writer, request, deps)
-		case contracts.CommandStartAnalyzeJob:
-			handleStartAnalyzeJob(writer, request, deps)
 		case contracts.CommandGetJob:
 			handleGetJob(writer, request, deps)
 		case contracts.CommandGetJobs:
@@ -287,7 +290,6 @@ func resolveSupportedJobKinds(service BackendService) []string {
 	return []string{
 		string(contracts.JobKindRenderStudy),
 		string(contracts.JobKindProcessStudy),
-		string(contracts.JobKindAnalyzeStudy),
 	}
 }
 
@@ -357,22 +359,6 @@ func handleStartProcessJob(writer http.ResponseWriter, request *http.Request, de
 	}
 
 	started, err := deps.Service.StartProcessJob(command)
-	if err != nil {
-		writeBackendError(writer, err)
-		return
-	}
-
-	writeJSON(writer, http.StatusOK, started)
-}
-
-func handleStartAnalyzeJob(writer http.ResponseWriter, request *http.Request, deps RouterDeps) {
-	var command contracts.AnalyzeStudyCommand
-	if err := decodeJSONRequest(request, &command); err != nil {
-		writeBackendError(writer, err)
-		return
-	}
-
-	started, err := deps.Service.StartAnalyzeJob(command)
 	if err != nil {
 		writeBackendError(writer, err)
 		return

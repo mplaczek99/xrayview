@@ -9,6 +9,22 @@ interface GrayscaleControlsProps {
   ) => void;
 }
 
+const BRIGHTNESS_MIN = -100;
+const BRIGHTNESS_MAX = 100;
+const CONTRAST_MIN = 0.1;
+const CONTRAST_MAX = 3.0;
+
+// clamp keeps spinbutton input inside the slider's range so the two stay in
+// sync and we never ship an out-of-range value to the backend. Returns null
+// for NaN (empty field, lone "-" or ".") so mid-edit states don't yank the
+// value to min while the user is still typing a negative or decimal.
+function clamp(value: number, min: number, max: number): number | null {
+  if (Number.isNaN(value)) {
+    return null;
+  }
+  return Math.min(max, Math.max(min, value));
+}
+
 export function GrayscaleControls({
   controls,
   busy,
@@ -36,8 +52,9 @@ export function GrayscaleControls({
           id="proc-brightness-range"
           className="form-range"
           type="range"
-          min={-100}
-          max={100}
+          data-testid="action-set-brightness"
+          min={BRIGHTNESS_MIN}
+          max={BRIGHTNESS_MAX}
           step={1}
           value={controls.brightness}
           onChange={(event) =>
@@ -52,16 +69,20 @@ export function GrayscaleControls({
           id="proc-brightness"
           className="form-input form-input--number"
           type="number"
-          min={-100}
-          max={100}
+          min={BRIGHTNESS_MIN}
+          max={BRIGHTNESS_MAX}
           value={controls.brightness}
           step={1}
-          onChange={(event) =>
-            onUpdateControl(
-              "brightness",
-              parseInt(event.target.value, 10) || 0,
-            )
-          }
+          onChange={(event) => {
+            const next = clamp(
+              parseInt(event.target.value, 10),
+              BRIGHTNESS_MIN,
+              BRIGHTNESS_MAX,
+            );
+            if (next !== null) {
+              onUpdateControl("brightness", next);
+            }
+          }}
           disabled={busy}
         />
       </div>
@@ -74,8 +95,9 @@ export function GrayscaleControls({
           id="proc-contrast-range"
           className="form-range"
           type="range"
-          min={0.1}
-          max={3.0}
+          data-testid="action-set-contrast"
+          min={CONTRAST_MIN}
+          max={CONTRAST_MAX}
           step={0.1}
           value={controls.contrast}
           onChange={(event) =>
@@ -92,14 +114,18 @@ export function GrayscaleControls({
           type="number"
           value={controls.contrast}
           step={0.1}
-          min={0.1}
-          max={3.0}
-          onChange={(event) =>
-            onUpdateControl(
-              "contrast",
-              parseFloat(event.target.value) || 0,
-            )
-          }
+          min={CONTRAST_MIN}
+          max={CONTRAST_MAX}
+          onChange={(event) => {
+            const next = clamp(
+              parseFloat(event.target.value),
+              CONTRAST_MIN,
+              CONTRAST_MAX,
+            );
+            if (next !== null) {
+              onUpdateControl("contrast", next);
+            }
+          }}
           disabled={busy}
         />
       </div>

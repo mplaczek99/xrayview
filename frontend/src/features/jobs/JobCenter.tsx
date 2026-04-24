@@ -9,8 +9,6 @@ function titleForJob(kind: string): string {
       return "Render Preview";
     case "processStudy":
       return "Process Study";
-    case "analyzeStudy":
-      return "Measure Tooth";
     default:
       return kind;
   }
@@ -123,11 +121,21 @@ export function JobCenter() {
                 : job.progress.message;
 
             return (
-              <article key={job.jobId} className="job-card">
+              <article
+                key={job.jobId}
+                className="job-card"
+                data-testid="job-row"
+                data-job-kind={job.jobKind}
+                data-job-state={job.state}
+              >
                 <div className="job-card__row">
                   <div>
                     <div className="job-card__title">{titleForJob(job.jobKind)}</div>
-                    <div className="job-card__meta">
+                    <div
+                      className="job-card__meta"
+                      data-testid="job-state"
+                      data-job-state={job.state}
+                    >
                       {stateLabel(job.state)}
                       {studyName ? ` • ${studyName}` : ""}
                       {job.fromCache ? " • cache" : ""}
@@ -137,6 +145,7 @@ export function JobCenter() {
                     <button
                       className="button button--ghost job-card__cancel"
                       type="button"
+                      data-testid="action-cancel-job"
                       onClick={() => void workbenchActions.cancelJob(job.jobId)}
                     >
                       Cancel

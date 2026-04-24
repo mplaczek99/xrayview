@@ -1,52 +1,23 @@
 import { useMemo } from "react";
 import type { MeasurementScale } from "../../lib/generated/contracts";
-import { workbenchActions, useWorkbenchStore, selectActiveStudy, selectIsOpeningStudy, selectActiveStudyJobs } from "../../app/store/workbenchStore";
+import { workbenchActions, useWorkbenchStore, selectActiveStudy, selectIsOpeningStudy } from "../../app/store/workbenchStore";
 import { ViewerCanvas } from "../../features/viewer/ViewerCanvas";
 import { ViewSidebar } from "./ViewSidebar";
 
 export function ViewTab() {
   const study = useWorkbenchStore(selectActiveStudy);
   const isOpeningStudy = useWorkbenchStore(selectIsOpeningStudy);
-  const activeStudyJobs = useWorkbenchStore(selectActiveStudyJobs);
-  const analysisJob = activeStudyJobs.analysis;
-
-  const teeth = useMemo(
-    () =>
-      study?.analysis?.teeth.length
-        ? study.analysis.teeth
-        : study?.analysis?.tooth
-          ? [study.analysis.tooth]
-          : [],
-    [study?.analysis?.teeth, study?.analysis?.tooth],
-  );
-  const tooth = useMemo(() => study?.analysis?.tooth ?? null, [study?.analysis?.tooth]);
-  const warnings = useMemo(() => study?.analysis?.warnings ?? [], [study?.analysis?.warnings]);
   const measurementScale: MeasurementScale | null = useMemo(
     () =>
-      study?.analysis?.calibration.measurementScale ??
       study?.measurementScale ??
       study?.originalPreview?.measurementScale ??
       null,
-    [study?.analysis?.calibration.measurementScale, study?.measurementScale, study?.originalPreview?.measurementScale],
+    [study?.measurementScale, study?.originalPreview?.measurementScale],
   );
-  const isMeasuring =
-    analysisJob?.state === "queued" ||
-    analysisJob?.state === "running" ||
-    analysisJob?.state === "cancelling";
   const previewUrl = study?.originalPreview?.previewUrl ?? null;
-  const imageSize = useMemo(
-    () =>
-      study?.originalPreview?.imageSize ??
-      (study?.analysis
-        ? {
-            width: study.analysis.image.width,
-            height: study.analysis.image.height,
-          }
-        : null),
-    [study?.originalPreview?.imageSize, study?.analysis],
-  );
+  const imageSize = study?.originalPreview?.imageSize ?? null;
   const annotations = useMemo(
-    () => study?.annotations ?? { lines: [], rectangles: [] },
+    () => study?.annotations ?? { lines: [], rectangles: [], polylines: [] },
     [study?.annotations],
   );
   const selectedAnnotationId = study?.viewer.selectedAnnotationId ?? null;
@@ -82,12 +53,12 @@ export function ViewTab() {
               <h3 className="empty-state__title">No study loaded</h3>
               <p className="empty-state__copy">
                 Open a DICOM study or BMP/TIFF image to inspect it, pan and
-                zoom, draw manual line measurements, or run automatic tooth
-                analysis.
+                zoom, and draw manual line measurements.
               </p>
               <button
                 className="button button--primary empty-state__cta"
                 type="button"
+                data-testid="action-open-study"
                 onClick={() => void workbenchActions.openStudy()}
               >
                 Open Study
@@ -107,6 +78,7 @@ export function ViewTab() {
           <button
             className="button button--primary"
             type="button"
+            data-testid="action-open-study"
             onClick={() => void workbenchActions.openStudy()}
             disabled={isOpeningStudy}
           >
@@ -123,6 +95,7 @@ export function ViewTab() {
           <button
             className={`button button--ghost${viewerTool === "pan" ? " viewer-tool--active" : ""}`}
             type="button"
+            data-testid="action-tool-pan"
             onClick={() => workbenchActions.setViewerTool("pan")}
           >
             <svg className="button__icon" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -133,6 +106,7 @@ export function ViewTab() {
           <button
             className={`button button--ghost${viewerTool === "measureLine" ? " viewer-tool--active" : ""}`}
             type="button"
+            data-testid="action-tool-measure-line"
             onClick={() => workbenchActions.setViewerTool("measureLine")}
           >
             <svg className="button__icon" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -150,24 +124,18 @@ export function ViewTab() {
           <button
             className="button button--ghost"
             type="button"
-            onClick={() => void workbenchActions.measureActiveStudy()}
-            disabled={isMeasuring}
+            data-testid="action-measure-teeth"
           >
             <svg className="button__icon" viewBox="0 0 16 16" fill="none" aria-hidden="true">
               <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.5" />
               <path d="M8 5v6M5 8h6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
             </svg>
-            {isMeasuring
-              ? analysisJob?.state === "cancelling"
-                ? "Cancelling..."
-                : "Measuring..."
-              : teeth.length
-                ? "Re-run detection"
-                : "Measure teeth"}
+            Analyze
           </button>
           <button
             className="button button--ghost"
             type="button"
+            data-testid="action-remove-annotation"
             onClick={() => workbenchActions.deleteSelectedAnnotation()}
             disabled={!selectedAnnotationId}
           >
@@ -183,8 +151,8 @@ export function ViewTab() {
         )}
       </div>
 
-      <div className="study-analysis">
-        <div className="study-analysis__viewer">
+      <div className="study-layout">
+        <div className="study-layout__viewer">
           <ViewerCanvas
             previewUrl={previewUrl}
             imageSize={imageSize}
@@ -209,11 +177,7 @@ export function ViewTab() {
           selectedLine={selectedLine}
           annotations={annotations}
           selectedAnnotationId={selectedAnnotationId}
-          teeth={teeth}
-          tooth={tooth}
           measurementScale={measurementScale}
-          warnings={warnings}
-          analysisJob={analysisJob}
         />
       </div>
     </div>

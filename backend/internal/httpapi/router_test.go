@@ -29,6 +29,7 @@ import (
 	"xrayview/backend/internal/jobs"
 	"xrayview/backend/internal/persistence"
 	"xrayview/backend/internal/studies"
+	"xrayview/backend/internal/testfixtures"
 )
 
 type testDeps struct {
@@ -50,7 +51,6 @@ type mockBackendService struct {
 	openStudy             func(contracts.OpenStudyCommand) (contracts.OpenStudyCommandResult, error)
 	startRenderJob        func(contracts.RenderStudyCommand) (contracts.StartedJob, error)
 	startProcessJob       func(contracts.ProcessStudyCommand) (contracts.StartedJob, error)
-	startAnalyzeJob       func(contracts.AnalyzeStudyCommand) (contracts.StartedJob, error)
 	getJob                func(contracts.JobCommand) (contracts.JobSnapshot, error)
 	getJobs               func(contracts.GetJobsCommand) ([]contracts.JobSnapshot, error)
 	cancelJob             func(contracts.JobCommand) (contracts.JobSnapshot, error)
@@ -74,12 +74,6 @@ func (service mockBackendService) StartProcessJob(
 	command contracts.ProcessStudyCommand,
 ) (contracts.StartedJob, error) {
 	return service.startProcessJob(command)
-}
-
-func (service mockBackendService) StartAnalyzeJob(
-	command contracts.AnalyzeStudyCommand,
-) (contracts.StartedJob, error) {
-	return service.startAnalyzeJob(command)
 }
 
 func (service mockBackendService) GetJob(command contracts.JobCommand) (contracts.JobSnapshot, error) {
@@ -170,12 +164,6 @@ func (service testBackendService) StartProcessJob(
 	command contracts.ProcessStudyCommand,
 ) (contracts.StartedJob, error) {
 	return service.jobs.StartProcessJob(command)
-}
-
-func (service testBackendService) StartAnalyzeJob(
-	command contracts.AnalyzeStudyCommand,
-) (contracts.StartedJob, error) {
-	return service.jobs.StartAnalyzeJob(command)
 }
 
 func (service testBackendService) GetJob(command contracts.JobCommand) (contracts.JobSnapshot, error) {
@@ -348,9 +336,6 @@ func TestRouterDispatchesOpenStudyToBackendService(t *testing.T) {
 			startProcessJob: func(contracts.ProcessStudyCommand) (contracts.StartedJob, error) {
 				return contracts.StartedJob{}, fmt.Errorf("unexpected StartProcessJob call")
 			},
-			startAnalyzeJob: func(contracts.AnalyzeStudyCommand) (contracts.StartedJob, error) {
-				return contracts.StartedJob{}, fmt.Errorf("unexpected StartAnalyzeJob call")
-			},
 			getJob: func(contracts.JobCommand) (contracts.JobSnapshot, error) {
 				return contracts.JobSnapshot{}, fmt.Errorf("unexpected GetJob call")
 			},
@@ -395,9 +380,6 @@ func TestRouterDispatchesCancelJobToBackendService(t *testing.T) {
 			},
 			startProcessJob: func(contracts.ProcessStudyCommand) (contracts.StartedJob, error) {
 				return contracts.StartedJob{}, fmt.Errorf("unexpected StartProcessJob call")
-			},
-			startAnalyzeJob: func(contracts.AnalyzeStudyCommand) (contracts.StartedJob, error) {
-				return contracts.StartedJob{}, fmt.Errorf("unexpected StartAnalyzeJob call")
 			},
 			getJob: func(contracts.JobCommand) (contracts.JobSnapshot, error) {
 				return contracts.JobSnapshot{}, fmt.Errorf("unexpected GetJob call")
@@ -469,9 +451,6 @@ func TestCommandEndpointRejectsTrailingJSONContent(t *testing.T) {
 			},
 			startProcessJob: func(contracts.ProcessStudyCommand) (contracts.StartedJob, error) {
 				return contracts.StartedJob{}, fmt.Errorf("unexpected StartProcessJob call")
-			},
-			startAnalyzeJob: func(contracts.AnalyzeStudyCommand) (contracts.StartedJob, error) {
-				return contracts.StartedJob{}, fmt.Errorf("unexpected StartAnalyzeJob call")
 			},
 			getJob: func(contracts.JobCommand) (contracts.JobSnapshot, error) {
 				return contracts.JobSnapshot{}, fmt.Errorf("unexpected GetJob call")
@@ -1225,133 +1204,10 @@ func TestProcessJobEndpointCompletesPreview(t *testing.T) {
 	t.Fatal("process job did not complete before timeout")
 }
 
-func TestAnalyzeJobEndpointCompletesPreview(t *testing.T) {
-	deps := testDependencies(t)
-	handler := NewRouter(deps.RouterDeps)
-	inputPath := sampleDicomPath(t)
-
-	openRecorder := httptest.NewRecorder()
-	openRequest := httptest.NewRequest(
-		http.MethodPost,
-		"/api/v1/commands/open_study",
-		strings.NewReader(`{"inputPath":"`+inputPath+`"}`),
-	)
-	openRequest.Header.Set("content-type", "application/json")
-	handler.ServeHTTP(openRecorder, openRequest)
-
-	if openRecorder.Code != http.StatusOK {
-		t.Fatalf("open status = %d, want %d", openRecorder.Code, http.StatusOK)
-	}
-
-	var opened contracts.OpenStudyCommandResult
-	if err := json.NewDecoder(openRecorder.Body).Decode(&opened); err != nil {
-		t.Fatalf("decode open payload failed: %v", err)
-	}
-
-	startRecorder := httptest.NewRecorder()
-	startRequest := httptest.NewRequest(
-		http.MethodPost,
-		"/api/v1/commands/start_analyze_job",
-		strings.NewReader(`{"studyId":"`+opened.Study.StudyID+`"}`),
-	)
-	startRequest.Header.Set("content-type", "application/json")
-	handler.ServeHTTP(startRecorder, startRequest)
-
-	if startRecorder.Code != http.StatusOK {
-		t.Fatalf("start_analyze_job status = %d, want %d", startRecorder.Code, http.StatusOK)
-	}
-
-	var started contracts.StartedJob
-	if err := json.NewDecoder(startRecorder.Body).Decode(&started); err != nil {
-		t.Fatalf("decode started job failed: %v", err)
-	}
-
-	deadline := time.Now().Add(2 * time.Minute)
-	for time.Now().Before(deadline) {
-		getRecorder := httptest.NewRecorder()
-		getRequest := httptest.NewRequest(
-			http.MethodPost,
-			"/api/v1/commands/get_job",
-			strings.NewReader(`{"jobId":"`+started.JobID+`"}`),
-		)
-		getRequest.Header.Set("content-type", "application/json")
-		handler.ServeHTTP(getRecorder, getRequest)
-
-		if getRecorder.Code != http.StatusOK {
-			t.Fatalf("get_job status = %d, want %d", getRecorder.Code, http.StatusOK)
-		}
-
-		var snapshot contracts.JobSnapshot
-		if err := json.NewDecoder(getRecorder.Body).Decode(&snapshot); err != nil {
-			t.Fatalf("decode job snapshot failed: %v", err)
-		}
-
-		switch snapshot.State {
-		case contracts.JobStateQueued, contracts.JobStateRunning, contracts.JobStateCancelling:
-			time.Sleep(25 * time.Millisecond)
-		case contracts.JobStateFailed:
-			t.Fatalf("analyze job failed: %#v", snapshot.Error)
-		case contracts.JobStateCancelled:
-			t.Fatal("analyze job was cancelled unexpectedly")
-		case contracts.JobStateCompleted:
-			if snapshot.Result == nil {
-				t.Fatal("completed analyze job returned nil result")
-			}
-			if got, want := snapshot.Result.Kind, contracts.JobKindAnalyzeStudy; got != want {
-				t.Fatalf("result kind = %q, want %q", got, want)
-			}
-
-			payload, ok := snapshot.Result.Payload.(map[string]any)
-			if !ok {
-				t.Fatalf("result payload type = %T, want map[string]any", snapshot.Result.Payload)
-			}
-
-			previewPath, ok := payload["previewPath"].(string)
-			if !ok || previewPath == "" {
-				t.Fatalf("previewPath = %#v, want non-empty string", payload["previewPath"])
-			}
-			if info, err := os.Stat(previewPath); err != nil || info.IsDir() {
-				t.Fatalf("preview artifact missing or invalid: %v", err)
-			}
-
-			analysisPayload, ok := payload["analysis"].(map[string]any)
-			if !ok {
-				t.Fatalf("analysis payload type = %T, want map[string]any", payload["analysis"])
-			}
-			imagePayload, ok := analysisPayload["image"].(map[string]any)
-			if !ok {
-				t.Fatalf("analysis.image type = %T, want map[string]any", analysisPayload["image"])
-			}
-			if got, ok := imagePayload["width"].(float64); !ok || got <= 0 {
-				t.Fatalf("analysis.image.width = %#v, want positive number", imagePayload["width"])
-			}
-
-			suggestedAnnotations, ok := payload["suggestedAnnotations"].(map[string]any)
-			if !ok {
-				t.Fatalf("suggestedAnnotations type = %T, want map[string]any", payload["suggestedAnnotations"])
-			}
-			lines, ok := suggestedAnnotations["lines"].([]any)
-			if !ok || len(lines) == 0 {
-				t.Fatalf("suggestedAnnotations.lines = %#v, want non-empty array", suggestedAnnotations["lines"])
-			}
-			return
-		}
-	}
-
-	t.Fatal("analyze job did not complete before timeout")
-}
-
 func sampleDicomPath(t *testing.T) string {
 	t.Helper()
 
-	_, currentFile, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller returned no file path")
-	}
-
-	return filepath.Clean(
-		filepath.Join(filepath.Dir(currentFile), "..", "..", "..", "images", "sample-dental-radiograph.dcm"),
-	)
+	return testfixtures.WriteSampleDicom(t)
 }
 
 func actualBMPPath(t *testing.T) string {

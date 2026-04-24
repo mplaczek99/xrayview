@@ -143,6 +143,7 @@ export function ProcessingTab() {
             <button
               className="button button--ghost"
               type="button"
+              data-testid="action-choose-output-path"
               onClick={() => void workbenchActions.pickProcessingOutputPath()}
               disabled={!study || busy}
             >
@@ -168,6 +169,7 @@ export function ProcessingTab() {
           <select
             id="proc-preset"
             className="form-select"
+            data-testid="action-select-preset"
             value={activePreset?.id ?? CUSTOM_PRESET_ID}
             onChange={(event) => {
               const preset = processingUi.presets.find(
@@ -210,6 +212,7 @@ export function ProcessingTab() {
           <select
             id="proc-palette"
             className="form-select"
+            data-testid="action-select-palette"
             value={form.controls.palette}
             onChange={(event) =>
               updateControl("palette", event.target.value as Palette)
@@ -243,6 +246,7 @@ export function ProcessingTab() {
           <button
             className="button button--primary processing-run-btn"
             type="button"
+            data-testid="action-start-process"
             onClick={() => void workbenchActions.runActiveStudyProcessing(request)}
             disabled={!canRun}
           >
@@ -260,6 +264,7 @@ export function ProcessingTab() {
             <button
               className="button button--ghost"
               type="button"
+              data-testid="action-cancel-process"
               onClick={() => void workbenchActions.cancelJob(runStatus.jobId)}
             >
               Cancel Job

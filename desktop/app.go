@@ -199,16 +199,6 @@ func (app *DesktopApp) StartProcessJob(
 	return invokeViaHTTP[backendapi.StartedJob](app, "start_process_job", command)
 }
 
-func (app *DesktopApp) StartAnalyzeJob(
-	command backendapi.AnalyzeStudyCommand,
-) (backendapi.StartedJob, error) {
-	if app.backend != nil {
-		return app.backend.StartAnalyzeJob(command)
-	}
-
-	return invokeViaHTTP[backendapi.StartedJob](app, "start_analyze_job", command)
-}
-
 func (app *DesktopApp) GetJobSnapshot(
 	command backendapi.JobCommand,
 ) (backendapi.JobSnapshot, error) {

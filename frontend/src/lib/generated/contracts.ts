@@ -30,7 +30,7 @@ export interface MeasurementScale {
   source: string;
 }
 
-export type AnnotationSource = "manual" | "autoTooth";
+export type AnnotationSource = "manual";
 
 export interface AnnotationPoint {
   x: number;
@@ -65,9 +65,20 @@ export interface RectangleAnnotation {
   confidence?: number | null;
 }
 
+export interface PolylineAnnotation {
+  id: string;
+  label: string;
+  source: AnnotationSource;
+  points: AnnotationPoint[];
+  closed: boolean;
+  editable: boolean;
+  confidence?: number | null;
+}
+
 export interface AnnotationBundle {
   lines: LineAnnotation[];
   rectangles: RectangleAnnotation[];
+  polylines: PolylineAnnotation[];
 }
 
 export type BackendErrorCode = "invalidInput" | "notFound" | "cancelled" | "conflict" | "cacheCorrupted" | "internal";
@@ -79,7 +90,7 @@ export interface BackendError {
   recoverable: boolean;
 }
 
-export type JobKind = "renderStudy" | "processStudy" | "analyzeStudy";
+export type JobKind = "renderStudy" | "processStudy";
 
 export type JobState = "queued" | "running" | "cancelling" | "completed" | "failed" | "cancelled";
 
@@ -146,82 +157,9 @@ export interface ProcessStudyCommandResult {
   measurementScale?: MeasurementScale | null;
 }
 
-export interface AnalyzeStudyCommand {
-  studyId: string;
-}
-
 export interface MeasureLineAnnotationCommand {
   studyId: string;
   annotation: LineAnnotation;
-}
-
-export interface ToothAnalysis {
-  image: ToothImageMetadata;
-  calibration: ToothCalibration;
-  tooth?: ToothCandidate | null;
-  teeth: ToothCandidate[];
-  warnings: string[];
-}
-
-export interface ToothImageMetadata {
-  width: number;
-  height: number;
-}
-
-export interface ToothCalibration {
-  pixelUnits: string;
-  measurementScale?: MeasurementScale | null;
-  realWorldMeasurementsAvailable: boolean;
-}
-
-export interface ToothCandidate {
-  confidence: number;
-  maskAreaPixels: number;
-  measurements: ToothMeasurementBundle;
-  geometry: ToothGeometry;
-}
-
-export interface ToothMeasurementBundle {
-  pixel: ToothMeasurementValues;
-  calibrated?: ToothMeasurementValues | null;
-}
-
-export interface ToothMeasurementValues {
-  toothWidth: number;
-  toothHeight: number;
-  boundingBoxWidth: number;
-  boundingBoxHeight: number;
-  units: string;
-}
-
-export interface ToothGeometry {
-  boundingBox: BoundingBox;
-  widthLine: LineSegment;
-  heightLine: LineSegment;
-}
-
-export interface BoundingBox {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
-
-export interface LineSegment {
-  start: Point;
-  end: Point;
-}
-
-export interface Point {
-  x: number;
-  y: number;
-}
-
-export interface AnalyzeStudyCommandResult {
-  studyId: string;
-  previewPath: string;
-  analysis: ToothAnalysis;
-  suggestedAnnotations: AnnotationBundle;
 }
 
 export interface MeasureLineAnnotationCommandResult {
@@ -231,8 +169,7 @@ export interface MeasureLineAnnotationCommandResult {
 
 export type JobResult =
   | { kind: "renderStudy"; payload: RenderStudyCommandResult; }
-  | { kind: "processStudy"; payload: ProcessStudyCommandResult; }
-  | { kind: "analyzeStudy"; payload: AnalyzeStudyCommandResult; };
+  | { kind: "processStudy"; payload: ProcessStudyCommandResult; };
 
 export interface JobSnapshot {
   jobId: string;

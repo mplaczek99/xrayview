@@ -393,7 +393,7 @@ button {
   font-size: 13px;
 }
 
-.study-analysis {
+.study-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(280px, 380px);
   gap: var(--space-4);
@@ -401,13 +401,13 @@ button {
   min-height: 0;
 }
 
-.study-analysis__viewer {
+.study-layout__viewer {
   min-height: 0;
   display: flex;
   flex-direction: column;
 }
 
-.study-analysis__sidebar {
+.study-layout__sidebar {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
@@ -423,10 +423,6 @@ button {
   border-radius: var(--radius-md);
   background: rgba(12, 17, 24, 0.82);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
-}
-
-.measurement-card--analysis {
-  gap: var(--space-3);
 }
 
 .measurement-card__eyebrow {
@@ -991,33 +987,6 @@ button {
   user-select: none;
 }
 
-.viewer-stage__overlay {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-}
-
-.viewer-stage__overlay-box {
-  fill: rgba(37, 181, 167, 0.12);
-  stroke: rgba(82, 226, 190, 0.9);
-  stroke-width: 3;
-}
-
-.viewer-stage__overlay-line {
-  stroke-linecap: round;
-  stroke-width: 4;
-}
-
-.viewer-stage__overlay-line--width {
-  stroke: rgba(248, 198, 78, 0.96);
-}
-
-.viewer-stage__overlay-line--height {
-  stroke: rgba(255, 112, 146, 0.94);
-}
-
 .viewer-placeholder {
   display: grid;
   place-items: center;
@@ -1083,6 +1052,19 @@ button {
   stroke-width: 2;
 }
 
+.annotation-layer__quad {
+  fill: rgba(37, 181, 167, 0.08);
+  stroke: rgba(82, 226, 190, 0.92);
+  stroke-width: 2;
+}
+
+.annotation-layer__polyline {
+  fill: rgba(232, 57, 70, 0.08);
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  stroke-width: 3;
+}
+
 .annotation-layer__line {
   stroke-linecap: round;
   stroke-width: 3;
@@ -1090,10 +1072,6 @@ button {
 
 .annotation-layer__line--manual {
   stroke: rgba(94, 187, 255, 0.96);
-}
-
-.annotation-layer__line--autoTooth {
-  stroke: rgba(248, 198, 78, 0.96);
 }
 
 .annotation-layer__line--selected {
@@ -1182,7 +1160,7 @@ button {
     grid-template-columns: 1fr;
   }
 
-  .study-analysis {
+  .study-layout {
     grid-template-columns: 1fr;
   }
 

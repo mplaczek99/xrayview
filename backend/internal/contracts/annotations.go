@@ -3,8 +3,7 @@ package contracts
 type AnnotationSource string
 
 const (
-	AnnotationSourceManual    AnnotationSource = "manual"
-	AnnotationSourceAutoTooth AnnotationSource = "autoTooth"
+	AnnotationSourceManual AnnotationSource = "manual"
 )
 
 type AnnotationPoint struct {
@@ -40,9 +39,20 @@ type RectangleAnnotation struct {
 	Confidence *float64         `json:"confidence,omitempty"`
 }
 
+type PolylineAnnotation struct {
+	ID         string            `json:"id"`
+	Label      string            `json:"label"`
+	Source     AnnotationSource  `json:"source"`
+	Points     []AnnotationPoint `json:"points"`
+	Closed     bool              `json:"closed"`
+	Editable   bool              `json:"editable"`
+	Confidence *float64          `json:"confidence,omitempty"`
+}
+
 type AnnotationBundle struct {
 	Lines      []LineAnnotation      `json:"lines"`
 	Rectangles []RectangleAnnotation `json:"rectangles"`
+	Polylines  []PolylineAnnotation  `json:"polylines"`
 }
 
 type MeasureLineAnnotationCommand struct {

@@ -1,10 +1,6 @@
 package processing
 
 import (
-	"image"
-	"image/color"
-	"image/png"
-	"os"
 	"testing"
 
 	"xrayview/backend/internal/imaging"
@@ -96,74 +92,4 @@ func TestApplyNamedPalettePromotesGrayPreviewToRGBA(t *testing.T) {
 	if want := []uint8{0, 0, 0, 255, 112, 120, 128, 255}; !equalBytes(got.Pixels, want) {
 		t.Fatalf("Pixels = %v, want %v", got.Pixels, want)
 	}
-}
-
-func sampleProcessedPaletteFixturePath(t *testing.T) string {
-	t.Helper()
-
-	return repoPathFromHere(
-		t,
-		"backend",
-		"tests",
-		"fixtures",
-		"parity",
-		"sample-dental-radiograph",
-		"process-xray-preview.png",
-	)
-}
-
-func sampleCompareFixturePath(t *testing.T) string {
-	t.Helper()
-
-	return repoPathFromHere(
-		t,
-		"backend",
-		"tests",
-		"fixtures",
-		"parity",
-		"sample-dental-radiograph",
-		"process-xray-compare-preview.png",
-	)
-}
-
-func decodeRGBAPNG(t *testing.T, path string) *image.RGBA {
-	t.Helper()
-
-	file, err := os.Open(path)
-	if err != nil {
-		t.Fatalf("Open returned error: %v", err)
-	}
-	defer file.Close()
-
-	decoded, err := png.Decode(file)
-	if err != nil {
-		t.Fatalf("png.Decode returned error: %v", err)
-	}
-
-	if rgba, ok := decoded.(*image.RGBA); ok {
-		return rgba
-	}
-
-	bounds := decoded.Bounds()
-	rgba := image.NewRGBA(bounds)
-	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
-		for x := bounds.Min.X; x < bounds.Max.X; x++ {
-			rgba.Set(x, y, color.RGBAModel.Convert(decoded.At(x, y)))
-		}
-	}
-
-	return rgba
-}
-
-func rgbaPixels(imageValue *image.RGBA) []uint8 {
-	bounds := imageValue.Bounds()
-	pixels := make([]uint8, 0, bounds.Dx()*bounds.Dy()*4)
-
-	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
-		rowStart := imageValue.PixOffset(bounds.Min.X, y)
-		rowEnd := rowStart + bounds.Dx()*4
-		pixels = append(pixels, imageValue.Pix[rowStart:rowEnd]...)
-	}
-
-	return pixels
 }

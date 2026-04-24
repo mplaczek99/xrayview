@@ -6,17 +6,15 @@ import type {
   MeasureLineAnnotationCommandResult,
   OpenStudyCommandResult,
   PaletteName,
-  ProcessStudyCommand,
   ProcessingManifest,
   StartedJob,
 } from "./generated/contracts";
 import { normalizeBackendError } from "./backendErrors";
+import { buildProcessStudyCommand } from "./commandBuilders";
 import { MOCK_PROCESSED_DICOM_PATH } from "./mockRuntime";
 import { MOCK_PROCESSING_MANIFEST } from "./mockProcessingManifest";
 import {
   createMockPreview,
-  createMockSuggestedAnnotations,
-  createMockToothAnalysis,
   measureMockLineAnnotation,
 } from "./mockStudy";
 import type { BackendAPI } from "./runtimeTypes";
@@ -49,32 +47,6 @@ function nextMockStudyId(): string {
 function nextMockJobId(): string {
   mockJobSequence += 1;
   return `mock-job-${mockJobSequence}`;
-}
-
-function buildProcessStudyCommand(
-  studyId: string,
-  request: ProcessingRequest,
-): ProcessStudyCommand {
-  return {
-    studyId,
-    outputPath: request.outputPath,
-    presetId: request.presetId,
-    invert: request.controls.invert && !request.presetControls.invert,
-    brightness:
-      request.controls.brightness !== request.presetControls.brightness
-        ? request.controls.brightness
-        : null,
-    contrast:
-      request.controls.contrast !== request.presetControls.contrast
-        ? request.controls.contrast
-        : null,
-    equalize: request.controls.equalize && !request.presetControls.equalize,
-    compare: request.compare,
-    palette:
-      request.controls.palette !== request.presetControls.palette
-        ? request.controls.palette
-        : null,
-  };
 }
 
 function buildMockJobSnapshot(
@@ -227,16 +199,6 @@ export function createMockBackendAPI(): BackendAPI {
           measurementScale: null,
         },
       })),
-    startAnalyzeStudyJob: async (studyId) =>
-      startMockJob("analyzeStudy", studyId, () => ({
-        kind: "analyzeStudy",
-        payload: {
-          studyId,
-          previewPath: createMockPreview(false, "none"),
-          analysis: createMockToothAnalysis(),
-          suggestedAnnotations: createMockSuggestedAnnotations(),
-        },
-      })),
     getJob: async (jobId): Promise<ContractJobSnapshot> => {
       const snapshot = mockJobs.get(jobId);
       if (!snapshot) {
@@ -330,8 +292,6 @@ export function createDesktopBackendAPI(): BackendAPI {
       invokeTypedDesktopBinding(() =>
         bindings.StartProcessJob(buildProcessStudyCommand(studyId, request)),
       ),
-    startAnalyzeStudyJob: async (studyId) =>
-      invokeTypedDesktopBinding(() => bindings.StartAnalyzeJob({ studyId })),
     getJob: async (jobId) =>
       invokeTypedDesktopBinding(() => bindings.GetJobSnapshot({ jobId })),
     getJobs: async (jobIds) =>

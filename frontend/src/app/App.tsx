@@ -35,7 +35,7 @@ function StatusIcon({ status }: { status: string }) {
       </svg>
     );
   }
-  if (/opening|running|measuring|processing|cancelling/i.test(status)) {
+  if (/opening|running|analyzing|processing|cancelling/i.test(status)) {
     return <span className="status-bar__spinner" aria-hidden="true" />;
   }
   return (

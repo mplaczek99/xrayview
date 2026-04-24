@@ -40,7 +40,10 @@ export function resolveRuntimeConfiguration(
       warnings.push(
         `${BACKEND_RUNTIME_ENV_KEY} must be one of mock or desktop. Falling back to ${defaultMode}.`,
       );
-    } else if (!isDesktopRuntime && modeOverride !== "mock") {
+    } else if (!isDesktopRuntime && modeOverride === "desktop") {
+      // desktop mode relies on the Wails JS bridge that only exists inside
+      // the packaged shell. In a plain browser fall back to mock so the page
+      // still boots.
       warnings.push(
         `${modeOverride} requires the desktop shell. Falling back to mock in browser mode.`,
       );

@@ -22,7 +22,6 @@ type BackendService interface {
 	OpenStudy(command contracts.OpenStudyCommand) (contracts.OpenStudyCommandResult, error)
 	StartRenderJob(command contracts.RenderStudyCommand) (contracts.StartedJob, error)
 	StartProcessJob(command contracts.ProcessStudyCommand) (contracts.StartedJob, error)
-	StartAnalyzeJob(command contracts.AnalyzeStudyCommand) (contracts.StartedJob, error)
 	GetJob(command contracts.JobCommand) (contracts.JobSnapshot, error)
 	GetJobs(command contracts.GetJobsCommand) ([]contracts.JobSnapshot, error)
 	CancelJob(command contracts.JobCommand) (contracts.JobSnapshot, error)
@@ -108,12 +107,6 @@ func (app *App) StartProcessJob(
 	command contracts.ProcessStudyCommand,
 ) (contracts.StartedJob, error) {
 	return app.jobs.StartProcessJob(command)
-}
-
-func (app *App) StartAnalyzeJob(
-	command contracts.AnalyzeStudyCommand,
-) (contracts.StartedJob, error) {
-	return app.jobs.StartAnalyzeJob(command)
 }
 
 func (app *App) GetJob(command contracts.JobCommand) (contracts.JobSnapshot, error) {

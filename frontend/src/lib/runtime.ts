@@ -8,7 +8,6 @@ import {
 } from "./backend";
 import { buildDesktopPreviewUrl, isDesktopRuntime } from "./desktop";
 import type {
-  AnalyzeStudyCommandResult,
   JobResult,
   JobSnapshot as ContractJobSnapshot,
   OpenStudyCommandResult,
@@ -24,16 +23,17 @@ import type {
   ProcessResult,
   ProcessingRequest,
   RuntimeMode,
-  ToothAnalysisResult,
 } from "./types";
 
 function resolvePreviewUrl(
   previewPath: string,
   runtime: RuntimeMode,
 ): string {
-  return runtime === "desktop"
-    ? buildDesktopPreviewUrl(previewPath)
-    : previewPath;
+  if (runtime === "desktop") {
+    return buildDesktopPreviewUrl(previewPath);
+  }
+
+  return previewPath;
 }
 
 function asOpenedStudy(
@@ -76,19 +76,6 @@ function asProcessResult(
   };
 }
 
-function asToothAnalysisResult(
-  payload: AnalyzeStudyCommandResult,
-  runtime: RuntimeMode,
-): ToothAnalysisResult {
-  return {
-    studyId: payload.studyId,
-    previewUrl: resolvePreviewUrl(payload.previewPath, runtime),
-    analysis: payload.analysis,
-    suggestedAnnotations: payload.suggestedAnnotations,
-    runtime,
-  };
-}
-
 function normalizeJobResultPayload(
   result: JobResult,
   runtime: RuntimeMode,
@@ -103,11 +90,6 @@ function normalizeJobResultPayload(
       return {
         kind: "processStudy",
         payload: asProcessResult(result.payload, runtime),
-      };
-    case "analyzeStudy":
-      return {
-        kind: "analyzeStudy",
-        payload: asToothAnalysisResult(result.payload, runtime),
       };
   }
 }
@@ -135,11 +117,20 @@ function createRuntimeAdapter(
   configuration: ReturnType<typeof resolveRuntimeConfiguration>,
 ): RuntimeAdapter {
   const { mode } = configuration;
-  const shell = mode === "mock" ? createMockShellAPI() : createDesktopShellAPI();
-  const backend: BackendAPI =
-    mode === "mock"
-      ? createMockBackendAPI()
-      : createDesktopBackendAPI();
+
+  let shell;
+  let backend: BackendAPI;
+  switch (mode) {
+    case "mock":
+      shell = createMockShellAPI();
+      backend = createMockBackendAPI();
+      break;
+    case "desktop":
+    default:
+      shell = createDesktopShellAPI();
+      backend = createDesktopBackendAPI();
+      break;
+  }
 
   return {
     mode,
@@ -153,7 +144,6 @@ function createRuntimeAdapter(
     startRenderStudyJob: (studyId) => backend.startRenderStudyJob(studyId),
     startProcessStudyJob: (studyId, request) =>
       backend.startProcessStudyJob(studyId, request),
-    startAnalyzeStudyJob: (studyId) => backend.startAnalyzeStudyJob(studyId),
     getJob: async (jobId) =>
       normalizeJobSnapshot(await backend.getJob(jobId), mode),
     getJobs: async (jobIds) =>
