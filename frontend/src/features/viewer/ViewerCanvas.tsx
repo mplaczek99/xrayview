@@ -357,7 +357,6 @@ export function ViewerCanvas({
         panY: viewport.panY,
       },
     });
-    onSelectAnnotation(null);
   }
 
   function beginHandleDrag(annotationId: string, endpoint: "start" | "end") {
