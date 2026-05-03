@@ -9,6 +9,8 @@ import (
 
 var toothOverlayGreen = [3]uint8{102, 255, 0}
 
+const minimumToothComponentPixels = 21
+
 type ToothOverlayResult struct {
 	Preview        imaging.PreviewImage
 	ToothPixels    int
@@ -47,6 +49,7 @@ func GenerateToothOverlay(preview imaging.PreviewImage) (ToothOverlayResult, err
 	mask := featureTableToothMask(normalized, width, height)
 	mask = closeBinaryMask(mask, width, height, 1)
 	mask = openBinaryMask(mask, width, height, 1)
+	mask = removeSmallMaskComponents(mask, width, height, minimumToothComponentPixels)
 	kept := len(collectComponents(mask, mask, width, height, maxInt(len(mask)/260, 90)))
 
 	toothPixels := countMaskPixels(mask)
@@ -275,6 +278,20 @@ func collectComponents(mask []uint8, seeds []uint8, width, height, minArea int) 
 	}
 
 	return components
+}
+
+func removeSmallMaskComponents(mask []uint8, width, height, minArea int) []uint8 {
+	if minArea <= 1 || len(mask) == 0 {
+		return append([]uint8(nil), mask...)
+	}
+
+	filtered := make([]uint8, len(mask))
+	for _, candidate := range collectComponents(mask, mask, width, height, minArea) {
+		for _, index := range candidate.pixels {
+			filtered[index] = 1
+		}
+	}
+	return filtered
 }
 
 func keepToothComponent(candidate component, width, height int) bool {

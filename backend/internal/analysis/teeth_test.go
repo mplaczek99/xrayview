@@ -73,6 +73,34 @@ func TestColoredFixturesCoverAllBMPInputs(t *testing.T) {
 	}
 }
 
+func TestRemoveSmallMaskComponentsKeepsOnlyRegionsOverTwentyPixels(t *testing.T) {
+	const width = 12
+	const height = 8
+
+	mask := make([]uint8, width*height)
+	fillMaskRect(mask, width, 0, 0, 4, 5)
+	fillMaskRect(mask, width, 7, 0, 3, 7)
+
+	filtered := removeSmallMaskComponents(mask, width, height, minimumToothComponentPixels)
+	if got := countMaskPixels(filtered); got != 21 {
+		t.Fatalf("countMaskPixels(filtered) = %d, want 21", got)
+	}
+	for y := 0; y < 5; y++ {
+		for x := 0; x < 4; x++ {
+			if filtered[y*width+x] != 0 {
+				t.Fatalf("20-pixel component was kept at (%d, %d)", x, y)
+			}
+		}
+	}
+	for y := 0; y < 7; y++ {
+		for x := 7; x < 10; x++ {
+			if filtered[y*width+x] == 0 {
+				t.Fatalf("21-pixel component was removed at (%d, %d)", x, y)
+			}
+		}
+	}
+}
+
 func TestRuntimeAnalysisDoesNotReadColoredFixtures(t *testing.T) {
 	_, currentFile, _, ok := runtime.Caller(0)
 	if !ok {
@@ -194,6 +222,14 @@ func greenMaskFromRGBA(preview imaging.PreviewImage) []uint8 {
 		}
 	}
 	return mask
+}
+
+func fillMaskRect(mask []uint8, width, x, y, rectWidth, rectHeight int) {
+	for dy := 0; dy < rectHeight; dy++ {
+		for dx := 0; dx < rectWidth; dx++ {
+			mask[(y+dy)*width+x+dx] = 1
+		}
+	}
 }
 
 func greenMaskFromImage(t *testing.T, path string) []uint8 {
