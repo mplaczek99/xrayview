@@ -18,7 +18,7 @@ import (
 
 const minimumFixtureDice = 0.95
 
-func TestGenerateToothOverlayUsesDynamicMaskForFixtures(t *testing.T) {
+func TestDetectedToothMaskUsesDynamicMaskForFixtures(t *testing.T) {
 	for _, name := range coloredFixtureNames(t) {
 		t.Run(name, func(t *testing.T) {
 			bmpPath := fixturePath(t, "images", "BMP", name+".bmp")
@@ -31,18 +31,12 @@ func TestGenerateToothOverlayUsesDynamicMaskForFixtures(t *testing.T) {
 			}
 
 			preview := decodeGrayFixture(t, bmpPath)
-			result, err := GenerateToothOverlay(preview)
+			gray, err := grayPixels(preview)
 			if err != nil {
-				t.Fatalf("GenerateToothOverlay returned error: %v", err)
+				t.Fatalf("grayPixels returned error: %v", err)
 			}
-			if result.Preview.Format != imaging.FormatRGBA8 {
-				t.Fatalf("Preview.Format = %q, want %q", result.Preview.Format, imaging.FormatRGBA8)
-			}
-			if result.ToothPixels == 0 {
-				t.Fatal("ToothPixels = 0, want generated mask")
-			}
+			gotMask := detectToothMask(gray, int(preview.Width), int(preview.Height))
 
-			gotMask := greenMaskFromRGBA(result.Preview)
 			wantMask := greenMaskFromImage(t, pngPath)
 			dice := diceCoefficient(gotMask, wantMask)
 			if dice < minimumFixtureDice {
@@ -51,10 +45,25 @@ func TestGenerateToothOverlayUsesDynamicMaskForFixtures(t *testing.T) {
 			if name == "1" && dice < 0.95 {
 				t.Fatalf("1.bmp green mask Dice = %.3f, want >= 0.95", dice)
 			}
-			if name == "1" && result.Coverage > 0.70 {
-				t.Fatalf("1.bmp coverage = %.3f, want <= 0.70 to avoid green flood", result.Coverage)
+			coverage := float64(countMaskPixels(gotMask)) / float64(maxInt(len(gotMask), 1))
+			if name == "1" && coverage > 0.70 {
+				t.Fatalf("1.bmp coverage = %.3f, want <= 0.70 to avoid green flood", coverage)
 			}
 		})
+	}
+}
+
+func TestGenerateToothOverlayDrawsInnerOutline(t *testing.T) {
+	preview := imaging.GrayPreview(32, 32, make([]uint8, 32*32))
+	result, err := GenerateToothOverlay(preview)
+	if err != nil {
+		t.Fatalf("GenerateToothOverlay returned error: %v", err)
+	}
+	if result.Preview.Format != imaging.FormatRGBA8 {
+		t.Fatalf("Preview.Format = %q, want %q", result.Preview.Format, imaging.FormatRGBA8)
+	}
+	if !strings.Contains(result.Mode, "tooth outline") {
+		t.Fatalf("Mode = %q, want tooth outline mode", result.Mode)
 	}
 }
 
@@ -73,48 +82,73 @@ func TestColoredFixturesCoverAllBMPInputs(t *testing.T) {
 	}
 }
 
-func TestRemoveSmallMaskComponentsKeepsRegionsAtLeastTwentyPixels(t *testing.T) {
-	const width = 12
-	const height = 20
+func TestRemoveSmallMaskComponentsKeepsRegionsBiggerThanFiftyPixels(t *testing.T) {
+	const width = 16
+	const height = 12
 
 	mask := make([]uint8, width*height)
-	fillMaskRect(mask, width, 0, 0, 1, 19)
-	fillMaskRect(mask, width, 7, 0, 4, 5)
+	fillMaskRect(mask, width, 0, 0, 5, 10)
+	fillMaskRect(mask, width, 9, 0, 6, 9)
 
-	filtered := removeSmallMaskComponents(mask, width, height, minimumSpeckComponentPixels)
-	if got := countMaskPixels(filtered); got != 20 {
-		t.Fatalf("countMaskPixels(filtered) = %d, want 20", got)
+	filtered := removeSmallMaskComponents(mask, width, height, minimumToothAreaFloorPixels)
+	if got := countMaskPixels(filtered); got != 54 {
+		t.Fatalf("countMaskPixels(filtered) = %d, want 54", got)
 	}
-	for y := 0; y < 19; y++ {
-		for x := 0; x < 1; x++ {
+	for y := 0; y < 10; y++ {
+		for x := 0; x < 5; x++ {
 			if filtered[y*width+x] != 0 {
-				t.Fatalf("19-pixel component was kept at (%d, %d)", x, y)
+				t.Fatalf("50-pixel component was kept at (%d, %d)", x, y)
 			}
 		}
 	}
-	for y := 0; y < 5; y++ {
-		for x := 7; x < 11; x++ {
+	for y := 0; y < 9; y++ {
+		for x := 9; x < 15; x++ {
 			if filtered[y*width+x] == 0 {
-				t.Fatalf("20-pixel component was removed at (%d, %d)", x, y)
+				t.Fatalf("54-pixel component was removed at (%d, %d)", x, y)
 			}
 		}
 	}
 }
 
-func TestSpeckRemovalMinimumPixelsScalesWithImageSize(t *testing.T) {
-	const width = 512
-	const height = 512
+func TestNineBMPFindsFourLargeToothComponents(t *testing.T) {
+	preview := decodeGrayFixture(t, fixturePath(t, "images", "BMP", "9.bmp"))
+	gray, err := grayPixels(preview)
+	if err != nil {
+		t.Fatalf("grayPixels returned error: %v", err)
+	}
+	mask := detectToothMask(gray, int(preview.Width), int(preview.Height))
+	teeth := collectComponents(mask, mask, int(preview.Width), int(preview.Height), minimumToothAreaPixels(int(preview.Width), int(preview.Height)))
+	if len(teeth) != 4 {
+		t.Fatalf("len(teeth) = %d, want 4", len(teeth))
+	}
+	for index, tooth := range teeth {
+		if tooth.area < minimumToothAreaPixels(int(preview.Width), int(preview.Height)) {
+			t.Fatalf("tooth %d area = %d, want >= scaled minimum", index+1, tooth.area)
+		}
+	}
+}
+
+func TestInnerOutlineMaskStaysInsideFilledMask(t *testing.T) {
+	const width = 9
+	const height = 9
 
 	mask := make([]uint8, width*height)
-	fillMaskRect(mask, width, 10, 10, 10, 10)
-	fillMaskRect(mask, width, 100, 100, 20, 20)
+	fillMaskRect(mask, width, 2, 2, 5, 5)
 
-	filtered := removeSmallMaskComponents(mask, width, height, speckRemovalMinimumPixels(width, height))
-	if filtered[10*width+10] != 0 {
-		t.Fatal("small visible dot component was kept")
+	outline := innerOutlineMask(mask, width, height, toothOutlineThicknessPixels)
+	if got := countMaskPixels(outline); got != 24 {
+		t.Fatalf("countMaskPixels(outline) = %d, want 24", got)
 	}
-	if filtered[100*width+100] == 0 {
-		t.Fatal("larger tooth-sized component was removed")
+	if outline[4*width+4] != 0 {
+		t.Fatal("inner center pixel was outlined")
+	}
+	if outline[2*width+2] == 0 || outline[6*width+6] == 0 {
+		t.Fatal("inside edge pixels were not outlined")
+	}
+	for index, value := range outline {
+		if value != 0 && mask[index] == 0 {
+			t.Fatalf("outline pixel at index %d was drawn outside the tooth mask", index)
+		}
 	}
 }
 

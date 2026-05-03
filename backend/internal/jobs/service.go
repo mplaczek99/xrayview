@@ -69,6 +69,8 @@ type Service struct {
 
 const decodeBenchmarkEnvKey = "XRAYVIEW_BENCH_LOG_DECODES"
 
+const analyzeFingerprintNamespace = "analyze-study"
+
 // maxConcurrentJobs sizes the worker pool. Three CPU-bound workers fit a
 // desktop workload — render and process both contend on the same
 // decoder cache, and more than a handful just starves the UI thread.
@@ -1183,10 +1185,9 @@ func validateInputFile(inputPath string) error {
 }
 
 // The Namespace string embedded in every fingerprint ("render-study-v1",
-// "process-study-v3") is a deliberate cache-bust key.
-// Bump the version suffix whenever the shape of what should invalidate a
-// cached result changes — without a bump, a stale entry keyed on the old
-// payload shape will be served for the new request.
+// "process-study-v3") is a deliberate cache-bust key. Render/process keep the
+// historical version suffix in the namespace. Analyze uses a stable namespace
+// plus analysis.AnalyzeAlgorithmVersion so algorithm changes are explicit.
 func renderFingerprint(study contracts.StudyRecord) (string, error) {
 	payload, err := json.Marshal(struct {
 		Namespace string `json:"namespace"`
@@ -1205,11 +1206,13 @@ func renderFingerprint(study contracts.StudyRecord) (string, error) {
 
 func analyzeFingerprint(study contracts.StudyRecord) (string, error) {
 	payload, err := json.Marshal(struct {
-		Namespace string `json:"namespace"`
-		InputPath string `json:"inputPath"`
+		Namespace        string `json:"namespace"`
+		AlgorithmVersion string `json:"algorithmVersion"`
+		InputPath        string `json:"inputPath"`
 	}{
-		Namespace: "analyze-study-v8",
-		InputPath: study.InputPath,
+		Namespace:        analyzeFingerprintNamespace,
+		AlgorithmVersion: analysis.AnalyzeAlgorithmVersion,
+		InputPath:        study.InputPath,
 	})
 	if err != nil {
 		return "", err

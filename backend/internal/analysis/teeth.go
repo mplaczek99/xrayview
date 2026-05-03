@@ -9,7 +9,12 @@ import (
 
 var toothOverlayGreen = [3]uint8{102, 255, 0}
 
-const minimumSpeckComponentPixels = 20
+// AnalyzeAlgorithmVersion is part of the Analyze result cache key. Change it
+// only when the generated overlay semantics intentionally change.
+const AnalyzeAlgorithmVersion = "outline-scaled-components-v1"
+
+const minimumToothAreaFloorPixels = 51
+const toothOutlineThicknessPixels = 2
 
 type ToothOverlayResult struct {
 	Preview        imaging.PreviewImage
@@ -45,28 +50,33 @@ func GenerateToothOverlay(preview imaging.PreviewImage) (ToothOverlayResult, err
 		return ToothOverlayResult{}, fmt.Errorf("image is too small for tooth analysis: %dx%d", width, height)
 	}
 
+	mask := detectToothMask(gray, width, height)
+	components := collectComponents(mask, mask, width, height, minimumToothAreaPixels(width, height))
+
+	toothPixels := countMaskPixels(mask)
+	coverage := float64(toothPixels) / float64(maxInt(len(mask), 1))
+	mode := "dynamic tooth outline overlay"
+	if toothPixels < len(mask)/150 || len(components) == 0 {
+		mode = "dynamic tooth outline overlay; no reliable tooth mask found"
+	}
+
+	return ToothOverlayResult{
+		Preview:        overlayMask(gray, innerOutlineMask(mask, width, height, toothOutlineThicknessPixels), preview.Width, preview.Height),
+		ToothPixels:    toothPixels,
+		Coverage:       coverage,
+		CandidateCount: len(components),
+		Mode:           mode,
+	}, nil
+}
+
+func detectToothMask(gray []uint8, width, height int) []uint8 {
 	normalized := normalizeGray(gray)
 	mask := featureTableToothMask(normalized, width, height)
 	mask = closeBinaryMask(mask, width, height, 1)
 	mask = openBinaryMask(mask, width, height, 1)
 	mask = fillHolesBinaryMask(mask, width, height)
-	mask = removeSmallMaskComponents(mask, width, height, speckRemovalMinimumPixels(width, height))
-	kept := len(collectComponents(mask, mask, width, height, maxInt(len(mask)/260, 90)))
-
-	toothPixels := countMaskPixels(mask)
-	coverage := float64(toothPixels) / float64(maxInt(len(mask), 1))
-	mode := "dynamic tooth color overlay"
-	if toothPixels < len(mask)/150 || kept == 0 {
-		mode = "dynamic tooth color overlay; no reliable tooth mask found"
-	}
-
-	return ToothOverlayResult{
-		Preview:        overlayMask(gray, mask, preview.Width, preview.Height),
-		ToothPixels:    toothPixels,
-		Coverage:       coverage,
-		CandidateCount: kept,
-		Mode:           mode,
-	}, nil
+	mask = removeSmallMaskComponents(mask, width, height, minimumToothAreaPixels(width, height))
+	return mask
 }
 
 func grayPixels(preview imaging.PreviewImage) ([]uint8, error) {
@@ -295,8 +305,23 @@ func removeSmallMaskComponents(mask []uint8, width, height, minArea int) []uint8
 	return filtered
 }
 
-func speckRemovalMinimumPixels(width, height int) int {
-	return maxInt(minInt(width*height/2500, 150), minimumSpeckComponentPixels)
+func minimumToothAreaPixels(width, height int) int {
+	return maxInt(width*height/2000, minimumToothAreaFloorPixels)
+}
+
+func innerOutlineMask(mask []uint8, width, height, thickness int) []uint8 {
+	if thickness <= 0 || len(mask) == 0 {
+		return append([]uint8(nil), mask...)
+	}
+
+	eroded := erodeBinaryMask(mask, width, height, thickness)
+	outline := make([]uint8, len(mask))
+	for index, value := range mask {
+		if value != 0 && eroded[index] == 0 {
+			outline[index] = 1
+		}
+	}
+	return outline
 }
 
 func keepToothComponent(candidate component, width, height int) bool {
