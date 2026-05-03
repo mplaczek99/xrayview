@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
-import { workbenchActions, useWorkbenchStore, selectActiveStudy, selectManifest } from "../../app/store/workbenchStore";
+import { workbenchActions, useWorkbenchStore } from "../../app/store/workbenchStore";
+import { selectActiveStudy, selectManifest } from "../../app/store/selectors";
 import { formatBackendError } from "../../lib/backendErrors";
 import { FALLBACK_PROCESSING_MANIFEST } from "../../lib/runtime";
 import type {
@@ -14,7 +15,8 @@ import {
 import {
   createProcessingForm,
 } from "../../features/study/model";
-import { describeProgress, useProgressClock } from "../../features/jobs/progressTiming";
+import { describeProgress } from "../../features/jobs/progressFormatting";
+import { useProgressClock } from "../../features/jobs/useProgressClock";
 import { DicomViewer } from "../viewer/DicomViewer";
 import { GrayscaleControls } from "./GrayscaleControls";
 

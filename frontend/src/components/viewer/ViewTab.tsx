@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import type { MeasurementScale } from "../../lib/generated/contracts";
-import { workbenchActions, useWorkbenchStore, selectActiveStudy, selectIsOpeningStudy, selectJobs } from "../../app/store/workbenchStore";
+import { workbenchActions, useWorkbenchStore } from "../../app/store/workbenchStore";
+import { selectActiveStudy, selectIsOpeningStudy, selectJobs } from "../../app/store/selectors";
 import { ViewerCanvas } from "../../features/viewer/ViewerCanvas";
 import { ViewSidebar } from "./ViewSidebar";
 

@@ -6,7 +6,8 @@ const ProcessingTab = lazy(() =>
 import { ViewTab } from "../components/viewer/ViewTab";
 import { JobCenter } from "../features/jobs/JobCenter";
 import { useJobs } from "../features/jobs/useJobs";
-import { workbenchActions, useWorkbenchStore, selectActiveStudy, selectWorkbenchStatus } from "./store/workbenchStore";
+import { workbenchActions, useWorkbenchStore } from "./store/workbenchStore";
+import { selectActiveStudy, selectWorkbenchStatus } from "./store/selectors";
 import type { ActiveTab } from "../lib/types";
 
 const TABS: ActiveTab[] = ["view", "processing"];

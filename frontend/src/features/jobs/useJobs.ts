@@ -1,11 +1,8 @@
 import { useEffect } from "react";
 import type { JobSnapshot as ContractJobSnapshot } from "../../lib/generated/contracts";
 import { getRuntimeAdapter, normalizeJobSnapshot } from "../../lib/runtime";
-import {
-  selectPendingJobCount,
-  useWorkbenchStore,
-  workbenchActions,
-} from "../../app/store/workbenchStore";
+import { useWorkbenchStore, workbenchActions } from "../../app/store/workbenchStore";
+import { selectPendingJobCount } from "../../app/store/selectors";
 import {
   clearJobSubmitTiming,
   logCompletedJobVisibleTiming,
