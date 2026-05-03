@@ -1,11 +1,9 @@
 import type { JobResultPayload, JobSnapshot } from "../features/jobs/model";
 import {
-  FALLBACK_PROCESSING_MANIFEST,
   buildOutputName,
-  createDesktopBackendAPI,
-  createMockBackendAPI,
   ensureDicomExtension,
-} from "./backend";
+} from "./backendUtils";
+import { createDesktopBackendAPI } from "./desktopBackend";
 import { buildDesktopPreviewUrl, isDesktopRuntime } from "./desktop";
 import type {
   JobResult,
@@ -15,6 +13,8 @@ import type {
   ProcessStudyCommandResult,
   RenderStudyCommandResult,
 } from "./generated/contracts";
+import { createMockBackendAPI } from "./mockBackend";
+import { MOCK_PROCESSING_MANIFEST } from "./mockProcessingManifest";
 import { resolveRuntimeConfiguration } from "./runtimeConfig";
 import { createDesktopShellAPI, createMockShellAPI } from "./shell";
 import type { BackendAPI, RuntimeAdapter } from "./runtimeTypes";
@@ -26,6 +26,8 @@ import type {
   ProcessingRequest,
   RuntimeMode,
 } from "./types";
+
+export const FALLBACK_PROCESSING_MANIFEST = MOCK_PROCESSING_MANIFEST;
 
 function resolvePreviewUrl(
   previewPath: string,
@@ -196,4 +198,4 @@ export function getRuntimeAdapter(): RuntimeAdapter {
   return activeRuntime;
 }
 
-export { FALLBACK_PROCESSING_MANIFEST, buildOutputName, ensureDicomExtension };
+export { buildOutputName, ensureDicomExtension };
