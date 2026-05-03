@@ -9,7 +9,7 @@ import (
 
 var toothOverlayGreen = [3]uint8{102, 255, 0}
 
-const minimumToothComponentPixels = 21
+const minimumSpeckComponentPixels = 20
 
 type ToothOverlayResult struct {
 	Preview        imaging.PreviewImage
@@ -49,7 +49,8 @@ func GenerateToothOverlay(preview imaging.PreviewImage) (ToothOverlayResult, err
 	mask := featureTableToothMask(normalized, width, height)
 	mask = closeBinaryMask(mask, width, height, 1)
 	mask = openBinaryMask(mask, width, height, 1)
-	mask = removeSmallMaskComponents(mask, width, height, minimumToothComponentPixels)
+	mask = fillHolesBinaryMask(mask, width, height)
+	mask = removeSmallMaskComponents(mask, width, height, speckRemovalMinimumPixels(width, height))
 	kept := len(collectComponents(mask, mask, width, height, maxInt(len(mask)/260, 90)))
 
 	toothPixels := countMaskPixels(mask)
@@ -292,6 +293,10 @@ func removeSmallMaskComponents(mask []uint8, width, height, minArea int) []uint8
 		}
 	}
 	return filtered
+}
+
+func speckRemovalMinimumPixels(width, height int) int {
+	return maxInt(minInt(width*height/2500, 150), minimumSpeckComponentPixels)
 }
 
 func keepToothComponent(candidate component, width, height int) bool {

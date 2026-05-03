@@ -1208,7 +1208,7 @@ func analyzeFingerprint(study contracts.StudyRecord) (string, error) {
 		Namespace string `json:"namespace"`
 		InputPath string `json:"inputPath"`
 	}{
-		Namespace: "analyze-study-v6",
+		Namespace: "analyze-study-v8",
 		InputPath: study.InputPath,
 	})
 	if err != nil {

@@ -73,31 +73,70 @@ func TestColoredFixturesCoverAllBMPInputs(t *testing.T) {
 	}
 }
 
-func TestRemoveSmallMaskComponentsKeepsOnlyRegionsOverTwentyPixels(t *testing.T) {
+func TestRemoveSmallMaskComponentsKeepsRegionsAtLeastTwentyPixels(t *testing.T) {
 	const width = 12
+	const height = 20
+
+	mask := make([]uint8, width*height)
+	fillMaskRect(mask, width, 0, 0, 1, 19)
+	fillMaskRect(mask, width, 7, 0, 4, 5)
+
+	filtered := removeSmallMaskComponents(mask, width, height, minimumSpeckComponentPixels)
+	if got := countMaskPixels(filtered); got != 20 {
+		t.Fatalf("countMaskPixels(filtered) = %d, want 20", got)
+	}
+	for y := 0; y < 19; y++ {
+		for x := 0; x < 1; x++ {
+			if filtered[y*width+x] != 0 {
+				t.Fatalf("19-pixel component was kept at (%d, %d)", x, y)
+			}
+		}
+	}
+	for y := 0; y < 5; y++ {
+		for x := 7; x < 11; x++ {
+			if filtered[y*width+x] == 0 {
+				t.Fatalf("20-pixel component was removed at (%d, %d)", x, y)
+			}
+		}
+	}
+}
+
+func TestSpeckRemovalMinimumPixelsScalesWithImageSize(t *testing.T) {
+	const width = 512
+	const height = 512
+
+	mask := make([]uint8, width*height)
+	fillMaskRect(mask, width, 10, 10, 10, 10)
+	fillMaskRect(mask, width, 100, 100, 20, 20)
+
+	filtered := removeSmallMaskComponents(mask, width, height, speckRemovalMinimumPixels(width, height))
+	if filtered[10*width+10] != 0 {
+		t.Fatal("small visible dot component was kept")
+	}
+	if filtered[100*width+100] == 0 {
+		t.Fatal("larger tooth-sized component was removed")
+	}
+}
+
+func TestFillHolesBinaryMaskFillsOnlyEnclosedGaps(t *testing.T) {
+	const width = 8
 	const height = 8
 
 	mask := make([]uint8, width*height)
-	fillMaskRect(mask, width, 0, 0, 4, 5)
-	fillMaskRect(mask, width, 7, 0, 3, 7)
+	fillMaskRect(mask, width, 1, 1, 5, 5)
+	fillMaskRect(mask, width, 6, 1, 1, 5)
+	fillMaskRect(mask, width, 1, 6, 6, 1)
+	mask[3*width+3] = 0
+	mask[0*width+7] = 0
+	mask[1*width+7] = 0
+	mask[2*width+7] = 0
 
-	filtered := removeSmallMaskComponents(mask, width, height, minimumToothComponentPixels)
-	if got := countMaskPixels(filtered); got != 21 {
-		t.Fatalf("countMaskPixels(filtered) = %d, want 21", got)
+	filled := fillHolesBinaryMask(mask, width, height)
+	if filled[3*width+3] == 0 {
+		t.Fatal("enclosed tooth gap was not filled")
 	}
-	for y := 0; y < 5; y++ {
-		for x := 0; x < 4; x++ {
-			if filtered[y*width+x] != 0 {
-				t.Fatalf("20-pixel component was kept at (%d, %d)", x, y)
-			}
-		}
-	}
-	for y := 0; y < 7; y++ {
-		for x := 7; x < 10; x++ {
-			if filtered[y*width+x] == 0 {
-				t.Fatalf("21-pixel component was removed at (%d, %d)", x, y)
-			}
-		}
+	if filled[0*width+7] != 0 || filled[1*width+7] != 0 || filled[2*width+7] != 0 {
+		t.Fatal("background connected to image border was filled")
 	}
 }
 
