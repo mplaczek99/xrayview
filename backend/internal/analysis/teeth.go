@@ -146,44 +146,6 @@ func percentileGray(pixels []uint8, percentile float64) uint8 {
 	return 255
 }
 
-func otsuThreshold(pixels []uint8) uint8 {
-	if len(pixels) == 0 {
-		return 0
-	}
-
-	var histogram [256]int
-	var sumAll float64
-	for _, value := range pixels {
-		histogram[value]++
-		sumAll += float64(value)
-	}
-
-	var sumBackground float64
-	var weightBackground int
-	bestVariance := -1.0
-	bestThreshold := uint8(0)
-	for threshold, count := range histogram {
-		weightBackground += count
-		if weightBackground == 0 {
-			continue
-		}
-		weightForeground := len(pixels) - weightBackground
-		if weightForeground == 0 {
-			break
-		}
-
-		sumBackground += float64(threshold * count)
-		meanBackground := sumBackground / float64(weightBackground)
-		meanForeground := (sumAll - sumBackground) / float64(weightForeground)
-		variance := float64(weightBackground) * float64(weightForeground) * math.Pow(meanBackground-meanForeground, 2)
-		if variance > bestVariance {
-			bestVariance = variance
-			bestThreshold = uint8(threshold)
-		}
-	}
-	return bestThreshold
-}
-
 func boxBlurGray(pixels []uint8, width, height, radius int) []uint8 {
 	if radius <= 0 || len(pixels) == 0 {
 		return append([]uint8(nil), pixels...)
@@ -324,35 +286,6 @@ func innerOutlineMask(mask []uint8, width, height, thickness int) []uint8 {
 	return outline
 }
 
-func keepToothComponent(candidate component, width, height int) bool {
-	if !candidate.seedHit {
-		return false
-	}
-
-	bboxWidth := candidate.maxX - candidate.minX + 1
-	bboxHeight := candidate.maxY - candidate.minY + 1
-	bboxArea := maxInt(bboxWidth*bboxHeight, 1)
-	fillRatio := float64(candidate.area) / float64(bboxArea)
-	areaRatio := float64(candidate.area) / float64(maxInt(width*height, 1))
-	widthRatio := float64(bboxWidth) / float64(width)
-	heightRatio := float64(bboxHeight) / float64(height)
-
-	if areaRatio < 0.004 || fillRatio < 0.16 {
-		return false
-	}
-	if widthRatio < 0.025 || heightRatio < 0.10 {
-		return false
-	}
-	if widthRatio > 0.92 && heightRatio < 0.58 {
-		return false
-	}
-	if candidate.minY == 0 && widthRatio > 0.55 && heightRatio < 0.45 {
-		return false
-	}
-
-	return true
-}
-
 func overlayMask(gray []uint8, mask []uint8, width, height uint32) imaging.PreviewImage {
 	rgba := make([]uint8, len(gray)*4)
 	for index, value := range gray {
@@ -491,31 +424,6 @@ func countMaskPixels(mask []uint8) int {
 	return count
 }
 
-func combineMasks(primary []uint8, secondary []uint8) []uint8 {
-	if len(primary) != len(secondary) {
-		return primary
-	}
-
-	primaryCoverage := float64(countMaskPixels(primary)) / float64(maxInt(len(primary), 1))
-	secondaryCoverage := float64(countMaskPixels(secondary)) / float64(maxInt(len(secondary), 1))
-	combined := append([]uint8(nil), primary...)
-	if secondaryCoverage > primaryCoverage+0.08 {
-		for index := range combined {
-			if secondary[index] != 0 {
-				combined[index] = 1
-			}
-		}
-	}
-	return combined
-}
-
-func subtractUint8(value uint8, delta int) uint8 {
-	if int(value) <= delta {
-		return 0
-	}
-	return uint8(int(value) - delta)
-}
-
 func minInt(left, right int) int {
 	if left < right {
 		return left
@@ -524,13 +432,6 @@ func minInt(left, right int) int {
 }
 
 func maxInt(left, right int) int {
-	if left > right {
-		return left
-	}
-	return right
-}
-
-func maxUint8(left, right uint8) uint8 {
 	if left > right {
 		return left
 	}
