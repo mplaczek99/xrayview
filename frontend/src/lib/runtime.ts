@@ -11,6 +11,7 @@ import type {
   JobResult,
   JobSnapshot as ContractJobSnapshot,
   OpenStudyCommandResult,
+  AnalyzeStudyCommandResult,
   ProcessStudyCommandResult,
   RenderStudyCommandResult,
 } from "./generated/contracts";
@@ -18,6 +19,7 @@ import { resolveRuntimeConfiguration } from "./runtimeConfig";
 import { createDesktopShellAPI, createMockShellAPI } from "./shell";
 import type { BackendAPI, RuntimeAdapter } from "./runtimeTypes";
 import type {
+  AnalysisResult,
   OpenedStudy,
   PreviewResult,
   ProcessResult,
@@ -76,6 +78,16 @@ function asProcessResult(
   };
 }
 
+function asAnalysisResult(
+  payload: AnalyzeStudyCommandResult,
+  runtime: RuntimeMode,
+): AnalysisResult {
+  return {
+    ...asPreviewResult(payload, runtime),
+    mode: payload.mode,
+  };
+}
+
 function normalizeJobResultPayload(
   result: JobResult,
   runtime: RuntimeMode,
@@ -85,6 +97,11 @@ function normalizeJobResultPayload(
       return {
         kind: "renderStudy",
         payload: asPreviewResult(result.payload, runtime),
+      };
+    case "analyzeStudy":
+      return {
+        kind: "analyzeStudy",
+        payload: asAnalysisResult(result.payload, runtime),
       };
     case "processStudy":
       return {
@@ -142,6 +159,7 @@ function createRuntimeAdapter(
     openStudy: async (inputPath) =>
       asOpenedStudy(await backend.openStudy(inputPath), mode),
     startRenderStudyJob: (studyId) => backend.startRenderStudyJob(studyId),
+    startAnalyzeStudyJob: (studyId) => backend.startAnalyzeStudyJob(studyId),
     startProcessStudyJob: (studyId, request) =>
       backend.startProcessStudyJob(studyId, request),
     getJob: async (jobId) =>

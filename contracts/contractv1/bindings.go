@@ -43,6 +43,8 @@ const BackendContractSchemaJSON = `{
     "OpenStudyCommandResult",
     "RenderStudyCommand",
     "RenderStudyCommandResult",
+    "AnalyzeStudyCommand",
+    "AnalyzeStudyCommandResult",
     "ProcessStudyCommand",
     "ProcessStudyCommandResult",
     "MeasureLineAnnotationCommand",
@@ -223,7 +225,7 @@ const BackendContractSchemaJSON = `{
       "required": ["code", "message", "recoverable"]
     },
     "JobKind": {
-      "enum": ["renderStudy", "processStudy"]
+      "enum": ["renderStudy", "analyzeStudy", "processStudy"]
     },
     "JobState": {
       "enum": ["queued", "running", "cancelling", "completed", "failed", "cancelled"]
@@ -311,6 +313,32 @@ const BackendContractSchemaJSON = `{
       },
       "required": ["studyId", "previewPath", "loadedWidth", "loadedHeight"]
     },
+    "AnalyzeStudyCommand": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "studyId": { "type": "string" }
+      },
+      "required": ["studyId"]
+    },
+    "AnalyzeStudyCommandResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "studyId": { "type": "string" },
+        "previewPath": { "type": "string" },
+        "loadedWidth": { "type": "number" },
+        "loadedHeight": { "type": "number" },
+        "mode": { "type": "string" },
+        "measurementScale": {
+          "anyOf": [
+            { "$ref": "#/$defs/MeasurementScale" },
+            { "type": "null" }
+          ]
+        }
+      },
+      "required": ["studyId", "previewPath", "loadedWidth", "loadedHeight", "mode"]
+    },
     "ProcessStudyCommand": {
       "type": "object",
       "additionalProperties": false,
@@ -397,6 +425,15 @@ const BackendContractSchemaJSON = `{
           "type": "object",
           "additionalProperties": false,
           "properties": {
+            "kind": { "const": "analyzeStudy" },
+            "payload": { "$ref": "#/$defs/AnalyzeStudyCommandResult" }
+          },
+          "required": ["kind", "payload"]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
             "kind": { "const": "processStudy" },
             "payload": { "$ref": "#/$defs/ProcessStudyCommandResult" }
           },
@@ -459,6 +496,8 @@ var DefinitionRefs = map[string]string{
 	"OpenStudyCommandResult": "#/$defs/OpenStudyCommandResult",
 	"RenderStudyCommand": "#/$defs/RenderStudyCommand",
 	"RenderStudyCommandResult": "#/$defs/RenderStudyCommandResult",
+	"AnalyzeStudyCommand": "#/$defs/AnalyzeStudyCommand",
+	"AnalyzeStudyCommandResult": "#/$defs/AnalyzeStudyCommandResult",
 	"ProcessStudyCommand": "#/$defs/ProcessStudyCommand",
 	"ProcessStudyCommandResult": "#/$defs/ProcessStudyCommandResult",
 	"MeasureLineAnnotationCommand": "#/$defs/MeasureLineAnnotationCommand",

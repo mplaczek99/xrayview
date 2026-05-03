@@ -186,6 +186,18 @@ export function createMockBackendAPI(): BackendAPI {
           measurementScale: null,
         },
       })),
+    startAnalyzeStudyJob: async (studyId) =>
+      startMockJob("analyzeStudy", studyId, () => ({
+        kind: "analyzeStudy",
+        payload: {
+          studyId,
+          previewPath: createMockPreview(true, "none"),
+          loadedWidth: 1200,
+          loadedHeight: 820,
+          mode: "dynamic tooth color overlay",
+          measurementScale: null,
+        },
+      })),
     startProcessStudyJob: async (studyId, request) =>
       startMockJob("processStudy", studyId, () => ({
         kind: "processStudy",
@@ -288,6 +300,8 @@ export function createDesktopBackendAPI(): BackendAPI {
       invokeTypedDesktopBinding(() => bindings.OpenStudy({ inputPath })),
     startRenderStudyJob: async (studyId) =>
       invokeTypedDesktopBinding(() => bindings.StartRenderJob({ studyId })),
+    startAnalyzeStudyJob: async (studyId) =>
+      invokeTypedDesktopBinding(() => bindings.StartAnalyzeJob({ studyId })),
     startProcessStudyJob: async (studyId, request) =>
       invokeTypedDesktopBinding(() =>
         bindings.StartProcessJob(buildProcessStudyCommand(studyId, request)),

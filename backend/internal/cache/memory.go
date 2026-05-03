@@ -95,6 +95,35 @@ func (memory *Memory) LoadRender(
 	return cloneRenderResult(payload), true
 }
 
+func (memory *Memory) StoreAnalyze(
+	fingerprint string,
+	result contracts.AnalyzeStudyCommandResult,
+) {
+	memory.storeLocked(fingerprint, contracts.JobResult{
+		Kind:    contracts.JobKindAnalyzeStudy,
+		Payload: cloneAnalyzeResult(result),
+	})
+}
+
+func (memory *Memory) LoadAnalyze(
+	fingerprint string,
+) (contracts.AnalyzeStudyCommandResult, bool) {
+	var zero contracts.AnalyzeStudyCommandResult
+
+	result, ok := memory.loadLocked(fingerprint, contracts.JobKindAnalyzeStudy)
+	if !ok {
+		return zero, false
+	}
+
+	payload, ok := result.Payload.(contracts.AnalyzeStudyCommandResult)
+	if !ok {
+		memory.discardInvalidEntry(fingerprint, result.Kind, "analyze payload type mismatch")
+		return zero, false
+	}
+
+	return cloneAnalyzeResult(payload), true
+}
+
 func (memory *Memory) StoreProcess(
 	fingerprint string,
 	result contracts.ProcessStudyCommandResult,
@@ -307,6 +336,14 @@ func resultArtifactsExist(
 		}
 
 		return artifactExists(logger, fingerprint, result.Kind, payload.PreviewPath)
+	case contracts.JobKindAnalyzeStudy:
+		payload, ok := result.Payload.(contracts.AnalyzeStudyCommandResult)
+		if !ok {
+			warnPayloadTypeMismatch(logger, fingerprint, result.Kind)
+			return false
+		}
+
+		return artifactExists(logger, fingerprint, result.Kind, payload.PreviewPath)
 	case contracts.JobKindProcessStudy:
 		payload, ok := result.Payload.(contracts.ProcessStudyCommandResult)
 		if !ok {
@@ -471,6 +508,13 @@ func (memory *Memory) removePreviewEntryLocked(entry *sourcePreviewEntry) {
 func cloneRenderResult(
 	result contracts.RenderStudyCommandResult,
 ) contracts.RenderStudyCommandResult {
+	result.MeasurementScale = cloneMeasurementScale(result.MeasurementScale)
+	return result
+}
+
+func cloneAnalyzeResult(
+	result contracts.AnalyzeStudyCommandResult,
+) contracts.AnalyzeStudyCommandResult {
 	result.MeasurementScale = cloneMeasurementScale(result.MeasurementScale)
 	return result
 }

@@ -50,6 +50,7 @@ type testBackendService struct {
 type mockBackendService struct {
 	openStudy             func(contracts.OpenStudyCommand) (contracts.OpenStudyCommandResult, error)
 	startRenderJob        func(contracts.RenderStudyCommand) (contracts.StartedJob, error)
+	startAnalyzeJob       func(contracts.AnalyzeStudyCommand) (contracts.StartedJob, error)
 	startProcessJob       func(contracts.ProcessStudyCommand) (contracts.StartedJob, error)
 	getJob                func(contracts.JobCommand) (contracts.JobSnapshot, error)
 	getJobs               func(contracts.GetJobsCommand) ([]contracts.JobSnapshot, error)
@@ -68,6 +69,15 @@ func (service mockBackendService) StartRenderJob(
 	command contracts.RenderStudyCommand,
 ) (contracts.StartedJob, error) {
 	return service.startRenderJob(command)
+}
+
+func (service mockBackendService) StartAnalyzeJob(
+	command contracts.AnalyzeStudyCommand,
+) (contracts.StartedJob, error) {
+	if service.startAnalyzeJob != nil {
+		return service.startAnalyzeJob(command)
+	}
+	return contracts.StartedJob{}, nil
 }
 
 func (service mockBackendService) StartProcessJob(
@@ -158,6 +168,12 @@ func (service testBackendService) StartRenderJob(
 	command contracts.RenderStudyCommand,
 ) (contracts.StartedJob, error) {
 	return service.jobs.StartRenderJob(command)
+}
+
+func (service testBackendService) StartAnalyzeJob(
+	command contracts.AnalyzeStudyCommand,
+) (contracts.StartedJob, error) {
+	return service.jobs.StartAnalyzeJob(command)
 }
 
 func (service testBackendService) StartProcessJob(

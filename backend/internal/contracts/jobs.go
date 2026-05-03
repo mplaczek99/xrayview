@@ -4,6 +4,7 @@ type JobKind string
 
 const (
 	JobKindRenderStudy  JobKind = "renderStudy"
+	JobKindAnalyzeStudy JobKind = "analyzeStudy"
 	JobKindProcessStudy JobKind = "processStudy"
 )
 
@@ -45,6 +46,19 @@ type RenderStudyCommandResult struct {
 	PreviewPath      string            `json:"previewPath"`
 	LoadedWidth      uint32            `json:"loadedWidth"`
 	LoadedHeight     uint32            `json:"loadedHeight"`
+	MeasurementScale *MeasurementScale `json:"measurementScale,omitempty"`
+}
+
+type AnalyzeStudyCommand struct {
+	StudyID string `json:"studyId"`
+}
+
+type AnalyzeStudyCommandResult struct {
+	StudyID          string            `json:"studyId"`
+	PreviewPath      string            `json:"previewPath"`
+	LoadedWidth      uint32            `json:"loadedWidth"`
+	LoadedHeight     uint32            `json:"loadedHeight"`
+	Mode             string            `json:"mode"`
 	MeasurementScale *MeasurementScale `json:"measurementScale,omitempty"`
 }
 

@@ -1,12 +1,13 @@
 import { useMemo } from "react";
 import type { MeasurementScale } from "../../lib/generated/contracts";
-import { workbenchActions, useWorkbenchStore, selectActiveStudy, selectIsOpeningStudy } from "../../app/store/workbenchStore";
+import { workbenchActions, useWorkbenchStore, selectActiveStudy, selectIsOpeningStudy, selectJobs } from "../../app/store/workbenchStore";
 import { ViewerCanvas } from "../../features/viewer/ViewerCanvas";
 import { ViewSidebar } from "./ViewSidebar";
 
 export function ViewTab() {
   const study = useWorkbenchStore(selectActiveStudy);
   const isOpeningStudy = useWorkbenchStore(selectIsOpeningStudy);
+  const jobs = useWorkbenchStore(selectJobs);
   const measurementScale: MeasurementScale | null = useMemo(
     () =>
       study?.measurementScale ??
@@ -14,8 +15,14 @@ export function ViewTab() {
       null,
     [study?.measurementScale, study?.originalPreview?.measurementScale],
   );
-  const previewUrl = study?.originalPreview?.previewUrl ?? null;
-  const imageSize = study?.originalPreview?.imageSize ?? null;
+  const visiblePreview = study?.analysisPreview ?? study?.originalPreview ?? null;
+  const previewUrl = visiblePreview?.previewUrl ?? null;
+  const imageSize = visiblePreview?.imageSize ?? null;
+  const analysisJob = study?.analysisJobId ? jobs[study.analysisJobId] ?? null : null;
+  const isAnalyzing =
+    analysisJob?.state === "queued" ||
+    analysisJob?.state === "running" ||
+    analysisJob?.state === "cancelling";
   const annotations = useMemo(
     () => study?.annotations ?? { lines: [], rectangles: [], polylines: [] },
     [study?.annotations],
@@ -125,12 +132,14 @@ export function ViewTab() {
             className="button button--ghost"
             type="button"
             data-testid="action-measure-teeth"
+            onClick={() => void workbenchActions.runActiveStudyAnalysis()}
+            disabled={!study.originalPreview || isAnalyzing}
           >
             <svg className="button__icon" viewBox="0 0 16 16" fill="none" aria-hidden="true">
               <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.5" />
               <path d="M8 5v6M5 8h6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
             </svg>
-            Analyze
+            {isAnalyzing ? "Analyzing..." : "Analyze"}
           </button>
           <button
             className="button button--ghost"

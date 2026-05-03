@@ -90,7 +90,7 @@ export interface BackendError {
   recoverable: boolean;
 }
 
-export type JobKind = "renderStudy" | "processStudy";
+export type JobKind = "renderStudy" | "analyzeStudy" | "processStudy";
 
 export type JobState = "queued" | "running" | "cancelling" | "completed" | "failed" | "cancelled";
 
@@ -135,6 +135,19 @@ export interface RenderStudyCommandResult {
   measurementScale?: MeasurementScale | null;
 }
 
+export interface AnalyzeStudyCommand {
+  studyId: string;
+}
+
+export interface AnalyzeStudyCommandResult {
+  studyId: string;
+  previewPath: string;
+  loadedWidth: number;
+  loadedHeight: number;
+  mode: string;
+  measurementScale?: MeasurementScale | null;
+}
+
 export interface ProcessStudyCommand {
   studyId: string;
   outputPath?: string | null;
@@ -169,6 +182,7 @@ export interface MeasureLineAnnotationCommandResult {
 
 export type JobResult =
   | { kind: "renderStudy"; payload: RenderStudyCommandResult; }
+  | { kind: "analyzeStudy"; payload: AnalyzeStudyCommandResult; }
   | { kind: "processStudy"; payload: ProcessStudyCommandResult; };
 
 export interface JobSnapshot {

@@ -7,6 +7,8 @@ function titleForJob(kind: string): string {
   switch (kind) {
     case "renderStudy":
       return "Render Preview";
+    case "analyzeStudy":
+      return "Analyze Teeth";
     case "processStudy":
       return "Process Study";
     default:

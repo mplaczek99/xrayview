@@ -6,6 +6,8 @@ type (
 	AnnotationBundle                   = internalcontracts.AnnotationBundle
 	AnnotationPoint                    = internalcontracts.AnnotationPoint
 	AnnotationSource                   = internalcontracts.AnnotationSource
+	AnalyzeStudyCommand                = internalcontracts.AnalyzeStudyCommand
+	AnalyzeStudyCommandResult          = internalcontracts.AnalyzeStudyCommandResult
 	BackendError                       = internalcontracts.BackendError
 	BackendErrorCode                   = internalcontracts.BackendErrorCode
 	GetJobsCommand                     = internalcontracts.GetJobsCommand
@@ -45,6 +47,7 @@ const (
 	BackendErrorCodeInternal       = internalcontracts.BackendErrorCodeInternal
 
 	JobKindRenderStudy  = internalcontracts.JobKindRenderStudy
+	JobKindAnalyzeStudy = internalcontracts.JobKindAnalyzeStudy
 	JobKindProcessStudy = internalcontracts.JobKindProcessStudy
 
 	JobStateQueued     = internalcontracts.JobStateQueued

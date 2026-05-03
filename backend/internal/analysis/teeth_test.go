@@ -1,0 +1,251 @@
+package analysis
+
+import (
+	"image"
+	"image/color"
+	_ "image/png"
+	"os"
+	"path/filepath"
+	"runtime"
+	"slices"
+	"strings"
+	"testing"
+
+	_ "golang.org/x/image/bmp"
+
+	"xrayview/backend/internal/imaging"
+)
+
+const minimumFixtureDice = 0.95
+
+func TestGenerateToothOverlayUsesDynamicMaskForFixtures(t *testing.T) {
+	for _, name := range coloredFixtureNames(t) {
+		t.Run(name, func(t *testing.T) {
+			bmpPath := fixturePath(t, "images", "BMP", name+".bmp")
+			pngPath := fixturePath(t, "images", "PNG", "Colored", name+".png")
+			if _, err := os.Stat(bmpPath); err != nil {
+				t.Skipf("missing BMP fixture: %v", err)
+			}
+			if _, err := os.Stat(pngPath); err != nil {
+				t.Skipf("missing colored PNG fixture: %v", err)
+			}
+
+			preview := decodeGrayFixture(t, bmpPath)
+			result, err := GenerateToothOverlay(preview)
+			if err != nil {
+				t.Fatalf("GenerateToothOverlay returned error: %v", err)
+			}
+			if result.Preview.Format != imaging.FormatRGBA8 {
+				t.Fatalf("Preview.Format = %q, want %q", result.Preview.Format, imaging.FormatRGBA8)
+			}
+			if result.ToothPixels == 0 {
+				t.Fatal("ToothPixels = 0, want generated mask")
+			}
+
+			gotMask := greenMaskFromRGBA(result.Preview)
+			wantMask := greenMaskFromImage(t, pngPath)
+			dice := diceCoefficient(gotMask, wantMask)
+			if dice < minimumFixtureDice {
+				t.Fatalf("green mask Dice = %.3f, want >= %.2f", dice, minimumFixtureDice)
+			}
+			if name == "1" && dice < 0.95 {
+				t.Fatalf("1.bmp green mask Dice = %.3f, want >= 0.95", dice)
+			}
+			if name == "1" && result.Coverage > 0.70 {
+				t.Fatalf("1.bmp coverage = %.3f, want <= 0.70 to avoid green flood", result.Coverage)
+			}
+		})
+	}
+}
+
+func TestColoredFixturesCoverAllBMPInputs(t *testing.T) {
+	bmpNames := fixtureNamesByExt(t, "images", "BMP", ".bmp")
+	pngNames := fixtureNamesByExt(t, "images", "PNG", "Colored", ".png")
+	for name := range bmpNames {
+		if !pngNames[name] {
+			t.Fatalf("missing colored PNG fixture for BMP %s.bmp", name)
+		}
+	}
+	for name := range pngNames {
+		if !bmpNames[name] {
+			t.Fatalf("missing BMP fixture for colored PNG %s.png", name)
+		}
+	}
+}
+
+func TestRuntimeAnalysisDoesNotReadColoredFixtures(t *testing.T) {
+	_, currentFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller returned no file path")
+	}
+
+	analysisDir := filepath.Dir(currentFile)
+	entries, err := os.ReadDir(analysisDir)
+	if err != nil {
+		t.Fatalf("read analysis dir: %v", err)
+	}
+
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+
+		data, err := os.ReadFile(filepath.Join(analysisDir, name))
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		contents := string(data)
+		for _, forbidden := range []string{"PNG/Colored", "matchingReference", "decodeReference", "referenceMask"} {
+			if strings.Contains(contents, forbidden) {
+				t.Fatalf("runtime analysis file %s contains forbidden label lookup marker %q", name, forbidden)
+			}
+		}
+	}
+}
+
+func coloredFixtureNames(t *testing.T) []string {
+	t.Helper()
+
+	pattern := fixturePath(t, "images", "PNG", "Colored", "*.png")
+	matches, err := filepath.Glob(pattern)
+	if err != nil {
+		t.Fatalf("glob colored fixtures: %v", err)
+	}
+	if len(matches) == 0 {
+		t.Skip("missing colored PNG fixtures")
+	}
+
+	names := make([]string, 0, len(matches))
+	for _, match := range matches {
+		name := strings.TrimSuffix(filepath.Base(match), filepath.Ext(match))
+		if _, err := os.Stat(fixturePath(t, "images", "BMP", name+".bmp")); err == nil {
+			names = append(names, name)
+		}
+	}
+	slices.Sort(names)
+	return names
+}
+
+func fixtureNamesByExt(t *testing.T, parts ...string) map[string]bool {
+	t.Helper()
+	extension := parts[len(parts)-1]
+	dir := fixturePath(t, parts[:len(parts)-1]...)
+	matches, err := filepath.Glob(filepath.Join(dir, "*"+extension))
+	if err != nil {
+		t.Fatalf("glob fixtures: %v", err)
+	}
+	names := make(map[string]bool, len(matches))
+	for _, match := range matches {
+		name := strings.TrimSuffix(filepath.Base(match), filepath.Ext(match))
+		names[name] = true
+	}
+	return names
+}
+
+func fixturePath(t *testing.T, parts ...string) string {
+	t.Helper()
+
+	_, currentFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller returned no file path")
+	}
+
+	root := filepath.Join(filepath.Dir(currentFile), "..", "..", "..")
+	return filepath.Join(append([]string{root}, parts...)...)
+}
+
+func decodeGrayFixture(t *testing.T, path string) imaging.PreviewImage {
+	t.Helper()
+
+	file, err := os.Open(path)
+	if err != nil {
+		t.Fatalf("open fixture: %v", err)
+	}
+	defer file.Close()
+
+	decoded, _, err := image.Decode(file)
+	if err != nil {
+		t.Fatalf("decode fixture: %v", err)
+	}
+
+	bounds := decoded.Bounds()
+	width := bounds.Dx()
+	height := bounds.Dy()
+	pixels := make([]uint8, width*height)
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			gray := color.GrayModel.Convert(decoded.At(x, y)).(color.Gray)
+			pixels[(y-bounds.Min.Y)*width+x-bounds.Min.X] = gray.Y
+		}
+	}
+
+	return imaging.GrayPreview(uint32(width), uint32(height), pixels)
+}
+
+func greenMaskFromRGBA(preview imaging.PreviewImage) []uint8 {
+	mask := make([]uint8, len(preview.Pixels)/4)
+	for index := range mask {
+		base := index * 4
+		if preview.Pixels[base] == toothOverlayGreen[0] &&
+			preview.Pixels[base+1] == toothOverlayGreen[1] &&
+			preview.Pixels[base+2] == toothOverlayGreen[2] {
+			mask[index] = 1
+		}
+	}
+	return mask
+}
+
+func greenMaskFromImage(t *testing.T, path string) []uint8 {
+	t.Helper()
+
+	file, err := os.Open(path)
+	if err != nil {
+		t.Fatalf("open colored fixture: %v", err)
+	}
+	defer file.Close()
+
+	decoded, _, err := image.Decode(file)
+	if err != nil {
+		t.Fatalf("decode colored fixture: %v", err)
+	}
+
+	bounds := decoded.Bounds()
+	width := bounds.Dx()
+	height := bounds.Dy()
+	mask := make([]uint8, width*height)
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			r, g, b, _ := decoded.At(x, y).RGBA()
+			if r>>8 <= 150 && g>>8 >= 220 && b>>8 <= 80 {
+				mask[(y-bounds.Min.Y)*width+x-bounds.Min.X] = 1
+			}
+		}
+	}
+	return mask
+}
+
+func diceCoefficient(left, right []uint8) float64 {
+	if len(left) != len(right) || len(left) == 0 {
+		return 0
+	}
+
+	intersection := 0
+	leftCount := 0
+	rightCount := 0
+	for index := range left {
+		if left[index] != 0 {
+			leftCount++
+		}
+		if right[index] != 0 {
+			rightCount++
+		}
+		if left[index] != 0 && right[index] != 0 {
+			intersection++
+		}
+	}
+	if leftCount+rightCount == 0 {
+		return 1
+	}
+	return float64(2*intersection) / float64(leftCount+rightCount)
+}

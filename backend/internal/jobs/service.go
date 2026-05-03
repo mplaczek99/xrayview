@@ -27,6 +27,7 @@ import (
 	"strings"
 	"sync"
 
+	"xrayview/backend/internal/analysis"
 	"xrayview/backend/internal/cache"
 	"xrayview/backend/internal/contracts"
 	"xrayview/backend/internal/dicommeta"
@@ -200,6 +201,62 @@ func (service *Service) StartRenderJob(
 	return contracts.StartedJob{JobID: outcome.Snapshot.JobID}, nil
 }
 
+func (service *Service) StartAnalyzeJob(
+	command contracts.AnalyzeStudyCommand,
+) (contracts.StartedJob, error) {
+	studyID := strings.TrimSpace(command.StudyID)
+	if studyID == "" {
+		return contracts.StartedJob{}, contracts.InvalidInput("studyId is required")
+	}
+
+	study, ok := service.studies.Get(studyID)
+	if !ok {
+		return contracts.StartedJob{}, contracts.NotFound(fmt.Sprintf("study not found: %s", studyID))
+	}
+
+	fingerprint, err := analyzeFingerprint(study)
+	if err != nil {
+		return contracts.StartedJob{}, contracts.Internal(
+			fmt.Sprintf("serialize analyze job fingerprint: %v", err),
+		)
+	}
+
+	if snapshot, ok, err := service.cachedAnalyzeSnapshot(fingerprint, study.StudyID); err != nil {
+		return contracts.StartedJob{}, err
+	} else if ok {
+		return contracts.StartedJob{JobID: snapshot.JobID}, nil
+	}
+
+	previewPath, err := service.cache.ArtifactPath("analyze", fingerprint, "png")
+	if err != nil {
+		return contracts.StartedJob{}, err
+	}
+
+	outcome, err := service.registry.StartJob(
+		contracts.JobKindAnalyzeStudy,
+		study.StudyID,
+		fingerprint,
+	)
+	if err != nil {
+		return contracts.StartedJob{}, err
+	}
+	if !outcome.Created {
+		return contracts.StartedJob{JobID: outcome.Snapshot.JobID}, nil
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	if err := service.registry.AttachCancel(outcome.Snapshot.JobID, cancel); err != nil {
+		cancel()
+		return contracts.StartedJob{}, err
+	}
+
+	service.launchJob(contracts.JobKindAnalyzeStudy, func() {
+		service.executeAnalyzeJob(ctx, outcome.Snapshot.JobID, study, fingerprint, previewPath)
+	})
+
+	return contracts.StartedJob{JobID: outcome.Snapshot.JobID}, nil
+}
+
 func (service *Service) StartProcessJob(
 	command contracts.ProcessStudyCommand,
 ) (contracts.StartedJob, error) {
@@ -340,6 +397,7 @@ func newService(
 	svc := &Service{
 		supportedKinds: []contracts.JobKind{
 			contracts.JobKindRenderStudy,
+			contracts.JobKindAnalyzeStudy,
 			contracts.JobKindProcessStudy,
 		},
 		cache:                  cacheStore,
@@ -470,6 +528,30 @@ func (service *Service) cachedProcessSnapshot(
 	return snapshot, true, nil
 }
 
+func (service *Service) cachedAnalyzeSnapshot(
+	fingerprint string,
+	studyID string,
+) (contracts.JobSnapshot, bool, error) {
+	cached, ok := service.memoryCache.LoadAnalyze(fingerprint)
+	if !ok {
+		return contracts.JobSnapshot{}, false, nil
+	}
+
+	snapshot, err := service.registry.CreateCachedJob(
+		contracts.JobKindAnalyzeStudy,
+		studyID,
+		contracts.JobResult{
+			Kind:    contracts.JobKindAnalyzeStudy,
+			Payload: cached,
+		},
+	)
+	if err != nil {
+		return contracts.JobSnapshot{}, false, err
+	}
+
+	return snapshot, true, nil
+}
+
 // executeRenderJob walks the render pipeline to completion or cancellation.
 //
 // The stage names ("validating", "loadingStudy", "renderingPreview",
@@ -583,6 +665,119 @@ func (service *Service) executeRenderJob(
 			PreviewPath:      previewPath,
 			LoadedWidth:      sourceStudy.Image.Width,
 			LoadedHeight:     sourceStudy.Image.Height,
+			MeasurementScale: cloneMeasurementScale(sourceStudy.MeasurementScale),
+		},
+	)
+}
+
+func (service *Service) executeAnalyzeJob(
+	ctx context.Context,
+	jobID string,
+	study contracts.StudyRecord,
+	fingerprint string,
+	previewPath string,
+) {
+	if service.finishCancelledIfRequested(ctx, jobID, "queued", previewPath) {
+		return
+	}
+
+	if err := service.transitionJob(
+		jobID,
+		contracts.JobStateRunning,
+		10,
+		"validating",
+		"Validating source study",
+	); err != nil {
+		service.failJob(jobID, err)
+		return
+	}
+
+	if err := validateInputFile(study.InputPath); err != nil {
+		service.failJob(jobID, err)
+		return
+	}
+	if service.finishCancelledIfRequested(ctx, jobID, "validating", previewPath) {
+		return
+	}
+
+	if err := service.transitionJob(
+		jobID,
+		contracts.JobStateRunning,
+		30,
+		"loadingStudy",
+		"Loading source pixels",
+	); err != nil {
+		service.failJob(jobID, err)
+		return
+	}
+
+	sourceStudy, err := service.loadSourceStudy(ctx, contracts.JobKindAnalyzeStudy, study)
+	if err != nil {
+		if service.finishCancelledIfRequested(ctx, jobID, "loadingStudy", previewPath) {
+			return
+		}
+		service.failJob(jobID, err)
+		return
+	}
+	service.memoryCache.StoreMeasurementScale(study.InputPath, sourceStudy.MeasurementScale)
+	if service.finishCancelledIfRequested(ctx, jobID, "loadingStudy", previewPath) {
+		return
+	}
+
+	if err := service.transitionJob(
+		jobID,
+		contracts.JobStateRunning,
+		68,
+		"analyzingTeeth",
+		"Detecting tooth regions",
+	); err != nil {
+		service.failJob(jobID, err)
+		return
+	}
+
+	analysisResult, err := analysis.GenerateToothOverlay(
+		service.loadOrRenderSourcePreview(study.InputPath, sourceStudy.Image),
+	)
+	if err != nil {
+		service.failJob(jobID, contracts.Internal(fmt.Sprintf("analyze source preview: %v", err)))
+		return
+	}
+	if service.finishCancelledIfRequested(ctx, jobID, "analyzingTeeth", previewPath) {
+		return
+	}
+
+	if err := service.transitionJob(
+		jobID,
+		contracts.JobStateRunning,
+		90,
+		"writingPreview",
+		"Writing tooth overlay preview",
+	); err != nil {
+		service.failJob(jobID, err)
+		return
+	}
+
+	if err := render.SavePreviewPNG(previewPath, analysisResult.Preview); err != nil {
+		cleanupPaths(previewPath)
+		service.failJob(jobID, contracts.Internal(fmt.Sprintf("write analyze preview PNG: %v", err)))
+		return
+	}
+	if info, err := os.Stat(previewPath); err == nil {
+		service.cache.AddArtifactBytes(info.Size())
+	}
+	if service.finishCancelledIfRequested(ctx, jobID, "writingPreview", previewPath) {
+		return
+	}
+
+	service.completeAnalyzeJob(
+		jobID,
+		fingerprint,
+		contracts.AnalyzeStudyCommandResult{
+			StudyID:          study.StudyID,
+			PreviewPath:      previewPath,
+			LoadedWidth:      sourceStudy.Image.Width,
+			LoadedHeight:     sourceStudy.Image.Height,
+			Mode:             analysisResult.Mode,
 			MeasurementScale: cloneMeasurementScale(sourceStudy.MeasurementScale),
 		},
 	)
@@ -805,6 +1000,28 @@ func (service *Service) completeRenderJob(
 	service.evictArtifactsIfNeeded()
 }
 
+func (service *Service) completeAnalyzeJob(
+	jobID string,
+	fingerprint string,
+	result contracts.AnalyzeStudyCommandResult,
+) {
+	snapshot, err := service.registry.Complete(jobID, contracts.JobResult{
+		Kind:    contracts.JobKindAnalyzeStudy,
+		Payload: result,
+	})
+	if err != nil {
+		return
+	}
+	if snapshot.State == contracts.JobStateCancelled {
+		_ = os.Remove(result.PreviewPath)
+		service.notifyJobCompletion(snapshot)
+		return
+	}
+	service.memoryCache.StoreAnalyze(fingerprint, result)
+	service.notifyJobCompletion(snapshot)
+	service.evictArtifactsIfNeeded()
+}
+
 // completeProcessJob mirrors completeRenderJob but also deletes the DICOM
 // artifact on the cancellation race — process is the only variant that
 // writes a second output file.
@@ -976,6 +1193,22 @@ func renderFingerprint(study contracts.StudyRecord) (string, error) {
 		InputPath string `json:"inputPath"`
 	}{
 		Namespace: "render-study-v1",
+		InputPath: study.InputPath,
+	})
+	if err != nil {
+		return "", err
+	}
+
+	sum := sha256.Sum256(payload)
+	return hex.EncodeToString(sum[:]), nil
+}
+
+func analyzeFingerprint(study contracts.StudyRecord) (string, error) {
+	payload, err := json.Marshal(struct {
+		Namespace string `json:"namespace"`
+		InputPath string `json:"inputPath"`
+	}{
+		Namespace: "analyze-study-v6",
 		InputPath: study.InputPath,
 	})
 	if err != nil {

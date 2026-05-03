@@ -26,6 +26,7 @@ var tinyPNG = []byte{
 type stubBackendService struct {
 	openStudyFn             func(backendapi.OpenStudyCommand) (backendapi.OpenStudyCommandResult, error)
 	startRenderJobFn        func(backendapi.RenderStudyCommand) (backendapi.StartedJob, error)
+	startAnalyzeJobFn       func(backendapi.AnalyzeStudyCommand) (backendapi.StartedJob, error)
 	startProcessJobFn       func(backendapi.ProcessStudyCommand) (backendapi.StartedJob, error)
 	getJobFn                func(backendapi.JobCommand) (backendapi.JobSnapshot, error)
 	cancelJobFn             func(backendapi.JobCommand) (backendapi.JobSnapshot, error)
@@ -50,6 +51,16 @@ func (service stubBackendService) StartRenderJob(
 ) (backendapi.StartedJob, error) {
 	if service.startRenderJobFn != nil {
 		return service.startRenderJobFn(command)
+	}
+
+	return backendapi.StartedJob{}, nil
+}
+
+func (service stubBackendService) StartAnalyzeJob(
+	command backendapi.AnalyzeStudyCommand,
+) (backendapi.StartedJob, error) {
+	if service.startAnalyzeJobFn != nil {
+		return service.startAnalyzeJobFn(command)
 	}
 
 	return backendapi.StartedJob{}, nil

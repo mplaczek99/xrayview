@@ -46,6 +46,22 @@ function nextJobOrder(currentOrder: readonly string[], jobId: string): string[] 
   return [jobId, ...currentOrder.filter((entry) => entry !== jobId)];
 }
 
+function activeJob(jobId: string | null, jobs: WorkbenchState["jobs"]): JobSnapshot | null {
+  if (!jobId) {
+    return null;
+  }
+
+  return jobs[jobId] ?? null;
+}
+
+function isPendingJob(job: JobSnapshot | null): boolean {
+  return job !== null && (
+    job.state === "queued" ||
+    job.state === "running" ||
+    job.state === "cancelling"
+  );
+}
+
 // Returns true if the incoming backend snapshot has no meaningful change vs what
 // is already stored. Skips state spreads and listener notifications for the
 // common case where the poller receives the same queued/running snapshot twice.
@@ -131,6 +147,50 @@ function applyRenderJob(study: WorkbenchStudy, job: JobSnapshot): WorkbenchStudy
         ...study,
         renderJobId: job.jobId,
         status: "Preview rendering cancelled.",
+      };
+  }
+}
+
+function applyAnalyzeJob(study: WorkbenchStudy, job: JobSnapshot): WorkbenchStudy {
+  switch (job.state) {
+    case "queued":
+    case "running":
+    case "cancelling":
+      return {
+        ...study,
+        analysisJobId: job.jobId,
+        status: job.progress.message,
+      };
+    case "completed": {
+      if (job.result?.kind !== "analyzeStudy") {
+        return study;
+      }
+
+      const status = job.result.payload.mode.includes("no reliable tooth mask")
+        ? "Analysis completed, but no reliable tooth mask was found."
+        : job.fromCache
+          ? "Tooth color overlay loaded from cache."
+          : "Tooth color overlay generated.";
+
+      return {
+        ...study,
+        analysisJobId: job.jobId,
+        analysisPreview: job.result.payload,
+        measurementScale: job.result.payload.measurementScale ?? study.measurementScale,
+        status,
+      };
+    }
+    case "failed":
+      return {
+        ...study,
+        analysisJobId: job.jobId,
+        status: formatBackendError(job.error, "Tooth analysis failed."),
+      };
+    case "cancelled":
+      return {
+        ...study,
+        analysisJobId: job.jobId,
+        status: "Tooth analysis cancelled.",
       };
   }
 }
@@ -224,6 +284,8 @@ function applyJobToStudy(study: WorkbenchStudy, job: JobSnapshot): WorkbenchStud
   switch (job.jobKind) {
     case "renderStudy":
       return applyRenderJob(study, job);
+    case "analyzeStudy":
+      return applyAnalyzeJob(study, job);
     case "processStudy":
       return applyProcessJob(study, job);
   }
@@ -334,6 +396,36 @@ class WorkbenchStore {
         ...current,
         isOpeningStudy: false,
         workbenchStatus: formatBackendError(error, "Opening the study failed."),
+      }));
+    }
+  }
+
+  async runActiveStudyAnalysis() {
+    const study = this.activeStudy();
+    if (!study) {
+      return;
+    }
+
+    if (isPendingJob(activeJob(study.analysisJobId, this.state.jobs))) {
+      return;
+    }
+
+    try {
+      const started = await runtime.startAnalyzeStudyJob(study.studyId);
+      recordJobSubmit(started.jobId);
+      this.receiveJobUpdate(
+        createPendingJobSnapshot(
+          started.jobId,
+          "analyzeStudy",
+          study.studyId,
+          "Queued tooth color analysis...",
+        ),
+      );
+      await this.syncJob(started.jobId);
+    } catch (error) {
+      this.setStudyState(study.studyId, (current) => ({
+        ...current,
+        status: formatBackendError(error, "Tooth analysis failed."),
       }));
     }
   }

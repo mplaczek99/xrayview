@@ -20,6 +20,7 @@ import (
 type Service interface {
 	OpenStudy(command OpenStudyCommand) (OpenStudyCommandResult, error)
 	StartRenderJob(command RenderStudyCommand) (StartedJob, error)
+	StartAnalyzeJob(command AnalyzeStudyCommand) (StartedJob, error)
 	StartProcessJob(command ProcessStudyCommand) (StartedJob, error)
 	GetJob(command JobCommand) (JobSnapshot, error)
 	GetJobs(command GetJobsCommand) ([]JobSnapshot, error)
@@ -63,6 +64,12 @@ func (service *embeddedService) StartRenderJob(
 	command RenderStudyCommand,
 ) (StartedJob, error) {
 	return service.app.StartRenderJob(command)
+}
+
+func (service *embeddedService) StartAnalyzeJob(
+	command AnalyzeStudyCommand,
+) (StartedJob, error) {
+	return service.app.StartAnalyzeJob(command)
 }
 
 func (service *embeddedService) StartProcessJob(
