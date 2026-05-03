@@ -13,23 +13,9 @@ import (
 )
 
 // BackendService is the command surface the HTTP router in internal/httpapi
-// and the desktop shell (via backend/service.go) both sit on top of. The
-// contracts package defines the wire types; this interface is what actually
-// gets invoked. Keep it in sync with httpapi.BackendService — the router
-// declares its own narrower copy so it doesn't depend on this package, and
-// the two will drift if nobody's watching.
+// and the desktop shell (via backend/service.go) both sit on top of.
 type BackendService interface {
-	OpenStudy(command contracts.OpenStudyCommand) (contracts.OpenStudyCommandResult, error)
-	StartRenderJob(command contracts.RenderStudyCommand) (contracts.StartedJob, error)
-	StartAnalyzeJob(command contracts.AnalyzeStudyCommand) (contracts.StartedJob, error)
-	StartProcessJob(command contracts.ProcessStudyCommand) (contracts.StartedJob, error)
-	GetJob(command contracts.JobCommand) (contracts.JobSnapshot, error)
-	GetJobs(command contracts.GetJobsCommand) ([]contracts.JobSnapshot, error)
-	CancelJob(command contracts.JobCommand) (contracts.JobSnapshot, error)
-	GetProcessingManifest() contracts.ProcessingManifest
-	MeasureLineAnnotation(
-		command contracts.MeasureLineAnnotationCommand,
-	) (contracts.MeasureLineAnnotationCommandResult, error)
+	contracts.BackendService
 	OnJobCompletion(callback jobs.JobCompletionCallback)
 	OnJobUpdate(callback jobs.JobCompletionCallback)
 	SupportedJobKinds() []string
