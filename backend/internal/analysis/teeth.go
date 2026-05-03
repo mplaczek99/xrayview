@@ -95,6 +95,26 @@ func grayPixels(preview imaging.PreviewImage) ([]uint8, error) {
 	}
 }
 
+func overlayMask(gray []uint8, mask []uint8, width, height uint32) imaging.PreviewImage {
+	rgba := make([]uint8, len(gray)*4)
+	for index, value := range gray {
+		base := index * 4
+		if mask[index] != 0 {
+			rgba[base+0] = toothOverlayGreen[0]
+			rgba[base+1] = toothOverlayGreen[1]
+			rgba[base+2] = toothOverlayGreen[2]
+			rgba[base+3] = 255
+			continue
+		}
+
+		rgba[base+0] = value
+		rgba[base+1] = value
+		rgba[base+2] = value
+		rgba[base+3] = 255
+	}
+	return imaging.RGBAPreview(width, height, rgba)
+}
+
 func normalizeGray(pixels []uint8) []uint8 {
 	low := percentileGray(pixels, 0.01)
 	high := percentileGray(pixels, 0.99)
@@ -146,42 +166,22 @@ func percentileGray(pixels []uint8, percentile float64) uint8 {
 	return 255
 }
 
-func boxBlurGray(pixels []uint8, width, height, radius int) []uint8 {
-	if radius <= 0 || len(pixels) == 0 {
-		return append([]uint8(nil), pixels...)
+func removeSmallMaskComponents(mask []uint8, width, height, minArea int) []uint8 {
+	if minArea <= 1 || len(mask) == 0 {
+		return append([]uint8(nil), mask...)
 	}
 
-	window := radius*2 + 1
-	horizontal := make([]uint16, len(pixels))
-	for y := 0; y < height; y++ {
-		row := y * width
-		sum := 0
-		for x := -radius; x <= radius; x++ {
-			sum += int(pixels[row+clampInt(x, 0, width-1)])
-		}
-		for x := 0; x < width; x++ {
-			horizontal[row+x] = uint16((sum + window/2) / window)
-			left := clampInt(x-radius, 0, width-1)
-			right := clampInt(x+radius+1, 0, width-1)
-			sum += int(pixels[row+right]) - int(pixels[row+left])
+	filtered := make([]uint8, len(mask))
+	for _, candidate := range collectComponents(mask, mask, width, height, minArea) {
+		for _, index := range candidate.pixels {
+			filtered[index] = 1
 		}
 	}
+	return filtered
+}
 
-	blurred := make([]uint8, len(pixels))
-	for x := 0; x < width; x++ {
-		sum := 0
-		for y := -radius; y <= radius; y++ {
-			sum += int(horizontal[clampInt(y, 0, height-1)*width+x])
-		}
-		for y := 0; y < height; y++ {
-			blurred[y*width+x] = uint8((sum + window/2) / window)
-			top := clampInt(y-radius, 0, height-1)
-			bottom := clampInt(y+radius+1, 0, height-1)
-			sum += int(horizontal[bottom*width+x]) - int(horizontal[top*width+x])
-		}
-	}
-
-	return blurred
+func minimumToothAreaPixels(width, height int) int {
+	return maxInt(width*height/2000, minimumToothAreaFloorPixels)
 }
 
 func collectComponents(mask []uint8, seeds []uint8, width, height, minArea int) []component {
@@ -253,22 +253,52 @@ func collectComponents(mask []uint8, seeds []uint8, width, height, minArea int) 
 	return components
 }
 
-func removeSmallMaskComponents(mask []uint8, width, height, minArea int) []uint8 {
-	if minArea <= 1 || len(mask) == 0 {
-		return append([]uint8(nil), mask...)
-	}
-
-	filtered := make([]uint8, len(mask))
-	for _, candidate := range collectComponents(mask, mask, width, height, minArea) {
-		for _, index := range candidate.pixels {
-			filtered[index] = 1
+func countMaskPixels(mask []uint8) int {
+	count := 0
+	for _, value := range mask {
+		if value != 0 {
+			count++
 		}
 	}
-	return filtered
+	return count
 }
 
-func minimumToothAreaPixels(width, height int) int {
-	return maxInt(width*height/2000, minimumToothAreaFloorPixels)
+func boxBlurGray(pixels []uint8, width, height, radius int) []uint8 {
+	if radius <= 0 || len(pixels) == 0 {
+		return append([]uint8(nil), pixels...)
+	}
+
+	window := radius*2 + 1
+	horizontal := make([]uint16, len(pixels))
+	for y := 0; y < height; y++ {
+		row := y * width
+		sum := 0
+		for x := -radius; x <= radius; x++ {
+			sum += int(pixels[row+clampInt(x, 0, width-1)])
+		}
+		for x := 0; x < width; x++ {
+			horizontal[row+x] = uint16((sum + window/2) / window)
+			left := clampInt(x-radius, 0, width-1)
+			right := clampInt(x+radius+1, 0, width-1)
+			sum += int(pixels[row+right]) - int(pixels[row+left])
+		}
+	}
+
+	blurred := make([]uint8, len(pixels))
+	for x := 0; x < width; x++ {
+		sum := 0
+		for y := -radius; y <= radius; y++ {
+			sum += int(horizontal[clampInt(y, 0, height-1)*width+x])
+		}
+		for y := 0; y < height; y++ {
+			blurred[y*width+x] = uint8((sum + window/2) / window)
+			top := clampInt(y-radius, 0, height-1)
+			bottom := clampInt(y+radius+1, 0, height-1)
+			sum += int(horizontal[bottom*width+x]) - int(horizontal[top*width+x])
+		}
+	}
+
+	return blurred
 }
 
 func innerOutlineMask(mask []uint8, width, height, thickness int) []uint8 {
@@ -284,26 +314,6 @@ func innerOutlineMask(mask []uint8, width, height, thickness int) []uint8 {
 		}
 	}
 	return outline
-}
-
-func overlayMask(gray []uint8, mask []uint8, width, height uint32) imaging.PreviewImage {
-	rgba := make([]uint8, len(gray)*4)
-	for index, value := range gray {
-		base := index * 4
-		if mask[index] != 0 {
-			rgba[base+0] = toothOverlayGreen[0]
-			rgba[base+1] = toothOverlayGreen[1]
-			rgba[base+2] = toothOverlayGreen[2]
-			rgba[base+3] = 255
-			continue
-		}
-
-		rgba[base+0] = value
-		rgba[base+1] = value
-		rgba[base+2] = value
-		rgba[base+3] = 255
-	}
-	return imaging.RGBAPreview(width, height, rgba)
 }
 
 func closeBinaryMask(mask []uint8, width, height, radius int) []uint8 {
@@ -413,17 +423,6 @@ func fillHolesBinaryMask(mask []uint8, width, height int) []uint8 {
 	}
 	return filled
 }
-
-func countMaskPixels(mask []uint8) int {
-	count := 0
-	for _, value := range mask {
-		if value != 0 {
-			count++
-		}
-	}
-	return count
-}
-
 func minInt(left, right int) int {
 	if left < right {
 		return left
