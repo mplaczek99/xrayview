@@ -4,6 +4,7 @@ import (
 	"image"
 	"image/color"
 	_ "image/png"
+	"math"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -103,11 +104,16 @@ func TestGenerateToothOverlayDrawsBoneLevelRedOutlineForFixtures(t *testing.T) {
 			}
 			toothMask := detectToothMask(gray, int(preview.Width), int(preview.Height))
 			boneMask := detectBoneLevelMask(gray, int(preview.Width), int(preview.Height))
-			wantMask := boneOutlineMask(toothMask, boneMask, int(preview.Width), int(preview.Height))
-			gotMask := redMaskFromRGBA(result.Preview)
-			dice := diceCoefficient(gotMask, wantMask)
-			if dice < 0.99 {
-				t.Fatalf("output red outline Dice = %.3f, want >= 0.99", dice)
+			wantMask := dilateBinaryMask(
+				boneOutlineMask(toothMask, boneMask, int(preview.Width), int(preview.Height)),
+				int(preview.Width),
+				int(preview.Height),
+				3,
+			)
+			gotMask := redDominantMaskFromRGBA(result.Preview)
+			nearby := maskContainmentRatio(gotMask, wantMask)
+			if nearby < 0.80 {
+				t.Fatalf("red contour nearby ratio = %.3f, want >= 0.80", nearby)
 			}
 		})
 	}
@@ -132,12 +138,13 @@ func TestGenerateToothOverlayDrawsToothGreenOutlineAndBlocksInternalBoneRedForFi
 				t.Fatalf("grayPixels returned error: %v", err)
 			}
 			toothMask := detectToothMask(gray, int(preview.Width), int(preview.Height))
-			redMask := redMaskFromRGBA(result.Preview)
-			greenMask := greenMaskFromRGBA(result.Preview)
+			redMask := redDominantMaskFromRGBA(result.Preview)
+			greenMask := greenDominantMaskFromRGBA(result.Preview)
 			toothOutlineMask := innerOutlineMask(toothMask, int(preview.Width), int(preview.Height), toothOutlineThicknessPixels)
-			greenDice := diceCoefficient(greenMask, toothOutlineMask)
-			if greenDice < 0.99 {
-				t.Fatalf("output green tooth outline Dice = %.3f, want >= 0.99", greenDice)
+			nearbyMask := dilateBinaryMask(toothOutlineMask, int(preview.Width), int(preview.Height), 3)
+			nearby := maskContainmentRatio(greenMask, nearbyMask)
+			if nearby < 0.70 {
+				t.Fatalf("green contour nearby ratio = %.3f, want >= 0.70", nearby)
 			}
 			for index, value := range toothMask {
 				if value != 0 && toothOutlineMask[index] == 0 && redMask[index] != 0 {
@@ -160,8 +167,8 @@ func TestOverlayMasksOutlinesToothAndSuppressesBoneInsideTooth(t *testing.T) {
 	boneMask[0] = 1
 
 	preview := overlayMasks(gray, toothMask, boneMask, width, height)
-	redMask := redMaskFromRGBA(preview)
-	greenMask := greenMaskFromRGBA(preview)
+	redMask := redDominantMaskFromRGBA(preview)
+	greenMask := greenDominantMaskFromRGBA(preview)
 	if redMask[0] != 0 {
 		t.Fatal("small isolated bone speckle was outlined red")
 	}
@@ -189,12 +196,12 @@ func TestOverlayMasksDrawsOneCleanBoneOutlineWithoutInternalLoops(t *testing.T) 
 	boneMask[0] = 1
 
 	preview := overlayMasks(gray, toothMask, boneMask, width, height)
-	redMask := redMaskFromRGBA(preview)
-	greenMask := greenMaskFromRGBA(preview)
+	redMask := redDominantMaskFromRGBA(preview)
+	greenMask := greenDominantMaskFromRGBA(preview)
 	if redMask[0] != 0 {
 		t.Fatal("small isolated bone component was outlined red")
 	}
-	if redMask[2*width+2] == 0 || redMask[6*width+6] == 0 {
+	if countMaskPixels(redMask) == 0 {
 		t.Fatal("main bone level boundary was not outlined red")
 	}
 	if redMask[4*width+4] != 0 {
@@ -205,6 +212,50 @@ func TestOverlayMasksDrawsOneCleanBoneOutlineWithoutInternalLoops(t *testing.T) 
 	}
 	if greenMask[3*width+3] == 0 || greenMask[5*width+5] == 0 {
 		t.Fatal("tooth boundary was not outlined green")
+	}
+}
+
+func TestOverlayMasksDrawsAntialiasedSmoothedContours(t *testing.T) {
+	const width = 24
+	const height = 24
+
+	gray := make([]uint8, width*height)
+	toothMask := make([]uint8, width*height)
+	fillMaskRect(toothMask, width, 6, 6, 12, 12)
+
+	preview := overlayMasks(gray, toothMask, nil, width, height)
+	partialGreenPixels := 0
+	for index := 0; index < len(preview.Pixels)/4; index++ {
+		base := index * 4
+		if isPartialGreenOverlayPixel(preview.Pixels[base], preview.Pixels[base+1], preview.Pixels[base+2]) {
+			partialGreenPixels++
+		}
+	}
+	if partialGreenPixels == 0 {
+		t.Fatal("smoothed contour did not produce antialiased green edge pixels")
+	}
+}
+
+func TestSmoothClosedContourReducesHighFrequencyJitter(t *testing.T) {
+	points := make([]overlayPoint, 0, 48)
+	for y := 0; y <= 24; y += 2 {
+		x := 4.0
+		if y%4 == 0 {
+			x = 7.0
+		}
+		points = append(points, overlayPoint{x: x, y: float64(y)})
+	}
+	for y := 24; y >= 0; y -= 2 {
+		points = append(points, overlayPoint{x: 22, y: float64(y)})
+	}
+
+	before := contourJitterScore(points)
+	after := contourJitterScore(smoothClosedContour(
+		lowPassClosedContour(points, overlayContourLowPassIterations),
+		overlayContourSmoothingIterations,
+	))
+	if after >= before*0.18 {
+		t.Fatalf("contour jitter score after smoothing = %.3f, want < %.3f", after, before*0.18)
 	}
 }
 
@@ -465,6 +516,43 @@ func redMaskFromRGBA(preview imaging.PreviewImage) []uint8 {
 	return mask
 }
 
+func greenDominantMaskFromRGBA(preview imaging.PreviewImage) []uint8 {
+	mask := make([]uint8, len(preview.Pixels)/4)
+	for index := range mask {
+		base := index * 4
+		if isGreenOverlayPixel(preview.Pixels[base], preview.Pixels[base+1], preview.Pixels[base+2]) {
+			mask[index] = 1
+		}
+	}
+	return mask
+}
+
+func redDominantMaskFromRGBA(preview imaging.PreviewImage) []uint8 {
+	mask := make([]uint8, len(preview.Pixels)/4)
+	for index := range mask {
+		base := index * 4
+		if isRedOverlayPixel(preview.Pixels[base], preview.Pixels[base+1], preview.Pixels[base+2]) {
+			mask[index] = 1
+		}
+	}
+	return mask
+}
+
+func isGreenOverlayPixel(red, green, blue uint8) bool {
+	return green >= 150 && int(green) > int(red)+35 && int(green) > int(blue)+35
+}
+
+func isPartialGreenOverlayPixel(red, green, blue uint8) bool {
+	return green > red && green > blue &&
+		(red != toothOverlayGreen[0] ||
+			green != toothOverlayGreen[1] ||
+			blue != toothOverlayGreen[2])
+}
+
+func isRedOverlayPixel(red, green, blue uint8) bool {
+	return red >= 150 && int(red) > int(green)+35 && int(red) > int(blue)+35
+}
+
 func clearMaskPixels(mask []uint8, clear []uint8) {
 	for index := range mask {
 		if clear[index] != 0 {
@@ -537,6 +625,46 @@ func redMaskFromImage(t *testing.T, path string) []uint8 {
 		}
 	}
 	return mask
+}
+
+func maskContainmentRatio(subject, allowed []uint8) float64 {
+	if len(subject) != len(allowed) || len(subject) == 0 {
+		return 0
+	}
+
+	subjectCount := 0
+	containedCount := 0
+	for index := range subject {
+		if subject[index] == 0 {
+			continue
+		}
+		subjectCount++
+		if allowed[index] != 0 {
+			containedCount++
+		}
+	}
+	if subjectCount == 0 {
+		return 0
+	}
+	return float64(containedCount) / float64(subjectCount)
+}
+
+func contourJitterScore(points []overlayPoint) float64 {
+	if len(points) < 3 {
+		return 0
+	}
+
+	score := 0.0
+	for index, point := range points {
+		previous := points[(index+len(points)-1)%len(points)]
+		next := points[(index+1)%len(points)]
+		expected := overlayPoint{
+			x: (previous.x + next.x) / 2,
+			y: (previous.y + next.y) / 2,
+		}
+		score += math.Hypot(point.x-expected.x, point.y-expected.y)
+	}
+	return score / float64(len(points))
 }
 
 func diceCoefficient(left, right []uint8) float64 {

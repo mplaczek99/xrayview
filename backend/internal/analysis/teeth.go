@@ -12,12 +12,20 @@ var boneOverlayRed = [3]uint8{255, 0, 0}
 
 // AnalyzeAlgorithmVersion is part of the Analyze result cache key. Change it
 // only when the generated overlay semantics intentionally change.
-const AnalyzeAlgorithmVersion = "clean-tooth-and-bone-outline-overlay-v1"
+const AnalyzeAlgorithmVersion = "lowpass-fair-uniform-tooth-and-bone-contour-overlay-v1"
 
 const minimumToothAreaFloorPixels = 51
 const toothOutlineThicknessPixels = 2
 const boneLineThicknessPixels = 0
 const boneOutlineThicknessPixels = 2
+const overlayContourLowPassIterations = 18
+const overlayContourSmoothingIterations = 4
+const overlayContourFairingIterations = 14
+const overlayContourFairingLambda = 0.45
+const overlayContourFairingMu = -0.47
+const overlayContourPointSpacingPixels = 3.0
+const overlayContourSimplifyTolerancePixels = 0.0
+const overlayStrokeWidthPixels = 2.6
 
 type ToothOverlayResult struct {
 	Preview        imaging.PreviewImage
@@ -36,6 +44,21 @@ type component struct {
 	maxY    int
 	area    int
 	seedHit bool
+}
+
+type overlayPoint struct {
+	x float64
+	y float64
+}
+
+type gridPoint struct {
+	x int
+	y int
+}
+
+type boundarySegment struct {
+	start gridPoint
+	end   gridPoint
 }
 
 func GenerateToothOverlay(preview imaging.PreviewImage) (ToothOverlayResult, error) {
@@ -125,38 +148,31 @@ func grayPixels(preview imaging.PreviewImage) ([]uint8, error) {
 }
 
 func overlayMasks(gray []uint8, toothMask []uint8, boneMask []uint8, width, height uint32) imaging.PreviewImage {
-	toothOutlineMask := innerOutlineMask(toothMask, int(width), int(height), toothOutlineThicknessPixels)
-	redBoneOutlineMask := boneOutlineMask(toothMask, boneMask, int(width), int(height))
 	rgba := make([]uint8, len(gray)*4)
 	for index, value := range gray {
 		base := index * 4
-		if toothOutlineMask[index] != 0 {
-			rgba[base+0] = toothOverlayGreen[0]
-			rgba[base+1] = toothOverlayGreen[1]
-			rgba[base+2] = toothOverlayGreen[2]
-			rgba[base+3] = 255
-			continue
-		}
-		if redBoneOutlineMask[index] != 0 {
-			rgba[base+0] = boneOverlayRed[0]
-			rgba[base+1] = boneOverlayRed[1]
-			rgba[base+2] = boneOverlayRed[2]
-			rgba[base+3] = 255
-			continue
-		}
-
 		rgba[base+0] = value
 		rgba[base+1] = value
 		rgba[base+2] = value
 		rgba[base+3] = 255
 	}
+
+	widthInt := int(width)
+	heightInt := int(height)
+	drawSmoothedMaskContours(
+		rgba,
+		widthInt,
+		heightInt,
+		boneOutlineSourceMask(boneMask, widthInt, heightInt),
+		boneOverlayRed,
+		toothMask,
+	)
+	drawSmoothedMaskContours(rgba, widthInt, heightInt, toothMask, toothOverlayGreen, nil)
 	return imaging.RGBAPreview(width, height, rgba)
 }
 
 func boneOutlineMask(toothMask []uint8, boneMask []uint8, width, height int) []uint8 {
-	source := removeSmallMaskComponents(boneMask, width, height, minimumBoneOutlineAreaPixels(width, height))
-	source = fillHolesBinaryMask(source, width, height)
-	outline := innerOutlineMask(source, width, height, boneOutlineThicknessPixels)
+	outline := innerOutlineMask(boneOutlineSourceMask(boneMask, width, height), width, height, boneOutlineThicknessPixels)
 	for index, value := range toothMask {
 		if value != 0 {
 			outline[index] = 0
@@ -165,8 +181,407 @@ func boneOutlineMask(toothMask []uint8, boneMask []uint8, width, height int) []u
 	return outline
 }
 
+func boneOutlineSourceMask(boneMask []uint8, width, height int) []uint8 {
+	source := removeSmallMaskComponents(boneMask, width, height, minimumBoneOutlineAreaPixels(width, height))
+	return fillHolesBinaryMask(source, width, height)
+}
+
 func minimumBoneOutlineAreaPixels(width, height int) int {
 	return minInt(maxInt(width*height/1000, 16), 128)
+}
+
+func drawSmoothedMaskContours(
+	rgba []uint8,
+	width int,
+	height int,
+	mask []uint8,
+	color [3]uint8,
+	excludeMask []uint8,
+) {
+	coverage := make([]float64, width*height)
+	for _, contour := range maskBoundaryContours(mask, width, height) {
+		if len(contour) < 4 {
+			continue
+		}
+		contour = resampleClosedContour(contour, overlayContourPointSpacingPixels)
+		contour = simplifyClosedContour(contour, overlayContourSimplifyTolerancePixels)
+		contour = lowPassClosedContour(contour, overlayContourLowPassIterations)
+		smoothed := smoothClosedContour(contour, overlayContourSmoothingIterations)
+		addClosedStrokeCoverage(coverage, width, height, smoothed, overlayStrokeWidthPixels, excludeMask)
+	}
+	compositeOverlayCoverage(rgba, coverage, color)
+}
+
+func simplifyClosedContour(points []overlayPoint, tolerance float64) []overlayPoint {
+	if len(points) < 4 || tolerance <= 0 {
+		return points
+	}
+
+	anchor := 0
+	for index := 1; index < len(points); index++ {
+		if points[index].x < points[anchor].x ||
+			(points[index].x == points[anchor].x && points[index].y < points[anchor].y) {
+			anchor = index
+		}
+	}
+
+	rotated := make([]overlayPoint, 0, len(points)+1)
+	rotated = append(rotated, points[anchor:]...)
+	rotated = append(rotated, points[:anchor]...)
+	rotated = append(rotated, rotated[0])
+
+	simplified := simplifyOpenPolyline(rotated, tolerance)
+	if len(simplified) > 1 {
+		simplified = simplified[:len(simplified)-1]
+	}
+	if len(simplified) < 4 {
+		return points
+	}
+	return simplified
+}
+
+func simplifyOpenPolyline(points []overlayPoint, tolerance float64) []overlayPoint {
+	if len(points) <= 2 {
+		return append([]overlayPoint(nil), points...)
+	}
+
+	keep := make([]bool, len(points))
+	keep[0] = true
+	keep[len(points)-1] = true
+	simplifyPolylineRange(points, tolerance*tolerance, 0, len(points)-1, keep)
+
+	simplified := make([]overlayPoint, 0, len(points))
+	for index, point := range points {
+		if keep[index] {
+			simplified = append(simplified, point)
+		}
+	}
+	return simplified
+}
+
+func simplifyPolylineRange(points []overlayPoint, toleranceSquared float64, start int, end int, keep []bool) {
+	if end <= start+1 {
+		return
+	}
+
+	maxDistanceSquared := 0.0
+	maxIndex := -1
+	for index := start + 1; index < end; index++ {
+		distance := distanceToSegment(points[index].x, points[index].y, points[start], points[end])
+		distanceSquared := distance * distance
+		if distanceSquared > maxDistanceSquared {
+			maxDistanceSquared = distanceSquared
+			maxIndex = index
+		}
+	}
+
+	if maxIndex < 0 || maxDistanceSquared <= toleranceSquared {
+		return
+	}
+
+	keep[maxIndex] = true
+	simplifyPolylineRange(points, toleranceSquared, start, maxIndex, keep)
+	simplifyPolylineRange(points, toleranceSquared, maxIndex, end, keep)
+}
+
+func lowPassClosedContour(points []overlayPoint, iterations int) []overlayPoint {
+	if len(points) < 24 {
+		return append([]overlayPoint(nil), points...)
+	}
+
+	filtered := append([]overlayPoint(nil), points...)
+	for iteration := 0; iteration < iterations; iteration++ {
+		if len(filtered) < 3 {
+			return filtered
+		}
+		next := make([]overlayPoint, len(filtered))
+		for index, point := range filtered {
+			previous := filtered[(index+len(filtered)-1)%len(filtered)]
+			following := filtered[(index+1)%len(filtered)]
+			next[index] = overlayPoint{
+				x: previous.x*0.25 + point.x*0.50 + following.x*0.25,
+				y: previous.y*0.25 + point.y*0.50 + following.y*0.25,
+			}
+		}
+		filtered = next
+	}
+	return filtered
+}
+
+func maskBoundaryContours(mask []uint8, width, height int) [][]overlayPoint {
+	if len(mask) == 0 || width <= 0 || height <= 0 || len(mask) != width*height {
+		return nil
+	}
+
+	segments := make([]boundarySegment, 0, width+height)
+	for y := 0; y < height; y++ {
+		for x := 0; x < width; x++ {
+			index := y*width + x
+			if mask[index] == 0 {
+				continue
+			}
+			if y == 0 || mask[index-width] == 0 {
+				segments = append(segments, boundarySegment{
+					start: gridPoint{x: x, y: y},
+					end:   gridPoint{x: x + 1, y: y},
+				})
+			}
+			if x+1 == width || mask[index+1] == 0 {
+				segments = append(segments, boundarySegment{
+					start: gridPoint{x: x + 1, y: y},
+					end:   gridPoint{x: x + 1, y: y + 1},
+				})
+			}
+			if y+1 == height || mask[index+width] == 0 {
+				segments = append(segments, boundarySegment{
+					start: gridPoint{x: x + 1, y: y + 1},
+					end:   gridPoint{x: x, y: y + 1},
+				})
+			}
+			if x == 0 || mask[index-1] == 0 {
+				segments = append(segments, boundarySegment{
+					start: gridPoint{x: x, y: y + 1},
+					end:   gridPoint{x: x, y: y},
+				})
+			}
+		}
+	}
+
+	starts := make(map[gridPoint][]int, len(segments))
+	for index, segment := range segments {
+		starts[segment.start] = append(starts[segment.start], index)
+	}
+
+	visited := make([]bool, len(segments))
+	contours := make([][]overlayPoint, 0)
+	for index, segment := range segments {
+		if visited[index] {
+			continue
+		}
+
+		currentIndex := index
+		start := segment.start
+		contour := make([]overlayPoint, 0, 64)
+		for {
+			if visited[currentIndex] {
+				break
+			}
+			current := segments[currentIndex]
+			visited[currentIndex] = true
+			contour = append(contour, overlayPoint{
+				x: float64(current.start.x),
+				y: float64(current.start.y),
+			})
+			if current.end == start {
+				break
+			}
+
+			nextIndex := -1
+			for _, candidate := range starts[current.end] {
+				if !visited[candidate] {
+					nextIndex = candidate
+					break
+				}
+			}
+			if nextIndex < 0 {
+				break
+			}
+			currentIndex = nextIndex
+		}
+
+		if len(contour) >= 4 {
+			contours = append(contours, contour)
+		}
+	}
+
+	return contours
+}
+
+func smoothClosedContour(points []overlayPoint, iterations int) []overlayPoint {
+	smoothed := append([]overlayPoint(nil), points...)
+	for iteration := 0; iteration < iterations; iteration++ {
+		if len(smoothed) < 3 {
+			return smoothed
+		}
+		next := make([]overlayPoint, 0, len(smoothed)*2)
+		for index, current := range smoothed {
+			following := smoothed[(index+1)%len(smoothed)]
+			next = append(next,
+				overlayPoint{
+					x: current.x*0.75 + following.x*0.25,
+					y: current.y*0.75 + following.y*0.25,
+				},
+				overlayPoint{
+					x: current.x*0.25 + following.x*0.75,
+					y: current.y*0.25 + following.y*0.75,
+				},
+			)
+		}
+		smoothed = next
+	}
+	smoothed = fairClosedContour(
+		smoothed,
+		overlayContourFairingIterations,
+		overlayContourFairingLambda,
+		overlayContourFairingMu,
+	)
+	return smoothed
+}
+
+func fairClosedContour(points []overlayPoint, iterations int, lambda, mu float64) []overlayPoint {
+	faired := append([]overlayPoint(nil), points...)
+	for iteration := 0; iteration < iterations; iteration++ {
+		faired = laplacianSmoothClosedContour(faired, lambda)
+		faired = laplacianSmoothClosedContour(faired, mu)
+	}
+	return faired
+}
+
+func laplacianSmoothClosedContour(points []overlayPoint, amount float64) []overlayPoint {
+	if len(points) < 3 || amount == 0 {
+		return append([]overlayPoint(nil), points...)
+	}
+
+	smoothed := make([]overlayPoint, len(points))
+	for index, point := range points {
+		previous := points[(index+len(points)-1)%len(points)]
+		next := points[(index+1)%len(points)]
+		average := overlayPoint{
+			x: (previous.x + next.x) / 2,
+			y: (previous.y + next.y) / 2,
+		}
+		smoothed[index] = overlayPoint{
+			x: point.x + amount*(average.x-point.x),
+			y: point.y + amount*(average.y-point.y),
+		}
+	}
+	return smoothed
+}
+
+func resampleClosedContour(points []overlayPoint, spacing float64) []overlayPoint {
+	if len(points) < 4 || spacing <= 1 {
+		return points
+	}
+
+	resampled := make([]overlayPoint, 0, len(points)/int(math.Ceil(spacing))+1)
+	resampled = append(resampled, points[0])
+	last := points[0]
+	for index := 1; index < len(points); index++ {
+		current := points[index]
+		if math.Hypot(current.x-last.x, current.y-last.y) < spacing {
+			continue
+		}
+		resampled = append(resampled, current)
+		last = current
+	}
+
+	if len(resampled) < 4 {
+		return points
+	}
+	return resampled
+}
+
+func addClosedStrokeCoverage(
+	coverage []float64,
+	width int,
+	height int,
+	points []overlayPoint,
+	strokeWidth float64,
+	excludeMask []uint8,
+) {
+	if len(points) < 2 || strokeWidth <= 0 {
+		return
+	}
+
+	radius := strokeWidth / 2
+	for index, start := range points {
+		end := points[(index+1)%len(points)]
+		addStrokeSegmentCoverage(coverage, width, height, start, end, radius, excludeMask)
+	}
+}
+
+func addStrokeSegmentCoverage(
+	coverage []float64,
+	width int,
+	height int,
+	start overlayPoint,
+	end overlayPoint,
+	radius float64,
+	excludeMask []uint8,
+) {
+	minX := clampInt(int(math.Floor(minFloat(start.x, end.x)-radius-1)), 0, width-1)
+	maxX := clampInt(int(math.Ceil(maxFloat(start.x, end.x)+radius+1)), 0, width-1)
+	minY := clampInt(int(math.Floor(minFloat(start.y, end.y)-radius-1)), 0, height-1)
+	maxY := clampInt(int(math.Ceil(maxFloat(start.y, end.y)+radius+1)), 0, height-1)
+
+	for y := minY; y <= maxY; y++ {
+		for x := minX; x <= maxX; x++ {
+			distance := distanceToSegment(float64(x)+0.5, float64(y)+0.5, start, end)
+			segmentCoverage := strokeCoverage(distance, radius)
+			if segmentCoverage <= 0 {
+				continue
+			}
+			index := y*width + x
+			if len(excludeMask) == len(coverage) && excludeMask[index] != 0 {
+				continue
+			}
+			if segmentCoverage > coverage[index] {
+				coverage[index] = segmentCoverage
+			}
+		}
+	}
+}
+
+func compositeOverlayCoverage(rgba []uint8, coverage []float64, color [3]uint8) {
+	for index, value := range coverage {
+		if value <= 0 {
+			continue
+		}
+		base := index * 4
+		if value >= 0.995 {
+			rgba[base+0] = color[0]
+			rgba[base+1] = color[1]
+			rgba[base+2] = color[2]
+			rgba[base+3] = 255
+			continue
+		}
+		for channel := 0; channel < 3; channel++ {
+			current := float64(rgba[base+channel])
+			target := float64(color[channel])
+			rgba[base+channel] = uint8(math.Round(current*(1-value) + target*value))
+		}
+		rgba[base+3] = 255
+	}
+}
+
+func strokeCoverage(distance float64, radius float64) float64 {
+	coverage := radius + 0.5 - distance
+	if coverage <= 0 {
+		return 0
+	}
+	if coverage >= 1 {
+		return 1
+	}
+	return coverage
+}
+
+func distanceToSegment(x float64, y float64, start overlayPoint, end overlayPoint) float64 {
+	dx := end.x - start.x
+	dy := end.y - start.y
+	lengthSquared := dx*dx + dy*dy
+	if lengthSquared == 0 {
+		return math.Hypot(x-start.x, y-start.y)
+	}
+
+	t := ((x-start.x)*dx + (y-start.y)*dy) / lengthSquared
+	if t < 0 {
+		t = 0
+	} else if t > 1 {
+		t = 1
+	}
+	closestX := start.x + t*dx
+	closestY := start.y + t*dy
+	return math.Hypot(x-closestX, y-closestY)
 }
 
 func normalizeGray(pixels []uint8) []uint8 {
@@ -587,4 +1002,18 @@ func clampInt(value, minValue, maxValue int) int {
 		return maxValue
 	}
 	return value
+}
+
+func minFloat(left, right float64) float64 {
+	if left < right {
+		return left
+	}
+	return right
+}
+
+func maxFloat(left, right float64) float64 {
+	if left > right {
+		return left
+	}
+	return right
 }
