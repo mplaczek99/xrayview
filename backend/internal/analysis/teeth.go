@@ -8,17 +8,21 @@ import (
 )
 
 var toothOverlayGreen = [3]uint8{102, 255, 0}
+var boneOverlayRed = [3]uint8{255, 0, 0}
 
 // AnalyzeAlgorithmVersion is part of the Analyze result cache key. Change it
 // only when the generated overlay semantics intentionally change.
-const AnalyzeAlgorithmVersion = "outline-scaled-components-v1"
+const AnalyzeAlgorithmVersion = "clean-tooth-and-bone-outline-overlay-v1"
 
 const minimumToothAreaFloorPixels = 51
 const toothOutlineThicknessPixels = 2
+const boneLineThicknessPixels = 0
+const boneOutlineThicknessPixels = 2
 
 type ToothOverlayResult struct {
 	Preview        imaging.PreviewImage
 	ToothPixels    int
+	BonePixels     int
 	Coverage       float64
 	CandidateCount int
 	Mode           string
@@ -50,19 +54,31 @@ func GenerateToothOverlay(preview imaging.PreviewImage) (ToothOverlayResult, err
 		return ToothOverlayResult{}, fmt.Errorf("image is too small for tooth analysis: %dx%d", width, height)
 	}
 
-	mask := detectToothMask(gray, width, height)
-	components := collectComponents(mask, mask, width, height, minimumToothAreaPixels(width, height))
+	toothMask := detectToothMask(gray, width, height)
+	boneMask := detectBoneLevelMask(gray, width, height)
+	components := collectComponents(toothMask, toothMask, width, height, minimumToothAreaPixels(width, height))
 
-	toothPixels := countMaskPixels(mask)
-	coverage := float64(toothPixels) / float64(maxInt(len(mask), 1))
-	mode := "dynamic tooth outline overlay"
-	if toothPixels < len(mask)/150 || len(components) == 0 {
-		mode = "dynamic tooth outline overlay; no reliable tooth mask found"
+	toothPixels := countMaskPixels(toothMask)
+	bonePixels := countMaskPixels(boneMask)
+	coverage := float64(toothPixels+bonePixels) / float64(maxInt(len(toothMask), 1))
+	mode := "dynamic tooth and bone level overlay"
+	if toothPixels < len(toothMask)/150 || len(components) == 0 {
+		mode = "dynamic tooth and bone level overlay; no reliable tooth mask found"
+	}
+	if bonePixels < width/8 {
+		mode = mode + "; no reliable bone level found"
 	}
 
 	return ToothOverlayResult{
-		Preview:        overlayMask(gray, innerOutlineMask(mask, width, height, toothOutlineThicknessPixels), preview.Width, preview.Height),
+		Preview: overlayMasks(
+			gray,
+			toothMask,
+			thickenBoneLineMask(boneMask, width, height, boneLineThicknessPixels),
+			preview.Width,
+			preview.Height,
+		),
 		ToothPixels:    toothPixels,
+		BonePixels:     bonePixels,
 		Coverage:       coverage,
 		CandidateCount: len(components),
 		Mode:           mode,
@@ -76,6 +92,19 @@ func detectToothMask(gray []uint8, width, height int) []uint8 {
 	mask = openBinaryMask(mask, width, height, 1)
 	mask = fillHolesBinaryMask(mask, width, height)
 	mask = removeSmallMaskComponents(mask, width, height, minimumToothAreaPixels(width, height))
+	return mask
+}
+
+func detectBoneLevelMask(gray []uint8, width, height int) []uint8 {
+	if mask, ok := boneExemplarMask(gray, width, height); ok {
+		return mask
+	}
+
+	normalized := normalizeGray(gray)
+	gradient := gradientGray(boxBlurGray(normalized, width, height, 2), width, height)
+	mask := boneFeatureTableMask(normalized, gradient, width, height)
+	mask = closeBinaryMask(mask, width, height, 1)
+	mask = removeSmallMaskComponents(mask, width, height, minimumBoneAreaPixels(width, height))
 	return mask
 }
 
@@ -95,14 +124,23 @@ func grayPixels(preview imaging.PreviewImage) ([]uint8, error) {
 	}
 }
 
-func overlayMask(gray []uint8, mask []uint8, width, height uint32) imaging.PreviewImage {
+func overlayMasks(gray []uint8, toothMask []uint8, boneMask []uint8, width, height uint32) imaging.PreviewImage {
+	toothOutlineMask := innerOutlineMask(toothMask, int(width), int(height), toothOutlineThicknessPixels)
+	redBoneOutlineMask := boneOutlineMask(toothMask, boneMask, int(width), int(height))
 	rgba := make([]uint8, len(gray)*4)
 	for index, value := range gray {
 		base := index * 4
-		if mask[index] != 0 {
+		if toothOutlineMask[index] != 0 {
 			rgba[base+0] = toothOverlayGreen[0]
 			rgba[base+1] = toothOverlayGreen[1]
 			rgba[base+2] = toothOverlayGreen[2]
+			rgba[base+3] = 255
+			continue
+		}
+		if redBoneOutlineMask[index] != 0 {
+			rgba[base+0] = boneOverlayRed[0]
+			rgba[base+1] = boneOverlayRed[1]
+			rgba[base+2] = boneOverlayRed[2]
 			rgba[base+3] = 255
 			continue
 		}
@@ -113,6 +151,22 @@ func overlayMask(gray []uint8, mask []uint8, width, height uint32) imaging.Previ
 		rgba[base+3] = 255
 	}
 	return imaging.RGBAPreview(width, height, rgba)
+}
+
+func boneOutlineMask(toothMask []uint8, boneMask []uint8, width, height int) []uint8 {
+	source := removeSmallMaskComponents(boneMask, width, height, minimumBoneOutlineAreaPixels(width, height))
+	source = fillHolesBinaryMask(source, width, height)
+	outline := innerOutlineMask(source, width, height, boneOutlineThicknessPixels)
+	for index, value := range toothMask {
+		if value != 0 {
+			outline[index] = 0
+		}
+	}
+	return outline
+}
+
+func minimumBoneOutlineAreaPixels(width, height int) int {
+	return minInt(maxInt(width*height/1000, 16), 128)
 }
 
 func normalizeGray(pixels []uint8) []uint8 {
@@ -182,6 +236,17 @@ func removeSmallMaskComponents(mask []uint8, width, height, minArea int) []uint8
 
 func minimumToothAreaPixels(width, height int) int {
 	return maxInt(width*height/2000, minimumToothAreaFloorPixels)
+}
+
+func minimumBoneAreaPixels(width, height int) int {
+	return maxInt(width*height/12000, 24)
+}
+
+func thickenBoneLineMask(mask []uint8, width, height, radius int) []uint8 {
+	if radius <= 0 {
+		return append([]uint8(nil), mask...)
+	}
+	return dilateBinaryMask(mask, width, height, radius)
 }
 
 func collectComponents(mask []uint8, seeds []uint8, width, height, minArea int) []component {
@@ -423,6 +488,76 @@ func fillHolesBinaryMask(mask []uint8, width, height int) []uint8 {
 	}
 	return filled
 }
+
+func fillSmallHolesBinaryMask(mask []uint8, width, height, maxArea int) []uint8 {
+	if len(mask) == 0 || maxArea <= 0 {
+		return append([]uint8(nil), mask...)
+	}
+
+	visited := make([]bool, len(mask))
+	queue := make([]int, 0, 512)
+	out := append([]uint8(nil), mask...)
+	for y := 0; y < height; y++ {
+		for x := 0; x < width; x++ {
+			start := y*width + x
+			if visited[start] || mask[start] != 0 {
+				continue
+			}
+
+			visited[start] = true
+			queue = append(queue[:0], start)
+			pixels := make([]int, 0, 128)
+			touchesBorder := false
+			for head := 0; head < len(queue); head++ {
+				index := queue[head]
+				pixels = append(pixels, index)
+				px := index % width
+				py := index / width
+				if px == 0 || py == 0 || px == width-1 || py == height-1 {
+					touchesBorder = true
+				}
+
+				if px > 0 {
+					neighbor := index - 1
+					if !visited[neighbor] && mask[neighbor] == 0 {
+						visited[neighbor] = true
+						queue = append(queue, neighbor)
+					}
+				}
+				if px+1 < width {
+					neighbor := index + 1
+					if !visited[neighbor] && mask[neighbor] == 0 {
+						visited[neighbor] = true
+						queue = append(queue, neighbor)
+					}
+				}
+				if py > 0 {
+					neighbor := index - width
+					if !visited[neighbor] && mask[neighbor] == 0 {
+						visited[neighbor] = true
+						queue = append(queue, neighbor)
+					}
+				}
+				if py+1 < height {
+					neighbor := index + width
+					if !visited[neighbor] && mask[neighbor] == 0 {
+						visited[neighbor] = true
+						queue = append(queue, neighbor)
+					}
+				}
+			}
+
+			if touchesBorder || len(pixels) > maxArea {
+				continue
+			}
+			for _, index := range pixels {
+				out[index] = 1
+			}
+		}
+	}
+	return out
+}
+
 func minInt(left, right int) int {
 	if left < right {
 		return left

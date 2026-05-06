@@ -171,7 +171,7 @@ export function createMockBackendAPI(): BackendAPI {
           previewPath: createMockPreview(true, "none"),
           loadedWidth: 1200,
           loadedHeight: 820,
-          mode: "dynamic tooth color overlay",
+          mode: "dynamic tooth and bone level overlay",
           measurementScale: null,
         },
       })),

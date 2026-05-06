@@ -240,14 +240,14 @@ class WorkbenchStore {
           started.jobId,
           "analyzeStudy",
           study.studyId,
-          "Queued tooth color analysis...",
+          "Queued tooth and bone level analysis...",
         ),
       );
       await this.syncJob(started.jobId);
     } catch (error) {
       this.setStudyState(study.studyId, (current) => ({
         ...current,
-        status: formatBackendError(error, "Tooth analysis failed."),
+        status: formatBackendError(error, "Tooth and bone level analysis failed."),
       }));
     }
   }

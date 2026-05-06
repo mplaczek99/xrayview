@@ -56,11 +56,11 @@ export function applyAnalyzeJob(study: WorkbenchStudy, job: JobSnapshot): Workbe
         return study;
       }
 
-      const status = job.result.payload.mode.includes("no reliable tooth mask")
-        ? "Analysis completed, but no reliable tooth mask was found."
-        : job.fromCache
-          ? "Tooth color overlay loaded from cache."
-          : "Tooth color overlay generated.";
+        const status = job.result.payload.mode.includes("no reliable tooth mask")
+          ? "Analysis completed, but no reliable tooth mask was found."
+          : job.fromCache
+          ? "Tooth and bone level overlay loaded from cache."
+          : "Tooth and bone level overlay generated.";
 
       return {
         ...study,
@@ -74,13 +74,13 @@ export function applyAnalyzeJob(study: WorkbenchStudy, job: JobSnapshot): Workbe
       return {
         ...study,
         analysisJobId: job.jobId,
-        status: formatBackendError(job.error, "Tooth analysis failed."),
+        status: formatBackendError(job.error, "Tooth and bone level analysis failed."),
       };
     case "cancelled":
       return {
         ...study,
         analysisJobId: job.jobId,
-        status: "Tooth analysis cancelled.",
+        status: "Tooth and bone level analysis cancelled.",
       };
   }
 }

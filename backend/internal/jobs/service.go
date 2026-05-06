@@ -746,8 +746,8 @@ func (service *Service) executeAnalyzeJob(
 	var analysisResult analysis.ToothOverlayResult
 	if !service.runJobStage(ctx, jobID, jobStage{
 		percent: 68,
-		stage:   "analyzingTeeth",
-		message: "Detecting tooth regions",
+		stage:   "analyzingDentalStructures",
+		message: "Detecting tooth regions and bone level",
 		cleanupPath: func() string {
 			return previewPath
 		},
@@ -768,7 +768,7 @@ func (service *Service) executeAnalyzeJob(
 	if !service.runJobStage(ctx, jobID, jobStage{
 		percent: 90,
 		stage:   "writingPreview",
-		message: "Writing tooth overlay preview",
+		message: "Writing tooth and bone overlay preview",
 		cleanupPath: func() string {
 			return previewPath
 		},
