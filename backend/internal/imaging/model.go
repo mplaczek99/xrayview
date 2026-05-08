@@ -13,25 +13,33 @@ const (
 	FormatRGBA8       ImageFormat = "rgba8"
 )
 
+type SourceStorage string
+
+const (
+	SourceStorageFloat32 SourceStorage = "float32"
+	SourceStorageUint16  SourceStorage = "uint16"
+)
+
 type WindowLevel struct {
 	Center float32 `json:"center"`
 	Width  float32 `json:"width"`
 }
 
-// SourceImage is the decode-side type: float32 modality values
-// (post-rescale, pre-window) as produced by dicommeta. One sample per
-// pixel — color source images aren't modeled here. This is the input
-// the render pipeline consumes.
+// SourceImage is the decode-side type: modality values (post-rescale,
+// pre-window) as produced by dicommeta. One sample per pixel — color source
+// images aren't modeled here. This is the input the render pipeline consumes.
 type SourceImage struct {
-	Width         uint32       `json:"width"`
-	Height        uint32       `json:"height"`
-	Format        ImageFormat  `json:"format,omitempty"`
-	Pixels        []float32    `json:"pixels"`
-	MinValue      float32      `json:"minValue"`
-	MaxValue      float32      `json:"maxValue"`
-	FitsUint16    bool         `json:"fitsUint16"`
-	DefaultWindow *WindowLevel `json:"defaultWindow,omitempty"`
-	Invert        bool         `json:"invert"`
+	Width         uint32        `json:"width"`
+	Height        uint32        `json:"height"`
+	Format        ImageFormat   `json:"format,omitempty"`
+	Storage       SourceStorage `json:"storage,omitempty"`
+	Pixels        []float32     `json:"pixels,omitempty"`
+	Uint16Pixels  []uint16      `json:"uint16Pixels,omitempty"`
+	MinValue      float32       `json:"minValue"`
+	MaxValue      float32       `json:"maxValue"`
+	FitsUint16    bool          `json:"fitsUint16"`
+	DefaultWindow *WindowLevel  `json:"defaultWindow,omitempty"`
+	Invert        bool          `json:"invert"`
 }
 
 // PreviewImage is the display-side type: uint8 bytes ready for PNG/JPEG
@@ -63,14 +71,39 @@ func (image *SourceImage) Normalize() {
 	if image.Format == "" {
 		image.Format = FormatGrayFloat32
 	}
+	if image.Storage == "" {
+		if len(image.Uint16Pixels) > 0 && len(image.Pixels) == 0 {
+			image.Storage = SourceStorageUint16
+		} else {
+			image.Storage = SourceStorageFloat32
+		}
+	}
 }
 
 func (image SourceImage) ByteSize() uint64 {
-	return uint64(len(image.Pixels)) * 4 // float32 = 4 bytes
+	switch image.normalizedStorage() {
+	case SourceStorageUint16:
+		return uint64(len(image.Uint16Pixels)) * 2
+	default:
+		return uint64(len(image.Pixels)) * 4
+	}
 }
 
 func (image SourceImage) ExpectedPixelCount() uint64 {
 	return uint64(image.Width) * uint64(image.Height)
+}
+
+func (image SourceImage) PixelCount() int {
+	switch image.normalizedStorage() {
+	case SourceStorageUint16:
+		return len(image.Uint16Pixels)
+	default:
+		return len(image.Pixels)
+	}
+}
+
+func (image SourceImage) StorageKind() SourceStorage {
+	return image.normalizedStorage()
 }
 
 func (image SourceImage) Validate() error {
@@ -89,7 +122,20 @@ func (image SourceImage) Validate() error {
 		)
 	}
 
-	if got, want := uint64(len(normalized.Pixels)), normalized.ExpectedPixelCount(); got != want {
+	switch normalized.Storage {
+	case SourceStorageFloat32:
+		if len(normalized.Uint16Pixels) != 0 {
+			return fmt.Errorf("source image float32 storage cannot also contain uint16 pixels")
+		}
+	case SourceStorageUint16:
+		if len(normalized.Pixels) != 0 {
+			return fmt.Errorf("source image uint16 storage cannot also contain float32 pixels")
+		}
+	default:
+		return fmt.Errorf("source image storage must be %q or %q, got %q", SourceStorageFloat32, SourceStorageUint16, normalized.Storage)
+	}
+
+	if got, want := uint64(normalized.PixelCount()), normalized.ExpectedPixelCount(); got != want {
 		return fmt.Errorf(
 			"source image pixel count %d does not match image size %dx%d",
 			got,
@@ -98,7 +144,7 @@ func (image SourceImage) Validate() error {
 		)
 	}
 
-	if len(normalized.Pixels) > 0 && normalized.MaxValue < normalized.MinValue {
+	if normalized.PixelCount() > 0 && normalized.MaxValue < normalized.MinValue {
 		return fmt.Errorf(
 			"source image max value %v must be greater than or equal to min value %v",
 			normalized.MaxValue,
@@ -114,6 +160,10 @@ func (image SourceImage) Validate() error {
 		)
 	}
 
+	if normalized.Storage == SourceStorageUint16 && !normalized.FitsUint16 {
+		return fmt.Errorf("source image uint16 storage requires fitsUint16")
+	}
+
 	if normalized.DefaultWindow != nil && normalized.DefaultWindow.Width <= 1.0 {
 		return fmt.Errorf(
 			"source image default window width must be greater than 1, got %v",
@@ -122,6 +172,16 @@ func (image SourceImage) Validate() error {
 	}
 
 	return nil
+}
+
+func (image SourceImage) normalizedStorage() SourceStorage {
+	if image.Storage != "" {
+		return image.Storage
+	}
+	if len(image.Uint16Pixels) > 0 && len(image.Pixels) == 0 {
+		return SourceStorageUint16
+	}
+	return SourceStorageFloat32
 }
 
 func (image PreviewImage) ByteSize() uint64 {

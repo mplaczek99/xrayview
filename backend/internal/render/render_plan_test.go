@@ -80,18 +80,19 @@ func TestRenderSourceImageAppliesSourceInvertAfterWindowing(t *testing.T) {
 
 func BenchmarkRenderGrayscalePixels(b *testing.B) {
 	const width, height = 2048, 1536
-	pixels := make([]float32, width*height)
+	pixels := make([]uint16, width*height)
 	for i := range pixels {
-		pixels[i] = float32(i % 4096)
+		pixels[i] = uint16(i % 4096)
 	}
 
 	source := imaging.SourceImage{
-		Width:      width,
-		Height:     height,
-		Pixels:     pixels,
-		MinValue:   0,
-		MaxValue:   4095,
-		FitsUint16: true,
+		Width:        width,
+		Height:       height,
+		Storage:      imaging.SourceStorageUint16,
+		Uint16Pixels: pixels,
+		MinValue:     0,
+		MaxValue:     4095,
+		FitsUint16:   true,
 		DefaultWindow: &imaging.WindowLevel{
 			Center: 2048,
 			Width:  4096,
@@ -110,18 +111,19 @@ func BenchmarkRenderGrayscalePixels(b *testing.B) {
 
 func BenchmarkRenderGrayscalePixelsFullRange(b *testing.B) {
 	const width, height = 2048, 1536
-	pixels := make([]float32, width*height)
+	pixels := make([]uint16, width*height)
 	for i := range pixels {
-		pixels[i] = float32(i % 4096)
+		pixels[i] = uint16(i % 4096)
 	}
 
 	source := imaging.SourceImage{
-		Width:      width,
-		Height:     height,
-		Pixels:     pixels,
-		MinValue:   0,
-		MaxValue:   4095,
-		FitsUint16: true,
+		Width:        width,
+		Height:       height,
+		Storage:      imaging.SourceStorageUint16,
+		Uint16Pixels: pixels,
+		MinValue:     0,
+		MaxValue:     4095,
+		FitsUint16:   true,
 	}
 
 	plan := RenderPlan{Window: FullRangeWindowMode()}
@@ -136,18 +138,19 @@ func BenchmarkRenderGrayscalePixelsFullRange(b *testing.B) {
 
 func BenchmarkRenderGrayscalePixelsInvert(b *testing.B) {
 	const width, height = 2048, 1536
-	pixels := make([]float32, width*height)
+	pixels := make([]uint16, width*height)
 	for i := range pixels {
-		pixels[i] = float32(i % 4096)
+		pixels[i] = uint16(i % 4096)
 	}
 
 	source := imaging.SourceImage{
-		Width:      width,
-		Height:     height,
-		Pixels:     pixels,
-		MinValue:   0,
-		MaxValue:   4095,
-		FitsUint16: true,
+		Width:        width,
+		Height:       height,
+		Storage:      imaging.SourceStorageUint16,
+		Uint16Pixels: pixels,
+		MinValue:     0,
+		MaxValue:     4095,
+		FitsUint16:   true,
 		DefaultWindow: &imaging.WindowLevel{
 			Center: 2048,
 			Width:  4096,
@@ -276,6 +279,43 @@ func TestRenderUsesFallbackWhenUint16FitFlagIsFalse(t *testing.T) {
 
 	if got, want := got[1], MapLinear(1.5, source.MinValue, source.MaxValue); got != want {
 		t.Fatalf("middle pixel = %d, want fallback full-range mapping %d", got, want)
+	}
+}
+
+func TestRenderUint16StorageMatchesFloatLUTPath(t *testing.T) {
+	floatSource := imaging.SourceImage{
+		Width:      4,
+		Height:     1,
+		Pixels:     []float32{0, 1024, 2048, 4095},
+		MinValue:   0,
+		MaxValue:   4095,
+		FitsUint16: true,
+		DefaultWindow: &imaging.WindowLevel{
+			Center: 2048,
+			Width:  4096,
+		},
+	}
+	uint16Source := imaging.SourceImage{
+		Width:        4,
+		Height:       1,
+		Storage:      imaging.SourceStorageUint16,
+		Uint16Pixels: []uint16{0, 1024, 2048, 4095},
+		MinValue:     0,
+		MaxValue:     4095,
+		FitsUint16:   true,
+		DefaultWindow: &imaging.WindowLevel{
+			Center: 2048,
+			Width:  4096,
+		},
+	}
+
+	floatPixels := RenderGrayscalePixels(floatSource, DefaultRenderPlan())
+	defer bufpool.PutUint8(floatPixels)
+	uint16Pixels := RenderGrayscalePixels(uint16Source, DefaultRenderPlan())
+	defer bufpool.PutUint8(uint16Pixels)
+
+	if !equalBytes(uint16Pixels, floatPixels) {
+		t.Fatalf("uint16 render = %v, want float LUT render %v", uint16Pixels, floatPixels)
 	}
 }
 

@@ -69,14 +69,17 @@ func TestDecodeFileSupportsStandaloneTIFFInput(t *testing.T) {
 	if got, want := study.Image.Format, imaging.FormatGrayFloat32; got != want {
 		t.Fatalf("Image.Format = %q, want %q", got, want)
 	}
-	if got, want := len(study.Image.Pixels), 2; got != want {
-		t.Fatalf("len(Image.Pixels) = %d, want %d", got, want)
+	if got, want := study.Image.Storage, imaging.SourceStorageUint16; got != want {
+		t.Fatalf("Image.Storage = %q, want %q", got, want)
 	}
-	if got, want := study.Image.Pixels[0], float32(0); got != want {
-		t.Fatalf("Image.Pixels[0] = %v, want %v", got, want)
+	if got, want := len(study.Image.Uint16Pixels), 2; got != want {
+		t.Fatalf("len(Image.Uint16Pixels) = %d, want %d", got, want)
 	}
-	if got, want := study.Image.Pixels[1], float32(0xffff); got != want {
-		t.Fatalf("Image.Pixels[1] = %v, want %v", got, want)
+	if got, want := study.Image.Uint16Pixels[0], uint16(0); got != want {
+		t.Fatalf("Image.Uint16Pixels[0] = %v, want %v", got, want)
+	}
+	if got, want := study.Image.Uint16Pixels[1], uint16(0xffff); got != want {
+		t.Fatalf("Image.Uint16Pixels[1] = %v, want %v", got, want)
 	}
 	if got, want := study.Image.MinValue, float32(0); got != want {
 		t.Fatalf("Image.MinValue = %v, want %v", got, want)
@@ -150,8 +153,9 @@ func TestSourceImageFromImageCommonFormats(t *testing.T) {
 			if got.Format != imaging.FormatGrayFloat32 {
 				t.Fatalf("Format = %q, want %q", got.Format, imaging.FormatGrayFloat32)
 			}
-			if !float32SlicesEqual(got.Pixels, tc.wantPixels) {
-				t.Fatalf("Pixels = %v, want %v", got.Pixels, tc.wantPixels)
+			gotPixels := sourceImagePixelsAsFloat32(got)
+			if !float32SlicesEqual(gotPixels, tc.wantPixels) {
+				t.Fatalf("Pixels = %v, want %v", gotPixels, tc.wantPixels)
 			}
 			if got.MinValue != tc.wantMin || got.MaxValue != tc.wantMax {
 				t.Fatalf("range = [%v, %v], want [%v, %v]", got.MinValue, got.MaxValue, tc.wantMin, tc.wantMax)
@@ -241,12 +245,23 @@ func BenchmarkSourceImageFromImage(b *testing.B) {
 				if err != nil {
 					b.Fatal(err)
 				}
-				if len(sourceImage.Pixels) != width*height {
-					b.Fatalf("len(Pixels) = %d, want %d", len(sourceImage.Pixels), width*height)
+				if sourceImage.PixelCount() != width*height {
+					b.Fatalf("PixelCount() = %d, want %d", sourceImage.PixelCount(), width*height)
 				}
 			}
 		})
 	}
+}
+
+func sourceImagePixelsAsFloat32(image imaging.SourceImage) []float32 {
+	if image.Storage != imaging.SourceStorageUint16 {
+		return image.Pixels
+	}
+	pixels := make([]float32, len(image.Uint16Pixels))
+	for index, value := range image.Uint16Pixels {
+		pixels[index] = float32(value)
+	}
+	return pixels
 }
 
 func writeBMPFixture(t *testing.T, path string) {

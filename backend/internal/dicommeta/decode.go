@@ -681,14 +681,59 @@ func buildSourceImage(
 		)
 	}
 
+	if sourceRangeFitsUint16(minValue, maxValue) && float32PixelsFitUint16(pixels) {
+		return buildUint16SourceImage(
+			width,
+			height,
+			float32PixelsToUint16(pixels),
+			minValue,
+			maxValue,
+			defaultWindow,
+			invert,
+		)
+	}
+
 	return imaging.SourceImage{
 		Width:         width,
 		Height:        height,
 		Format:        imaging.FormatGrayFloat32,
+		Storage:       imaging.SourceStorageFloat32,
 		Pixels:        pixels,
 		MinValue:      minValue,
 		MaxValue:      maxValue,
-		FitsUint16:    sourceRangeFitsUint16(minValue, maxValue),
+		DefaultWindow: defaultWindow,
+		Invert:        invert,
+	}, nil
+}
+
+func buildUint16SourceImage(
+	width uint32,
+	height uint32,
+	pixels []uint16,
+	minValue float32,
+	maxValue float32,
+	defaultWindow *imaging.WindowLevel,
+	invert bool,
+) (imaging.SourceImage, error) {
+	expected := int(width) * int(height)
+	if len(pixels) != expected {
+		return imaging.SourceImage{}, fmt.Errorf(
+			"decoded source pixel count %d does not match dimensions %dx%d",
+			len(pixels),
+			width,
+			height,
+		)
+	}
+
+	return imaging.SourceImage{
+		Width:         width,
+		Height:        height,
+		Format:        imaging.FormatGrayFloat32,
+		Storage:       imaging.SourceStorageUint16,
+		Uint16Pixels:  pixels,
+		MinValue:      minValue,
+		MaxValue:      maxValue,
+		FitsUint16:    true,
 		DefaultWindow: defaultWindow,
 		Invert:        invert,
 	}, nil
@@ -696,6 +741,23 @@ func buildSourceImage(
 
 func sourceRangeFitsUint16(minValue float32, maxValue float32) bool {
 	return minValue >= 0 && maxValue <= 65535
+}
+
+func float32PixelsFitUint16(pixels []float32) bool {
+	for _, value := range pixels {
+		if value < 0 || value > 65535 || value != float32(uint16(value)) {
+			return false
+		}
+	}
+	return true
+}
+
+func float32PixelsToUint16(pixels []float32) []uint16 {
+	converted := make([]uint16, len(pixels))
+	for index, value := range pixels {
+		converted[index] = uint16(value)
+	}
+	return converted
 }
 
 func sourceImageFromImage(

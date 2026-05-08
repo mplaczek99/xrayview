@@ -31,8 +31,16 @@ func RenderSourceImage(source imaging.SourceImage, plan RenderPlan) imaging.Prev
 }
 
 func RenderGrayscalePixels(source imaging.SourceImage, plan RenderPlan) []uint8 {
-	pixels := bufpool.GetUint8(len(source.Pixels))
+	pixels := bufpool.GetUint8(source.PixelCount())
 	window, hasWindow := resolveWindow(source, plan.Window)
+
+	if source.StorageKind() == imaging.SourceStorageUint16 {
+		lut := *cachedRenderLUT(source, window, hasWindow)
+		for index, value := range source.Uint16Pixels {
+			pixels[index] = lut[value]
+		}
+		return pixels
+	}
 
 	// LUT fast path. When the source's modality values fit a uint16 index
 	// we precompute a 65k-entry table once and turn each per-pixel

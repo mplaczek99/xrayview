@@ -42,6 +42,29 @@ func TestSourceImageValidateAcceptsSharedDecodeModel(t *testing.T) {
 	}
 }
 
+func TestSourceImageValidateAcceptsUint16Storage(t *testing.T) {
+	image := SourceImage{
+		Width:        2,
+		Height:       2,
+		Format:       FormatGrayFloat32,
+		Storage:      SourceStorageUint16,
+		Uint16Pixels: []uint16{0, 64, 128, 255},
+		MinValue:     0,
+		MaxValue:     255,
+		FitsUint16:   true,
+	}
+
+	if err := image.Validate(); err != nil {
+		t.Fatalf("Validate returned error: %v", err)
+	}
+	if got, want := image.ByteSize(), uint64(8); got != want {
+		t.Fatalf("ByteSize() = %d, want %d", got, want)
+	}
+	if got, want := image.PixelCount(), 4; got != want {
+		t.Fatalf("PixelCount() = %d, want %d", got, want)
+	}
+}
+
 func TestSourceImageValidateRejectsInvalidShape(t *testing.T) {
 	image := SourceImage{
 		Width:    2,

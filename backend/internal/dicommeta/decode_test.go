@@ -137,6 +137,7 @@ func TestDecodeNativePixelDataRecordsUint16FitFlag(t *testing.T) {
 		slope        float32
 		intercept    float32
 		wantFitsU16  bool
+		wantStorage  imaging.SourceStorage
 		wantMinValue float32
 		wantMaxValue float32
 	}{
@@ -154,6 +155,7 @@ func TestDecodeNativePixelDataRecordsUint16FitFlag(t *testing.T) {
 			raw:          []byte{0, 255},
 			slope:        1,
 			wantFitsU16:  true,
+			wantStorage:  imaging.SourceStorageUint16,
 			wantMinValue: 0,
 			wantMaxValue: 255,
 		},
@@ -172,8 +174,27 @@ func TestDecodeNativePixelDataRecordsUint16FitFlag(t *testing.T) {
 			slope:        1,
 			intercept:    -1,
 			wantFitsU16:  false,
+			wantStorage:  imaging.SourceStorageFloat32,
 			wantMinValue: -1,
 			wantMaxValue: 254,
+		},
+		{
+			name: "fractional rescale",
+			metadata: Metadata{
+				Rows:                      1,
+				Columns:                   2,
+				SamplesPerPixel:           1,
+				BitsAllocated:             8,
+				BitsStored:                8,
+				PixelRepresentation:       0,
+				PhotometricInterpretation: "MONOCHROME2",
+			},
+			raw:          []byte{1, 3},
+			slope:        0.5,
+			wantFitsU16:  false,
+			wantStorage:  imaging.SourceStorageFloat32,
+			wantMinValue: 0.5,
+			wantMaxValue: 1.5,
 		},
 		{
 			name: "rescaled above uint16",
@@ -189,6 +210,7 @@ func TestDecodeNativePixelDataRecordsUint16FitFlag(t *testing.T) {
 			raw:          []byte{0xff, 0xff, 0x00, 0x00},
 			slope:        2,
 			wantFitsU16:  false,
+			wantStorage:  imaging.SourceStorageFloat32,
 			wantMinValue: 0,
 			wantMaxValue: 131070,
 		},
@@ -208,6 +230,9 @@ func TestDecodeNativePixelDataRecordsUint16FitFlag(t *testing.T) {
 
 			if got := image.FitsUint16; got != test.wantFitsU16 {
 				t.Fatalf("FitsUint16 = %v, want %v", got, test.wantFitsU16)
+			}
+			if got := image.Storage; got != test.wantStorage {
+				t.Fatalf("Storage = %q, want %q", got, test.wantStorage)
 			}
 			if got := image.MinValue; got != test.wantMinValue {
 				t.Fatalf("MinValue = %v, want %v", got, test.wantMinValue)
@@ -650,8 +675,8 @@ func TestDecodeCompressedImageBuildsSourceImageFromJPEGPayload(t *testing.T) {
 	if got, want := sourceImage.Format, imaging.FormatGrayFloat32; got != want {
 		t.Fatalf("Format = %q, want %q", got, want)
 	}
-	if got, want := len(sourceImage.Pixels), 2; got != want {
-		t.Fatalf("len(Pixels) = %d, want %d", got, want)
+	if got, want := sourceImage.PixelCount(), 2; got != want {
+		t.Fatalf("PixelCount() = %d, want %d", got, want)
 	}
 	if sourceImage.DefaultWindow == nil {
 		t.Fatal("DefaultWindow = nil, want resolved window metadata")
