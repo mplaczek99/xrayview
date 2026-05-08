@@ -1,13 +1,19 @@
 package httpapi
 
 import (
+	"bytes"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"sync"
 
 	"xrayview/backend/internal/contracts"
 )
+
+var sseFrameBufferPool = sync.Pool{
+	New: func() any {
+		return new(bytes.Buffer)
+	},
+}
 
 // sseHub fans out job-update events to all connected SSE clients.
 // Each subscriber receives a buffered channel; frames are dropped for slow
@@ -38,11 +44,26 @@ func (h *sseHub) unsubscribe(ch chan []byte) {
 // broadcast serialises snapshot and enqueues a SSE data frame to every client.
 // Non-blocking: frames are dropped for clients whose buffer is full.
 func (h *sseHub) broadcast(snapshot contracts.JobSnapshot) {
-	data, err := json.Marshal(snapshot)
-	if err != nil {
+	h.mu.Lock()
+	if len(h.clients) == 0 {
+		h.mu.Unlock()
 		return
 	}
-	frame := []byte(fmt.Sprintf("data: %s\n\n", data))
+	h.mu.Unlock()
+
+	buf := sseFrameBufferPool.Get().(*bytes.Buffer)
+	buf.Reset()
+	buf.WriteString("data: ")
+	if err := json.NewEncoder(buf).Encode(snapshot); err != nil {
+		sseFrameBufferPool.Put(buf)
+		return
+	}
+	buf.WriteByte('\n')
+
+	// SSE clients receive frames asynchronously, so copy the bytes before
+	// returning the scratch buffer to the pool.
+	frame := bytes.Clone(buf.Bytes())
+	sseFrameBufferPool.Put(buf)
 
 	h.mu.Lock()
 	defer h.mu.Unlock()
