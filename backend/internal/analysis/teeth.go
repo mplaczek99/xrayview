@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 
+	"xrayview/backend/internal/bufpool"
 	"xrayview/backend/internal/imaging"
 )
 
@@ -66,6 +67,44 @@ type boundarySegment struct {
 	end   gridPoint
 }
 
+type maskWorkspace struct {
+	masks           [][]uint8
+	counts          []int
+	queue           []int
+	componentPixels []int
+}
+
+func newMaskWorkspace() *maskWorkspace {
+	return &maskWorkspace{}
+}
+
+func (workspace *maskWorkspace) getMask(length int) []uint8 {
+	if length <= 0 {
+		return nil
+	}
+	mask := bufpool.GetUint8(length)
+	clear(mask)
+	workspace.masks = append(workspace.masks, mask)
+	return mask
+}
+
+func (workspace *maskWorkspace) countScratch(width int) []int {
+	if cap(workspace.counts) < width {
+		workspace.counts = make([]int, width)
+	}
+	return workspace.counts[:width]
+}
+
+func (workspace *maskWorkspace) release() {
+	for _, mask := range workspace.masks {
+		bufpool.PutUint8(mask)
+	}
+	workspace.masks = nil
+	workspace.counts = nil
+	workspace.queue = nil
+	workspace.componentPixels = nil
+}
+
 func GenerateToothOverlay(preview imaging.PreviewImage) (ToothOverlayResult, error) {
 	if err := preview.Validate(); err != nil {
 		return ToothOverlayResult{}, fmt.Errorf("validate preview image: %w", err)
@@ -82,8 +121,11 @@ func GenerateToothOverlay(preview imaging.PreviewImage) (ToothOverlayResult, err
 		return ToothOverlayResult{}, fmt.Errorf("image is too small for tooth analysis: %dx%d", width, height)
 	}
 
-	toothMask := detectToothMask(gray, width, height)
-	boneMask := detectBoneLevelMask(gray, width, height)
+	workspace := newMaskWorkspace()
+	defer workspace.release()
+
+	toothMask := detectToothMaskWithWorkspace(gray, width, height, workspace)
+	boneMask := detectBoneLevelMaskWithWorkspace(gray, width, height, workspace)
 	components := collectComponents(toothMask, toothMask, width, height, minimumToothAreaPixels(width, height))
 
 	toothPixels := countMaskPixels(toothMask)
@@ -98,10 +140,11 @@ func GenerateToothOverlay(preview imaging.PreviewImage) (ToothOverlayResult, err
 	}
 
 	return ToothOverlayResult{
-		Preview: overlayMasks(
+		Preview: overlayMasksWithWorkspace(
+			workspace,
 			gray,
 			toothMask,
-			thickenBoneLineMask(boneMask, width, height, boneLineThicknessPixels),
+			thickenBoneLineMaskWithWorkspace(boneMask, width, height, boneLineThicknessPixels, workspace),
 			preview.Width,
 			preview.Height,
 		),
@@ -114,25 +157,52 @@ func GenerateToothOverlay(preview imaging.PreviewImage) (ToothOverlayResult, err
 }
 
 func detectToothMask(gray []uint8, width, height int) []uint8 {
+	workspace := newMaskWorkspace()
+	defer workspace.release()
+	return append([]uint8(nil), detectToothMaskWithWorkspace(gray, width, height, workspace)...)
+}
+
+func detectToothMaskWithWorkspace(gray []uint8, width, height int, workspace *maskWorkspace) []uint8 {
 	normalized := normalizeGray(gray)
-	mask := featureTableToothMask(normalized, width, height)
-	mask = closeBinaryMask(mask, width, height, 1)
-	mask = openBinaryMask(mask, width, height, 1)
-	mask = fillHolesBinaryMask(mask, width, height)
-	mask = removeSmallMaskComponents(mask, width, height, minimumToothAreaPixels(width, height))
+	mask := workspace.getMask(len(normalized))
+	work := workspace.getMask(len(normalized))
+	scratch := workspace.getMask(len(normalized))
+	counts := workspace.countScratch(width)
+
+	featureTableToothMaskInto(mask, normalized, width, height)
+	closeBinaryMaskInPlace(mask, work, scratch, counts, width, height, 1)
+	openBinaryMaskInPlace(mask, work, scratch, counts, width, height, 1)
+	fillHolesBinaryMaskInto(work, scratch, &workspace.queue, mask, width, height)
+	mask, work = work, mask
+	removeSmallMaskComponentsInto(work, scratch, &workspace.queue, &workspace.componentPixels, mask, width, height, minimumToothAreaPixels(width, height))
+	mask = work
 	return mask
 }
 
 func detectBoneLevelMask(gray []uint8, width, height int) []uint8 {
+	workspace := newMaskWorkspace()
+	defer workspace.release()
+	return append([]uint8(nil), detectBoneLevelMaskWithWorkspace(gray, width, height, workspace)...)
+}
+
+func detectBoneLevelMaskWithWorkspace(gray []uint8, width, height int, workspace *maskWorkspace) []uint8 {
 	if mask, ok := boneExemplarMask(gray, width, height); ok {
-		return mask
+		pooled := workspace.getMask(len(mask))
+		copy(pooled, mask)
+		return pooled
 	}
 
 	normalized := normalizeGray(gray)
 	gradient := gradientGray(boxBlurGray(normalized, width, height, 2), width, height)
-	mask := boneFeatureTableMask(normalized, gradient, width, height)
-	mask = closeBinaryMask(mask, width, height, 1)
-	mask = removeSmallMaskComponents(mask, width, height, minimumBoneAreaPixels(width, height))
+	mask := workspace.getMask(len(normalized))
+	work := workspace.getMask(len(normalized))
+	scratch := workspace.getMask(len(normalized))
+	counts := workspace.countScratch(width)
+
+	boneFeatureTableMaskInto(mask, normalized, gradient, width, height)
+	closeBinaryMaskInPlace(mask, work, scratch, counts, width, height, 1)
+	removeSmallMaskComponentsInto(work, scratch, &workspace.queue, &workspace.componentPixels, mask, width, height, minimumBoneAreaPixels(width, height))
+	mask = work
 	return mask
 }
 
@@ -153,6 +223,12 @@ func grayPixels(preview imaging.PreviewImage) ([]uint8, error) {
 }
 
 func overlayMasks(gray []uint8, toothMask []uint8, boneMask []uint8, width, height uint32) imaging.PreviewImage {
+	workspace := newMaskWorkspace()
+	defer workspace.release()
+	return overlayMasksWithWorkspace(workspace, gray, toothMask, boneMask, width, height)
+}
+
+func overlayMasksWithWorkspace(workspace *maskWorkspace, gray []uint8, toothMask []uint8, boneMask []uint8, width, height uint32) imaging.PreviewImage {
 	rgba := make([]uint8, len(gray)*4)
 	for index, value := range gray {
 		base := index * 4
@@ -168,7 +244,7 @@ func overlayMasks(gray []uint8, toothMask []uint8, boneMask []uint8, width, heig
 		rgba,
 		widthInt,
 		heightInt,
-		boneOutlineSourceMask(boneMask, widthInt, heightInt),
+		boneOutlineSourceMaskWithWorkspace(boneMask, widthInt, heightInt, workspace),
 		boneOverlayRed,
 		toothMask,
 	)
@@ -177,18 +253,35 @@ func overlayMasks(gray []uint8, toothMask []uint8, boneMask []uint8, width, heig
 }
 
 func boneOutlineMask(toothMask []uint8, boneMask []uint8, width, height int) []uint8 {
-	outline := innerOutlineMask(boneOutlineSourceMask(boneMask, width, height), width, height, boneOutlineThicknessPixels)
+	workspace := newMaskWorkspace()
+	defer workspace.release()
+
+	source := boneOutlineSourceMaskWithWorkspace(boneMask, width, height, workspace)
+	outline := workspace.getMask(len(source))
+	work := workspace.getMask(len(source))
+	scratch := workspace.getMask(len(source))
+	innerOutlineMaskInto(outline, work, scratch, workspace.countScratch(width), source, width, height, boneOutlineThicknessPixels)
 	for index, value := range toothMask {
 		if value != 0 {
 			outline[index] = 0
 		}
 	}
-	return outline
+	return append([]uint8(nil), outline...)
 }
 
 func boneOutlineSourceMask(boneMask []uint8, width, height int) []uint8 {
-	source := removeSmallMaskComponents(boneMask, width, height, minimumBoneOutlineAreaPixels(width, height))
-	return fillHolesBinaryMask(source, width, height)
+	workspace := newMaskWorkspace()
+	defer workspace.release()
+	return append([]uint8(nil), boneOutlineSourceMaskWithWorkspace(boneMask, width, height, workspace)...)
+}
+
+func boneOutlineSourceMaskWithWorkspace(boneMask []uint8, width, height int, workspace *maskWorkspace) []uint8 {
+	source := workspace.getMask(len(boneMask))
+	scratch := workspace.getMask(len(boneMask))
+	filled := workspace.getMask(len(boneMask))
+	removeSmallMaskComponentsInto(source, scratch, &workspace.queue, &workspace.componentPixels, boneMask, width, height, minimumBoneOutlineAreaPixels(width, height))
+	fillHolesBinaryMaskInto(filled, scratch, &workspace.queue, source, width, height)
+	return filled
 }
 
 func minimumBoneOutlineAreaPixels(width, height int) int {
@@ -840,12 +933,61 @@ func removeSmallMaskComponents(mask []uint8, width, height, minArea int) []uint8
 	}
 
 	filtered := make([]uint8, len(mask))
-	for _, candidate := range collectComponents(mask, mask, width, height, minArea) {
-		for _, index := range candidate.pixels {
-			filtered[index] = 1
+	visited := make([]uint8, len(mask))
+	queue := make([]int, 0, 512)
+	pixels := make([]int, 0, 512)
+	removeSmallMaskComponentsInto(filtered, visited, &queue, &pixels, mask, width, height, minArea)
+	return filtered
+}
+
+func removeSmallMaskComponentsInto(out []uint8, visited []uint8, queue *[]int, pixels *[]int, mask []uint8, width, height, minArea int) {
+	if minArea <= 1 || len(mask) == 0 {
+		copy(out, mask)
+		return
+	}
+
+	clear(out)
+	clear(visited[:len(mask)])
+	q := (*queue)[:0]
+	componentPixels := (*pixels)[:0]
+	for y := 0; y < height; y++ {
+		for x := 0; x < width; x++ {
+			start := y*width + x
+			if visited[start] != 0 || mask[start] == 0 {
+				continue
+			}
+
+			visited[start] = 1
+			q = append(q[:0], start)
+			componentPixels = componentPixels[:0]
+			for head := 0; head < len(q); head++ {
+				index := q[head]
+				componentPixels = append(componentPixels, index)
+				px := index % width
+				py := index / width
+
+				for ny := maxInt(py-1, 0); ny <= minInt(py+1, height-1); ny++ {
+					for nx := maxInt(px-1, 0); nx <= minInt(px+1, width-1); nx++ {
+						neighbor := ny*width + nx
+						if visited[neighbor] != 0 || mask[neighbor] == 0 {
+							continue
+						}
+						visited[neighbor] = 1
+						q = append(q, neighbor)
+					}
+				}
+			}
+
+			if len(componentPixels) < minArea {
+				continue
+			}
+			for _, index := range componentPixels {
+				out[index] = 1
+			}
 		}
 	}
-	return filtered
+	*queue = q
+	*pixels = componentPixels[:0]
 }
 
 func minimumToothAreaPixels(width, height int) int {
@@ -861,6 +1003,16 @@ func thickenBoneLineMask(mask []uint8, width, height, radius int) []uint8 {
 		return append([]uint8(nil), mask...)
 	}
 	return dilateBinaryMask(mask, width, height, radius)
+}
+
+func thickenBoneLineMaskWithWorkspace(mask []uint8, width, height, radius int, workspace *maskWorkspace) []uint8 {
+	if radius <= 0 || len(mask) == 0 {
+		return mask
+	}
+	out := workspace.getMask(len(mask))
+	scratch := workspace.getMask(len(mask))
+	dilateBinaryMaskInto(out, scratch, workspace.countScratch(width), mask, width, height, radius)
+	return out
 }
 
 func collectComponents(mask []uint8, seeds []uint8, width, height, minArea int) []component {
@@ -985,67 +1137,97 @@ func innerOutlineMask(mask []uint8, width, height, thickness int) []uint8 {
 		return append([]uint8(nil), mask...)
 	}
 
-	eroded := erodeBinaryMask(mask, width, height, thickness)
 	outline := make([]uint8, len(mask))
+	eroded := make([]uint8, len(mask))
+	scratch := make([]uint8, len(mask))
+	counts := make([]int, width)
+	innerOutlineMaskInto(outline, eroded, scratch, counts, mask, width, height, thickness)
+	return outline
+}
+
+func innerOutlineMaskInto(out []uint8, eroded []uint8, scratch []uint8, counts []int, mask []uint8, width, height, thickness int) {
+	if thickness <= 0 || len(mask) == 0 {
+		copy(out, mask)
+		return
+	}
+
+	erodeBinaryMaskInto(eroded, scratch, counts, mask, width, height, thickness)
 	for index, value := range mask {
 		if value != 0 && eroded[index] == 0 {
-			outline[index] = 1
+			out[index] = 1
+		} else {
+			out[index] = 0
 		}
 	}
-	return outline
 }
 
 func closeBinaryMask(mask []uint8, width, height, radius int) []uint8 {
 	if radius <= 0 || len(mask) == 0 {
 		return append([]uint8(nil), mask...)
 	}
+
+	out := append([]uint8(nil), mask...)
+	work := make([]uint8, len(mask))
+	scratch := make([]uint8, len(mask))
+	counts := make([]int, maxInt(width, 0))
+	closeBinaryMaskInPlace(out, work, scratch, counts, width, height, radius)
+	return out
+}
+
+func closeBinaryMaskInPlace(mask []uint8, work []uint8, scratch []uint8, counts []int, width, height, radius int) {
+	if radius <= 0 || len(mask) == 0 {
+		return
+	}
 	if width <= 0 || height <= 0 {
-		return make([]uint8, len(mask))
+		clear(mask)
+		return
 	}
 
-	scratch := make([]uint8, len(mask))
-	counts := make([]int, width)
-	closed := make([]uint8, len(mask))
-	out := make([]uint8, len(mask))
-	dilateBinaryMaskInto(closed, scratch, counts, mask, width, height, radius)
-	erodeBinaryMaskInto(out, scratch, counts, closed, width, height, radius)
-	return out
+	dilateBinaryMaskInto(work, scratch, counts, mask, width, height, radius)
+	erodeBinaryMaskInto(mask, scratch, counts, work, width, height, radius)
 }
 
 func openBinaryMask(mask []uint8, width, height, radius int) []uint8 {
 	if radius <= 0 || len(mask) == 0 {
 		return append([]uint8(nil), mask...)
 	}
+
+	out := append([]uint8(nil), mask...)
+	work := make([]uint8, len(mask))
+	scratch := make([]uint8, len(mask))
+	counts := make([]int, maxInt(width, 0))
+	openBinaryMaskInPlace(out, work, scratch, counts, width, height, radius)
+	return out
+}
+
+func openBinaryMaskInPlace(mask []uint8, work []uint8, scratch []uint8, counts []int, width, height, radius int) {
+	if radius <= 0 || len(mask) == 0 {
+		return
+	}
 	if width <= 0 || height <= 0 {
-		return make([]uint8, len(mask))
+		clear(mask)
+		return
 	}
 
-	scratch := make([]uint8, len(mask))
-	counts := make([]int, width)
-	opened := make([]uint8, len(mask))
-	out := make([]uint8, len(mask))
-	erodeBinaryMaskInto(opened, scratch, counts, mask, width, height, radius)
-	dilateBinaryMaskInto(out, scratch, counts, opened, width, height, radius)
-	return out
+	erodeBinaryMaskInto(work, scratch, counts, mask, width, height, radius)
+	dilateBinaryMaskInto(mask, scratch, counts, work, width, height, radius)
 }
 
 func dilateBinaryMask(mask []uint8, width, height, radius int) []uint8 {
 	if radius <= 0 || len(mask) == 0 {
 		return append([]uint8(nil), mask...)
 	}
-	if width <= 0 || height <= 0 {
-		return make([]uint8, len(mask))
-	}
 
 	out := make([]uint8, len(mask))
 	scratch := make([]uint8, len(mask))
-	counts := make([]int, width)
+	counts := make([]int, maxInt(width, 0))
 	dilateBinaryMaskInto(out, scratch, counts, mask, width, height, radius)
 	return out
 }
 
 func dilateBinaryMaskInto(out []uint8, scratch []uint8, counts []int, mask []uint8, width, height, radius int) {
 	if width <= 0 || height <= 0 {
+		clear(out)
 		return
 	}
 
@@ -1113,19 +1295,17 @@ func erodeBinaryMask(mask []uint8, width, height, radius int) []uint8 {
 	if radius <= 0 || len(mask) == 0 {
 		return append([]uint8(nil), mask...)
 	}
-	if width <= 0 || height <= 0 {
-		return make([]uint8, len(mask))
-	}
 
 	out := make([]uint8, len(mask))
 	scratch := make([]uint8, len(mask))
-	counts := make([]int, width)
+	counts := make([]int, maxInt(width, 0))
 	erodeBinaryMaskInto(out, scratch, counts, mask, width, height, radius)
 	return out
 }
 
 func erodeBinaryMaskInto(out []uint8, scratch []uint8, counts []int, mask []uint8, width, height, radius int) {
 	if width <= 0 || height <= 0 {
+		clear(out)
 		return
 	}
 
@@ -1195,14 +1375,30 @@ func fillHolesBinaryMask(mask []uint8, width, height int) []uint8 {
 		return nil
 	}
 
-	outside := make([]bool, len(mask))
+	filled := make([]uint8, len(mask))
+	outside := make([]uint8, len(mask))
 	queue := make([]int, 0, width*2+height*2)
+	fillHolesBinaryMaskInto(filled, outside, &queue, mask, width, height)
+	return filled
+}
+
+func fillHolesBinaryMaskInto(out []uint8, outside []uint8, queue *[]int, mask []uint8, width, height int) {
+	if len(mask) == 0 {
+		return
+	}
+	if width <= 0 || height <= 0 {
+		copy(out, mask)
+		return
+	}
+
+	clear(outside[:len(mask)])
+	q := (*queue)[:0]
 	push := func(index int) {
-		if index < 0 || index >= len(mask) || outside[index] || mask[index] != 0 {
+		if index < 0 || index >= len(mask) || outside[index] != 0 || mask[index] != 0 {
 			return
 		}
-		outside[index] = true
-		queue = append(queue, index)
+		outside[index] = 1
+		q = append(q, index)
 	}
 	for x := 0; x < width; x++ {
 		push(x)
@@ -1213,8 +1409,8 @@ func fillHolesBinaryMask(mask []uint8, width, height int) []uint8 {
 		push(y*width + width - 1)
 	}
 
-	for head := 0; head < len(queue); head++ {
-		index := queue[head]
+	for head := 0; head < len(q); head++ {
+		index := q[head]
 		x := index % width
 		y := index / width
 		if x > 0 {
@@ -1231,13 +1427,13 @@ func fillHolesBinaryMask(mask []uint8, width, height int) []uint8 {
 		}
 	}
 
-	filled := append([]uint8(nil), mask...)
-	for index := range filled {
-		if filled[index] == 0 && !outside[index] {
-			filled[index] = 1
+	copy(out, mask)
+	for index := range out {
+		if out[index] == 0 && outside[index] == 0 {
+			out[index] = 1
 		}
 	}
-	return filled
+	*queue = q
 }
 
 func fillSmallHolesBinaryMask(mask []uint8, width, height, maxArea int) []uint8 {

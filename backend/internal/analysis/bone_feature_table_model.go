@@ -33,6 +33,12 @@ var boneFeatureTable = struct {
 
 func boneFeatureTableMask(normalized []uint8, gradient []uint8, width, height int) []uint8 {
 	mask := make([]uint8, len(normalized))
+	boneFeatureTableMaskInto(mask, normalized, gradient, width, height)
+	return mask
+}
+
+func boneFeatureTableMaskInto(mask []uint8, normalized []uint8, gradient []uint8, width, height int) {
+	clear(mask)
 	boneFeatureTable.Once.Do(loadBoneFeatureTable)
 	parallelRows(width, height, func(startY, endY int) {
 		for y := startY; y < endY; y++ {
@@ -45,7 +51,6 @@ func boneFeatureTableMask(normalized []uint8, gradient []uint8, width, height in
 			}
 		}
 	})
-	return mask
 }
 
 func boneFeatureTableProbability(key uint32) (uint8, bool) {

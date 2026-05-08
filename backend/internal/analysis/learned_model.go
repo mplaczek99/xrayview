@@ -116,8 +116,14 @@ func learnedToothMask(gray []uint8, normalized []uint8, width, height int) []uin
 }
 
 func featureTableToothMask(normalized []uint8, width, height int) []uint8 {
-	scores := learnedToothScores(normalized, width, height)
 	mask := make([]uint8, len(normalized))
+	featureTableToothMaskInto(mask, normalized, width, height)
+	return mask
+}
+
+func featureTableToothMaskInto(mask []uint8, normalized []uint8, width, height int) {
+	clear(mask)
+	scores := learnedToothScores(normalized, width, height)
 	featureTable.Once.Do(loadFeatureTable)
 	parallelRows(width, height, func(startY, endY int) {
 		for y := startY; y < endY; y++ {
@@ -135,7 +141,6 @@ func featureTableToothMask(normalized []uint8, width, height int) []uint8 {
 			}
 		}
 	})
-	return mask
 }
 
 func featureTableKey(x, y, width, height int, normalized uint8, score float64) uint32 {

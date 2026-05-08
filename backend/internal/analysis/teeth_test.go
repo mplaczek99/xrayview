@@ -532,6 +532,26 @@ func BenchmarkBinaryMorphology(b *testing.B) {
 	}
 }
 
+func BenchmarkGenerateToothOverlay(b *testing.B) {
+	const width = 512
+	const height = 384
+
+	preview := imaging.GrayPreview(width, height, benchmarkGray(width, height))
+	b.SetBytes(int64(width * height))
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		result, err := GenerateToothOverlay(preview)
+		if err != nil {
+			b.Fatalf("GenerateToothOverlay returned error: %v", err)
+		}
+		if len(result.Preview.Pixels) == 0 {
+			b.Fatal("empty preview")
+		}
+	}
+}
+
 func BenchmarkLearnedToothScores(b *testing.B) {
 	const width = 1024
 	const height = 768
