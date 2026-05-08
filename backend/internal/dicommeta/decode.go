@@ -24,7 +24,9 @@ import (
 	"math/big"
 	"math/bits"
 	"os"
+	"runtime"
 	"strings"
+	"sync"
 	"unsafe"
 
 	"xrayview/backend/internal/contracts"
@@ -790,60 +792,199 @@ func sourceImageFromImage(
 }
 
 func decodeU8Monochrome(samples []byte, cfg sourceDecodeConfig) ([]float32, float32, float32) {
-	n := len(samples)
-	if n == 0 {
-		return nil, 0, 0
-	}
-	pixels := make([]float32, n)
-	first := scaledStoredPixelValue(uint32(samples[0]), cfg)
-	pixels[0] = first
-	minVal, maxVal := first, first
-	for i := 1; i < n; i++ {
-		v := scaledStoredPixelValue(uint32(samples[i]), cfg)
-		pixels[i] = v
-		if v < minVal {
-			minVal = v
-		}
-		if v > maxVal {
-			maxVal = v
-		}
-	}
-	return pixels, minVal, maxVal
+	return decodeMonochromeSamples(samples, cfg, 8)
 }
 
 func decodeU16Monochrome(samples []uint16, cfg sourceDecodeConfig) ([]float32, float32, float32) {
-	n := len(samples)
-	if n == 0 {
-		return nil, 0, 0
-	}
-	pixels := make([]float32, n)
-	first := scaledStoredPixelValue(uint32(samples[0]), cfg)
-	pixels[0] = first
-	minVal, maxVal := first, first
-	for i := 1; i < n; i++ {
-		v := scaledStoredPixelValue(uint32(samples[i]), cfg)
-		pixels[i] = v
-		if v < minVal {
-			minVal = v
-		}
-		if v > maxVal {
-			maxVal = v
-		}
-	}
-	return pixels, minVal, maxVal
+	return decodeMonochromeSamples(samples, cfg, 16)
 }
 
 func decodeU32Monochrome(samples []uint32, cfg sourceDecodeConfig) ([]float32, float32, float32) {
+	return decodeMonochromeSamples(samples, cfg, 32)
+}
+
+type monochromeSample interface {
+	~uint8 | ~uint16 | ~uint32
+}
+
+const (
+	decodeParallelMinPixels = 1 << 20
+	decodePixelsPerWorker   = 1 << 18
+	decodeMaxWorkers        = 64
+)
+
+type decodeMode uint8
+
+const (
+	decodeModeUnsignedFullRange decodeMode = iota
+	decodeModeUnsignedFullRangeRescale
+	decodeModeUnsignedMasked
+	decodeModeUnsignedMaskedRescale
+	decodeModeSigned
+	decodeModeSignedRescale
+)
+
+func decodeMonochromeSamples[T monochromeSample](
+	samples []T,
+	cfg sourceDecodeConfig,
+	bitsAllocated uint16,
+) ([]float32, float32, float32) {
 	n := len(samples)
 	if n == 0 {
 		return nil, 0, 0
 	}
 	pixels := make([]float32, n)
-	first := scaledStoredPixelValue(samples[0], cfg)
-	pixels[0] = first
+
+	bitsStored := normalizeBitsStored(cfg.bitsStored)
+	noRescale := cfg.slope == 1 && cfg.intercept == 0
+	var (
+		mask  uint32
+		shift uint
+		mode  decodeMode
+	)
+	if cfg.pixelRepresentation == 0 {
+		if bitsStored >= bitsAllocated {
+			if noRescale {
+				mode = decodeModeUnsignedFullRange
+			} else {
+				mode = decodeModeUnsignedFullRangeRescale
+			}
+			minVal, maxVal := decodeSamples(samples, pixels, mode, 0, 0, cfg.slope, cfg.intercept)
+			return pixels, minVal, maxVal
+		}
+
+		mask = uint32(1<<bitsStored) - 1
+		if noRescale {
+			mode = decodeModeUnsignedMasked
+		} else {
+			mode = decodeModeUnsignedMaskedRescale
+		}
+		minVal, maxVal := decodeSamples(samples, pixels, mode, mask, 0, cfg.slope, cfg.intercept)
+		return pixels, minVal, maxVal
+	}
+
+	shift = uint(32 - bitsStored)
+	if noRescale {
+		mode = decodeModeSigned
+	} else {
+		mode = decodeModeSignedRescale
+	}
+	minVal, maxVal := decodeSamples(samples, pixels, mode, 0, shift, cfg.slope, cfg.intercept)
+	return pixels, minVal, maxVal
+}
+
+func decodeSamples[T monochromeSample](
+	samples []T,
+	pixels []float32,
+	mode decodeMode,
+	mask uint32,
+	shift uint,
+	slope float32,
+	intercept float32,
+) (float32, float32) {
+	workers := decodeWorkerCount(len(samples))
+	if workers == 1 {
+		return decodeChunk(samples, pixels, mode, 0, len(samples), mask, shift, slope, intercept)
+	}
+
+	var mins [decodeMaxWorkers]float32
+	var maxs [decodeMaxWorkers]float32
+	var wg sync.WaitGroup
+	chunkSize := (len(samples) + workers - 1) / workers
+	wg.Add(workers)
+	for worker := 0; worker < workers; worker++ {
+		start := worker * chunkSize
+		end := start + chunkSize
+		if end > len(samples) {
+			end = len(samples)
+		}
+		go decodeChunkWorker(
+			samples,
+			pixels,
+			mode,
+			start,
+			end,
+			mask,
+			shift,
+			slope,
+			intercept,
+			&mins[worker],
+			&maxs[worker],
+			&wg,
+		)
+	}
+	wg.Wait()
+
+	minVal, maxVal := mins[0], maxs[0]
+	for i := 1; i < workers; i++ {
+		if mins[i] < minVal {
+			minVal = mins[i]
+		}
+		if maxs[i] > maxVal {
+			maxVal = maxs[i]
+		}
+	}
+	return minVal, maxVal
+}
+
+func decodeChunkWorker[T monochromeSample](
+	samples []T,
+	pixels []float32,
+	mode decodeMode,
+	start int,
+	end int,
+	mask uint32,
+	shift uint,
+	slope float32,
+	intercept float32,
+	minOut *float32,
+	maxOut *float32,
+	wg *sync.WaitGroup,
+) {
+	*minOut, *maxOut = decodeChunk(samples, pixels, mode, start, end, mask, shift, slope, intercept)
+	wg.Done()
+}
+
+func decodeChunk[T monochromeSample](
+	samples []T,
+	pixels []float32,
+	mode decodeMode,
+	start int,
+	end int,
+	mask uint32,
+	shift uint,
+	slope float32,
+	intercept float32,
+) (float32, float32) {
+	switch mode {
+	case decodeModeUnsignedFullRange:
+		return decodeUnsignedFullRangeChunk(samples, pixels, start, end)
+	case decodeModeUnsignedFullRangeRescale:
+		return decodeUnsignedFullRangeRescaleChunk(samples, pixels, start, end, slope, intercept)
+	case decodeModeUnsignedMasked:
+		return decodeUnsignedMaskedChunk(samples, pixels, start, end, mask)
+	case decodeModeUnsignedMaskedRescale:
+		return decodeUnsignedMaskedRescaleChunk(samples, pixels, start, end, mask, slope, intercept)
+	case decodeModeSigned:
+		return decodeSignedChunk(samples, pixels, start, end, shift)
+	case decodeModeSignedRescale:
+		return decodeSignedRescaleChunk(samples, pixels, start, end, shift, slope, intercept)
+	default:
+		panic("unknown monochrome decode mode")
+	}
+}
+
+func decodeUnsignedFullRangeChunk[T monochromeSample](
+	samples []T,
+	pixels []float32,
+	start int,
+	end int,
+) (float32, float32) {
+	first := float32(samples[start])
+	pixels[start] = first
 	minVal, maxVal := first, first
-	for i := 1; i < n; i++ {
-		v := scaledStoredPixelValue(samples[i], cfg)
+	for i := start + 1; i < end; i++ {
+		v := float32(samples[i])
 		pixels[i] = v
 		if v < minVal {
 			minVal = v
@@ -852,7 +993,155 @@ func decodeU32Monochrome(samples []uint32, cfg sourceDecodeConfig) ([]float32, f
 			maxVal = v
 		}
 	}
-	return pixels, minVal, maxVal
+	return minVal, maxVal
+}
+
+func decodeUnsignedFullRangeRescaleChunk[T monochromeSample](
+	samples []T,
+	pixels []float32,
+	start int,
+	end int,
+	slope float32,
+	intercept float32,
+) (float32, float32) {
+	first := float32(samples[start])*slope + intercept
+	pixels[start] = first
+	minVal, maxVal := first, first
+	for i := start + 1; i < end; i++ {
+		v := float32(samples[i])*slope + intercept
+		pixels[i] = v
+		if v < minVal {
+			minVal = v
+		}
+		if v > maxVal {
+			maxVal = v
+		}
+	}
+	return minVal, maxVal
+}
+
+func decodeUnsignedMaskedChunk[T monochromeSample](
+	samples []T,
+	pixels []float32,
+	start int,
+	end int,
+	mask uint32,
+) (float32, float32) {
+	first := float32(uint32(samples[start]) & mask)
+	pixels[start] = first
+	minVal, maxVal := first, first
+	for i := start + 1; i < end; i++ {
+		v := float32(uint32(samples[i]) & mask)
+		pixels[i] = v
+		if v < minVal {
+			minVal = v
+		}
+		if v > maxVal {
+			maxVal = v
+		}
+	}
+	return minVal, maxVal
+}
+
+func decodeUnsignedMaskedRescaleChunk[T monochromeSample](
+	samples []T,
+	pixels []float32,
+	start int,
+	end int,
+	mask uint32,
+	slope float32,
+	intercept float32,
+) (float32, float32) {
+	first := float32(uint32(samples[start])&mask)*slope + intercept
+	pixels[start] = first
+	minVal, maxVal := first, first
+	for i := start + 1; i < end; i++ {
+		v := float32(uint32(samples[i])&mask)*slope + intercept
+		pixels[i] = v
+		if v < minVal {
+			minVal = v
+		}
+		if v > maxVal {
+			maxVal = v
+		}
+	}
+	return minVal, maxVal
+}
+
+func decodeSignedChunk[T monochromeSample](
+	samples []T,
+	pixels []float32,
+	start int,
+	end int,
+	shift uint,
+) (float32, float32) {
+	first := float32(int32(uint32(samples[start])<<shift) >> shift)
+	pixels[start] = first
+	minVal, maxVal := first, first
+	for i := start + 1; i < end; i++ {
+		v := float32(int32(uint32(samples[i])<<shift) >> shift)
+		pixels[i] = v
+		if v < minVal {
+			minVal = v
+		}
+		if v > maxVal {
+			maxVal = v
+		}
+	}
+	return minVal, maxVal
+}
+
+func decodeSignedRescaleChunk[T monochromeSample](
+	samples []T,
+	pixels []float32,
+	start int,
+	end int,
+	shift uint,
+	slope float32,
+	intercept float32,
+) (float32, float32) {
+	first := float32(int32(uint32(samples[start])<<shift)>>shift)*slope + intercept
+	pixels[start] = first
+	minVal, maxVal := first, first
+	for i := start + 1; i < end; i++ {
+		v := float32(int32(uint32(samples[i])<<shift)>>shift)*slope + intercept
+		pixels[i] = v
+		if v < minVal {
+			minVal = v
+		}
+		if v > maxVal {
+			maxVal = v
+		}
+	}
+	return minVal, maxVal
+}
+
+func decodeWorkerCount(n int) int {
+	if n < decodeParallelMinPixels {
+		return 1
+	}
+	workers := runtime.GOMAXPROCS(0)
+	if workers > decodeMaxWorkers {
+		workers = decodeMaxWorkers
+	}
+	if workers < 2 {
+		return 1
+	}
+	sizeBound := n / decodePixelsPerWorker
+	if sizeBound < 2 {
+		return 1
+	}
+	if workers > sizeBound {
+		workers = sizeBound
+	}
+	return workers
+}
+
+func normalizeBitsStored(bitsStored uint16) uint16 {
+	if bitsStored == 0 || bitsStored > 32 {
+		return 32
+	}
+	return bitsStored
 }
 
 func ensureFrameLen(actual int, expected int) error {

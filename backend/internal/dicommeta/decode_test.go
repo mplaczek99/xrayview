@@ -219,6 +219,113 @@ func TestDecodeNativePixelDataRecordsUint16FitFlag(t *testing.T) {
 	}
 }
 
+func TestDecodeU16MonochromeSpecializedPaths(t *testing.T) {
+	tests := []struct {
+		name    string
+		samples []uint16
+		cfg     sourceDecodeConfig
+		want    []float32
+		wantMin float32
+		wantMax float32
+	}{
+		{
+			name:    "unsigned full range",
+			samples: []uint16{0, 65535},
+			cfg: sourceDecodeConfig{
+				bitsStored:          16,
+				pixelRepresentation: 0,
+				slope:               1,
+			},
+			want:    []float32{0, 65535},
+			wantMin: 0,
+			wantMax: 65535,
+		},
+		{
+			name:    "unsigned full range rescaled",
+			samples: []uint16{0, 10},
+			cfg: sourceDecodeConfig{
+				bitsStored:          16,
+				pixelRepresentation: 0,
+				slope:               2,
+				intercept:           -1,
+			},
+			want:    []float32{-1, 19},
+			wantMin: -1,
+			wantMax: 19,
+		},
+		{
+			name:    "unsigned masked",
+			samples: []uint16{0x1001, 0x0fff},
+			cfg: sourceDecodeConfig{
+				bitsStored:          12,
+				pixelRepresentation: 0,
+				slope:               1,
+			},
+			want:    []float32{1, 4095},
+			wantMin: 1,
+			wantMax: 4095,
+		},
+		{
+			name:    "unsigned masked rescaled",
+			samples: []uint16{0x1001, 0x0fff},
+			cfg: sourceDecodeConfig{
+				bitsStored:          12,
+				pixelRepresentation: 0,
+				slope:               2,
+				intercept:           -1,
+			},
+			want:    []float32{1, 8189},
+			wantMin: 1,
+			wantMax: 8189,
+		},
+		{
+			name:    "signed",
+			samples: []uint16{0x07ff, 0x0800, 0x0fff},
+			cfg: sourceDecodeConfig{
+				bitsStored:          12,
+				pixelRepresentation: 1,
+				slope:               1,
+			},
+			want:    []float32{2047, -2048, -1},
+			wantMin: -2048,
+			wantMax: 2047,
+		},
+		{
+			name:    "signed rescaled",
+			samples: []uint16{0x07ff, 0x0800, 0x0fff},
+			cfg: sourceDecodeConfig{
+				bitsStored:          12,
+				pixelRepresentation: 1,
+				slope:               2,
+				intercept:           1,
+			},
+			want:    []float32{4095, -4095, -1},
+			wantMin: -4095,
+			wantMax: 4095,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			pixels, minVal, maxVal := decodeU16Monochrome(test.samples, test.cfg)
+			if len(pixels) != len(test.want) {
+				t.Fatalf("len(pixels) = %d, want %d", len(pixels), len(test.want))
+			}
+			for i, want := range test.want {
+				if got := pixels[i]; got != want {
+					t.Fatalf("pixels[%d] = %v, want %v", i, got, want)
+				}
+			}
+			if minVal != test.wantMin {
+				t.Fatalf("minVal = %v, want %v", minVal, test.wantMin)
+			}
+			if maxVal != test.wantMax {
+				t.Fatalf("maxVal = %v, want %v", maxVal, test.wantMax)
+			}
+		})
+	}
+}
+
 func TestDecodeRejectsMalformedSourceStudies(t *testing.T) {
 	tests := []struct {
 		name string
