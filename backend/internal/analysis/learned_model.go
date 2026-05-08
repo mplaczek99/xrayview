@@ -118,20 +118,23 @@ func learnedToothMask(gray []uint8, normalized []uint8, width, height int) []uin
 func featureTableToothMask(normalized []uint8, width, height int) []uint8 {
 	scores := learnedToothScores(normalized, width, height)
 	mask := make([]uint8, len(normalized))
-	for y := 0; y < height; y++ {
-		for x := 0; x < width; x++ {
-			index := y*width + x
-			if probability, ok := featureTableProbability(featureTableKey(x, y, width, height, normalized[index], scores[index])); ok {
-				if probability >= featureTableProbabilityThreshold {
+	featureTable.Once.Do(loadFeatureTable)
+	parallelRows(width, height, func(startY, endY int) {
+		for y := startY; y < endY; y++ {
+			for x := 0; x < width; x++ {
+				index := y*width + x
+				if probability, ok := loadedFeatureTableProbability(featureTableKey(x, y, width, height, normalized[index], scores[index])); ok {
+					if probability >= featureTableProbabilityThreshold {
+						mask[index] = 1
+					}
+					continue
+				}
+				if scores[index] >= learnedModelThreshold {
 					mask[index] = 1
 				}
-				continue
-			}
-			if scores[index] >= learnedModelThreshold {
-				mask[index] = 1
 			}
 		}
-	}
+	})
 	return mask
 }
 
@@ -163,17 +166,19 @@ func learnedToothScores(normalized []uint8, width, height int) []float64 {
 	blur21 := boxBlurGray(normalized, width, height, 21)
 	gradient := gradientGray(blur3, width, height)
 	scores := make([]float64, len(normalized))
-	for y := 0; y < height; y++ {
-		for x := 0; x < width; x++ {
-			index := y*width + x
-			features := learnedFeatures(x, y, width, height, normalized[index], blur3[index], blur21[index], gradient[index])
-			score := 0.0
-			for _, tree := range learnedModelTrees {
-				score += learnedModelLearningRate * evaluateLearnedTree(tree, features)
+	parallelRows(width, height, func(startY, endY int) {
+		for y := startY; y < endY; y++ {
+			for x := 0; x < width; x++ {
+				index := y*width + x
+				features := learnedFeatures(x, y, width, height, normalized[index], blur3[index], blur21[index], gradient[index])
+				score := 0.0
+				for _, tree := range learnedModelTrees {
+					score += learnedModelLearningRate * evaluateLearnedTree(tree, features)
+				}
+				scores[index] = score
 			}
-			scores[index] = score
 		}
-	}
+	})
 	return scores
 }
 
@@ -210,16 +215,24 @@ func evaluateLearnedTree(tree []learnedNode, features [18]float64) float64 {
 
 func gradientGray(pixels []uint8, width, height int) []uint8 {
 	gradient := make([]uint8, len(pixels))
-	for y := 1; y < height-1; y++ {
-		for x := 1; x < width-1; x++ {
-			value := absInt(int(pixels[y*width+x+1])-int(pixels[y*width+x-1])) +
-				absInt(int(pixels[(y+1)*width+x])-int(pixels[(y-1)*width+x]))
-			if value > 255 {
-				value = 255
-			}
-			gradient[y*width+x] = uint8(value)
+	parallelRows(width, height, func(startY, endY int) {
+		if startY == 0 {
+			startY = 1
 		}
-	}
+		if endY > height-1 {
+			endY = height - 1
+		}
+		for y := startY; y < endY; y++ {
+			for x := 1; x < width-1; x++ {
+				value := absInt(int(pixels[y*width+x+1])-int(pixels[y*width+x-1])) +
+					absInt(int(pixels[(y+1)*width+x])-int(pixels[(y-1)*width+x]))
+				if value > 255 {
+					value = 255
+				}
+				gradient[y*width+x] = uint8(value)
+			}
+		}
+	})
 	return gradient
 }
 

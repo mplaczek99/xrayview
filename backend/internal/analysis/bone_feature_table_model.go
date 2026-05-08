@@ -33,20 +33,27 @@ var boneFeatureTable = struct {
 
 func boneFeatureTableMask(normalized []uint8, gradient []uint8, width, height int) []uint8 {
 	mask := make([]uint8, len(normalized))
-	for y := 0; y < height; y++ {
-		for x := 0; x < width; x++ {
-			index := y*width + x
-			probability, ok := boneFeatureTableProbability(boneFeatureTableKey(x, y, width, height, normalized[index], gradient[index]))
-			if ok && probability >= boneTableProbabilityThreshold {
-				mask[index] = 1
+	boneFeatureTable.Once.Do(loadBoneFeatureTable)
+	parallelRows(width, height, func(startY, endY int) {
+		for y := startY; y < endY; y++ {
+			for x := 0; x < width; x++ {
+				index := y*width + x
+				probability, ok := loadedBoneFeatureTableProbability(boneFeatureTableKey(x, y, width, height, normalized[index], gradient[index]))
+				if ok && probability >= boneTableProbabilityThreshold {
+					mask[index] = 1
+				}
 			}
 		}
-	}
+	})
 	return mask
 }
 
 func boneFeatureTableProbability(key uint32) (uint8, bool) {
 	boneFeatureTable.Once.Do(loadBoneFeatureTable)
+	return loadedBoneFeatureTableProbability(key)
+}
+
+func loadedBoneFeatureTableProbability(key uint32) (uint8, bool) {
 	if boneFeatureTable.err != nil {
 		return 0, false
 	}

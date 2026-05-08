@@ -458,6 +458,77 @@ func BenchmarkBinaryMorphology(b *testing.B) {
 	}
 }
 
+func BenchmarkLearnedToothScores(b *testing.B) {
+	const width = 1024
+	const height = 768
+
+	normalized := benchmarkGray(width, height)
+	b.SetBytes(int64(width * height))
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		scores := learnedToothScores(normalized, width, height)
+		if len(scores) != len(normalized) {
+			b.Fatalf("score len = %d, want %d", len(scores), len(normalized))
+		}
+	}
+}
+
+func BenchmarkFeatureTableToothMask(b *testing.B) {
+	const width = 1024
+	const height = 768
+
+	normalized := benchmarkGray(width, height)
+	_, _ = featureTableProbability(0)
+	b.SetBytes(int64(width * height))
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		mask := featureTableToothMask(normalized, width, height)
+		if len(mask) != len(normalized) {
+			b.Fatalf("mask len = %d, want %d", len(mask), len(normalized))
+		}
+	}
+}
+
+func BenchmarkBoneFeatureTableMask(b *testing.B) {
+	const width = 1024
+	const height = 768
+
+	normalized := benchmarkGray(width, height)
+	gradient := gradientGray(normalized, width, height)
+	_, _ = boneFeatureTableProbability(0)
+	b.SetBytes(int64(width * height))
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		mask := boneFeatureTableMask(normalized, gradient, width, height)
+		if len(mask) != len(normalized) {
+			b.Fatalf("mask len = %d, want %d", len(mask), len(normalized))
+		}
+	}
+}
+
+func BenchmarkGradientGray(b *testing.B) {
+	const width = 2048
+	const height = 1536
+
+	pixels := benchmarkGray(width, height)
+	b.SetBytes(int64(width * height))
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		gradient := gradientGray(pixels, width, height)
+		if len(gradient) != len(pixels) {
+			b.Fatalf("gradient len = %d, want %d", len(gradient), len(pixels))
+		}
+	}
+}
+
 func referenceDilateBinaryMask(mask []uint8, width, height, radius int) []uint8 {
 	if radius <= 0 || len(mask) == 0 {
 		return append([]uint8(nil), mask...)
@@ -530,6 +601,15 @@ func benchmarkMask(width, height int) []uint8 {
 		}
 	}
 	return mask
+}
+
+func benchmarkGray(width, height int) []uint8 {
+	rng := rand.New(rand.NewSource(84))
+	pixels := make([]uint8, width*height)
+	for index := range pixels {
+		pixels[index] = uint8((index*31 + rng.Intn(64)) & 0xff)
+	}
+	return pixels
 }
 
 func coloredFixtureNames(t *testing.T) []string {
