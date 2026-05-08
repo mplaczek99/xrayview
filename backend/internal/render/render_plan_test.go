@@ -86,11 +86,12 @@ func BenchmarkRenderGrayscalePixels(b *testing.B) {
 	}
 
 	source := imaging.SourceImage{
-		Width:    width,
-		Height:   height,
-		Pixels:   pixels,
-		MinValue: 0,
-		MaxValue: 4095,
+		Width:      width,
+		Height:     height,
+		Pixels:     pixels,
+		MinValue:   0,
+		MaxValue:   4095,
+		FitsUint16: true,
 		DefaultWindow: &imaging.WindowLevel{
 			Center: 2048,
 			Width:  4096,
@@ -115,11 +116,12 @@ func BenchmarkRenderGrayscalePixelsFullRange(b *testing.B) {
 	}
 
 	source := imaging.SourceImage{
-		Width:    width,
-		Height:   height,
-		Pixels:   pixels,
-		MinValue: 0,
-		MaxValue: 4095,
+		Width:      width,
+		Height:     height,
+		Pixels:     pixels,
+		MinValue:   0,
+		MaxValue:   4095,
+		FitsUint16: true,
 	}
 
 	plan := RenderPlan{Window: FullRangeWindowMode()}
@@ -140,11 +142,12 @@ func BenchmarkRenderGrayscalePixelsInvert(b *testing.B) {
 	}
 
 	source := imaging.SourceImage{
-		Width:    width,
-		Height:   height,
-		Pixels:   pixels,
-		MinValue: 0,
-		MaxValue: 4095,
+		Width:      width,
+		Height:     height,
+		Pixels:     pixels,
+		MinValue:   0,
+		MaxValue:   4095,
+		FitsUint16: true,
 		DefaultWindow: &imaging.WindowLevel{
 			Center: 2048,
 			Width:  4096,
@@ -164,8 +167,9 @@ func BenchmarkRenderGrayscalePixelsInvert(b *testing.B) {
 
 func BenchmarkBuildRenderLUT(b *testing.B) {
 	source := imaging.SourceImage{
-		MinValue: 0,
-		MaxValue: 4095,
+		MinValue:   0,
+		MaxValue:   4095,
+		FitsUint16: true,
 		DefaultWindow: &imaging.WindowLevel{
 			Center: 2048,
 			Width:  4096,
@@ -183,8 +187,9 @@ func BenchmarkBuildRenderLUT(b *testing.B) {
 
 func BenchmarkCachedRenderLUTHit(b *testing.B) {
 	source := imaging.SourceImage{
-		MinValue: 0,
-		MaxValue: 4095,
+		MinValue:   0,
+		MaxValue:   4095,
+		FitsUint16: true,
 		DefaultWindow: &imaging.WindowLevel{
 			Center: 2048,
 			Width:  4096,
@@ -254,6 +259,23 @@ func TestRenderFallbackPathNoInvert(t *testing.T) {
 	}
 	if got[1] <= got[0] || got[1] >= got[2] {
 		t.Fatalf("got[1] = %d should be between %d and %d", got[1], got[0], got[2])
+	}
+}
+
+func TestRenderUsesFallbackWhenUint16FitFlagIsFalse(t *testing.T) {
+	source := imaging.SourceImage{
+		Width:    3,
+		Height:   1,
+		Pixels:   []float32{0, 1.5, 3},
+		MinValue: 0,
+		MaxValue: 3,
+	}
+
+	got := RenderGrayscalePixels(source, RenderPlan{Window: FullRangeWindowMode()})
+	defer bufpool.PutUint8(got)
+
+	if got, want := got[1], MapLinear(1.5, source.MinValue, source.MaxValue); got != want {
+		t.Fatalf("middle pixel = %d, want fallback full-range mapping %d", got, want)
 	}
 }
 
@@ -339,8 +361,9 @@ func TestRenderSourceImageReturnsPooledBuffer(t *testing.T) {
 
 func TestRenderLUTCacheReusesIdenticalRenderParameters(t *testing.T) {
 	source := imaging.SourceImage{
-		MinValue: 0,
-		MaxValue: 4095,
+		MinValue:   0,
+		MaxValue:   4095,
+		FitsUint16: true,
 		DefaultWindow: &imaging.WindowLevel{
 			Center: 2048,
 			Width:  4096,

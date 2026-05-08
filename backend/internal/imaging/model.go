@@ -29,6 +29,7 @@ type SourceImage struct {
 	Pixels        []float32    `json:"pixels"`
 	MinValue      float32      `json:"minValue"`
 	MaxValue      float32      `json:"maxValue"`
+	FitsUint16    bool         `json:"fitsUint16"`
 	DefaultWindow *WindowLevel `json:"defaultWindow,omitempty"`
 	Invert        bool         `json:"invert"`
 }
@@ -102,6 +103,14 @@ func (image SourceImage) Validate() error {
 			"source image max value %v must be greater than or equal to min value %v",
 			normalized.MaxValue,
 			normalized.MinValue,
+		)
+	}
+
+	if normalized.FitsUint16 && (normalized.MinValue < 0 || normalized.MaxValue > 65535) {
+		return fmt.Errorf(
+			"source image marked fits uint16 but value range [%v, %v] is outside [0, 65535]",
+			normalized.MinValue,
+			normalized.MaxValue,
 		)
 	}
 

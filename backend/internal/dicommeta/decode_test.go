@@ -78,6 +78,9 @@ func TestDecodeBuildsScaledMonochromeStudyFromNativePixelData(t *testing.T) {
 	if got, want := study.Image.MaxValue, float32(190); got != want {
 		t.Fatalf("Image.MaxValue = %v, want %v", got, want)
 	}
+	if study.Image.FitsUint16 {
+		t.Fatal("Image.FitsUint16 = true, want false for negative rescaled values")
+	}
 	if !study.Image.Invert {
 		t.Fatal("Image.Invert = false, want true for MONOCHROME1")
 	}
@@ -123,6 +126,96 @@ func TestDecodeBuildsScaledMonochromeStudyFromNativePixelData(t *testing.T) {
 	}
 	if got, want := study.MeasurementScale.Source, "PixelSpacing"; got != want {
 		t.Fatalf("MeasurementScale.Source = %q, want %q", got, want)
+	}
+}
+
+func TestDecodeNativePixelDataRecordsUint16FitFlag(t *testing.T) {
+	tests := []struct {
+		name         string
+		metadata     Metadata
+		raw          []byte
+		slope        float32
+		intercept    float32
+		wantFitsU16  bool
+		wantMinValue float32
+		wantMaxValue float32
+	}{
+		{
+			name: "unscaled unsigned 8 bit",
+			metadata: Metadata{
+				Rows:                      1,
+				Columns:                   2,
+				SamplesPerPixel:           1,
+				BitsAllocated:             8,
+				BitsStored:                8,
+				PixelRepresentation:       0,
+				PhotometricInterpretation: "MONOCHROME2",
+			},
+			raw:          []byte{0, 255},
+			slope:        1,
+			wantFitsU16:  true,
+			wantMinValue: 0,
+			wantMaxValue: 255,
+		},
+		{
+			name: "rescaled negative",
+			metadata: Metadata{
+				Rows:                      1,
+				Columns:                   2,
+				SamplesPerPixel:           1,
+				BitsAllocated:             8,
+				BitsStored:                8,
+				PixelRepresentation:       0,
+				PhotometricInterpretation: "MONOCHROME2",
+			},
+			raw:          []byte{0, 255},
+			slope:        1,
+			intercept:    -1,
+			wantFitsU16:  false,
+			wantMinValue: -1,
+			wantMaxValue: 254,
+		},
+		{
+			name: "rescaled above uint16",
+			metadata: Metadata{
+				Rows:                      1,
+				Columns:                   2,
+				SamplesPerPixel:           1,
+				BitsAllocated:             16,
+				BitsStored:                16,
+				PixelRepresentation:       0,
+				PhotometricInterpretation: "MONOCHROME2",
+			},
+			raw:          []byte{0xff, 0xff, 0x00, 0x00},
+			slope:        2,
+			wantFitsU16:  false,
+			wantMinValue: 0,
+			wantMaxValue: 131070,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			state := sourceStudyState{
+				metadata:         test.metadata,
+				rescaleSlope:     test.slope,
+				rescaleIntercept: test.intercept,
+			}
+			image, err := state.decodeNativePixelData(test.raw, binary.LittleEndian)
+			if err != nil {
+				t.Fatalf("decodeNativePixelData returned error: %v", err)
+			}
+
+			if got := image.FitsUint16; got != test.wantFitsU16 {
+				t.Fatalf("FitsUint16 = %v, want %v", got, test.wantFitsU16)
+			}
+			if got := image.MinValue; got != test.wantMinValue {
+				t.Fatalf("MinValue = %v, want %v", got, test.wantMinValue)
+			}
+			if got := image.MaxValue; got != test.wantMaxValue {
+				t.Fatalf("MaxValue = %v, want %v", got, test.wantMaxValue)
+			}
+		})
 	}
 }
 
@@ -464,6 +557,9 @@ func TestDecodeCompressedImageBuildsSourceImageFromJPEGPayload(t *testing.T) {
 	}
 	if !sourceImage.Invert {
 		t.Fatal("Invert = false, want true for MONOCHROME1")
+	}
+	if !sourceImage.FitsUint16 {
+		t.Fatal("FitsUint16 = false, want true for decoded grayscale JPEG")
 	}
 	if sourceImage.MinValue >= sourceImage.MaxValue {
 		t.Fatalf("MinValue = %v, MaxValue = %v, want increasing intensity range", sourceImage.MinValue, sourceImage.MaxValue)
@@ -812,8 +908,8 @@ func TestDecodeWithContextCancelledDuringParse(t *testing.T) {
 	// Cancel after 6 reads to fire during metadata parsing, before pixel data.
 	ctx, cancel := context.WithCancel(context.Background())
 	reader := &cancelAfterNReadsReader{
-		inner: bytes.NewReader(dicomData),
-		limit: 6,
+		inner:  bytes.NewReader(dicomData),
+		limit:  6,
 		cancel: cancel,
 	}
 

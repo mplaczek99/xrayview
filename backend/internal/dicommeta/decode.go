@@ -686,9 +686,14 @@ func buildSourceImage(
 		Pixels:        pixels,
 		MinValue:      minValue,
 		MaxValue:      maxValue,
+		FitsUint16:    sourceRangeFitsUint16(minValue, maxValue),
 		DefaultWindow: defaultWindow,
 		Invert:        invert,
 	}, nil
+}
+
+func sourceRangeFitsUint16(minValue float32, maxValue float32) bool {
+	return minValue >= 0 && maxValue <= 65535
 }
 
 func sourceImageFromImage(

@@ -58,6 +58,23 @@ func TestSourceImageValidateRejectsInvalidShape(t *testing.T) {
 	}
 }
 
+func TestSourceImageValidateRejectsInvalidUint16FitFlag(t *testing.T) {
+	image := SourceImage{
+		Width:      2,
+		Height:     1,
+		Format:     FormatGrayFloat32,
+		Pixels:     []float32{-1, 0},
+		MinValue:   -1,
+		MaxValue:   0,
+		FitsUint16: true,
+	}
+
+	err := image.Validate()
+	if err == nil {
+		t.Fatal("Validate returned nil error, want uint16 range failure")
+	}
+}
+
 func TestPreviewImageValidateAcceptsGrayAndRGBAFormats(t *testing.T) {
 	gray := GrayPreview(2, 2, []uint8{0, 64, 128, 255})
 	if err := gray.Validate(); err != nil {

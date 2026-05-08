@@ -39,7 +39,7 @@ func RenderGrayscalePixels(source imaging.SourceImage, plan RenderPlan) []uint8 
 	// window/invert/map into a single cache-friendly read. The else branch
 	// below handles sources whose range doesn't fit (signed CT, rescaled
 	// PET) with the old branchy per-pixel path.
-	if source.MinValue >= 0 && source.MaxValue <= 65535 {
+	if source.FitsUint16 {
 		lut := *cachedRenderLUT(source, window, hasWindow)
 		for index, value := range source.Pixels {
 			pixels[index] = lut[uint16(value+0.5)]

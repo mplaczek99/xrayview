@@ -84,6 +84,9 @@ func TestDecodeFileSupportsStandaloneTIFFInput(t *testing.T) {
 	if got, want := study.Image.MaxValue, float32(0xffff); got != want {
 		t.Fatalf("Image.MaxValue = %v, want %v", got, want)
 	}
+	if !study.Image.FitsUint16 {
+		t.Fatal("Image.FitsUint16 = false, want true for standalone 16-bit image range")
+	}
 	if got, want := len(study.Metadata.PreservedElements), 0; got != want {
 		t.Fatalf("len(Metadata.PreservedElements) = %d, want %d", got, want)
 	}
