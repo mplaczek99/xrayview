@@ -95,6 +95,77 @@ func TestDecodeFileSupportsStandaloneTIFFInput(t *testing.T) {
 	}
 }
 
+func TestSourceImageFromImageCommonFormats(t *testing.T) {
+	defaultWindow := &imaging.WindowLevel{Center: 128, Width: 256}
+	testCases := []struct {
+		name       string
+		image      image.Image
+		window     *imaging.WindowLevel
+		invert     bool
+		wantPixels []float32
+		wantMin    float32
+		wantMax    float32
+	}{
+		{
+			name:       "gray16",
+			image:      testGray16SubImage(),
+			window:     defaultWindow,
+			invert:     true,
+			wantPixels: []float32{0x1234, 0xabcd, 0x00ff, 0xffff},
+			wantMin:    0x00ff,
+			wantMax:    0xffff,
+		},
+		{
+			name:       "rgba",
+			image:      testRGBASubImage(),
+			wantPixels: colorImagePixelsFromAt(testRGBASubImage()),
+			wantMin:    minFloat32(colorImagePixelsFromAt(testRGBASubImage())),
+			wantMax:    maxFloat32(colorImagePixelsFromAt(testRGBASubImage())),
+		},
+		{
+			name:       "nrgba",
+			image:      testNRGBASubImage(),
+			wantPixels: colorImagePixelsFromAt(testNRGBASubImage()),
+			wantMin:    minFloat32(colorImagePixelsFromAt(testNRGBASubImage())),
+			wantMax:    maxFloat32(colorImagePixelsFromAt(testNRGBASubImage())),
+		},
+		{
+			name:       "ycbcr",
+			image:      testYCbCrSubImage(),
+			wantPixels: colorImagePixelsFromAt(testYCbCrSubImage()),
+			wantMin:    minFloat32(colorImagePixelsFromAt(testYCbCrSubImage())),
+			wantMax:    maxFloat32(colorImagePixelsFromAt(testYCbCrSubImage())),
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := sourceImageFromImage(tc.image, tc.window, tc.invert)
+			if err != nil {
+				t.Fatalf("sourceImageFromImage returned error: %v", err)
+			}
+			if got.Width != 2 || got.Height != 2 {
+				t.Fatalf("size = %dx%d, want 2x2", got.Width, got.Height)
+			}
+			if got.Format != imaging.FormatGrayFloat32 {
+				t.Fatalf("Format = %q, want %q", got.Format, imaging.FormatGrayFloat32)
+			}
+			if !float32SlicesEqual(got.Pixels, tc.wantPixels) {
+				t.Fatalf("Pixels = %v, want %v", got.Pixels, tc.wantPixels)
+			}
+			if got.MinValue != tc.wantMin || got.MaxValue != tc.wantMax {
+				t.Fatalf("range = [%v, %v], want [%v, %v]", got.MinValue, got.MaxValue, tc.wantMin, tc.wantMax)
+			}
+			if got.DefaultWindow != tc.window {
+				t.Fatalf("DefaultWindow = %+v, want %+v", got.DefaultWindow, tc.window)
+			}
+			if got.Invert != tc.invert {
+				t.Fatalf("Invert = %v, want %v", got.Invert, tc.invert)
+			}
+		})
+	}
+}
+
 func TestReadFileRejectsStandalonePNGAndJPEGInput(t *testing.T) {
 	testCases := []struct {
 		name   string
@@ -147,6 +218,37 @@ func TestReadFileRejectsStandalonePNGAndJPEGInput(t *testing.T) {
 	}
 }
 
+func BenchmarkSourceImageFromImage(b *testing.B) {
+	const width, height = 2048, 1536
+	benchmarks := []struct {
+		name  string
+		image image.Image
+		bytes int64
+	}{
+		{name: "Gray16", image: benchmarkGray16Image(width, height), bytes: width * height * 2},
+		{name: "RGBA", image: benchmarkRGBAImage(width, height), bytes: width * height * 4},
+		{name: "NRGBA", image: benchmarkNRGBAImage(width, height), bytes: width * height * 4},
+		{name: "YCbCr", image: benchmarkYCbCrImage(width, height), bytes: width * height * 3},
+	}
+
+	for _, benchmark := range benchmarks {
+		b.Run(benchmark.name, func(b *testing.B) {
+			b.SetBytes(benchmark.bytes)
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				sourceImage, err := sourceImageFromImage(benchmark.image, nil, false)
+				if err != nil {
+					b.Fatal(err)
+				}
+				if len(sourceImage.Pixels) != width*height {
+					b.Fatalf("len(Pixels) = %d, want %d", len(sourceImage.Pixels), width*height)
+				}
+			}
+		})
+	}
+}
+
 func writeBMPFixture(t *testing.T, path string) {
 	t.Helper()
 
@@ -161,6 +263,165 @@ func writeBMPFixture(t *testing.T, path string) {
 	if err := os.WriteFile(path, payload.Bytes(), 0o644); err != nil {
 		t.Fatalf("WriteFile returned error: %v", err)
 	}
+}
+
+func testGray16SubImage() image.Image {
+	img := image.NewGray16(image.Rect(0, 0, 4, 4))
+	values := []uint16{0x1234, 0xabcd, 0x00ff, 0xffff}
+	index := 0
+	for y := 1; y < 3; y++ {
+		for x := 1; x < 3; x++ {
+			img.SetGray16(x, y, color.Gray16{Y: values[index]})
+			index++
+		}
+	}
+	return img.SubImage(image.Rect(1, 1, 3, 3))
+}
+
+func testRGBASubImage() image.Image {
+	img := image.NewRGBA(image.Rect(0, 0, 4, 4))
+	colors := []color.RGBA{
+		{R: 10, G: 20, B: 30, A: 255},
+		{R: 240, G: 20, B: 10, A: 255},
+		{R: 20, G: 230, B: 40, A: 255},
+		{R: 30, G: 40, B: 220, A: 255},
+	}
+	index := 0
+	for y := 1; y < 3; y++ {
+		for x := 1; x < 3; x++ {
+			img.SetRGBA(x, y, colors[index])
+			index++
+		}
+	}
+	return img.SubImage(image.Rect(1, 1, 3, 3))
+}
+
+func testNRGBASubImage() image.Image {
+	img := image.NewNRGBA(image.Rect(0, 0, 4, 4))
+	colors := []color.NRGBA{
+		{R: 12, G: 34, B: 56, A: 128},
+		{R: 210, G: 45, B: 60, A: 255},
+		{R: 50, G: 200, B: 80, A: 255},
+		{R: 70, G: 90, B: 210, A: 255},
+	}
+	index := 0
+	for y := 1; y < 3; y++ {
+		for x := 1; x < 3; x++ {
+			img.SetNRGBA(x, y, colors[index])
+			index++
+		}
+	}
+	return img.SubImage(image.Rect(1, 1, 3, 3))
+}
+
+func testYCbCrSubImage() image.Image {
+	img := image.NewYCbCr(image.Rect(0, 0, 4, 4), image.YCbCrSubsampleRatio444)
+	values := []color.YCbCr{
+		{Y: 0x7f, Cb: 0x7f, Cr: 0x7f},
+		{Y: 96, Cb: 80, Cr: 170},
+		{Y: 160, Cb: 190, Cr: 70},
+		{Y: 220, Cb: 128, Cr: 128},
+	}
+	index := 0
+	for y := 1; y < 3; y++ {
+		for x := 1; x < 3; x++ {
+			yOffset := img.YOffset(x, y)
+			cOffset := img.COffset(x, y)
+			img.Y[yOffset] = values[index].Y
+			img.Cb[cOffset] = values[index].Cb
+			img.Cr[cOffset] = values[index].Cr
+			index++
+		}
+	}
+	return img.SubImage(image.Rect(1, 1, 3, 3))
+}
+
+func colorImagePixelsFromAt(img image.Image) []float32 {
+	bounds := img.Bounds()
+	pixels := make([]float32, 0, bounds.Dx()*bounds.Dy())
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			red, green, blue, _ := img.At(x, y).RGBA()
+			pixels = append(pixels, float32(grayFromRGB8(uint8(red>>8), uint8(green>>8), uint8(blue>>8))))
+		}
+	}
+	return pixels
+}
+
+func minFloat32(values []float32) float32 {
+	minVal := values[0]
+	for _, value := range values[1:] {
+		if value < minVal {
+			minVal = value
+		}
+	}
+	return minVal
+}
+
+func maxFloat32(values []float32) float32 {
+	maxVal := values[0]
+	for _, value := range values[1:] {
+		if value > maxVal {
+			maxVal = value
+		}
+	}
+	return maxVal
+}
+
+func float32SlicesEqual(left []float32, right []float32) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
+}
+
+func benchmarkGray16Image(width int, height int) *image.Gray16 {
+	img := image.NewGray16(image.Rect(0, 0, width, height))
+	for i := 0; i+1 < len(img.Pix); i += 2 {
+		value := uint16(i*13 + i/7)
+		img.Pix[i] = byte(value >> 8)
+		img.Pix[i+1] = byte(value)
+	}
+	return img
+}
+
+func benchmarkRGBAImage(width int, height int) *image.RGBA {
+	img := image.NewRGBA(image.Rect(0, 0, width, height))
+	for i := 0; i+3 < len(img.Pix); i += 4 {
+		img.Pix[i] = byte(i * 3)
+		img.Pix[i+1] = byte(i*5 + 17)
+		img.Pix[i+2] = byte(i*7 + 29)
+		img.Pix[i+3] = 0xff
+	}
+	return img
+}
+
+func benchmarkNRGBAImage(width int, height int) *image.NRGBA {
+	img := image.NewNRGBA(image.Rect(0, 0, width, height))
+	for i := 0; i+3 < len(img.Pix); i += 4 {
+		img.Pix[i] = byte(i * 11)
+		img.Pix[i+1] = byte(i*13 + 19)
+		img.Pix[i+2] = byte(i*17 + 31)
+		img.Pix[i+3] = 0xff
+	}
+	return img
+}
+
+func benchmarkYCbCrImage(width int, height int) *image.YCbCr {
+	img := image.NewYCbCr(image.Rect(0, 0, width, height), image.YCbCrSubsampleRatio444)
+	for i := range img.Y {
+		img.Y[i] = byte(i*3 + 11)
+	}
+	for i := range img.Cb {
+		img.Cb[i] = byte(i*5 + 127)
+		img.Cr[i] = byte(i*7 + 83)
+	}
+	return img
 }
 
 func writeTIFFFixture(t *testing.T, path string) {

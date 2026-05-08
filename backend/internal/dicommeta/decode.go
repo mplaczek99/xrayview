@@ -710,18 +710,41 @@ func sourceImageFromImage(
 	if n == 0 {
 		return buildSourceImage(uint32(width), uint32(height), nil, 0, 0, defaultWindow, invert)
 	}
-	pixels := make([]float32, 0, n)
+	pixels := make([]float32, n)
 
 	switch imageValue := decoded.(type) {
 	case *image.Gray:
-		rowStart := imageValue.PixOffset(bounds.Min.X, bounds.Min.Y)
-		row := imageValue.Pix[rowStart : rowStart+width]
-		first := float32(row[0])
-		pixels = append(pixels, first)
-		minVal, maxVal := first, first
-		for _, value := range row[1:] {
+		minVal, maxVal := copyGrayImagePixels(pixels, imageValue, bounds)
+		return buildSourceImage(uint32(width), uint32(height), pixels, minVal, maxVal, defaultWindow, invert)
+	case *image.Gray16:
+		minVal, maxVal := copyGray16ImagePixels(pixels, imageValue, bounds)
+		return buildSourceImage(uint32(width), uint32(height), pixels, minVal, maxVal, defaultWindow, invert)
+	case *image.RGBA:
+		minVal, maxVal := copyRGBAImagePixels(pixels, imageValue, bounds)
+		return buildSourceImage(uint32(width), uint32(height), pixels, minVal, maxVal, defaultWindow, invert)
+	case *image.NRGBA:
+		minVal, maxVal := copyNRGBAImagePixels(pixels, imageValue, bounds)
+		return buildSourceImage(uint32(width), uint32(height), pixels, minVal, maxVal, defaultWindow, invert)
+	case *image.YCbCr:
+		minVal, maxVal := copyYCbCrImagePixels(pixels, imageValue, bounds)
+		return buildSourceImage(uint32(width), uint32(height), pixels, minVal, maxVal, defaultWindow, invert)
+	default:
+		minVal, maxVal := copyGenericImagePixels(pixels, decoded, bounds)
+		return buildSourceImage(uint32(width), uint32(height), pixels, minVal, maxVal, defaultWindow, invert)
+	}
+}
+
+func copyGrayImagePixels(pixels []float32, decoded *image.Gray, bounds image.Rectangle) (float32, float32) {
+	width := bounds.Dx()
+	minVal, maxVal := float32(65535), float32(0)
+	dst := 0
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		rowStart := decoded.PixOffset(bounds.Min.X, y)
+		row := decoded.Pix[rowStart : rowStart+width]
+		for _, value := range row {
 			v := float32(value)
-			pixels = append(pixels, v)
+			pixels[dst] = v
+			dst++
 			if v < minVal {
 				minVal = v
 			}
@@ -729,66 +752,148 @@ func sourceImageFromImage(
 				maxVal = v
 			}
 		}
-		for y := bounds.Min.Y + 1; y < bounds.Max.Y; y++ {
-			rowStart = imageValue.PixOffset(bounds.Min.X, y)
-			row = imageValue.Pix[rowStart : rowStart+width]
-			for _, value := range row {
-				v := float32(value)
-				pixels = append(pixels, v)
-				if v < minVal {
-					minVal = v
-				}
-				if v > maxVal {
-					maxVal = v
-				}
-			}
-		}
-		return buildSourceImage(uint32(width), uint32(height), pixels, minVal, maxVal, defaultWindow, invert)
-	case *image.Gray16:
-		first := float32(imageValue.Gray16At(bounds.Min.X, bounds.Min.Y).Y)
-		pixels = append(pixels, first)
-		minVal, maxVal := first, first
-		for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
-			startX := bounds.Min.X
-			if y == bounds.Min.Y {
-				startX++
-			}
-			for x := startX; x < bounds.Max.X; x++ {
-				v := float32(imageValue.Gray16At(x, y).Y)
-				pixels = append(pixels, v)
-				if v < minVal {
-					minVal = v
-				}
-				if v > maxVal {
-					maxVal = v
-				}
-			}
-		}
-		return buildSourceImage(uint32(width), uint32(height), pixels, minVal, maxVal, defaultWindow, invert)
-	default:
-		firstRed, firstGreen, firstBlue, _ := decoded.At(bounds.Min.X, bounds.Min.Y).RGBA()
-		first := float32(grayFromRGB8(uint8(firstRed>>8), uint8(firstGreen>>8), uint8(firstBlue>>8)))
-		pixels = append(pixels, first)
-		minVal, maxVal := first, first
-		for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
-			startX := bounds.Min.X
-			if y == bounds.Min.Y {
-				startX++
-			}
-			for x := startX; x < bounds.Max.X; x++ {
-				red, green, blue, _ := decoded.At(x, y).RGBA()
-				v := float32(grayFromRGB8(uint8(red>>8), uint8(green>>8), uint8(blue>>8)))
-				pixels = append(pixels, v)
-				if v < minVal {
-					minVal = v
-				}
-				if v > maxVal {
-					maxVal = v
-				}
-			}
-		}
-		return buildSourceImage(uint32(width), uint32(height), pixels, minVal, maxVal, nil, false)
 	}
+	return minVal, maxVal
+}
+
+func copyGray16ImagePixels(pixels []float32, decoded *image.Gray16, bounds image.Rectangle) (float32, float32) {
+	width := bounds.Dx()
+	minVal, maxVal := float32(65535), float32(0)
+	dst := 0
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		rowStart := decoded.PixOffset(bounds.Min.X, y)
+		row := decoded.Pix[rowStart : rowStart+width*2]
+		for offset := 0; offset < len(row); offset += 2 {
+			v := float32(uint16(row[offset])<<8 | uint16(row[offset+1]))
+			pixels[dst] = v
+			dst++
+			if v < minVal {
+				minVal = v
+			}
+			if v > maxVal {
+				maxVal = v
+			}
+		}
+	}
+	return minVal, maxVal
+}
+
+func copyRGBAImagePixels(pixels []float32, decoded *image.RGBA, bounds image.Rectangle) (float32, float32) {
+	width := bounds.Dx()
+	minVal, maxVal := float32(65535), float32(0)
+	dst := 0
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		rowStart := decoded.PixOffset(bounds.Min.X, y)
+		row := decoded.Pix[rowStart : rowStart+width*4]
+		for offset := 0; offset < len(row); offset += 4 {
+			v := float32(grayFromRGB8(row[offset], row[offset+1], row[offset+2]))
+			pixels[dst] = v
+			dst++
+			if v < minVal {
+				minVal = v
+			}
+			if v > maxVal {
+				maxVal = v
+			}
+		}
+	}
+	return minVal, maxVal
+}
+
+func copyNRGBAImagePixels(pixels []float32, decoded *image.NRGBA, bounds image.Rectangle) (float32, float32) {
+	width := bounds.Dx()
+	minVal, maxVal := float32(65535), float32(0)
+	dst := 0
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		rowStart := decoded.PixOffset(bounds.Min.X, y)
+		row := decoded.Pix[rowStart : rowStart+width*4]
+		for offset := 0; offset < len(row); offset += 4 {
+			alpha := row[offset+3]
+			red := nrgbaPremultiplied8(row[offset], alpha)
+			green := nrgbaPremultiplied8(row[offset+1], alpha)
+			blue := nrgbaPremultiplied8(row[offset+2], alpha)
+			v := float32(grayFromRGB8(red, green, blue))
+			pixels[dst] = v
+			dst++
+			if v < minVal {
+				minVal = v
+			}
+			if v > maxVal {
+				maxVal = v
+			}
+		}
+	}
+	return minVal, maxVal
+}
+
+func copyYCbCrImagePixels(pixels []float32, decoded *image.YCbCr, bounds image.Rectangle) (float32, float32) {
+	width := bounds.Dx()
+	minVal, maxVal := float32(65535), float32(0)
+	dst := 0
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		yStart := decoded.YOffset(bounds.Min.X, y)
+		yRow := decoded.Y[yStart : yStart+width]
+		for xOffset, yValue := range yRow {
+			cOffset := decoded.COffset(bounds.Min.X+xOffset, y)
+			red, green, blue := ycbcrRGBA8(yValue, decoded.Cb[cOffset], decoded.Cr[cOffset])
+			v := float32(grayFromRGB8(red, green, blue))
+			pixels[dst] = v
+			dst++
+			if v < minVal {
+				minVal = v
+			}
+			if v > maxVal {
+				maxVal = v
+			}
+		}
+	}
+	return minVal, maxVal
+}
+
+func copyGenericImagePixels(pixels []float32, decoded image.Image, bounds image.Rectangle) (float32, float32) {
+	minVal, maxVal := float32(65535), float32(0)
+	dst := 0
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			red, green, blue, _ := decoded.At(x, y).RGBA()
+			v := float32(grayFromRGB8(uint8(red>>8), uint8(green>>8), uint8(blue>>8)))
+			pixels[dst] = v
+			dst++
+			if v < minVal {
+				minVal = v
+			}
+			if v > maxVal {
+				maxVal = v
+			}
+		}
+	}
+	return minVal, maxVal
+}
+
+func nrgbaPremultiplied8(component uint8, alpha uint8) uint8 {
+	value := uint32(component)
+	value |= value << 8
+	value *= uint32(alpha)
+	value /= 0xff
+	return uint8(value >> 8)
+}
+
+func ycbcrRGBA8(y uint8, cb uint8, cr uint8) (uint8, uint8, uint8) {
+	yy1 := int32(y) * 0x10101
+	cb1 := int32(cb) - 128
+	cr1 := int32(cr) - 128
+
+	red := ycbcrToRGBA16(yy1 + 91881*cr1)
+	green := ycbcrToRGBA16(yy1 - 22554*cb1 - 46802*cr1)
+	blue := ycbcrToRGBA16(yy1 + 116130*cb1)
+	return uint8(red >> 8), uint8(green >> 8), uint8(blue >> 8)
+}
+
+func ycbcrToRGBA16(value int32) uint32 {
+	if uint32(value)&0xff000000 == 0 {
+		return uint32(value >> 8)
+	}
+	return uint32(^(value >> 31)) & 0xffff
 }
 
 func decodeU8Monochrome(samples []byte, cfg sourceDecodeConfig) ([]float32, float32, float32) {
