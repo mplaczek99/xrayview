@@ -21,6 +21,7 @@ import (
 	_ "image/jpeg"
 	_ "image/png"
 	"io"
+	"math"
 	"math/big"
 	"math/bits"
 	"os"
@@ -415,6 +416,15 @@ func (state *sourceStudyState) decodeNativePixelData(
 		}
 		samples := raw[:frameSampleCount]
 		if samplesPerPixel == 1 {
+			if image, ok, err := buildUint16MonochromeSourceImage(
+				uint32(width),
+				uint32(height),
+				samples,
+				cfg,
+			); ok || err != nil {
+				return image, err
+			}
+
 			pixels, minVal, maxVal := decodeU8Monochrome(samples, cfg)
 			return buildSourceImage(
 				uint32(width),
@@ -441,6 +451,15 @@ func (state *sourceStudyState) decodeNativePixelData(
 		}
 
 		samples := readU16Samples(raw[:frameSampleCount*2], byteOrder)
+		if image, ok, err := buildUint16MonochromeSourceImage(
+			uint32(width),
+			uint32(height),
+			samples,
+			cfg,
+		); ok || err != nil {
+			return image, err
+		}
+
 		pixels, minVal, maxVal := decodeU16Monochrome(samples, cfg)
 		return buildSourceImage(
 			uint32(width),
@@ -737,6 +756,115 @@ func buildUint16SourceImage(
 		DefaultWindow: defaultWindow,
 		Invert:        invert,
 	}, nil
+}
+
+func buildUint16MonochromeSourceImage[T monochromeUint16Sample](
+	width uint32,
+	height uint32,
+	samples []T,
+	cfg sourceDecodeConfig,
+) (imaging.SourceImage, bool, error) {
+	if len(samples) == 0 {
+		return imaging.SourceImage{}, false, nil
+	}
+	if cfg.pixelRepresentation != 0 {
+		return imaging.SourceImage{}, false, nil
+	}
+
+	bitsStored := normalizeBitsStored(cfg.bitsStored)
+	if bitsStored > 16 {
+		return imaging.SourceImage{}, false, nil
+	}
+
+	rescale, ok := uint16RescaleTransform(cfg, bitsStored)
+	if !ok {
+		return imaging.SourceImage{}, false, nil
+	}
+
+	pixels, minVal, maxVal := copyUint16MonochromeSamples(samples, bitsStored, rescale)
+	image, err := buildUint16SourceImage(
+		width,
+		height,
+		pixels,
+		minVal,
+		maxVal,
+		cfg.defaultWindow,
+		cfg.invert,
+	)
+	return image, true, err
+}
+
+type monochromeUint16Sample interface {
+	~uint8 | ~uint16
+}
+
+type uint16Rescale struct {
+	slope     int64
+	intercept int64
+}
+
+func uint16RescaleTransform(cfg sourceDecodeConfig, bitsStored uint16) (uint16Rescale, bool) {
+	slope, ok := exactInt64(cfg.slope)
+	if !ok {
+		return uint16Rescale{}, false
+	}
+	intercept, ok := exactInt64(cfg.intercept)
+	if !ok {
+		return uint16Rescale{}, false
+	}
+
+	maxStored := float64(0xffff)
+	if bitsStored < 16 {
+		maxStored = float64(uint64(1)<<bitsStored) - 1
+	}
+
+	minValue := float64(intercept)
+	maxValue := maxStored*float64(slope) + float64(intercept)
+	if minValue > maxValue {
+		minValue, maxValue = maxValue, minValue
+	}
+	if minValue < 0 || maxValue > 65535 {
+		return uint16Rescale{}, false
+	}
+
+	return uint16Rescale{slope: slope, intercept: intercept}, true
+}
+
+func exactInt64(value float32) (int64, bool) {
+	asFloat64 := float64(value)
+	if math.Trunc(asFloat64) != asFloat64 ||
+		asFloat64 < float64(math.MinInt64) ||
+		asFloat64 > float64(math.MaxInt64) {
+		return 0, false
+	}
+	return int64(value), true
+}
+
+func copyUint16MonochromeSamples[T monochromeUint16Sample](
+	samples []T,
+	bitsStored uint16,
+	rescale uint16Rescale,
+) ([]uint16, float32, float32) {
+	pixels := make([]uint16, len(samples))
+	mask := uint32(0xffff)
+	if bitsStored < 16 {
+		mask = uint32(1<<bitsStored) - 1
+	}
+
+	first := uint16(int64(uint32(samples[0])&mask)*rescale.slope + rescale.intercept)
+	pixels[0] = first
+	minVal, maxVal := first, first
+	for index := 1; index < len(samples); index++ {
+		value := uint16(int64(uint32(samples[index])&mask)*rescale.slope + rescale.intercept)
+		pixels[index] = value
+		if value < minVal {
+			minVal = value
+		}
+		if value > maxVal {
+			maxVal = value
+		}
+	}
+	return pixels, float32(minVal), float32(maxVal)
 }
 
 func sourceRangeFitsUint16(minValue float32, maxValue float32) bool {

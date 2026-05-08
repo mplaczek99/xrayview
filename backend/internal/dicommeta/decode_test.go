@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -140,6 +141,7 @@ func TestDecodeNativePixelDataRecordsUint16FitFlag(t *testing.T) {
 		wantStorage  imaging.SourceStorage
 		wantMinValue float32
 		wantMaxValue float32
+		wantUint16   []uint16
 	}{
 		{
 			name: "unscaled unsigned 8 bit",
@@ -158,6 +160,27 @@ func TestDecodeNativePixelDataRecordsUint16FitFlag(t *testing.T) {
 			wantStorage:  imaging.SourceStorageUint16,
 			wantMinValue: 0,
 			wantMaxValue: 255,
+			wantUint16:   []uint16{0, 255},
+		},
+		{
+			name: "integer rescale within uint16",
+			metadata: Metadata{
+				Rows:                      1,
+				Columns:                   2,
+				SamplesPerPixel:           1,
+				BitsAllocated:             16,
+				BitsStored:                12,
+				PixelRepresentation:       0,
+				PhotometricInterpretation: "MONOCHROME2",
+			},
+			raw:          []byte{0x01, 0x00, 0xff, 0x0f},
+			slope:        2,
+			intercept:    5,
+			wantFitsU16:  true,
+			wantStorage:  imaging.SourceStorageUint16,
+			wantMinValue: 7,
+			wantMaxValue: 8195,
+			wantUint16:   []uint16{7, 8195},
 		},
 		{
 			name: "rescaled negative",
@@ -239,6 +262,11 @@ func TestDecodeNativePixelDataRecordsUint16FitFlag(t *testing.T) {
 			}
 			if got := image.MaxValue; got != test.wantMaxValue {
 				t.Fatalf("MaxValue = %v, want %v", got, test.wantMaxValue)
+			}
+			if test.wantUint16 != nil {
+				if got := image.Uint16Pixels; !slices.Equal(got, test.wantUint16) {
+					t.Fatalf("Uint16Pixels = %v, want %v", got, test.wantUint16)
+				}
 			}
 		})
 	}
