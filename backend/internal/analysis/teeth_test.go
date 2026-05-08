@@ -552,6 +552,40 @@ func BenchmarkGenerateToothOverlay(b *testing.B) {
 	}
 }
 
+func BenchmarkCollectComponents(b *testing.B) {
+	const width = 1024
+	const height = 768
+
+	mask := benchmarkComponentMask(width, height)
+	b.SetBytes(int64(width * height))
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		components := collectComponents(mask, mask, width, height, 32)
+		if len(components) == 0 {
+			b.Fatal("no components")
+		}
+	}
+}
+
+func BenchmarkRemoveSmallMaskComponents(b *testing.B) {
+	const width = 1024
+	const height = 768
+
+	mask := benchmarkComponentMask(width, height)
+	b.SetBytes(int64(width * height))
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		filtered := removeSmallMaskComponents(mask, width, height, 32)
+		if len(filtered) != len(mask) {
+			b.Fatalf("filtered len = %d, want %d", len(filtered), len(mask))
+		}
+	}
+}
+
 func BenchmarkLearnedToothScores(b *testing.B) {
 	const width = 1024
 	const height = 768
@@ -732,6 +766,20 @@ func benchmarkMask(width, height int) []uint8 {
 	for index := range mask {
 		if rng.Intn(100) < 18 {
 			mask[index] = 1
+		}
+	}
+	return mask
+}
+
+func benchmarkComponentMask(width, height int) []uint8 {
+	mask := make([]uint8, width*height)
+	for y := 4; y < height-20; y += 28 {
+		for x := 4; x < width-20; x += 28 {
+			size := 4
+			if (x/28+y/28)%3 == 0 {
+				size = 9
+			}
+			fillMaskRect(mask, width, x, y, size, size)
 		}
 	}
 	return mask

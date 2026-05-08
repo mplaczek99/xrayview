@@ -37,8 +37,8 @@ type ToothOverlayResult struct {
 	Mode           string
 }
 
-type component struct {
-	pixels  []int
+type componentMeta struct {
+	label   int32
 	minX    int
 	minY    int
 	maxX    int
@@ -71,7 +71,8 @@ type maskWorkspace struct {
 	masks           [][]uint8
 	counts          []int
 	queue           []int
-	componentPixels []int
+	componentLabels []int32
+	components      []componentMeta
 }
 
 func newMaskWorkspace() *maskWorkspace {
@@ -95,6 +96,13 @@ func (workspace *maskWorkspace) countScratch(width int) []int {
 	return workspace.counts[:width]
 }
 
+func (workspace *maskWorkspace) componentLabelScratch(length int) []int32 {
+	if cap(workspace.componentLabels) < length {
+		workspace.componentLabels = make([]int32, length)
+	}
+	return workspace.componentLabels[:length]
+}
+
 func (workspace *maskWorkspace) release() {
 	for _, mask := range workspace.masks {
 		bufpool.PutUint8(mask)
@@ -102,7 +110,8 @@ func (workspace *maskWorkspace) release() {
 	workspace.masks = nil
 	workspace.counts = nil
 	workspace.queue = nil
-	workspace.componentPixels = nil
+	workspace.componentLabels = nil
+	workspace.components = nil
 }
 
 func GenerateToothOverlay(preview imaging.PreviewImage) (ToothOverlayResult, error) {
@@ -126,7 +135,13 @@ func GenerateToothOverlay(preview imaging.PreviewImage) (ToothOverlayResult, err
 
 	toothMask := detectToothMaskWithWorkspace(gray, width, height, workspace)
 	boneMask := detectBoneLevelMaskWithWorkspace(gray, width, height, workspace)
-	components := collectComponents(toothMask, toothMask, width, height, minimumToothAreaPixels(width, height))
+	components := componentSizesAndBBoxes(
+		toothMask,
+		toothMask,
+		width,
+		height,
+		minimumToothAreaPixels(width, height),
+	)
 
 	toothPixels := countMaskPixels(toothMask)
 	bonePixels := countMaskPixels(boneMask)
@@ -174,7 +189,16 @@ func detectToothMaskWithWorkspace(gray []uint8, width, height int, workspace *ma
 	openBinaryMaskInPlace(mask, work, scratch, counts, width, height, 1)
 	fillHolesBinaryMaskInto(work, scratch, &workspace.queue, mask, width, height)
 	mask, work = work, mask
-	removeSmallMaskComponentsInto(work, scratch, &workspace.queue, &workspace.componentPixels, mask, width, height, minimumToothAreaPixels(width, height))
+	removeSmallMaskComponentsInto(
+		work,
+		workspace.componentLabelScratch(len(mask)),
+		&workspace.queue,
+		&workspace.components,
+		mask,
+		width,
+		height,
+		minimumToothAreaPixels(width, height),
+	)
 	mask = work
 	return mask
 }
@@ -201,7 +225,16 @@ func detectBoneLevelMaskWithWorkspace(gray []uint8, width, height int, workspace
 
 	boneFeatureTableMaskInto(mask, normalized, gradient, width, height)
 	closeBinaryMaskInPlace(mask, work, scratch, counts, width, height, 1)
-	removeSmallMaskComponentsInto(work, scratch, &workspace.queue, &workspace.componentPixels, mask, width, height, minimumBoneAreaPixels(width, height))
+	removeSmallMaskComponentsInto(
+		work,
+		workspace.componentLabelScratch(len(mask)),
+		&workspace.queue,
+		&workspace.components,
+		mask,
+		width,
+		height,
+		minimumBoneAreaPixels(width, height),
+	)
 	mask = work
 	return mask
 }
@@ -279,7 +312,16 @@ func boneOutlineSourceMaskWithWorkspace(boneMask []uint8, width, height int, wor
 	source := workspace.getMask(len(boneMask))
 	scratch := workspace.getMask(len(boneMask))
 	filled := workspace.getMask(len(boneMask))
-	removeSmallMaskComponentsInto(source, scratch, &workspace.queue, &workspace.componentPixels, boneMask, width, height, minimumBoneOutlineAreaPixels(width, height))
+	removeSmallMaskComponentsInto(
+		source,
+		workspace.componentLabelScratch(len(boneMask)),
+		&workspace.queue,
+		&workspace.components,
+		boneMask,
+		width,
+		height,
+		minimumBoneOutlineAreaPixels(width, height),
+	)
 	fillHolesBinaryMaskInto(filled, scratch, &workspace.queue, source, width, height)
 	return filled
 }
@@ -933,61 +975,114 @@ func removeSmallMaskComponents(mask []uint8, width, height, minArea int) []uint8
 	}
 
 	filtered := make([]uint8, len(mask))
-	visited := make([]uint8, len(mask))
+	labels := make([]int32, len(mask))
 	queue := make([]int, 0, 512)
-	pixels := make([]int, 0, 512)
-	removeSmallMaskComponentsInto(filtered, visited, &queue, &pixels, mask, width, height, minArea)
+	components := make([]componentMeta, 0, 512)
+	removeSmallMaskComponentsInto(filtered, labels, &queue, &components, mask, width, height, minArea)
 	return filtered
 }
 
-func removeSmallMaskComponentsInto(out []uint8, visited []uint8, queue *[]int, pixels *[]int, mask []uint8, width, height, minArea int) {
+func removeSmallMaskComponentsInto(out []uint8, labels []int32, queue *[]int, components *[]componentMeta, mask []uint8, width, height, minArea int) {
 	if minArea <= 1 || len(mask) == 0 {
 		copy(out, mask)
 		return
 	}
 
 	clear(out)
-	clear(visited[:len(mask)])
+	metas := componentSizesAndBBoxesInto(labels, queue, components, mask, mask, width, height, 0)
+	for index, label := range labels[:len(mask)] {
+		if label <= 0 {
+			continue
+		}
+		metaIndex := int(label - 1)
+		if metaIndex < len(metas) && metas[metaIndex].area >= minArea {
+			out[index] = 1
+		}
+	}
+}
+
+func componentSizesAndBBoxes(mask []uint8, seeds []uint8, width, height, minArea int) []componentMeta {
+	if len(mask) == 0 {
+		return nil
+	}
+
+	labels := make([]int32, len(mask))
+	queue := make([]int, 0, 512)
+	components := make([]componentMeta, 0)
+	return componentSizesAndBBoxesInto(labels, &queue, &components, mask, seeds, width, height, minArea)
+}
+
+func componentSizesAndBBoxesInto(labels []int32, queue *[]int, components *[]componentMeta, mask []uint8, seeds []uint8, width, height, minArea int) []componentMeta {
+	clear(labels[:len(mask)])
 	q := (*queue)[:0]
-	componentPixels := (*pixels)[:0]
+	metas := (*components)[:0]
+	nextLabel := int32(1)
 	for y := 0; y < height; y++ {
 		for x := 0; x < width; x++ {
 			start := y*width + x
-			if visited[start] != 0 || mask[start] == 0 {
+			if labels[start] != 0 || mask[start] == 0 {
 				continue
 			}
 
-			visited[start] = 1
+			label := nextLabel
+			nextLabel++
+			labels[start] = label
 			q = append(q[:0], start)
-			componentPixels = componentPixels[:0]
+			area := 0
+			minX, maxX := x, x
+			minY, maxY := y, y
+			seedHit := false
 			for head := 0; head < len(q); head++ {
 				index := q[head]
-				componentPixels = append(componentPixels, index)
+				area++
 				px := index % width
 				py := index / width
+				if px < minX {
+					minX = px
+				}
+				if px > maxX {
+					maxX = px
+				}
+				if py < minY {
+					minY = py
+				}
+				if py > maxY {
+					maxY = py
+				}
+				if seeds[index] != 0 {
+					seedHit = true
+				}
 
 				for ny := maxInt(py-1, 0); ny <= minInt(py+1, height-1); ny++ {
 					for nx := maxInt(px-1, 0); nx <= minInt(px+1, width-1); nx++ {
 						neighbor := ny*width + nx
-						if visited[neighbor] != 0 || mask[neighbor] == 0 {
+						if labels[neighbor] != 0 || mask[neighbor] == 0 {
 							continue
 						}
-						visited[neighbor] = 1
+						labels[neighbor] = label
 						q = append(q, neighbor)
 					}
 				}
 			}
 
-			if len(componentPixels) < minArea {
+			meta := componentMeta{
+				label:   label,
+				minX:    minX,
+				minY:    minY,
+				maxX:    maxX,
+				maxY:    maxY,
+				area:    area,
+				seedHit: seedHit,
+			}
+			if minArea > 1 && area < minArea {
 				continue
 			}
-			for _, index := range componentPixels {
-				out[index] = 1
-			}
+			metas = append(metas, meta)
 		}
 	}
 	*queue = q
-	*pixels = componentPixels[:0]
+	*components = metas
+	return metas
 }
 
 func minimumToothAreaPixels(width, height int) int {
@@ -1015,73 +1110,8 @@ func thickenBoneLineMaskWithWorkspace(mask []uint8, width, height, radius int, w
 	return out
 }
 
-func collectComponents(mask []uint8, seeds []uint8, width, height, minArea int) []component {
-	visited := make([]bool, len(mask))
-	queue := make([]int, 0, 512)
-	components := make([]component, 0)
-
-	for y := 0; y < height; y++ {
-		for x := 0; x < width; x++ {
-			start := y*width + x
-			if visited[start] || mask[start] == 0 {
-				continue
-			}
-
-			visited[start] = true
-			queue = append(queue[:0], start)
-			pixels := make([]int, 0, 512)
-			minX, maxX := x, x
-			minY, maxY := y, y
-			seedHit := false
-			for head := 0; head < len(queue); head++ {
-				index := queue[head]
-				pixels = append(pixels, index)
-				px := index % width
-				py := index / width
-				if px < minX {
-					minX = px
-				}
-				if px > maxX {
-					maxX = px
-				}
-				if py < minY {
-					minY = py
-				}
-				if py > maxY {
-					maxY = py
-				}
-				if seeds[index] != 0 {
-					seedHit = true
-				}
-
-				for ny := maxInt(py-1, 0); ny <= minInt(py+1, height-1); ny++ {
-					for nx := maxInt(px-1, 0); nx <= minInt(px+1, width-1); nx++ {
-						neighbor := ny*width + nx
-						if visited[neighbor] || mask[neighbor] == 0 {
-							continue
-						}
-						visited[neighbor] = true
-						queue = append(queue, neighbor)
-					}
-				}
-			}
-
-			if len(pixels) < minArea {
-				continue
-			}
-			components = append(components, component{
-				pixels:  pixels,
-				minX:    minX,
-				minY:    minY,
-				maxX:    maxX,
-				maxY:    maxY,
-				area:    len(pixels),
-				seedHit: seedHit,
-			})
-		}
-	}
-
-	return components
+func collectComponents(mask []uint8, seeds []uint8, width, height, minArea int) []componentMeta {
+	return componentSizesAndBBoxes(mask, seeds, width, height, minArea)
 }
 
 func countMaskPixels(mask []uint8) int {
