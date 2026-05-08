@@ -7,6 +7,8 @@ import (
 	"xrayview/backend/internal/imaging"
 )
 
+var benchmarkRenderLUTByte uint8
+
 func TestRenderSourceImageUsesEmbeddedWindowByDefault(t *testing.T) {
 	source := imaging.SourceImage{
 		Width:    3,
@@ -160,6 +162,51 @@ func BenchmarkRenderGrayscalePixelsInvert(b *testing.B) {
 	}
 }
 
+func BenchmarkBuildRenderLUT(b *testing.B) {
+	source := imaging.SourceImage{
+		MinValue: 0,
+		MaxValue: 4095,
+		DefaultWindow: &imaging.WindowLevel{
+			Center: 2048,
+			Width:  4096,
+		},
+	}
+	window, hasWindow := resolveWindow(source, DefaultRenderPlan().Window)
+
+	var lut [65536]uint8
+	b.ReportAllocs()
+	for range b.N {
+		populateRenderLUT(&lut, source, window, hasWindow)
+	}
+	benchmarkRenderLUTByte = lut[4095]
+}
+
+func BenchmarkCachedRenderLUTHit(b *testing.B) {
+	source := imaging.SourceImage{
+		MinValue: 0,
+		MaxValue: 4095,
+		DefaultWindow: &imaging.WindowLevel{
+			Center: 2048,
+			Width:  4096,
+		},
+	}
+	window, hasWindow := resolveWindow(source, DefaultRenderPlan().Window)
+	key := newRenderLUTKey(source, window, hasWindow)
+	cache := newRenderLUTCache(4)
+	cache.getOrBuild(key, func() *[65536]uint8 {
+		return buildRenderLUT(source, window, hasWindow)
+	})
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		_ = cache.getOrBuild(key, func() *[65536]uint8 {
+			b.Fatal("unexpected cached LUT miss")
+			return nil
+		})
+	}
+}
+
 func TestRenderFallbackPathInvertProducesSameResultAsLUT(t *testing.T) {
 	source := imaging.SourceImage{
 		Width:    4,
@@ -287,6 +334,66 @@ func TestRenderSourceImageReturnsPooledBuffer(t *testing.T) {
 	})
 	if allocs != 0 {
 		t.Fatalf("RenderSourceImage pooled allocs/run = %v, want 0", allocs)
+	}
+}
+
+func TestRenderLUTCacheReusesIdenticalRenderParameters(t *testing.T) {
+	source := imaging.SourceImage{
+		MinValue: 0,
+		MaxValue: 4095,
+		DefaultWindow: &imaging.WindowLevel{
+			Center: 2048,
+			Width:  4096,
+		},
+	}
+	window, hasWindow := resolveWindow(source, DefaultRenderPlan().Window)
+	key := newRenderLUTKey(source, window, hasWindow)
+
+	cache := newRenderLUTCache(4)
+	builds := 0
+	build := func() *[65536]uint8 {
+		builds++
+		return buildRenderLUT(source, window, hasWindow)
+	}
+
+	first := cache.getOrBuild(key, build)
+	second := cache.getOrBuild(key, build)
+	if first != second {
+		t.Fatal("cached LUT pointer changed for identical render parameters")
+	}
+	if builds != 1 {
+		t.Fatalf("builds = %d, want 1", builds)
+	}
+}
+
+func TestRenderLUTCacheEvictsLeastRecentlyUsedEntry(t *testing.T) {
+	cache := newRenderLUTCache(2)
+	keyA := renderLUTKey{minValue: 1}
+	keyB := renderLUTKey{minValue: 2}
+	keyC := renderLUTKey{minValue: 3}
+	builds := map[renderLUTKey]int{}
+
+	build := func(key renderLUTKey) func() *[65536]uint8 {
+		return func() *[65536]uint8 {
+			builds[key]++
+			return new([65536]uint8)
+		}
+	}
+
+	cache.getOrBuild(keyA, build(keyA))
+	cache.getOrBuild(keyB, build(keyB))
+	cache.getOrBuild(keyA, build(keyA))
+	cache.getOrBuild(keyC, build(keyC))
+	cache.getOrBuild(keyB, build(keyB))
+
+	if builds[keyA] != 1 {
+		t.Fatalf("keyA builds = %d, want 1", builds[keyA])
+	}
+	if builds[keyB] != 2 {
+		t.Fatalf("keyB builds = %d, want 2 after LRU eviction", builds[keyB])
+	}
+	if builds[keyC] != 1 {
+		t.Fatalf("keyC builds = %d, want 1", builds[keyC])
 	}
 }
 
