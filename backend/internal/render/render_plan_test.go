@@ -3,6 +3,7 @@ package render
 import (
 	"testing"
 
+	"xrayview/backend/internal/bufpool"
 	"xrayview/backend/internal/imaging"
 )
 
@@ -20,6 +21,7 @@ func TestRenderSourceImageUsesEmbeddedWindowByDefault(t *testing.T) {
 	}
 
 	preview := RenderSourceImage(source, DefaultRenderPlan())
+	defer preview.Release()
 
 	if got, want := preview.Format, imaging.FormatGray8; got != want {
 		t.Fatalf("Format = %q, want %q", got, want)
@@ -45,6 +47,7 @@ func TestRenderSourceImageFullRangeIgnoresEmbeddedWindow(t *testing.T) {
 	preview := RenderSourceImage(source, RenderPlan{
 		Window: FullRangeWindowMode(),
 	})
+	defer preview.Release()
 
 	if got, want := preview.Pixels, []uint8{0, 128, 255}; !equalBytes(got, want) {
 		t.Fatalf("Pixels = %v, want %v", got, want)
@@ -66,6 +69,7 @@ func TestRenderSourceImageAppliesSourceInvertAfterWindowing(t *testing.T) {
 	}
 
 	preview := RenderSourceImage(source, DefaultRenderPlan())
+	defer preview.Release()
 
 	if got, want := preview.Pixels, []uint8{255, 127, 0}; !equalBytes(got, want) {
 		t.Fatalf("Pixels = %v, want %v", got, want)
@@ -93,9 +97,11 @@ func BenchmarkRenderGrayscalePixels(b *testing.B) {
 
 	plan := DefaultRenderPlan()
 
+	b.ReportAllocs()
 	b.ResetTimer()
 	for range b.N {
-		RenderGrayscalePixels(source, plan)
+		pixels := RenderGrayscalePixels(source, plan)
+		bufpool.PutUint8(pixels)
 	}
 }
 
@@ -116,9 +122,11 @@ func BenchmarkRenderGrayscalePixelsFullRange(b *testing.B) {
 
 	plan := RenderPlan{Window: FullRangeWindowMode()}
 
+	b.ReportAllocs()
 	b.ResetTimer()
 	for range b.N {
-		RenderGrayscalePixels(source, plan)
+		pixels := RenderGrayscalePixels(source, plan)
+		bufpool.PutUint8(pixels)
 	}
 }
 
@@ -144,9 +152,11 @@ func BenchmarkRenderGrayscalePixelsInvert(b *testing.B) {
 
 	plan := DefaultRenderPlan()
 
+	b.ReportAllocs()
 	b.ResetTimer()
 	for range b.N {
-		RenderGrayscalePixels(source, plan)
+		pixels := RenderGrayscalePixels(source, plan)
+		bufpool.PutUint8(pixels)
 	}
 }
 
@@ -165,6 +175,7 @@ func TestRenderFallbackPathInvertProducesSameResultAsLUT(t *testing.T) {
 	}
 
 	got := RenderGrayscalePixels(source, DefaultRenderPlan())
+	defer bufpool.PutUint8(got)
 
 	// Manually compute expected: window maps, then invert
 	// With such wide window, values spread across 0-255 range
@@ -185,6 +196,7 @@ func TestRenderFallbackPathNoInvert(t *testing.T) {
 	}
 
 	got := RenderGrayscalePixels(source, RenderPlan{Window: FullRangeWindowMode()})
+	defer bufpool.PutUint8(got)
 
 	// Linear mapping: -100 → 0, 70000 → 255
 	if got[0] != 0 {
@@ -219,9 +231,11 @@ func BenchmarkRenderGrayscalePixelsFallback(b *testing.B) {
 
 	plan := DefaultRenderPlan()
 
+	b.ReportAllocs()
 	b.ResetTimer()
 	for range b.N {
-		RenderGrayscalePixels(source, plan)
+		pixels := RenderGrayscalePixels(source, plan)
+		bufpool.PutUint8(pixels)
 	}
 }
 
@@ -247,9 +261,32 @@ func BenchmarkRenderGrayscalePixelsFallbackInvert(b *testing.B) {
 
 	plan := DefaultRenderPlan()
 
+	b.ReportAllocs()
 	b.ResetTimer()
 	for range b.N {
-		RenderGrayscalePixels(source, plan)
+		pixels := RenderGrayscalePixels(source, plan)
+		bufpool.PutUint8(pixels)
+	}
+}
+
+func TestRenderSourceImageReturnsPooledBuffer(t *testing.T) {
+	source := imaging.SourceImage{
+		Width:    4,
+		Height:   1,
+		Pixels:   []float32{0, 1, 2, 3},
+		MinValue: 0,
+		MaxValue: 3,
+	}
+
+	warm := RenderSourceImage(source, RenderPlan{Window: FullRangeWindowMode()})
+	warm.Release()
+
+	allocs := testing.AllocsPerRun(100, func() {
+		preview := RenderSourceImage(source, RenderPlan{Window: FullRangeWindowMode()})
+		preview.Release()
+	})
+	if allocs != 0 {
+		t.Fatalf("RenderSourceImage pooled allocs/run = %v, want 0", allocs)
 	}
 }
 

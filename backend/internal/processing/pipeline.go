@@ -25,23 +25,28 @@ func ProcessRenderedPreview(
 
 	normalizedPalette, err := NormalizePaletteName(palette)
 	if err != nil {
+		processed.Release()
 		return PipelineOutput{}, err
 	}
 
 	outputPreview := processed
 	if normalizedPalette != PaletteNone {
 		mode = fmt.Sprintf("%s with %s palette", mode, normalizedPalette)
-		outputPreview, err = ApplyNamedPalette(processed, normalizedPalette)
+		paletted, err := ApplyNamedPalette(processed, normalizedPalette)
+		processed.Release()
 		if err != nil {
 			return PipelineOutput{}, err
 		}
+		outputPreview = paletted
 	}
 
 	if compare {
-		outputPreview, err = CombineComparison(sourcePreview, outputPreview)
+		compared, err := CombineComparison(sourcePreview, outputPreview)
+		outputPreview.Release()
 		if err != nil {
 			return PipelineOutput{}, err
 		}
+		outputPreview = compared
 		mode = fmt.Sprintf("comparison of grayscale and %s", mode)
 	}
 
@@ -63,5 +68,6 @@ func ProcessSourceImage(
 	}
 
 	sourcePreview := render.RenderSourceImage(source, plan)
+	defer sourcePreview.Release()
 	return ProcessRenderedPreview(sourcePreview, controls, palette, compare)
 }

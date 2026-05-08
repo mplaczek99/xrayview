@@ -83,3 +83,35 @@ func TestPreviewImageValidateRejectsUnknownFormat(t *testing.T) {
 		t.Fatal("Validate returned nil error, want format failure")
 	}
 }
+
+func TestPreviewImageReleaseIsIdempotentForSameOwner(t *testing.T) {
+	releaseCalls := 0
+	image := GrayPreviewWithRelease(2, 1, []uint8{1, 2}, func(pixels []uint8) {
+		releaseCalls++
+		if got, want := pixels, []uint8{1, 2}; !equalUint8(got, want) {
+			t.Fatalf("released pixels = %v, want %v", got, want)
+		}
+	})
+
+	image.Release()
+	image.Release()
+
+	if releaseCalls != 1 {
+		t.Fatalf("release calls = %d, want 1", releaseCalls)
+	}
+	if image.Pixels != nil {
+		t.Fatalf("released image pixels = %v, want nil", image.Pixels)
+	}
+}
+
+func equalUint8(left, right []uint8) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if left[i] != right[i] {
+			return false
+		}
+	}
+	return true
+}

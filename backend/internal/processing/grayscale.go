@@ -31,7 +31,7 @@ func ProcessPreviewImage(
 	copy(pixels, preview.Pixels)
 	mode := ProcessGrayscalePixels(pixels, controls)
 
-	return imaging.GrayPreview(preview.Width, preview.Height, pixels), mode, nil
+	return imaging.GrayPreviewWithRelease(preview.Width, preview.Height, pixels, bufpool.PutUint8), mode, nil
 }
 
 func ProcessGrayscalePixels(pixels []uint8, controls GrayscaleControls) string {

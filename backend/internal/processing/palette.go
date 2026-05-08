@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"xrayview/backend/internal/bufpool"
 	"xrayview/backend/internal/imaging"
 )
 
@@ -58,13 +59,13 @@ func ApplyNamedPalette(
 		lookup[index] = colorFn(uint8(index))
 	}
 
-	pixels := make([]uint8, len(preview.Pixels)*4)
+	pixels := bufpool.GetUint8(len(preview.Pixels) * 4)
 	for index, value := range preview.Pixels {
 		base := index * 4
 		copy(pixels[base:base+4], lookup[value][:])
 	}
 
-	return imaging.RGBAPreview(preview.Width, preview.Height, pixels), nil
+	return imaging.RGBAPreviewWithRelease(preview.Width, preview.Height, pixels, bufpool.PutUint8), nil
 }
 
 func hotColor(value uint8) [4]uint8 {

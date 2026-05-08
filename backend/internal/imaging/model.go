@@ -41,6 +41,8 @@ type PreviewImage struct {
 	Height uint32      `json:"height"`
 	Format ImageFormat `json:"format"`
 	Pixels []uint8     `json:"pixels"`
+
+	release func([]uint8)
 }
 
 func (image *SourceImage) UnmarshalJSON(data []byte) error {
@@ -159,6 +161,12 @@ func GrayPreview(width, height uint32, pixels []uint8) PreviewImage {
 	}
 }
 
+func GrayPreviewWithRelease(width, height uint32, pixels []uint8, release func([]uint8)) PreviewImage {
+	preview := GrayPreview(width, height, pixels)
+	preview.release = release
+	return preview
+}
+
 func RGBAPreview(width, height uint32, pixels []uint8) PreviewImage {
 	return PreviewImage{
 		Width:  width,
@@ -166,6 +174,24 @@ func RGBAPreview(width, height uint32, pixels []uint8) PreviewImage {
 		Format: FormatRGBA8,
 		Pixels: pixels,
 	}
+}
+
+func RGBAPreviewWithRelease(width, height uint32, pixels []uint8, release func([]uint8)) PreviewImage {
+	preview := RGBAPreview(width, height, pixels)
+	preview.release = release
+	return preview
+}
+
+func (image *PreviewImage) Release() {
+	if image == nil || image.release == nil {
+		return
+	}
+
+	release := image.release
+	pixels := image.Pixels
+	image.Pixels = nil
+	image.release = nil
+	release(pixels)
 }
 
 func (format ImageFormat) channelsPerPixel() int {

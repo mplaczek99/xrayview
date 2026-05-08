@@ -3,6 +3,7 @@ package processing
 import (
 	"fmt"
 
+	"xrayview/backend/internal/bufpool"
 	"xrayview/backend/internal/imaging"
 )
 
@@ -35,7 +36,7 @@ func CombineComparison(
 	width := int(left.Width)
 	height := int(left.Height)
 	combinedWidth := left.Width * 2
-	pixels := make([]uint8, int(uint64(combinedWidth)*uint64(left.Height)*4))
+	pixels := bufpool.GetUint8(int(uint64(combinedWidth) * uint64(left.Height) * 4))
 
 	for row := 0; row < height; row++ {
 		dstRowStart := row * int(combinedWidth) * 4
@@ -70,5 +71,5 @@ func CombineComparison(
 		}
 	}
 
-	return imaging.RGBAPreview(combinedWidth, left.Height, pixels), nil
+	return imaging.RGBAPreviewWithRelease(combinedWidth, left.Height, pixels, bufpool.PutUint8), nil
 }

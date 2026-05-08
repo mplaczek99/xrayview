@@ -647,6 +647,7 @@ func (service *Service) executeRenderJob(
 	}) {
 		return
 	}
+	defer preview.Release()
 
 	var previewPath string
 	if !service.runJobStage(ctx, jobID, jobStage{
@@ -752,8 +753,10 @@ func (service *Service) executeAnalyzeJob(
 			return previewPath
 		},
 		work: func() error {
+			sourcePreview := service.loadOrRenderSourcePreview(study.InputPath, sourceStudy.Image)
+			defer sourcePreview.Release()
 			result, err := analysis.GenerateToothOverlay(
-				service.loadOrRenderSourcePreview(study.InputPath, sourceStudy.Image),
+				sourcePreview,
 			)
 			if err != nil {
 				return contracts.Internal(fmt.Sprintf("analyze source preview: %v", err))
@@ -868,8 +871,10 @@ func (service *Service) executeProcessJob(
 			return previewPath
 		},
 		work: func() error {
+			sourcePreview := service.loadOrRenderSourcePreview(study.InputPath, sourceStudy.Image)
+			defer sourcePreview.Release()
 			processed, err := processing.ProcessRenderedPreview(
-				service.loadOrRenderSourcePreview(study.InputPath, sourceStudy.Image),
+				sourcePreview,
 				resolved.Controls,
 				resolved.Palette,
 				resolved.Compare,
@@ -883,6 +888,7 @@ func (service *Service) executeProcessJob(
 	}) {
 		return
 	}
+	defer output.Preview.Release()
 
 	if !service.runJobStage(ctx, jobID, jobStage{
 		percent: 84,
