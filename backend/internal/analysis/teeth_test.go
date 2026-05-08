@@ -260,6 +260,15 @@ func TestSmoothClosedContourReducesHighFrequencyJitter(t *testing.T) {
 	}
 }
 
+func TestSmoothClosedContourDoesNotCompoundPointCount(t *testing.T) {
+	points := benchmarkClosedContour(128)
+	smoothed := smoothClosedContour(points, overlayContourSmoothingIterations)
+	want := len(points) * 2
+	if len(smoothed) != want {
+		t.Fatalf("len(smoothClosedContour(points)) = %d, want %d", len(smoothed), want)
+	}
+}
+
 func TestGenerateToothOverlayDrawsInnerOutline(t *testing.T) {
 	preview := imaging.GrayPreview(32, 32, make([]uint8, 32*32))
 	result, err := GenerateToothOverlay(preview)
@@ -529,6 +538,27 @@ func BenchmarkGradientGray(b *testing.B) {
 	}
 }
 
+func BenchmarkContourSmoothing(b *testing.B) {
+	points := benchmarkClosedContour(4096)
+	var scratch contourSmoothingScratch
+	lowPassed := lowPassClosedContourWithScratch(points, overlayContourLowPassIterations, &scratch)
+	smoothed := smoothClosedContourWithScratch(lowPassed, overlayContourSmoothingIterations, &scratch)
+	if len(smoothed) != len(points)*2 {
+		b.Fatalf("smoothed len = %d, want %d", len(smoothed), len(points)*2)
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		lowPassed := lowPassClosedContourWithScratch(points, overlayContourLowPassIterations, &scratch)
+		smoothed := smoothClosedContourWithScratch(lowPassed, overlayContourSmoothingIterations, &scratch)
+		if len(smoothed) != len(points)*2 {
+			b.Fatalf("smoothed len = %d, want %d", len(smoothed), len(points)*2)
+		}
+	}
+}
+
 func referenceDilateBinaryMask(mask []uint8, width, height, radius int) []uint8 {
 	if radius <= 0 || len(mask) == 0 {
 		return append([]uint8(nil), mask...)
@@ -610,6 +640,19 @@ func benchmarkGray(width, height int) []uint8 {
 		pixels[index] = uint8((index*31 + rng.Intn(64)) & 0xff)
 	}
 	return pixels
+}
+
+func benchmarkClosedContour(pointCount int) []overlayPoint {
+	points := make([]overlayPoint, 0, pointCount)
+	for index := 0; index < pointCount; index++ {
+		angle := 2 * math.Pi * float64(index) / float64(pointCount)
+		radius := 250.0 + 18.0*math.Sin(angle*7) + 11.0*math.Cos(angle*13)
+		points = append(points, overlayPoint{
+			x: 300.0 + radius*math.Cos(angle),
+			y: 300.0 + radius*math.Sin(angle),
+		})
+	}
+	return points
 }
 
 func coloredFixtureNames(t *testing.T) []string {

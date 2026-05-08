@@ -12,7 +12,7 @@ var boneOverlayRed = [3]uint8{255, 0, 0}
 
 // AnalyzeAlgorithmVersion is part of the Analyze result cache key. Change it
 // only when the generated overlay semantics intentionally change.
-const AnalyzeAlgorithmVersion = "lowpass-fair-uniform-tooth-and-bone-contour-overlay-v1"
+const AnalyzeAlgorithmVersion = "lowpass-fair-uniform-tooth-and-bone-contour-overlay-v2"
 
 const minimumToothAreaFloorPixels = 51
 const toothOutlineThicknessPixels = 2
@@ -49,6 +49,11 @@ type component struct {
 type overlayPoint struct {
 	x float64
 	y float64
+}
+
+type contourSmoothingScratch struct {
+	a []overlayPoint
+	b []overlayPoint
 }
 
 type gridPoint struct {
@@ -199,14 +204,15 @@ func drawSmoothedMaskContours(
 	excludeMask []uint8,
 ) {
 	coverage := make([]float64, width*height)
+	var scratch contourSmoothingScratch
 	for _, contour := range maskBoundaryContours(mask, width, height) {
 		if len(contour) < 4 {
 			continue
 		}
 		contour = resampleClosedContour(contour, overlayContourPointSpacingPixels)
 		contour = simplifyClosedContour(contour, overlayContourSimplifyTolerancePixels)
-		contour = lowPassClosedContour(contour, overlayContourLowPassIterations)
-		smoothed := smoothClosedContour(contour, overlayContourSmoothingIterations)
+		contour = lowPassClosedContourWithScratch(contour, overlayContourLowPassIterations, &scratch)
+		smoothed := smoothClosedContourWithScratch(contour, overlayContourSmoothingIterations, &scratch)
 		addClosedStrokeCoverage(coverage, width, height, smoothed, overlayStrokeWidthPixels, excludeMask)
 	}
 	compositeOverlayCoverage(rgba, coverage, color)
@@ -285,16 +291,20 @@ func simplifyPolylineRange(points []overlayPoint, toleranceSquared float64, star
 }
 
 func lowPassClosedContour(points []overlayPoint, iterations int) []overlayPoint {
+	var scratch contourSmoothingScratch
+	return lowPassClosedContourWithScratch(points, iterations, &scratch)
+}
+
+func lowPassClosedContourWithScratch(points []overlayPoint, iterations int, scratch *contourSmoothingScratch) []overlayPoint {
 	if len(points) < 24 {
-		return append([]overlayPoint(nil), points...)
+		return points
 	}
 
-	filtered := append([]overlayPoint(nil), points...)
+	filtered, next := scratch.prepare(points)
 	for iteration := 0; iteration < iterations; iteration++ {
 		if len(filtered) < 3 {
 			return filtered
 		}
-		next := make([]overlayPoint, len(filtered))
 		for index, point := range filtered {
 			previous := filtered[(index+len(filtered)-1)%len(filtered)]
 			following := filtered[(index+1)%len(filtered)]
@@ -303,7 +313,7 @@ func lowPassClosedContour(points []overlayPoint, iterations int) []overlayPoint 
 				y: previous.y*0.25 + point.y*0.50 + following.y*0.25,
 			}
 		}
-		filtered = next
+		filtered, next = next, filtered
 	}
 	return filtered
 }
@@ -398,41 +408,58 @@ func maskBoundaryContours(mask []uint8, width, height int) [][]overlayPoint {
 }
 
 func smoothClosedContour(points []overlayPoint, iterations int) []overlayPoint {
-	smoothed := append([]overlayPoint(nil), points...)
+	var scratch contourSmoothingScratch
+	return smoothClosedContourWithScratch(points, iterations, &scratch)
+}
+
+func smoothClosedContourWithScratch(points []overlayPoint, iterations int, scratch *contourSmoothingScratch) []overlayPoint {
+	if len(points) < 24 {
+		return points
+	}
+
+	smoothed, next := scratch.prepare(points)
 	for iteration := 0; iteration < iterations; iteration++ {
 		if len(smoothed) < 3 {
 			return smoothed
 		}
-		next := make([]overlayPoint, 0, len(smoothed)*2)
 		for index, current := range smoothed {
+			previous := smoothed[(index+len(smoothed)-1)%len(smoothed)]
 			following := smoothed[(index+1)%len(smoothed)]
-			next = append(next,
-				overlayPoint{
-					x: current.x*0.75 + following.x*0.25,
-					y: current.y*0.75 + following.y*0.25,
-				},
-				overlayPoint{
-					x: current.x*0.25 + following.x*0.75,
-					y: current.y*0.25 + following.y*0.75,
-				},
-			)
+			next[index] = overlayPoint{
+				x: previous.x*0.125 + current.x*0.75 + following.x*0.125,
+				y: previous.y*0.125 + current.y*0.75 + following.y*0.125,
+			}
 		}
-		smoothed = next
+		smoothed, next = next, smoothed
 	}
-	smoothed = fairClosedContour(
+	smoothed = fairClosedContourWithScratch(
 		smoothed,
 		overlayContourFairingIterations,
 		overlayContourFairingLambda,
 		overlayContourFairingMu,
+		scratch,
 	)
-	return smoothed
+	return subdivideClosedContourWithScratch(smoothed, scratch)
 }
 
 func fairClosedContour(points []overlayPoint, iterations int, lambda, mu float64) []overlayPoint {
-	faired := append([]overlayPoint(nil), points...)
+	var scratch contourSmoothingScratch
+	return fairClosedContourWithScratch(points, iterations, lambda, mu, &scratch)
+}
+
+func fairClosedContourWithScratch(
+	points []overlayPoint,
+	iterations int,
+	lambda float64,
+	mu float64,
+	scratch *contourSmoothingScratch,
+) []overlayPoint {
+	faired, next := scratch.prepare(points)
 	for iteration := 0; iteration < iterations; iteration++ {
-		faired = laplacianSmoothClosedContour(faired, lambda)
-		faired = laplacianSmoothClosedContour(faired, mu)
+		laplacianSmoothClosedContourInto(next, faired, lambda)
+		faired, next = next, faired
+		laplacianSmoothClosedContourInto(next, faired, mu)
+		faired, next = next, faired
 	}
 	return faired
 }
@@ -443,6 +470,16 @@ func laplacianSmoothClosedContour(points []overlayPoint, amount float64) []overl
 	}
 
 	smoothed := make([]overlayPoint, len(points))
+	laplacianSmoothClosedContourInto(smoothed, points, amount)
+	return smoothed
+}
+
+func laplacianSmoothClosedContourInto(smoothed []overlayPoint, points []overlayPoint, amount float64) {
+	if len(points) < 3 || amount == 0 {
+		copy(smoothed, points)
+		return
+	}
+
 	for index, point := range points {
 		previous := points[(index+len(points)-1)%len(points)]
 		next := points[(index+1)%len(points)]
@@ -455,7 +492,58 @@ func laplacianSmoothClosedContour(points []overlayPoint, amount float64) []overl
 			y: point.y + amount*(average.y-point.y),
 		}
 	}
-	return smoothed
+}
+
+func subdivideClosedContourWithScratch(points []overlayPoint, scratch *contourSmoothingScratch) []overlayPoint {
+	if len(points) < 3 {
+		return points
+	}
+
+	subdivided := scratch.spare(points, len(points)*2)
+	for index, current := range points {
+		following := points[(index+1)%len(points)]
+		base := index * 2
+		subdivided[base] = overlayPoint{
+			x: current.x*0.75 + following.x*0.25,
+			y: current.y*0.75 + following.y*0.25,
+		}
+		subdivided[base+1] = overlayPoint{
+			x: current.x*0.25 + following.x*0.75,
+			y: current.y*0.25 + following.y*0.75,
+		}
+	}
+	return subdivided
+}
+
+func (scratch *contourSmoothingScratch) prepare(points []overlayPoint) ([]overlayPoint, []overlayPoint) {
+	if cap(scratch.a) < len(points) {
+		scratch.a = make([]overlayPoint, len(points))
+	}
+	if cap(scratch.b) < len(points) {
+		scratch.b = make([]overlayPoint, len(points))
+	}
+
+	first := scratch.a[:len(points)]
+	second := scratch.b[:len(points)]
+	copy(first, points)
+	return first, second
+}
+
+func (scratch *contourSmoothingScratch) spare(points []overlayPoint, length int) []overlayPoint {
+	if sameBacking(points, scratch.a) {
+		if cap(scratch.b) < length {
+			scratch.b = make([]overlayPoint, length)
+		}
+		return scratch.b[:length]
+	}
+	if cap(scratch.a) < length {
+		scratch.a = make([]overlayPoint, length)
+	}
+	return scratch.a[:length]
+}
+
+func sameBacking(left []overlayPoint, right []overlayPoint) bool {
+	return len(left) > 0 && len(right) > 0 && &left[0] == &right[0]
 }
 
 func resampleClosedContour(points []overlayPoint, spacing float64) []overlayPoint {
