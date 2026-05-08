@@ -601,11 +601,106 @@ func addStrokeSegmentCoverage(
 	maxX := clampInt(int(math.Ceil(maxFloat(start.x, end.x)+radius+1)), 0, width-1)
 	minY := clampInt(int(math.Floor(minFloat(start.y, end.y)-radius-1)), 0, height-1)
 	maxY := clampInt(int(math.Ceil(maxFloat(start.y, end.y)+radius+1)), 0, height-1)
+	if minX > maxX || minY > maxY {
+		return
+	}
+
+	dx := end.x - start.x
+	dy := end.y - start.y
+	lengthSquared := dx*dx + dy*dy
+	fullCoverageRadius := radius - 0.5
+	fullCoverageRadiusSquared := fullCoverageRadius * fullCoverageRadius
+	edgeCoverageRadius := radius + 0.5
+	edgeCoverageRadiusSquared := edgeCoverageRadius * edgeCoverageRadius
+	if lengthSquared == 0 {
+		addStrokePointCoverage(
+			coverage,
+			width,
+			minX,
+			maxX,
+			minY,
+			maxY,
+			start,
+			radius,
+			fullCoverageRadius,
+			fullCoverageRadiusSquared,
+			edgeCoverageRadiusSquared,
+			excludeMask,
+		)
+		return
+	}
+
+	invLengthSquared := 1 / lengthSquared
 
 	for y := minY; y <= maxY; y++ {
+		pixelY := float64(y) + 0.5
+		startY := pixelY - start.y
+		endY := pixelY - end.y
+		pixelStartX := float64(minX) + 0.5
+		startX := pixelStartX - start.x
+		endX := pixelStartX - end.x
+		dot := startX*dx + startY*dy
+		cross := startX*dy - startY*dx
+
 		for x := minX; x <= maxX; x++ {
-			distance := distanceToSegment(float64(x)+0.5, float64(y)+0.5, start, end)
-			segmentCoverage := strokeCoverage(distance, radius)
+			distanceSquared := 0.0
+			switch {
+			case dot <= 0:
+				distanceSquared = startX*startX + startY*startY
+			case dot >= lengthSquared:
+				distanceSquared = endX*endX + endY*endY
+			default:
+				distanceSquared = cross * cross * invLengthSquared
+			}
+
+			segmentCoverage := strokeCoverageFromDistanceSquared(
+				distanceSquared,
+				radius,
+				fullCoverageRadius,
+				fullCoverageRadiusSquared,
+				edgeCoverageRadiusSquared,
+			)
+			if segmentCoverage > 0 {
+				index := y*width + x
+				if (len(excludeMask) != len(coverage) || excludeMask[index] == 0) &&
+					segmentCoverage > coverage[index] {
+					coverage[index] = segmentCoverage
+				}
+			}
+			startX++
+			endX++
+			dot += dx
+			cross += dy
+		}
+	}
+}
+
+func addStrokePointCoverage(
+	coverage []float64,
+	width int,
+	minX int,
+	maxX int,
+	minY int,
+	maxY int,
+	point overlayPoint,
+	radius float64,
+	fullCoverageRadius float64,
+	fullCoverageRadiusSquared float64,
+	edgeCoverageRadiusSquared float64,
+	excludeMask []uint8,
+) {
+	for y := minY; y <= maxY; y++ {
+		pixelY := float64(y) + 0.5
+		dy := pixelY - point.y
+		for x := minX; x <= maxX; x++ {
+			dx := float64(x) + 0.5 - point.x
+			segmentCoverage := strokeCoverageFromDistanceSquared(
+				dx*dx+dy*dy,
+				radius,
+				fullCoverageRadius,
+				fullCoverageRadiusSquared,
+				edgeCoverageRadiusSquared,
+			)
 			if segmentCoverage <= 0 {
 				continue
 			}
@@ -651,6 +746,22 @@ func strokeCoverage(distance float64, radius float64) float64 {
 		return 1
 	}
 	return coverage
+}
+
+func strokeCoverageFromDistanceSquared(
+	distanceSquared float64,
+	radius float64,
+	fullCoverageRadius float64,
+	fullCoverageRadiusSquared float64,
+	edgeCoverageRadiusSquared float64,
+) float64 {
+	if distanceSquared >= edgeCoverageRadiusSquared {
+		return 0
+	}
+	if fullCoverageRadius >= 0 && distanceSquared <= fullCoverageRadiusSquared {
+		return 1
+	}
+	return strokeCoverage(math.Sqrt(distanceSquared), radius)
 }
 
 func distanceToSegment(x float64, y float64, start overlayPoint, end overlayPoint) float64 {

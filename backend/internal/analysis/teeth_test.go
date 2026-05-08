@@ -269,6 +269,39 @@ func TestSmoothClosedContourDoesNotCompoundPointCount(t *testing.T) {
 	}
 }
 
+func TestStrokeSegmentCoverageMatchesDistanceReference(t *testing.T) {
+	const width = 32
+	const height = 28
+	const radius = 1.3
+
+	excludeMask := make([]uint8, width*height)
+	fillMaskRect(excludeMask, width, 12, 11, 5, 4)
+	segments := []struct {
+		name  string
+		start overlayPoint
+		end   overlayPoint
+	}{
+		{name: "horizontal", start: overlayPoint{x: 2.25, y: 5.5}, end: overlayPoint{x: 28.75, y: 5.5}},
+		{name: "diagonal", start: overlayPoint{x: 4.5, y: 3.25}, end: overlayPoint{x: 24.75, y: 22.5}},
+		{name: "outside_bounds", start: overlayPoint{x: -3.0, y: 8.0}, end: overlayPoint{x: 18.0, y: 30.0}},
+		{name: "zero_length", start: overlayPoint{x: 15.25, y: 14.75}, end: overlayPoint{x: 15.25, y: 14.75}},
+	}
+
+	for _, tt := range segments {
+		t.Run(tt.name, func(t *testing.T) {
+			got := make([]float64, width*height)
+			want := make([]float64, width*height)
+			addStrokeSegmentCoverage(got, width, height, tt.start, tt.end, radius, excludeMask)
+			referenceAddStrokeSegmentCoverage(want, width, height, tt.start, tt.end, radius, excludeMask)
+			for index := range got {
+				if math.Abs(got[index]-want[index]) > 1e-12 {
+					t.Fatalf("coverage[%d] = %.17f, want %.17f", index, got[index], want[index])
+				}
+			}
+		})
+	}
+}
+
 func TestGenerateToothOverlayDrawsInnerOutline(t *testing.T) {
 	preview := imaging.GrayPreview(32, 32, make([]uint8, 32*32))
 	result, err := GenerateToothOverlay(preview)
@@ -448,6 +481,38 @@ func TestRuntimeAnalysisDoesNotReadColoredFixtures(t *testing.T) {
 	}
 }
 
+func referenceAddStrokeSegmentCoverage(
+	coverage []float64,
+	width int,
+	height int,
+	start overlayPoint,
+	end overlayPoint,
+	radius float64,
+	excludeMask []uint8,
+) {
+	minX := clampInt(int(math.Floor(minFloat(start.x, end.x)-radius-1)), 0, width-1)
+	maxX := clampInt(int(math.Ceil(maxFloat(start.x, end.x)+radius+1)), 0, width-1)
+	minY := clampInt(int(math.Floor(minFloat(start.y, end.y)-radius-1)), 0, height-1)
+	maxY := clampInt(int(math.Ceil(maxFloat(start.y, end.y)+radius+1)), 0, height-1)
+
+	for y := minY; y <= maxY; y++ {
+		for x := minX; x <= maxX; x++ {
+			distance := distanceToSegment(float64(x)+0.5, float64(y)+0.5, start, end)
+			segmentCoverage := strokeCoverage(distance, radius)
+			if segmentCoverage <= 0 {
+				continue
+			}
+			index := y*width + x
+			if len(excludeMask) == len(coverage) && excludeMask[index] != 0 {
+				continue
+			}
+			if segmentCoverage > coverage[index] {
+				coverage[index] = segmentCoverage
+			}
+		}
+	}
+}
+
 func BenchmarkBinaryMorphology(b *testing.B) {
 	const width = 2048
 	const height = 1536
@@ -555,6 +620,25 @@ func BenchmarkContourSmoothing(b *testing.B) {
 		smoothed := smoothClosedContourWithScratch(lowPassed, overlayContourSmoothingIterations, &scratch)
 		if len(smoothed) != len(points)*2 {
 			b.Fatalf("smoothed len = %d, want %d", len(smoothed), len(points)*2)
+		}
+	}
+}
+
+func BenchmarkStrokeCoverage(b *testing.B) {
+	const width = 2048
+	const height = 1536
+
+	points := benchmarkClosedContour(4096)
+	coverage := make([]float64, width*height)
+	b.SetBytes(int64(len(points)))
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		clear(coverage)
+		addClosedStrokeCoverage(coverage, width, height, points, overlayStrokeWidthPixels, nil)
+		if coverage[300*width+50] == -1 {
+			b.Fatal("unreachable coverage sentinel")
 		}
 	}
 }
