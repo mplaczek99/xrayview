@@ -89,9 +89,14 @@ Transport guarantees:
 - `XRAYVIEW_BACKEND_CACHE_DIR`
 - `XRAYVIEW_BACKEND_PERSISTENCE_DIR`
 - `XRAYVIEW_BACKEND_SHUTDOWN_TIMEOUT`
+- `XRAYVIEW_BACKEND_WORKERS`
 
 Legacy `XRAYVIEW_GO_BACKEND_*` environment variables are still accepted for
 compatibility.
+
+`XRAYVIEW_BACKEND_WORKERS` controls the long-running render/analyze/process
+job worker pool. The default is `min(4, runtime.NumCPU()-1)` with a floor of
+one worker.
 
 Default disk layout when only `XRAYVIEW_BACKEND_BASE_DIR` is set or when no
 path overrides are provided:

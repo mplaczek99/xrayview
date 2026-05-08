@@ -191,6 +191,35 @@ func BenchmarkLaunchJobConcurrent(b *testing.B) {
 	})
 }
 
+func BenchmarkLaunchJobBatchParallelism(b *testing.B) {
+	const (
+		jobCount = 16
+		jobCost  = 2 * time.Millisecond
+	)
+
+	for _, workers := range []int{3, 8} {
+		b.Run(fmt.Sprintf("workers=%d", workers), func(b *testing.B) {
+			b.Setenv(workerCountEnvKey, fmt.Sprintf("%d", workers))
+			svc := newService(nil, nil, nil, nil, nil, nil)
+			defer svc.Stop()
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				var done sync.WaitGroup
+				done.Add(jobCount)
+				for jobIndex := 0; jobIndex < jobCount; jobIndex++ {
+					svc.launchJob(contracts.JobKindProcessStudy, func() {
+						time.Sleep(jobCost)
+						done.Done()
+					})
+				}
+				done.Wait()
+			}
+		})
+	}
+}
+
 func loadBenchmarkStudy(b *testing.B) dicommeta.SourceStudy {
 	b.Helper()
 

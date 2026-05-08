@@ -24,6 +24,8 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -61,6 +63,7 @@ type Service struct {
 	jobQueue               chan func()          // normal-priority: process jobs
 	workerStop             chan struct{}
 	workerOnce             sync.Once // guards against a double close of workerStop from repeated Stop() calls
+	workerCount            int
 	renderSourcePreview    renderSourcePreviewFunc
 	callbackMu             sync.RWMutex
 	onJobCompletion        JobCompletionCallback
@@ -71,10 +74,7 @@ const decodeBenchmarkEnvKey = "XRAYVIEW_BENCH_LOG_DECODES"
 
 const analyzeFingerprintNamespace = "analyze-study"
 
-// maxConcurrentJobs sizes the worker pool. Three CPU-bound workers fit a
-// desktop workload — render and process both contend on the same
-// decoder cache, and more than a handful just starves the UI thread.
-const maxConcurrentJobs = 3
+const workerCountEnvKey = "XRAYVIEW_BACKEND_WORKERS"
 
 // maxArtifactBytes is a soft upper bound on total bytes held in the on-disk
 // artifact cache. Sized for a session's worth of previews and exported
@@ -334,6 +334,7 @@ func newService(
 		jobIDFactory = generateJobID
 	}
 
+	workerCount := resolveWorkerCount(logger)
 	svc := &Service{
 		supportedKinds: []contracts.JobKind{
 			contracts.JobKindRenderStudy,
@@ -351,12 +352,42 @@ func newService(
 		renderQueue:            make(chan func(), 16),
 		jobQueue:               make(chan func(), 16),
 		workerStop:             make(chan struct{}),
+		workerCount:            workerCount,
 		renderSourcePreview:    render.RenderSourceImage,
 	}
-	for i := 0; i < maxConcurrentJobs; i++ {
+	for i := 0; i < workerCount; i++ {
 		go svc.runWorker()
 	}
 	return svc
+}
+
+func resolveWorkerCount(logger *slog.Logger) int {
+	if value := strings.TrimSpace(os.Getenv(workerCountEnvKey)); value != "" {
+		workers, err := strconv.Atoi(value)
+		if err == nil && workers > 0 {
+			return workers
+		}
+
+		logger.Warn(
+			"invalid backend worker count; using default",
+			slog.String("env_key", workerCountEnvKey),
+			slog.String("value", value),
+			slog.Int("default_workers", defaultWorkerCount()),
+		)
+	}
+
+	return defaultWorkerCount()
+}
+
+func defaultWorkerCount() int {
+	cpus := runtime.NumCPU()
+	if cpus <= 1 {
+		return 1
+	}
+	if cpus-1 < 4 {
+		return cpus - 1
+	}
+	return 4
 }
 
 func (service *Service) logDecodeStudyCall(jobKind contracts.JobKind, study contracts.StudyRecord) {
