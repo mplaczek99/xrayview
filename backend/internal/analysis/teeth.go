@@ -797,61 +797,198 @@ func innerOutlineMask(mask []uint8, width, height, thickness int) []uint8 {
 }
 
 func closeBinaryMask(mask []uint8, width, height, radius int) []uint8 {
-	return erodeBinaryMask(dilateBinaryMask(mask, width, height, radius), width, height, radius)
+	if radius <= 0 || len(mask) == 0 {
+		return append([]uint8(nil), mask...)
+	}
+	if width <= 0 || height <= 0 {
+		return make([]uint8, len(mask))
+	}
+
+	scratch := make([]uint8, len(mask))
+	counts := make([]int, width)
+	closed := make([]uint8, len(mask))
+	out := make([]uint8, len(mask))
+	dilateBinaryMaskInto(closed, scratch, counts, mask, width, height, radius)
+	erodeBinaryMaskInto(out, scratch, counts, closed, width, height, radius)
+	return out
 }
 
 func openBinaryMask(mask []uint8, width, height, radius int) []uint8 {
-	return dilateBinaryMask(erodeBinaryMask(mask, width, height, radius), width, height, radius)
+	if radius <= 0 || len(mask) == 0 {
+		return append([]uint8(nil), mask...)
+	}
+	if width <= 0 || height <= 0 {
+		return make([]uint8, len(mask))
+	}
+
+	scratch := make([]uint8, len(mask))
+	counts := make([]int, width)
+	opened := make([]uint8, len(mask))
+	out := make([]uint8, len(mask))
+	erodeBinaryMaskInto(opened, scratch, counts, mask, width, height, radius)
+	dilateBinaryMaskInto(out, scratch, counts, opened, width, height, radius)
+	return out
 }
 
 func dilateBinaryMask(mask []uint8, width, height, radius int) []uint8 {
 	if radius <= 0 || len(mask) == 0 {
 		return append([]uint8(nil), mask...)
 	}
+	if width <= 0 || height <= 0 {
+		return make([]uint8, len(mask))
+	}
 
 	out := make([]uint8, len(mask))
+	scratch := make([]uint8, len(mask))
+	counts := make([]int, width)
+	dilateBinaryMaskInto(out, scratch, counts, mask, width, height, radius)
+	return out
+}
+
+func dilateBinaryMaskInto(out []uint8, scratch []uint8, counts []int, mask []uint8, width, height, radius int) {
+	if width <= 0 || height <= 0 {
+		return
+	}
+
 	for y := 0; y < height; y++ {
-		for x := 0; x < width; x++ {
-			filled := false
-			for ny := maxInt(y-radius, 0); ny <= minInt(y+radius, height-1) && !filled; ny++ {
-				for nx := maxInt(x-radius, 0); nx <= minInt(x+radius, width-1); nx++ {
-					if mask[ny*width+nx] != 0 {
-						filled = true
-						break
-					}
-				}
+		row := y * width
+		count := 0
+		for x := 0; x <= minInt(radius, width-1); x++ {
+			if mask[row+x] != 0 {
+				count++
 			}
-			if filled {
-				out[y*width+x] = 1
+		}
+		for x := 0; x < width; x++ {
+			if count > 0 {
+				scratch[row+x] = 1
+			} else {
+				scratch[row+x] = 0
+			}
+			if remove := x - radius; remove >= 0 && mask[row+remove] != 0 {
+				count--
+			}
+			if add := x + radius + 1; add < width && mask[row+add] != 0 {
+				count++
 			}
 		}
 	}
-	return out
+
+	clear(counts[:width])
+	for y := 0; y <= minInt(radius, height-1); y++ {
+		row := y * width
+		for x := 0; x < width; x++ {
+			if scratch[row+x] != 0 {
+				counts[x]++
+			}
+		}
+	}
+	for y := 0; y < height; y++ {
+		row := y * width
+		for x := 0; x < width; x++ {
+			if counts[x] > 0 {
+				out[row+x] = 1
+			} else {
+				out[row+x] = 0
+			}
+		}
+		if remove := y - radius; remove >= 0 {
+			row := remove * width
+			for x := 0; x < width; x++ {
+				if scratch[row+x] != 0 {
+					counts[x]--
+				}
+			}
+		}
+		if add := y + radius + 1; add < height {
+			row := add * width
+			for x := 0; x < width; x++ {
+				if scratch[row+x] != 0 {
+					counts[x]++
+				}
+			}
+		}
+	}
 }
 
 func erodeBinaryMask(mask []uint8, width, height, radius int) []uint8 {
 	if radius <= 0 || len(mask) == 0 {
 		return append([]uint8(nil), mask...)
 	}
+	if width <= 0 || height <= 0 {
+		return make([]uint8, len(mask))
+	}
 
 	out := make([]uint8, len(mask))
+	scratch := make([]uint8, len(mask))
+	counts := make([]int, width)
+	erodeBinaryMaskInto(out, scratch, counts, mask, width, height, radius)
+	return out
+}
+
+func erodeBinaryMaskInto(out []uint8, scratch []uint8, counts []int, mask []uint8, width, height, radius int) {
+	if width <= 0 || height <= 0 {
+		return
+	}
+
+	window := radius*2 + 1
 	for y := 0; y < height; y++ {
-		for x := 0; x < width; x++ {
-			filled := true
-			for ny := y - radius; ny <= y+radius && filled; ny++ {
-				for nx := x - radius; nx <= x+radius; nx++ {
-					if nx < 0 || nx >= width || ny < 0 || ny >= height || mask[ny*width+nx] == 0 {
-						filled = false
-						break
-					}
-				}
+		row := y * width
+		count := 0
+		for x := 0; x <= minInt(radius, width-1); x++ {
+			if mask[row+x] != 0 {
+				count++
 			}
-			if filled {
-				out[y*width+x] = 1
+		}
+		for x := 0; x < width; x++ {
+			if count == window {
+				scratch[row+x] = 1
+			} else {
+				scratch[row+x] = 0
+			}
+			if remove := x - radius; remove >= 0 && mask[row+remove] != 0 {
+				count--
+			}
+			if add := x + radius + 1; add < width && mask[row+add] != 0 {
+				count++
 			}
 		}
 	}
-	return out
+
+	clear(counts[:width])
+	for y := 0; y <= minInt(radius, height-1); y++ {
+		row := y * width
+		for x := 0; x < width; x++ {
+			if scratch[row+x] != 0 {
+				counts[x]++
+			}
+		}
+	}
+	for y := 0; y < height; y++ {
+		row := y * width
+		for x := 0; x < width; x++ {
+			if counts[x] == window {
+				out[row+x] = 1
+			} else {
+				out[row+x] = 0
+			}
+		}
+		if remove := y - radius; remove >= 0 {
+			row := remove * width
+			for x := 0; x < width; x++ {
+				if scratch[row+x] != 0 {
+					counts[x]--
+				}
+			}
+		}
+		if add := y + radius + 1; add < height {
+			row := add * width
+			for x := 0; x < width; x++ {
+				if scratch[row+x] != 0 {
+					counts[x]++
+				}
+			}
+		}
+	}
 }
 
 func fillHolesBinaryMask(mask []uint8, width, height int) []uint8 {

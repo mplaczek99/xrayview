@@ -5,6 +5,7 @@ import (
 	"image/color"
 	_ "image/png"
 	"math"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -380,6 +381,33 @@ func TestFillHolesBinaryMaskFillsOnlyEnclosedGaps(t *testing.T) {
 	}
 }
 
+func TestBinaryMorphologyMatchesReference(t *testing.T) {
+	for _, tt := range []struct {
+		name         string
+		width        int
+		height       int
+		radius       int
+		fillEveryNth int
+	}{
+		{name: "empty", width: 8, height: 7, radius: 2, fillEveryNth: 0},
+		{name: "radius_one", width: 9, height: 6, radius: 1, fillEveryNth: 5},
+		{name: "radius_two", width: 11, height: 10, radius: 2, fillEveryNth: 7},
+		{name: "radius_larger_than_edge", width: 5, height: 4, radius: 3, fillEveryNth: 4},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			mask := make([]uint8, tt.width*tt.height)
+			for index := range mask {
+				if tt.fillEveryNth > 0 && (index*17+3)%tt.fillEveryNth == 0 {
+					mask[index] = 1
+				}
+			}
+
+			assertMasksEqual(t, dilateBinaryMask(mask, tt.width, tt.height, tt.radius), referenceDilateBinaryMask(mask, tt.width, tt.height, tt.radius))
+			assertMasksEqual(t, erodeBinaryMask(mask, tt.width, tt.height, tt.radius), referenceErodeBinaryMask(mask, tt.width, tt.height, tt.radius))
+		})
+	}
+}
+
 func TestRuntimeAnalysisDoesNotReadColoredFixtures(t *testing.T) {
 	_, currentFile, _, ok := runtime.Caller(0)
 	if !ok {
@@ -409,6 +437,99 @@ func TestRuntimeAnalysisDoesNotReadColoredFixtures(t *testing.T) {
 			}
 		}
 	}
+}
+
+func BenchmarkBinaryMorphology(b *testing.B) {
+	const width = 2048
+	const height = 1536
+	const radius = 2
+
+	mask := benchmarkMask(width, height)
+	b.SetBytes(int64(width * height))
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		closed := closeBinaryMask(mask, width, height, radius)
+		opened := openBinaryMask(closed, width, height, radius)
+		if len(opened) == 0 {
+			b.Fatal("empty output")
+		}
+	}
+}
+
+func referenceDilateBinaryMask(mask []uint8, width, height, radius int) []uint8 {
+	if radius <= 0 || len(mask) == 0 {
+		return append([]uint8(nil), mask...)
+	}
+
+	out := make([]uint8, len(mask))
+	for y := 0; y < height; y++ {
+		for x := 0; x < width; x++ {
+			filled := false
+			for ny := maxInt(y-radius, 0); ny <= minInt(y+radius, height-1) && !filled; ny++ {
+				for nx := maxInt(x-radius, 0); nx <= minInt(x+radius, width-1); nx++ {
+					if mask[ny*width+nx] != 0 {
+						filled = true
+						break
+					}
+				}
+			}
+			if filled {
+				out[y*width+x] = 1
+			}
+		}
+	}
+	return out
+}
+
+func referenceErodeBinaryMask(mask []uint8, width, height, radius int) []uint8 {
+	if radius <= 0 || len(mask) == 0 {
+		return append([]uint8(nil), mask...)
+	}
+
+	out := make([]uint8, len(mask))
+	for y := 0; y < height; y++ {
+		for x := 0; x < width; x++ {
+			filled := true
+			for ny := y - radius; ny <= y+radius && filled; ny++ {
+				for nx := x - radius; nx <= x+radius; nx++ {
+					if nx < 0 || nx >= width || ny < 0 || ny >= height || mask[ny*width+nx] == 0 {
+						filled = false
+						break
+					}
+				}
+			}
+			if filled {
+				out[y*width+x] = 1
+			}
+		}
+	}
+	return out
+}
+
+func assertMasksEqual(t *testing.T, got []uint8, want []uint8) {
+	t.Helper()
+
+	if len(got) != len(want) {
+		t.Fatalf("len(got) = %d, want %d", len(got), len(want))
+	}
+	for index := range got {
+		if got[index] != want[index] {
+			t.Fatalf("mask[%d] = %d, want %d", index, got[index], want[index])
+		}
+	}
+}
+
+func benchmarkMask(width, height int) []uint8 {
+	rng := rand.New(rand.NewSource(42))
+	mask := make([]uint8, width*height)
+	for index := range mask {
+		if rng.Intn(100) < 18 {
+			mask[index] = 1
+		}
+	}
+	return mask
 }
 
 func coloredFixtureNames(t *testing.T) []string {
