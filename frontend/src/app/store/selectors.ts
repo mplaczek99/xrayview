@@ -36,17 +36,7 @@ export const selectIsOpeningStudy = (state: WorkbenchState) => state.isOpeningSt
 export const selectWorkbenchStatus = (state: WorkbenchState) => state.workbenchStatus;
 export const selectManifest = (state: WorkbenchState) => state.manifest;
 
-// Memoized on state.jobs: skips Object.values().filter() when jobs map is unchanged.
-export const selectPendingJobCount = createSelector(
-  [(state) => state.jobs],
-  (jobs) =>
-    Object.values(jobs).filter(
-      (job) =>
-        job.state === "queued" ||
-        job.state === "running" ||
-        job.state === "cancelling",
-    ).length,
-);
+export const selectPendingJobCount = (state: WorkbenchState) => state.pendingJobIds.size;
 
 // Memoized on activeStudyId + studies: returns cached reference when neither changes.
 export const selectActiveStudy = createSelector(

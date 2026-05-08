@@ -76,14 +76,9 @@ export function useJobs() {
 
     async function pollPendingJobs() {
       const state = workbenchActions.getState();
-      const pendingJobs = Object.values(state.jobs).filter(
-        (job) =>
-          job.state === "queued" ||
-          job.state === "running" ||
-          job.state === "cancelling",
-      );
+      const pendingJobIds = [...state.pendingJobIds];
 
-      if (pendingJobs.length === 0) {
+      if (pendingJobIds.length === 0) {
         scheduleNext(IDLE_POLL_MS);
         return;
       }
@@ -96,14 +91,19 @@ export function useJobs() {
       }
 
       // Snapshot pre-poll state for progress change detection.
-      const prePollState = new Map(
-        pendingJobs.map((job) => [job.jobId, { percent: job.progress.percent, state: job.state }]),
-      );
+      const prePollState = new Map<string, { percent: number; state: string }>();
+      for (const jobId of pendingJobIds) {
+        const job = state.jobs[jobId];
+        if (job) {
+          prePollState.set(jobId, {
+            percent: job.progress.percent,
+            state: job.state,
+          });
+        }
+      }
 
-      // Batch fetch: deduplicate IDs and fetch all snapshots in one request.
-      const jobIds = [...new Set(pendingJobs.map((job) => job.jobId))];
       try {
-        const snapshots = await runtime.getJobs(jobIds);
+        const snapshots = await runtime.getJobs(pendingJobIds);
         if (!cancelled) {
           for (const job of snapshots) {
             applyJobUpdate(job);
@@ -118,14 +118,10 @@ export function useJobs() {
         return;
       }
 
-      const updatedJobs = Object.values(workbenchActions.getState().jobs).filter(
-        (job) =>
-          job.state === "queued" ||
-          job.state === "running" ||
-          job.state === "cancelling",
-      );
+      const updatedState = workbenchActions.getState();
+      const updatedJobIds = [...updatedState.pendingJobIds];
 
-      if (updatedJobs.length === 0) {
+      if (updatedJobIds.length === 0) {
         scheduleNext(IDLE_POLL_MS);
         return;
       }
@@ -134,7 +130,11 @@ export function useJobs() {
       let allQueued = true;
       let anyNearComplete = false;
 
-      for (const job of updatedJobs) {
+      for (const jobId of updatedJobIds) {
+        const job = updatedState.jobs[jobId];
+        if (!job) {
+          continue;
+        }
         if (job.state !== "queued") {
           allQueued = false;
         }

@@ -57,6 +57,7 @@ export interface WorkbenchState {
   studyOrder: string[];
   jobs: Record<string, JobSnapshot>;
   jobOrder: string[];
+  pendingJobIds: ReadonlySet<string>;
   isOpeningStudy: boolean;
   workbenchStatus: string;
 }

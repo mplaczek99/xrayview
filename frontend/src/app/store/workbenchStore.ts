@@ -37,6 +37,7 @@ const INITIAL_STATE: WorkbenchState = {
   studyOrder: [],
   jobs: {},
   jobOrder: [],
+  pendingJobIds: new Set<string>(),
   isOpeningStudy: false,
   workbenchStatus: "Open a DICOM study or BMP/TIFF image to begin.",
 };
@@ -61,6 +62,26 @@ function isPendingJob(job: JobSnapshot | null): boolean {
     job.state === "running" ||
     job.state === "cancelling"
   );
+}
+
+function nextPendingJobIds(
+  currentIds: ReadonlySet<string>,
+  previous: JobSnapshot | undefined,
+  next: JobSnapshot,
+): ReadonlySet<string> {
+  const wasPending = isPendingJob(previous ?? null);
+  const isPending = isPendingJob(next);
+  if (wasPending === isPending) {
+    return currentIds;
+  }
+
+  const ids = new Set(currentIds);
+  if (isPending) {
+    ids.add(next.jobId);
+  } else {
+    ids.delete(next.jobId);
+  }
+  return ids;
 }
 
 // Returns true if the incoming backend snapshot has no meaningful change vs what
@@ -480,6 +501,11 @@ class WorkbenchStore {
         ...current.jobs,
         [job.jobId]: nextJob,
       };
+      const pendingJobIds = nextPendingJobIds(
+        current.pendingJobIds,
+        previous,
+        nextJob,
+      );
       const studies = { ...current.studies };
       if (nextJob.studyId && studies[nextJob.studyId]) {
         studies[nextJob.studyId] = applyJobToStudy(studies[nextJob.studyId], nextJob);
@@ -492,6 +518,7 @@ class WorkbenchStore {
         jobs,
         studies,
         jobOrder: nextJobOrder(current.jobOrder, nextJob.jobId),
+        pendingJobIds,
         workbenchStatus: activeStudy?.status ?? current.workbenchStatus,
       };
     });
