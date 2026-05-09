@@ -97,6 +97,22 @@ func TestProcessGrayscalePixelsEqualizeLeavesFlatImageUntouched(t *testing.T) {
 	}
 }
 
+func TestEqualizeHistogramInPlaceParallelPathMatchesSerialReference(t *testing.T) {
+	size := minParallelEqualizePixels + 257
+	pixels := make([]uint8, size)
+	for index := range pixels {
+		pixels[index] = uint8((index*37 + index/17) & 0xff)
+	}
+	want := append([]uint8(nil), pixels...)
+	equalizeHistogramSerialReference(want)
+
+	equalizeHistogramInPlace(pixels)
+
+	if !equalBytes(pixels, want) {
+		t.Fatal("parallel histogram equalization does not match serial reference")
+	}
+}
+
 func TestProcessPreviewImageRequiresGrayPreviewInput(t *testing.T) {
 	_, _, err := ProcessPreviewImage(imaging.RGBAPreview(1, 1, []uint8{0, 0, 0, 255}), GrayscaleControls{})
 	if err == nil {
@@ -282,6 +298,64 @@ func BenchmarkApplyLookupInPlace(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		applyLookupInPlace(pixels, &lookup)
 	}
+}
+
+func BenchmarkEqualizeHistogramInPlace(b *testing.B) {
+	const size = 2048 * 1536
+	source := make([]uint8, size)
+	for i := range source {
+		source[i] = uint8((i*37 + i/17) & 0xff)
+	}
+	pixels := make([]uint8, size)
+
+	b.ReportAllocs()
+	b.SetBytes(int64(size))
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		b.StopTimer()
+		copy(pixels, source)
+		b.StartTimer()
+		equalizeHistogramInPlace(pixels)
+	}
+}
+
+func equalizeHistogramSerialReference(pixels []uint8) {
+	var histogram [256]int
+	for _, value := range pixels {
+		histogram[value]++
+	}
+
+	total := len(pixels)
+	cdf := 0
+	cdfMin := 0
+	found := false
+
+	for _, count := range histogram {
+		cdf += count
+		if !found && count != 0 {
+			cdfMin = cdf
+			found = true
+		}
+	}
+
+	if cdfMin == total {
+		return
+	}
+
+	var lookup [256]uint8
+	cdf = 0
+	denom := total - cdfMin
+	for index, count := range histogram {
+		cdf += count
+		if cdf <= cdfMin {
+			continue
+		}
+
+		value := ((cdf-cdfMin)*255 + denom/2) / denom
+		lookup[index] = uint8(value)
+	}
+
+	applyLookupInPlace(pixels, &lookup)
 }
 
 func equalBytes(left, right []uint8) bool {

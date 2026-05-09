@@ -3,10 +3,17 @@ package processing
 import (
 	"fmt"
 	"math"
+	"runtime"
+	"sync"
 	"unsafe"
 
 	"xrayview/backend/internal/bufpool"
 	"xrayview/backend/internal/imaging"
+)
+
+const (
+	minParallelEqualizePixels  = 64 * 1024
+	maxParallelEqualizeWorkers = 8
 )
 
 type GrayscaleControls struct {
@@ -167,12 +174,70 @@ func equalizeHistogramInPlace(pixels []uint8) {
 		return
 	}
 
-	var histogram [256]int
-	for _, value := range pixels {
-		histogram[value]++
+	workers := equalizeWorkerCount(len(pixels))
+	if workers > 1 {
+		equalizeHistogramInPlaceParallel(pixels, workers)
+		return
 	}
 
-	total := len(pixels)
+	histogram := histogramPixelRange(pixels)
+	lookup, ok := equalizeLookup(histogram, len(pixels))
+	if !ok {
+		return
+	}
+
+	applyLookupInPlace(pixels, &lookup)
+}
+
+func equalizeHistogramInPlaceParallel(pixels []uint8, workers int) {
+	var workerHistograms [maxParallelEqualizeWorkers][256]int
+	var lookup [256]uint8
+	applyLookup := false
+	startApply := make(chan struct{})
+	chunkSize := (len(pixels) + workers - 1) / workers
+
+	var histogramWG sync.WaitGroup
+	var applyWG sync.WaitGroup
+	for worker := 0; worker < workers; worker++ {
+		start := worker * chunkSize
+		if start >= len(pixels) {
+			break
+		}
+		end := start + chunkSize
+		if end > len(pixels) {
+			end = len(pixels)
+		}
+		histogramWG.Add(1)
+		applyWG.Add(1)
+		go func(worker, start, end int) {
+			defer applyWG.Done()
+			workerHistograms[worker] = histogramPixelRange(pixels[start:end])
+			histogramWG.Done()
+			<-startApply
+			if applyLookup {
+				applyLookupInPlace(pixels[start:end], &lookup)
+			}
+		}(worker, start, end)
+	}
+	histogramWG.Wait()
+
+	var histogram [256]int
+	for worker := 0; worker < workers; worker++ {
+		workerHistogram := &workerHistograms[worker]
+		for index, count := range workerHistogram {
+			histogram[index] += count
+		}
+	}
+
+	var ok bool
+	lookup, ok = equalizeLookup(histogram, len(pixels))
+	applyLookup = ok
+	close(startApply)
+	applyWG.Wait()
+}
+
+func equalizeLookup(histogram [256]int, total int) ([256]uint8, bool) {
+	var lookup [256]uint8
 	cdf := 0
 	cdfMin := 0
 	found := false
@@ -186,10 +251,9 @@ func equalizeHistogramInPlace(pixels []uint8) {
 	}
 
 	if cdfMin == total {
-		return
+		return lookup, false
 	}
 
-	var lookup [256]uint8
 	cdf = 0
 	denom := total - cdfMin
 	for index, count := range histogram {
@@ -202,5 +266,33 @@ func equalizeHistogramInPlace(pixels []uint8) {
 		lookup[index] = uint8(value)
 	}
 
-	applyLookupInPlace(pixels, &lookup)
+	return lookup, true
+}
+
+func histogramPixelRange(pixels []uint8) [256]int {
+	var histogram [256]int
+	for _, value := range pixels {
+		histogram[value]++
+	}
+
+	return histogram
+}
+
+func equalizeWorkerCount(pixelCount int) int {
+	if pixelCount < minParallelEqualizePixels {
+		return 1
+	}
+
+	workers := runtime.NumCPU()
+	if workers > maxParallelEqualizeWorkers {
+		workers = maxParallelEqualizeWorkers
+	}
+	if workers > pixelCount {
+		workers = pixelCount
+	}
+	if workers <= 1 {
+		return 1
+	}
+
+	return workers
 }

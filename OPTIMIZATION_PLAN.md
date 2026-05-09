@@ -376,6 +376,11 @@ parallelize cleanly.
 **Fix (S):** rarely the bottleneck (LUT fast path dominates), but trivial
 once the patterns from #3 are in place.
 
+**Status:** completed in `backend/internal/processing/grayscale.go` with
+`BenchmarkEqualizeHistogramInPlace`. Validation on linux/amd64, i5-13400:
+before ~1.48 ms/op (2.12 GB/s, 0 B/op, 0 allocs/op), after ~0.51 ms/op
+(6.19 GB/s, ~17.8 KB/op, 22 allocs/op).
+
 ### 20. JSON request body pool can grow unboundedly
 
 **Where:** `backend/internal/httpapi/router.go:21,320–351`.
