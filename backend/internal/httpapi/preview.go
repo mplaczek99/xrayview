@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"xrayview/backend/internal/cache"
 	"xrayview/backend/internal/config"
@@ -29,6 +30,9 @@ const PreviewPath = "/preview"
 // runtimes. Future work will replace the path query with opaque artifact
 // ids so agents never see the filesystem shape — see AGENTS.md.
 func newPreviewHandler(cacheStore *cache.Store, cfg config.Config) http.HandlerFunc {
+	rootDir := previewCacheRoot(cacheStore, cfg)
+	rootResolver := newPreviewRootResolver(rootDir)
+
 	return func(writer http.ResponseWriter, request *http.Request) {
 		rawPath := strings.TrimSpace(request.URL.Query().Get("path"))
 		if rawPath == "" {
@@ -41,16 +45,12 @@ func newPreviewHandler(cacheStore *cache.Store, cfg config.Config) http.HandlerF
 			return
 		}
 
-		rootDir := previewCacheRoot(cacheStore, cfg)
 		if rootDir == "" {
 			http.Error(writer, "cache root not configured", http.StatusInternalServerError)
 			return
 		}
 
-		// Resolve symlinks on both sides before the containment check.
-		// Without this, a symlink inside the cache root that points at an
-		// arbitrary file would pass a naive prefix comparison.
-		resolvedRoot, err := filepath.EvalSymlinks(rootDir)
+		resolvedRoot, err := rootResolver.resolve()
 		if err != nil {
 			http.Error(
 				writer,
@@ -60,6 +60,9 @@ func newPreviewHandler(cacheStore *cache.Store, cfg config.Config) http.HandlerF
 			return
 		}
 
+		// Resolve the target before the containment check. Without this, a
+		// symlink inside the cache root that points at an arbitrary file would
+		// pass a naive prefix comparison.
 		resolvedTarget, err := filepath.EvalSymlinks(rawPath)
 		if err != nil {
 			if os.IsNotExist(err) {
@@ -117,6 +120,45 @@ func newPreviewHandler(cacheStore *cache.Store, cfg config.Config) http.HandlerF
 		// If-Modified-Since — all of which browsers use for previews.
 		http.ServeContent(writer, request, filepath.Base(resolvedTarget), info.ModTime(), file)
 	}
+}
+
+type previewRootResolver struct {
+	rootDir string
+
+	mu           sync.RWMutex
+	resolvedRoot string
+}
+
+func newPreviewRootResolver(rootDir string) *previewRootResolver {
+	resolver := &previewRootResolver{rootDir: rootDir}
+	if rootDir != "" {
+		_, _ = resolver.resolve()
+	}
+	return resolver
+}
+
+func (resolver *previewRootResolver) resolve() (string, error) {
+	resolver.mu.RLock()
+	if resolver.resolvedRoot != "" {
+		resolvedRoot := resolver.resolvedRoot
+		resolver.mu.RUnlock()
+		return resolvedRoot, nil
+	}
+	resolver.mu.RUnlock()
+
+	resolver.mu.Lock()
+	defer resolver.mu.Unlock()
+	if resolver.resolvedRoot != "" {
+		return resolver.resolvedRoot, nil
+	}
+
+	resolvedRoot, err := filepath.EvalSymlinks(resolver.rootDir)
+	if err != nil {
+		return "", err
+	}
+
+	resolver.resolvedRoot = resolvedRoot
+	return resolvedRoot, nil
 }
 
 func previewCacheRoot(cacheStore *cache.Store, cfg config.Config) string {

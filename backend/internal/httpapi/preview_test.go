@@ -15,6 +15,30 @@ import (
 	"xrayview/backend/internal/config"
 )
 
+type discardPreviewResponseWriter struct {
+	header http.Header
+	status int
+}
+
+func (writer *discardPreviewResponseWriter) Header() http.Header {
+	return writer.header
+}
+
+func (writer *discardPreviewResponseWriter) Write(data []byte) (int, error) {
+	return len(data), nil
+}
+
+func (writer *discardPreviewResponseWriter) WriteHeader(statusCode int) {
+	writer.status = statusCode
+}
+
+func (writer *discardPreviewResponseWriter) reset() {
+	for key := range writer.header {
+		delete(writer.header, key)
+	}
+	writer.status = 0
+}
+
 // buildPreviewRouter wires just enough of a router to exercise the /preview
 // handler. The preview endpoint never reaches the command dispatch table, so
 // a nil BackendService is safe here.
@@ -101,6 +125,32 @@ func TestPreviewReturnsNotFoundWhenArtifactMissing(t *testing.T) {
 	}
 }
 
+func TestPreviewResolvesCacheRootAfterHandlerBuild(t *testing.T) {
+	rootDir := filepath.Join(t.TempDir(), "xrayview")
+	store := cache.NewWithRoot(rootDir)
+	handler := newPreviewHandler(store, config.Default())
+
+	if err := store.Ensure(); err != nil {
+		t.Fatalf("cache ensure failed: %v", err)
+	}
+
+	artifactPath := filepath.Join(store.RootDir(), "preview.png")
+	want := []byte("artifact-bytes")
+	if err := os.WriteFile(artifactPath, want, 0o644); err != nil {
+		t.Fatalf("write artifact: %v", err)
+	}
+
+	recorder := previewRequest(t, handler, artifactPath)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d (body=%q), want %d", recorder.Code, recorder.Body.String(), http.StatusOK)
+	}
+
+	if got := recorder.Body.Bytes(); string(got) != string(want) {
+		t.Fatalf("body = %q, want %q", got, want)
+	}
+}
+
 func TestPreviewRejectsPathOutsideCacheRoot(t *testing.T) {
 	handler, _ := buildPreviewRouter(t)
 
@@ -171,5 +221,36 @@ func TestPreviewRejectsNonGetMethods(t *testing.T) {
 
 	if recorder.Body.Len() > 0 && string(recorder.Body.Bytes()) == "secret-bytes" {
 		t.Fatalf("non-GET leaked artifact bytes: body = %q", recorder.Body.String())
+	}
+}
+
+func BenchmarkPreviewServesArtifact(b *testing.B) {
+	rootDir := filepath.Join(b.TempDir(), "xrayview")
+	store := cache.NewWithRoot(rootDir)
+	if err := store.Ensure(); err != nil {
+		b.Fatalf("cache ensure failed: %v", err)
+	}
+
+	artifactPath := filepath.Join(store.RootDir(), "preview.png")
+	if err := os.WriteFile(artifactPath, []byte("artifact-bytes"), 0o644); err != nil {
+		b.Fatalf("write artifact: %v", err)
+	}
+
+	handler := newPreviewHandler(store, config.Default())
+	request := httptest.NewRequest(
+		http.MethodGet,
+		PreviewPath+"?path="+url.QueryEscape(artifactPath),
+		nil,
+	)
+	writer := &discardPreviewResponseWriter{header: make(http.Header)}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for b.Loop() {
+		writer.reset()
+		handler.ServeHTTP(writer, request)
+		if writer.status != http.StatusOK {
+			b.Fatalf("status = %d, want %d", writer.status, http.StatusOK)
+		}
 	}
 }

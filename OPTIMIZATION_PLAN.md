@@ -409,6 +409,15 @@ preview images many times during pan/zoom.
 (`previewCacheRoot` only changes if the cache config changes). Resolve
 the target path with a single `EvalSymlinks` call and skip the second.
 
+**Status:** completed in `backend/internal/httpapi/preview.go` with
+`BenchmarkPreviewServesArtifact`. Validation on linux/amd64, i5-13400:
+before ~9.91 us/op, after ~6.93 us/op, a ~1.43x time speedup (about
+2.98 us/op faster, ~30.1% less time). Allocation cost also dropped from
+~4913 B/op and 57 allocs/op to ~3175 B/op and 38 allocs/op because the
+cache root is resolved once when the preview handler is built, or on the
+first successful preview request if the cache directory is created after
+router construction, instead of on every preview GET.
+
 ### 22. Job snapshots are deep-cloned even on read-only `Get`
 
 **Where:** `backend/internal/jobs/registry.go:140–150` and 399–418.
