@@ -583,6 +583,10 @@ integer blend averaged ~6.998 ms/op. That is a ~2.22x time speedup, about
 already admits the function picks an arbitrary entry from `range`. Either
 make it actually LRU (cheap) or rename to `evictArbitraryLocked`.
 
+**Status:** completed by renaming the helper to `evictArbitraryLocked`
+and tightening the comment around the existing arbitrary eviction behavior.
+This is a code-organization fix with no intended runtime behavior change.
+
 ### 31. `featureTable` lookups via `sort.Search` per pixel
 
 **Where:** `backend/internal/analysis/feature_table_model.go:32–44`,
