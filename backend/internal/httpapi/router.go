@@ -17,6 +17,8 @@ import (
 	"xrayview/backend/internal/persistence"
 )
 
+const maxPooledBodyBufferCap = 64 * 1024
+
 // bodyPool reuses request body read buffers across handler calls.
 var bodyPool = sync.Pool{New: func() any { return new(bytes.Buffer) }}
 
@@ -318,9 +320,8 @@ func handleCommand[Cmd any, Result any](
 }
 
 func decodeJSONRequest(request *http.Request, payload any) error {
-	buf := bodyPool.Get().(*bytes.Buffer)
-	buf.Reset()
-	defer bodyPool.Put(buf)
+	buf := getBodyBuffer()
+	defer putBodyBuffer(buf)
 
 	if _, err := buf.ReadFrom(request.Body); err != nil {
 		return contracts.InvalidInput("invalid command payload").WithDetails(err.Error())
@@ -348,6 +349,19 @@ func decodeJSONRequest(request *http.Request, payload any) error {
 	}
 
 	return nil
+}
+
+func getBodyBuffer() *bytes.Buffer {
+	buf := bodyPool.Get().(*bytes.Buffer)
+	buf.Reset()
+	return buf
+}
+
+func putBodyBuffer(buf *bytes.Buffer) {
+	if buf.Cap() > maxPooledBodyBufferCap {
+		return
+	}
+	bodyPool.Put(buf)
 }
 
 func writeBackendError(writer http.ResponseWriter, err error) {

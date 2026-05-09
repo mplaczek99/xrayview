@@ -391,6 +391,14 @@ pin large buffers.
 **Fix (S):** before `Put`, drop oversized buffers (e.g.,
 `if buf.Cap() > 64*1024 { return }`).
 
+**Status:** completed in `backend/internal/httpapi/router.go` with
+`TestPutBodyBufferDropsOversizedBuffers` and
+`BenchmarkDecodeJSONRequestSmallAfterOversizeBody`. Validation on
+linux/amd64, i5-13400: before ~1.90 us/op after a 10 MiB body, after
+~1.81 us/op, a ~1.05x speedup (about 90 ns/op faster), with 6171 B/op
+and 19 allocs/op in both runs. Oversized request buffers above 64 KiB are
+now dropped instead of retained in `bodyPool`.
+
 ### 21. `/preview` resolves symlinks on every request
 
 **Where:** `backend/internal/httpapi/preview.go:53,63`. `EvalSymlinks`
