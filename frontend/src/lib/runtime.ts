@@ -166,8 +166,20 @@ function createRuntimeAdapter(
       backend.startProcessStudyJob(studyId, request),
     getJob: async (jobId) =>
       normalizeJobSnapshot(await backend.getJob(jobId), mode),
-    getJobs: async (jobIds) =>
-      (await backend.getJobs(jobIds)).map((s) => normalizeJobSnapshot(s, mode)),
+    getJobs: async (jobIds) => {
+      const snapshots = await backend.getJobs(jobIds);
+      const jobs = new Array<JobSnapshot>(snapshots.length);
+      for (let index = 0; index < snapshots.length; index += 1) {
+        jobs[index] = normalizeJobSnapshot(snapshots[index], mode);
+      }
+      return jobs;
+    },
+    forEachJob: async (jobIds, visitor) => {
+      const snapshots = await backend.getJobs(jobIds);
+      for (const snapshot of snapshots) {
+        visitor(normalizeJobSnapshot(snapshot, mode));
+      }
+    },
     cancelJob: async (jobId) =>
       normalizeJobSnapshot(await backend.cancelJob(jobId), mode),
     measureLineAnnotation: (studyId, annotation) =>

@@ -548,6 +548,16 @@ proportional to batch size on every poll.
 **Fix:** trivial; defer until #14 lands and the polling cadence is
 known.
 
+**Status:** completed by adding `RuntimeAdapter.forEachJob`, which keeps
+the existing backend batch request but lets the polling loop consume
+normalized snapshots one at a time without allocating a second normalized
+batch array. Validation in
+`frontend/scripts/validate-runtime-get-jobs-normalization.mjs` on
+linux/amd64, i5-13400: before, 20,000 jobs over 100 batches averaged
+~61.322 ms/sample with `map(...)` normalization; after, visitor
+normalization averaged ~41.081 ms/sample. That is a ~1.49x time speedup,
+about 20.241 ms faster per 100 polled batches.
+
 ### 29. `compositeOverlayCoverage` does `math.Round` per channel per pixel
 
 **Where:** `backend/internal/analysis/teeth.go:535–555`. For every

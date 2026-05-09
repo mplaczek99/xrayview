@@ -104,12 +104,11 @@ export function useJobs() {
       }
 
       try {
-        const snapshots = await runtime.getJobs(pendingJobIds);
-        if (!cancelled) {
-          for (const job of snapshots) {
+        await runtime.forEachJob(pendingJobIds, (job) => {
+          if (!cancelled) {
             applyJobUpdate(job);
           }
-        }
+        });
       } catch {
         // Batch fetch failed; individual job states remain unchanged until
         // the next poll cycle.
