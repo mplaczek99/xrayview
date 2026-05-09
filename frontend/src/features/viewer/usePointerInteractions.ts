@@ -83,9 +83,13 @@ export function usePointerInteractions({
   const [hoverCoord, setHoverCoord] = useState<{ x: number; y: number } | null>(null);
 
   const draftLineRef = useRef(draftLine);
-  useEffect(() => {
-    draftLineRef.current = draftLine;
-  }, [draftLine]);
+  const imageSizeRef = useRef(imageSize);
+  const interactionRef = useRef<ViewerInteraction | null>(interaction);
+  const transformRef = useRef(transform);
+  draftLineRef.current = draftLine;
+  imageSizeRef.current = imageSize;
+  interactionRef.current = interaction;
+  transformRef.current = transform;
 
   const callbacksRef = useRef({ onCreateLine, onSelectAnnotation, onUpdateLine });
   useEffect(() => {
@@ -93,18 +97,14 @@ export function usePointerInteractions({
   }, [onCreateLine, onSelectAnnotation, onUpdateLine]);
 
   useEffect(() => {
-    const activeInteraction = interaction;
-    const activeTransform = transform;
-    const activeImageSize = imageSize;
-    if (!activeInteraction || !activeTransform || !activeImageSize) {
-      return;
-    }
-
-    const stableInteraction = activeInteraction;
-    const stableTransform = activeTransform;
-    const stableImageSize = activeImageSize;
-
     function handlePointerMove(event: PointerEvent) {
+      const activeInteraction = interactionRef.current;
+      const activeTransform = transformRef.current;
+      const activeImageSize = imageSizeRef.current;
+      if (!activeInteraction || !activeTransform || !activeImageSize) {
+        return;
+      }
+
       const rect = containerRef.current?.getBoundingClientRect();
       if (!rect) {
         return;
@@ -115,48 +115,58 @@ export function usePointerInteractions({
         y: event.clientY - rect.top,
       };
 
-      if (stableInteraction.kind === "pan") {
+      if (activeInteraction.kind === "pan") {
         setViewport((current) => ({
           ...current,
           panX:
-            stableInteraction.panStart.panX +
-            (pointer.x - stableInteraction.pointerStart.x),
+            activeInteraction.panStart.panX +
+            (pointer.x - activeInteraction.pointerStart.x),
           panY:
-            stableInteraction.panStart.panY +
-            (pointer.y - stableInteraction.pointerStart.y),
+            activeInteraction.panStart.panY +
+            (pointer.y - activeInteraction.pointerStart.y),
         }));
         return;
       }
 
       const imagePoint = clampPointToImage(
-        screenToImage(pointer, stableTransform),
-        stableImageSize,
+        screenToImage(pointer, activeTransform),
+        activeImageSize,
       );
-      if (stableInteraction.kind === "draw") {
-        setDraftLine((current) =>
-          current
+      if (activeInteraction.kind === "draw") {
+        setDraftLine((current) => {
+          const next = current
             ? {
                 ...current,
                 end: imagePoint,
               }
-            : current,
-        );
+            : current;
+          draftLineRef.current = next;
+          return next;
+        });
         return;
       }
 
-      setDraftLine((current) =>
-        current
+      setDraftLine((current) => {
+        const next = current
           ? {
               ...current,
-              [stableInteraction.endpoint]: imagePoint,
+              [activeInteraction.endpoint]: imagePoint,
             }
-          : current,
-      );
+          : current;
+        draftLineRef.current = next;
+        return next;
+      });
     }
 
     function handlePointerUp() {
+      const nextInteraction = interactionRef.current;
+      if (!nextInteraction) {
+        return;
+      }
+
       const nextDraft = draftLineRef.current;
-      const nextInteraction = stableInteraction;
+      interactionRef.current = null;
+      draftLineRef.current = null;
       setInteraction(null);
       setDraftLine(null);
 
@@ -187,7 +197,7 @@ export function usePointerInteractions({
       container.removeEventListener("pointermove", handlePointerMove);
       container.removeEventListener("pointerup", handlePointerUp);
     };
-  }, [containerRef, interaction, imageSize, transform, setViewport]);
+  }, [containerRef, setViewport]);
 
   const displayedAnnotations = useMemo(() => {
     if (interaction?.kind !== "edit" || !draftLine) {
@@ -254,20 +264,25 @@ export function usePointerInteractions({
         imageSize,
       );
       const annotation = createManualLineAnnotation(imagePoint, imagePoint);
+      const nextInteraction = { kind: "draw" } satisfies ViewerInteraction;
+      draftLineRef.current = annotation;
+      interactionRef.current = nextInteraction;
       setDraftLine(annotation);
-      setInteraction({ kind: "draw" });
+      setInteraction(nextInteraction);
       onSelectAnnotation(null);
       return;
     }
 
-    setInteraction({
+    const nextInteraction = {
       kind: "pan",
       pointerStart: pointer,
       panStart: {
         panX: viewport.panX,
         panY: viewport.panY,
       },
-    });
+    } satisfies ViewerInteraction;
+    interactionRef.current = nextInteraction;
+    setInteraction(nextInteraction);
   }
 
   function beginHandleDrag(annotationId: string, endpoint: "start" | "end") {
@@ -276,16 +291,21 @@ export function usePointerInteractions({
       return;
     }
 
-    setDraftLine(annotation);
-    setInteraction({
+    const nextInteraction = {
       kind: "edit",
       annotationId,
       endpoint,
-    });
+    } satisfies ViewerInteraction;
+    draftLineRef.current = annotation;
+    interactionRef.current = nextInteraction;
+    setDraftLine(annotation);
+    setInteraction(nextInteraction);
     onSelectAnnotation(annotationId);
   }
 
   function resetPointerInteractions() {
+    interactionRef.current = null;
+    draftLineRef.current = null;
     setInteraction(null);
     setDraftLine(null);
     setHoverCoord(null);

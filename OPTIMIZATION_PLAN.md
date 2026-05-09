@@ -451,6 +451,16 @@ mount with a stable callback that reads from the refs. Pattern is the
 same one already used for `draftLineRef` (line 86). Eliminates listener
 churn during drag.
 
+**Status:** completed in
+`frontend/src/features/viewer/usePointerInteractions.ts` with
+`frontend/scripts/validate-pointer-interactions.mjs`. Validation on
+linux/amd64, i5-13400: before 400-move pan drags averaged ~11.000 ms
+with ~1602 listener add/remove operations during the drag; after they
+averaged ~9.529 ms with 0 listener operations during the drag. That is a
+~1.15x time speedup (about 1.47 ms faster per 400 pointer moves, ~13.4%
+less time) because the hook now keeps one stable pointer listener pair
+and reads live interaction state from refs.
+
 ### 24. `displayedAnnotations` allocates a new array on every pointer move during edit
 
 **Where:** `frontend/src/features/viewer/usePointerInteractions.ts:192–203`.
