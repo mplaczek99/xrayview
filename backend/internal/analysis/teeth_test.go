@@ -450,6 +450,36 @@ func TestBinaryMorphologyMatchesReference(t *testing.T) {
 	}
 }
 
+func TestBoxBlurGrayMatchesReference(t *testing.T) {
+	tests := []struct {
+		name   string
+		width  int
+		height int
+		radius int
+	}{
+		{name: "small_square", width: 7, height: 5, radius: 2},
+		{name: "large_radius", width: 5, height: 3, radius: 9},
+		{name: "single_column", width: 1, height: 6, radius: 3},
+		{name: "single_row", width: 8, height: 1, radius: 4},
+		{name: "radiograph_shape", width: 64, height: 48, radius: 21},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pixels := make([]uint8, tt.width*tt.height)
+			for index := range pixels {
+				pixels[index] = uint8((index*37 + index/tt.width*11) & 0xff)
+			}
+
+			got := boxBlurGray(pixels, tt.width, tt.height, tt.radius)
+			want := referenceBoxBlurGray(pixels, tt.width, tt.height, tt.radius)
+			if !slices.Equal(got, want) {
+				t.Fatal("boxBlurGray does not match reference")
+			}
+		})
+	}
+}
+
 func TestRuntimeAnalysisDoesNotReadColoredFixtures(t *testing.T) {
 	_, currentFile, _, ok := runtime.Caller(0)
 	if !ok {
@@ -657,6 +687,24 @@ func BenchmarkGradientGray(b *testing.B) {
 	}
 }
 
+func BenchmarkBoxBlurGray(b *testing.B) {
+	const width = 2048
+	const height = 1536
+	const radius = 21
+
+	pixels := benchmarkGray(width, height)
+	b.SetBytes(int64(width * height))
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		blurred := boxBlurGray(pixels, width, height, radius)
+		if len(blurred) != len(pixels) {
+			b.Fatalf("blurred len = %d, want %d", len(blurred), len(pixels))
+		}
+	}
+}
+
 func BenchmarkContourSmoothing(b *testing.B) {
 	points := benchmarkClosedContour(4096)
 	var scratch contourSmoothingScratch
@@ -745,6 +793,44 @@ func referenceErodeBinaryMask(mask []uint8, width, height, radius int) []uint8 {
 		}
 	}
 	return out
+}
+
+func referenceBoxBlurGray(pixels []uint8, width, height, radius int) []uint8 {
+	if radius <= 0 || len(pixels) == 0 {
+		return append([]uint8(nil), pixels...)
+	}
+
+	window := radius*2 + 1
+	horizontal := make([]uint16, len(pixels))
+	for y := 0; y < height; y++ {
+		row := y * width
+		sum := 0
+		for x := -radius; x <= radius; x++ {
+			sum += int(pixels[row+clampInt(x, 0, width-1)])
+		}
+		for x := 0; x < width; x++ {
+			horizontal[row+x] = uint16((sum + window/2) / window)
+			left := clampInt(x-radius, 0, width-1)
+			right := clampInt(x+radius+1, 0, width-1)
+			sum += int(pixels[row+right]) - int(pixels[row+left])
+		}
+	}
+
+	blurred := make([]uint8, len(pixels))
+	for x := 0; x < width; x++ {
+		sum := 0
+		for y := -radius; y <= radius; y++ {
+			sum += int(horizontal[clampInt(y, 0, height-1)*width+x])
+		}
+		for y := 0; y < height; y++ {
+			blurred[y*width+x] = uint8((sum + window/2) / window)
+			top := clampInt(y-radius, 0, height-1)
+			bottom := clampInt(y+radius+1, 0, height-1)
+			sum += int(horizontal[bottom*width+x]) - int(horizontal[top*width+x])
+		}
+	}
+
+	return blurred
 }
 
 func assertMasksEqual(t *testing.T, got []uint8, want []uint8) {

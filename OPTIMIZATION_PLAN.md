@@ -533,6 +533,13 @@ pixel loop for the initial window setup.
 section and skip the clamps in the middle. Same for vertical pass. Modest
 speedup.
 
+**Status:** completed by splitting each horizontal row and vertical column
+pass into clamped border sections plus an unclamped middle section, preserving
+the previous edge-replication semantics. Validation in
+`BenchmarkBoxBlurGray` on linux/amd64, i5-13400: before, a 2048x1536
+radius-21 blur averaged ~22.331 ms/op; after, it averaged ~21.851 ms/op.
+That is a ~1.02x time speedup, about 0.480 ms faster per blur pass.
+
 ### 28. `runtime.getJobs` returns plain array; per-batch `map(...)` re-normalizes
 
 **Where:** `frontend/src/lib/runtime.ts:169–170`. Allocations are

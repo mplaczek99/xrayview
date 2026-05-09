@@ -1131,32 +1131,76 @@ func boxBlurGray(pixels []uint8, width, height, radius int) []uint8 {
 
 	window := radius*2 + 1
 	horizontal := make([]uint16, len(pixels))
+	maxX := width - 1
 	for y := 0; y < height; y++ {
 		row := y * width
 		sum := 0
-		for x := -radius; x <= radius; x++ {
-			sum += int(pixels[row+clampInt(x, 0, width-1)])
+		sum += int(pixels[row]) * (radius + 1)
+		rightEdge := minInt(radius, maxX)
+		for x := 1; x <= rightEdge; x++ {
+			sum += int(pixels[row+x])
 		}
-		for x := 0; x < width; x++ {
+		if radius > maxX {
+			sum += int(pixels[row+maxX]) * (radius - maxX)
+		}
+
+		x := 0
+		leftBorderEnd := minInt(radius, maxX)
+		for ; x < leftBorderEnd; x++ {
 			horizontal[row+x] = uint16((sum + window/2) / window)
-			left := clampInt(x-radius, 0, width-1)
-			right := clampInt(x+radius+1, 0, width-1)
-			sum += int(pixels[row+right]) - int(pixels[row+left])
+			right := x + radius + 1
+			rightValue := pixels[row+maxX]
+			if right < width {
+				rightValue = pixels[row+right]
+			}
+			sum += int(rightValue) - int(pixels[row])
 		}
+		middleEnd := maxX - radius
+		for ; x < middleEnd; x++ {
+			horizontal[row+x] = uint16((sum + window/2) / window)
+			sum += int(pixels[row+x+radius+1]) - int(pixels[row+x-radius])
+		}
+		for ; x < maxX; x++ {
+			horizontal[row+x] = uint16((sum + window/2) / window)
+			sum += int(pixels[row+maxX]) - int(pixels[row+x-radius])
+		}
+		horizontal[row+maxX] = uint16((sum + window/2) / window)
 	}
 
 	blurred := make([]uint8, len(pixels))
+	maxY := height - 1
 	for x := 0; x < width; x++ {
 		sum := 0
-		for y := -radius; y <= radius; y++ {
-			sum += int(horizontal[clampInt(y, 0, height-1)*width+x])
+		sum += int(horizontal[x]) * (radius + 1)
+		bottomEdge := minInt(radius, maxY)
+		for y := 1; y <= bottomEdge; y++ {
+			sum += int(horizontal[y*width+x])
 		}
-		for y := 0; y < height; y++ {
+		if radius > maxY {
+			sum += int(horizontal[maxY*width+x]) * (radius - maxY)
+		}
+
+		y := 0
+		topBorderEnd := minInt(radius, maxY)
+		for ; y < topBorderEnd; y++ {
 			blurred[y*width+x] = uint8((sum + window/2) / window)
-			top := clampInt(y-radius, 0, height-1)
-			bottom := clampInt(y+radius+1, 0, height-1)
-			sum += int(horizontal[bottom*width+x]) - int(horizontal[top*width+x])
+			bottom := y + radius + 1
+			bottomValue := horizontal[maxY*width+x]
+			if bottom < height {
+				bottomValue = horizontal[bottom*width+x]
+			}
+			sum += int(bottomValue) - int(horizontal[x])
 		}
+		middleEnd := maxY - radius
+		for ; y < middleEnd; y++ {
+			blurred[y*width+x] = uint8((sum + window/2) / window)
+			sum += int(horizontal[(y+radius+1)*width+x]) - int(horizontal[(y-radius)*width+x])
+		}
+		for ; y < maxY; y++ {
+			blurred[y*width+x] = uint8((sum + window/2) / window)
+			sum += int(horizontal[maxY*width+x]) - int(horizontal[(y-radius)*width+x])
+		}
+		blurred[maxY*width+x] = uint8((sum + window/2) / window)
 	}
 
 	return blurred
