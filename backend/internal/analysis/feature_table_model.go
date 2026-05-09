@@ -7,7 +7,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
-	"sort"
 	"sync"
 )
 
@@ -24,8 +23,7 @@ var compressedFeatureTable []byte
 
 var featureTable = struct {
 	sync.Once
-	keys          []uint32
-	probabilities []uint8
+	probabilities map[uint32]uint8
 	err           error
 }{}
 
@@ -38,13 +36,8 @@ func loadedFeatureTableProbability(key uint32) (uint8, bool) {
 	if featureTable.err != nil {
 		return 0, false
 	}
-	index := sort.Search(len(featureTable.keys), func(index int) bool {
-		return featureTable.keys[index] >= key
-	})
-	if index >= len(featureTable.keys) || featureTable.keys[index] != key {
-		return 0, false
-	}
-	return featureTable.probabilities[index], true
+	probability, ok := featureTable.probabilities[key]
+	return probability, ok
 }
 
 func loadFeatureTable() {
@@ -70,8 +63,7 @@ func loadFeatureTable() {
 		featureTable.err = err
 		return
 	}
-	keys := make([]uint32, count)
-	probabilities := make([]uint8, count)
+	probabilities := make(map[uint32]uint8, count)
 	var key uint32
 	var probability [1]byte
 	for index := uint32(0); index < count; index++ {
@@ -83,10 +75,8 @@ func loadFeatureTable() {
 			featureTable.err = err
 			return
 		}
-		keys[index] = key
-		probabilities[index] = probability[0]
+		probabilities[key] = probability[0]
 	}
 
-	featureTable.keys = keys
 	featureTable.probabilities = probabilities
 }

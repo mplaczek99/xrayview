@@ -7,7 +7,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
-	"sort"
 	"sync"
 )
 
@@ -26,8 +25,7 @@ var compressedBoneFeatureTable []byte
 
 var boneFeatureTable = struct {
 	sync.Once
-	keys          []uint32
-	probabilities []uint8
+	probabilities map[uint32]uint8
 	err           error
 }{}
 
@@ -62,13 +60,8 @@ func loadedBoneFeatureTableProbability(key uint32) (uint8, bool) {
 	if boneFeatureTable.err != nil {
 		return 0, false
 	}
-	index := sort.Search(len(boneFeatureTable.keys), func(index int) bool {
-		return boneFeatureTable.keys[index] >= key
-	})
-	if index >= len(boneFeatureTable.keys) || boneFeatureTable.keys[index] != key {
-		return 0, false
-	}
-	return boneFeatureTable.probabilities[index], true
+	probability, ok := boneFeatureTable.probabilities[key]
+	return probability, ok
 }
 
 func boneFeatureTableKey(x, y, width, height int, normalized uint8, gradient uint8) uint32 {
@@ -114,8 +107,7 @@ func loadBoneFeatureTable() {
 		boneFeatureTable.err = err
 		return
 	}
-	keys := make([]uint32, count)
-	probabilities := make([]uint8, count)
+	probabilities := make(map[uint32]uint8, count)
 	var key uint32
 	var probability [1]byte
 	for index := uint32(0); index < count; index++ {
@@ -127,10 +119,8 @@ func loadBoneFeatureTable() {
 			boneFeatureTable.err = err
 			return
 		}
-		keys[index] = key
-		probabilities[index] = probability[0]
+		probabilities[key] = probability[0]
 	}
 
-	boneFeatureTable.keys = keys
 	boneFeatureTable.probabilities = probabilities
 }

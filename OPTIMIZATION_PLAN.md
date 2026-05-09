@@ -597,6 +597,15 @@ lookup × millions of pixels.
 (or a perfect-hash bitset since bins are small). Map lookups for typical
 sizes will beat `sort.Search` by ~3–5×, and parallelize cleanly.
 
+**Status:** completed by loading both tooth and bone feature tables into
+`map[uint32]uint8` lookup tables instead of sorted key/probability slices.
+Validation with `BenchmarkFeatureTableToothMask` and
+`BenchmarkBoneFeatureTableMask` on linux/amd64, i5-13400: tooth-mask full
+pipeline averaged ~116.420 ms/op before and ~115.487 ms/op after, a
+~1.01x time speedup and ~0.934 ms faster per mask; bone-mask lookup-heavy
+pipeline averaged ~2.813 ms/op before and ~1.901 ms/op after, a ~1.48x
+time speedup and ~0.913 ms faster per mask.
+
 ### 32. `getJobs` always sends de-duped IDs but `getJob` does not
 
 **Where:** `frontend/src/lib/desktopBackend.ts:38–40`. `getJobs` does
