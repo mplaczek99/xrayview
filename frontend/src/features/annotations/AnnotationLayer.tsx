@@ -12,6 +12,7 @@ interface AnnotationLayerProps {
   annotations: AnnotationBundle;
   selectedAnnotationId: string | null;
   draftLine: LineAnnotation | null;
+  draftLineOverride: LineAnnotation | null;
   onSelectAnnotation: (annotationId: string) => void;
   onStartHandleDrag: (
     annotationId: string,
@@ -107,7 +108,8 @@ function annotationLayerPropsEqual(
     prev.transform.scale === next.transform.scale &&
     Object.is(prev.annotations, next.annotations) &&
     prev.selectedAnnotationId === next.selectedAnnotationId &&
-    Object.is(prev.draftLine, next.draftLine)
+    Object.is(prev.draftLine, next.draftLine) &&
+    Object.is(prev.draftLineOverride, next.draftLineOverride)
     // callbacks intentionally excluded — ViewerCanvas recreates them each render
   );
 }
@@ -120,13 +122,20 @@ export const AnnotationLayer = memo(
     annotations,
     selectedAnnotationId,
     draftLine,
+    draftLineOverride,
     onSelectAnnotation,
     onStartHandleDrag,
   }: AnnotationLayerProps) {
     const selectedLine = useMemo(
-      () =>
-        annotations.lines.find((a) => a.id === selectedAnnotationId) ?? null,
-      [annotations.lines, selectedAnnotationId],
+      () => {
+        const line =
+          annotations.lines.find((a) => a.id === selectedAnnotationId) ?? null;
+        if (line && draftLineOverride?.id === line.id) {
+          return draftLineOverride;
+        }
+        return line;
+      },
+      [annotations.lines, draftLineOverride, selectedAnnotationId],
     );
     const handleRadius = 7 / Math.max(transform.scale, 1);
 
@@ -172,15 +181,22 @@ export const AnnotationLayer = memo(
             ),
           )}
 
-          {annotations.lines.map((annotation) => (
-            <LineAnnotationItem
-              key={annotation.id}
-              annotation={annotation}
-              isSelected={annotation.id === selectedAnnotationId}
-              scale={transform.scale}
-              onSelectAnnotation={onSelectAnnotation}
-            />
-          ))}
+          {annotations.lines.map((annotation) => {
+            const visibleAnnotation =
+              draftLineOverride?.id === annotation.id
+                ? draftLineOverride
+                : annotation;
+
+            return (
+              <LineAnnotationItem
+                key={annotation.id}
+                annotation={visibleAnnotation}
+                isSelected={annotation.id === selectedAnnotationId}
+                scale={transform.scale}
+                onSelectAnnotation={onSelectAnnotation}
+              />
+            );
+          })}
 
           {draftLine ? (
             <line

@@ -97,6 +97,7 @@ export function ViewerCanvas({
     displayedAnnotations,
     draftDistance,
     draftLine,
+    draftLineOverride,
     handleMouseLeave,
     handleMouseMove,
     hoverCoord,
@@ -208,6 +209,7 @@ export function ViewerCanvas({
             annotations={displayedAnnotations}
             selectedAnnotationId={selectedAnnotationId}
             draftLine={isDrawingLine ? draftLine : null}
+            draftLineOverride={draftLineOverride}
             onSelectAnnotation={onSelectAnnotation}
             onStartHandleDrag={beginHandleDrag}
           />

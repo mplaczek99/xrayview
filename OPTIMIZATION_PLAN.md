@@ -471,6 +471,18 @@ While dragging an endpoint, every `pointermove` builds a fresh
 position (compare to previous draft) or skip the structural clone and
 have `AnnotationLayer` accept a `draftLineOverride: LineAnnotation` prop.
 
+**Status:** completed in
+`frontend/src/features/viewer/usePointerInteractions.ts` and
+`frontend/src/features/annotations/AnnotationLayer.tsx` with
+`frontend/scripts/validate-annotation-edit-drag.mjs`. Validation on
+linux/amd64, i5-13400: before 5000-line edit drags averaged ~24.786 ms
+for 400 pointer moves and produced ~401 fresh `lines` arrays; after they
+averaged ~9.271 ms with 0 fresh `lines` arrays. That is a ~2.67x time
+speedup (about 15.515 ms faster per 400 pointer moves, ~62.6% less
+time) because endpoint dragging now passes the active line as a
+`draftLineOverride` instead of cloning the annotation bundle on every
+move.
+
 ### 25. `selectPendingJobCount` selector iterates jobs map on every change
 
 **Where:** `frontend/src/app/store/selectors.ts:40–49`. Memoized on the

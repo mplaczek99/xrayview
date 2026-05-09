@@ -199,18 +199,8 @@ export function usePointerInteractions({
     };
   }, [containerRef, setViewport]);
 
-  const displayedAnnotations = useMemo(() => {
-    if (interaction?.kind !== "edit" || !draftLine) {
-      return annotations;
-    }
-
-    return {
-      ...annotations,
-      lines: annotations.lines.map((annotation) =>
-        annotation.id === draftLine.id ? draftLine : annotation,
-      ),
-    };
-  }, [annotations, draftLine, interaction]);
+  const displayedAnnotations = annotations;
+  const draftLineOverride = interaction?.kind === "edit" ? draftLine : null;
 
   const draftDistance = useMemo(() => {
     if (!draftLine) {
@@ -317,6 +307,7 @@ export function usePointerInteractions({
     displayedAnnotations,
     draftDistance,
     draftLine,
+    draftLineOverride,
     handleMouseLeave,
     handleMouseMove,
     hoverCoord,
