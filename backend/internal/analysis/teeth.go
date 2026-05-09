@@ -863,11 +863,11 @@ func compositeOverlayCoverage(rgba []uint8, coverage []float64, color [3]uint8) 
 			rgba[base+3] = 255
 			continue
 		}
-		for channel := 0; channel < 3; channel++ {
-			current := float64(rgba[base+channel])
-			target := float64(color[channel])
-			rgba[base+channel] = uint8(math.Round(current*(1-value) + target*value))
-		}
+		q := uint32(value*255 + 0.5)
+		inverse := uint32(255) - q
+		rgba[base+0] = uint8((uint32(rgba[base+0])*inverse + uint32(color[0])*q + 127) / 255)
+		rgba[base+1] = uint8((uint32(rgba[base+1])*inverse + uint32(color[1])*q + 127) / 255)
+		rgba[base+2] = uint8((uint32(rgba[base+2])*inverse + uint32(color[2])*q + 127) / 255)
 		rgba[base+3] = 255
 	}
 }

@@ -745,6 +745,24 @@ func BenchmarkStrokeCoverage(b *testing.B) {
 	}
 }
 
+func BenchmarkCompositeOverlayCoverage(b *testing.B) {
+	const width = 2048
+	const height = 1536
+
+	rgba := benchmarkRGBA(width, height)
+	coverage := benchmarkOverlayCoverage(width, height)
+	b.SetBytes(int64(width * height))
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		compositeOverlayCoverage(rgba, coverage, toothOverlayGreen)
+		if rgba[400*width*4+500*4] == 253 {
+			b.Fatal("unreachable rgba sentinel")
+		}
+	}
+}
+
 func referenceDilateBinaryMask(mask []uint8, width, height, radius int) []uint8 {
 	if radius <= 0 || len(mask) == 0 {
 		return append([]uint8(nil), mask...)
@@ -878,6 +896,33 @@ func benchmarkGray(width, height int) []uint8 {
 		pixels[index] = uint8((index*31 + rng.Intn(64)) & 0xff)
 	}
 	return pixels
+}
+
+func benchmarkRGBA(width, height int) []uint8 {
+	rng := rand.New(rand.NewSource(126))
+	pixels := make([]uint8, width*height*4)
+	for index := 0; index < len(pixels); index += 4 {
+		pixels[index+0] = uint8((index/4*17 + rng.Intn(64)) & 0xff)
+		pixels[index+1] = uint8((index/4*23 + rng.Intn(64)) & 0xff)
+		pixels[index+2] = uint8((index/4*29 + rng.Intn(64)) & 0xff)
+		pixels[index+3] = 255
+	}
+	return pixels
+}
+
+func benchmarkOverlayCoverage(width, height int) []float64 {
+	coverage := make([]float64, width*height)
+	for y := 0; y < height; y++ {
+		for x := 0; x < width; x++ {
+			index := y*width + x
+			if (x+y)%5 == 0 {
+				continue
+			}
+			value := float64((x*13 + y*7) % 256)
+			coverage[index] = value / 255
+		}
+	}
+	return coverage
 }
 
 func benchmarkClosedContour(pointCount int) []overlayPoint {
