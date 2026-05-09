@@ -8,7 +8,8 @@ import {
   logCompletedJobVisibleTiming,
 } from "./benchmarks";
 
-const FAST_POLL_MS = 200;
+const ACTIVE_POLL_MS = 500;
+const RECENT_TRANSITION_POLL_MS = 200;
 const QUEUED_POLL_MS = 1000;
 const MAX_POLL_MS = 2000;
 const IDLE_POLL_MS = 0;
@@ -37,7 +38,7 @@ export function useJobs() {
     let cancelled = false;
     let timer: number | undefined;
     let unsubscribeEvent: (() => void) | undefined;
-    let currentIntervalMs = FAST_POLL_MS;
+    let currentIntervalMs = ACTIVE_POLL_MS;
     // Tracks the last time a job-update event was received via Wails/SSE.
     // When fresh (< EVENT_STALE_MS ago), HTTP polling is suppressed entirely.
     let lastEventAtMs = 0;
@@ -127,6 +128,7 @@ export function useJobs() {
       }
 
       let anyProgress = false;
+      let anyStateTransition = false;
       let allQueued = true;
       let anyNearComplete = false;
 
@@ -144,7 +146,10 @@ export function useJobs() {
         const pre = prePollState.get(job.jobId);
         if (pre !== undefined) {
           // Percent advance or state transition (queued → running) counts as progress.
-          if (job.progress.percent > pre.percent || job.state !== pre.state) {
+          if (job.state !== pre.state) {
+            anyStateTransition = true;
+            anyProgress = true;
+          } else if (job.progress.percent > pre.percent) {
             anyProgress = true;
           }
         }
@@ -152,13 +157,17 @@ export function useJobs() {
 
       // Completion events arrive in the embedded desktop path, but progress
       // updates still come from polling while a job is running.
-      if (anyProgress || anyNearComplete) {
-        // Progress detected or near-complete: reset to fast polling.
-        currentIntervalMs = FAST_POLL_MS;
+      if (anyStateTransition || anyNearComplete) {
+        // State transitions and near-complete jobs get a brief fast cadence.
+        currentIntervalMs = RECENT_TRANSITION_POLL_MS;
+        scheduleNext(currentIntervalMs);
+      } else if (anyProgress) {
+        // Progress detected: reset to the active cadence.
+        currentIntervalMs = ACTIVE_POLL_MS;
         scheduleNext(currentIntervalMs);
       } else if (allQueued) {
         // Queued-only: use steady slow interval without advancing the backoff state.
-        // currentIntervalMs stays at FAST_POLL_MS so backoff starts fresh when running begins.
+        // currentIntervalMs stays at ACTIVE_POLL_MS so backoff starts fresh when running begins.
         scheduleNext(QUEUED_POLL_MS);
       } else {
         // No progress on running/cancelling jobs: schedule at current interval then double.

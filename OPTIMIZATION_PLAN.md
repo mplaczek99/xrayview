@@ -513,6 +513,16 @@ fallback path it pegs the renderer.
 seen; keep the existing exponential backoff. SSE is the real solution
 when available.
 
+**Status:** completed by starting fallback active polling at 500 ms,
+retaining the 200 ms cadence only for recent state transitions and
+near-complete jobs, and keeping the existing exponential backoff behavior.
+Validation in `frontend/scripts/validate-fast-poll-cadence.mjs` on
+linux/amd64, i5-13400: before, a 10000 ms fallback window with 20000
+pending jobs averaged ~114.346 ms of simulated polling work across 51
+polls; after, the 500 ms active cadence averaged ~16.368 ms across 7
+polls. That is a ~6.99x time speedup, about 97.978 ms faster per
+simulated fallback window, with polling reduced 86.3%.
+
 ### 27. `boxBlurGray` uses `clampInt` per access in the prologue
 
 **Where:** `backend/internal/analysis/teeth.go:746–782`. Separable, two

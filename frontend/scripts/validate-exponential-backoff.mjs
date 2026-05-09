@@ -1,9 +1,9 @@
 // Validation test for step 10.1: Exponential backoff on job polling.
 // Runs with: node frontend/scripts/validate-exponential-backoff.mjs
 //
-// Tests that the polling interval backs off exponentially (200 → 400 → 800 → 1600 → 2000ms)
-// when jobs make no progress, resets to 200ms on progress, uses 1s for queued-only jobs,
-// and stays at 200ms when any running job is >80% complete.
+// Tests that the polling interval backs off exponentially (500 → 1000 → 2000ms)
+// when jobs make no progress, uses 1s for queued-only jobs, resets to 500ms on
+// progress, and uses 200ms briefly for state transitions or near-complete jobs.
 //
 // Note: pollers in this script are synchronous mirrors of the async useJobs.ts logic,
 // valid because the backoff decision is made after all fetches complete — the async nature
@@ -102,7 +102,8 @@ function makePoller_BEFORE(getJobs, getUpdatedJob) {
 // AFTER: exponential backoff polling — synchronous mirror of updated useJobs.ts.
 // ---------------------------------------------------------------------------
 
-const AFTER_FAST_POLL_MS = 200;
+const AFTER_FAST_POLL_MS = 500;
+const AFTER_RECENT_TRANSITION_POLL_MS = 200;
 const AFTER_QUEUED_POLL_MS = 1000;
 const AFTER_MAX_POLL_MS = 2000;
 const AFTER_IDLE_POLL_MS = 0;
@@ -147,6 +148,7 @@ function makePoller_AFTER(getJobs, getUpdatedJob) {
     }
 
     let anyProgress = false;
+    let anyStateTransition = false;
     let allQueued = true;
     let anyNearComplete = false;
 
@@ -155,13 +157,19 @@ function makePoller_AFTER(getJobs, getUpdatedJob) {
       if (job.state === "running" && job.progress.percent > 80) anyNearComplete = true;
       const pre = prePollState.get(job.jobId);
       if (pre !== undefined) {
-        if (job.progress.percent > pre.percent || job.state !== pre.state) {
+        if (job.state !== pre.state) {
+          anyStateTransition = true;
+          anyProgress = true;
+        } else if (job.progress.percent > pre.percent) {
           anyProgress = true;
         }
       }
     }
 
-    if (anyProgress || anyNearComplete) {
+    if (anyStateTransition || anyNearComplete) {
+      currentIntervalMs = AFTER_RECENT_TRANSITION_POLL_MS;
+      scheduleNext(currentIntervalMs);
+    } else if (anyProgress) {
       currentIntervalMs = AFTER_FAST_POLL_MS;
       scheduleNext(currentIntervalMs);
     } else if (allQueued) {
@@ -236,13 +244,13 @@ test("BEFORE: 10 idle polls → 10 x 200ms = 2000ms total wait", () => {
 // AFTER tests: exponential backoff on stalled jobs.
 // ---------------------------------------------------------------------------
 
-test("AFTER: running job no progress → exponential backoff 200→400→800→1600→2000 (capped)", () => {
+test("AFTER: running job no progress → exponential backoff 500→1000→2000 (capped)", () => {
   resetTimers();
   const jobs = [makeJob("j1", "running", 50)];
   const poller = makePoller_AFTER(() => jobs, () => null);
 
   const intervals = runNCycles(poller, 6);
-  assert.deepEqual(intervals, [200, 400, 800, 1600, 2000, 2000],
+  assert.deepEqual(intervals, [500, 1000, 2000, 2000, 2000, 2000],
     "AFTER: backoff doubles each poll, caps at 2000ms");
 });
 
@@ -256,7 +264,7 @@ test("AFTER: queued-only jobs → steady 1000ms (not 200ms, not backoff)", () =>
     "AFTER: queued-only always uses QUEUED_POLL_MS");
 });
 
-test("AFTER: progress detected → resets interval to 200ms", () => {
+test("AFTER: progress detected → resets interval to 500ms", () => {
   resetTimers();
   let pollCount = 0;
   const jobs = [makeJob("j1", "running", 50)];
@@ -273,12 +281,12 @@ test("AFTER: progress detected → resets interval to 200ms", () => {
   );
 
   const intervals = runNCycles(poller, 5);
-  // Polls 1-3: no progress → schedule-then-double: 200, 400, 800.
-  // Poll 4: progress (50→60) → reset currentIntervalMs=200, schedule 200.
-  // Poll 5: no progress → schedule currentIntervalMs=200, double to 400.
-  // (200ms used twice: once at reset, once as starting point of new backoff)
-  assert.deepEqual(intervals, [200, 400, 800, 200, 200],
-    "AFTER: backoff resets to 200ms on progress, restarts backoff from 200");
+  // Polls 1-3: no progress → schedule-then-double: 500, 1000, 2000.
+  // Poll 4: progress (50→60) → reset currentIntervalMs=500, schedule 500.
+  // Poll 5: no progress → schedule currentIntervalMs=500, double to 1000.
+  // (500ms used twice: once at reset, once as starting point of new backoff)
+  assert.deepEqual(intervals, [500, 1000, 2000, 500, 500],
+    "AFTER: backoff resets to 500ms on progress, restarts backoff from 500");
 });
 
 test("AFTER: running job >80% → stays at 200ms (near-complete fast path)", () => {
@@ -324,7 +332,7 @@ test("AFTER: cancelling state jobs back off when no progress", () => {
   const poller = makePoller_AFTER(() => jobs, () => null);
 
   const intervals = runNCycles(poller, 4);
-  assert.deepEqual(intervals, [200, 400, 800, 1600],
+  assert.deepEqual(intervals, [500, 1000, 2000, 2000],
     "AFTER: cancelling jobs use same backoff logic");
 });
 
@@ -348,11 +356,11 @@ test("AFTER: multiple jobs — progress in any job resets global interval", () =
   );
 
   const intervals = runNCycles(poller, 5);
-  // Polls 1-3: no progress from either → 200, 400, 800.
-  // Poll 4: j2 advances (30→40) → anyProgress=true → currentIntervalMs=200, schedule 200.
-  // Poll 5: no progress → schedule currentIntervalMs=200, double to 400.
-  assert.deepEqual(intervals, [200, 400, 800, 200, 200],
-    "AFTER: any job progress resets global backoff; restarts from 200ms");
+  // Polls 1-3: no progress from either → 500, 1000, 2000.
+  // Poll 4: j2 advances (30→40) → anyProgress=true → currentIntervalMs=500, schedule 500.
+  // Poll 5: no progress → schedule currentIntervalMs=500, double to 1000.
+  assert.deepEqual(intervals, [500, 1000, 2000, 500, 500],
+    "AFTER: any job progress resets global backoff; restarts from 500ms");
 });
 
 // ---------------------------------------------------------------------------
@@ -419,9 +427,9 @@ test("AFTER: ≥40% fewer HTTP requests than BEFORE over 10s job", () => {
   console.log(`  Reduction: ${reduction.toFixed(1)}%`);
 });
 
-test("AFTER: interval resets to 200ms when new job becomes pending (effect re-mount)", () => {
-  // Simulates pendingJobCount going 0→1: the effect re-mounts, currentIntervalMs resets to 200.
-  // Each makePoller_AFTER call creates a fresh closure with currentIntervalMs = FAST_POLL_MS.
+test("AFTER: interval resets to 500ms when new job becomes pending (effect re-mount)", () => {
+  // Simulates pendingJobCount going 0→1: the effect re-mounts, currentIntervalMs resets to 500.
+  // Each makePoller_AFTER call creates a fresh closure with the active poll interval.
   resetTimers();
   const jobs = [makeJob("j1", "running", 20)];
 
@@ -431,10 +439,10 @@ test("AFTER: interval resets to 200ms when new job becomes pending (effect re-mo
   stalledPoller.cancel();
   resetTimers();
 
-  // New effect mount: fresh poller, should start at 200ms again.
+  // New effect mount: fresh poller, should start at 500ms again.
   const freshPoller = makePoller_AFTER(() => jobs, () => null);
   freshPoller.start();
   assert.equal(timerQueue.length, 1, "AFTER: fresh poller schedules timer");
-  assert.equal(timerQueue[0].ms, 200, "AFTER: fresh poller starts at 200ms (not stale 2000ms)");
+  assert.equal(timerQueue[0].ms, 500, "AFTER: fresh poller starts at 500ms (not stale 2000ms)");
   freshPoller.cancel();
 });
