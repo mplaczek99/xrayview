@@ -346,6 +346,11 @@ output, four-byte stores per pixel via slicing.
 unsafe pattern in `processing/grayscale.go:118–157`. Unblocks easy
 parallelization too.
 
+**Status:** completed in `backend/internal/processing/palette.go` with
+`BenchmarkApplyNamedPalette`. Validation on linux/amd64, i5-13400:
+before ~2.10 ms/op (1496 MB/s), after ~0.91 ms/op (3459 MB/s), with
+0 B/op and 0 allocs/op in both runs.
+
 ### 18. `processing/compare.go:CombineComparison` is a row-by-row sequential copy
 
 **Where:** `backend/internal/processing/compare.go:40–72`. Two

@@ -93,3 +93,29 @@ func TestApplyNamedPalettePromotesGrayPreviewToRGBA(t *testing.T) {
 		t.Fatalf("Pixels = %v, want %v", got.Pixels, want)
 	}
 }
+
+func BenchmarkApplyNamedPalette(b *testing.B) {
+	const width, height = 2048, 1536
+	pixels := make([]uint8, width*height)
+	for i := range pixels {
+		pixels[i] = uint8(i % 256)
+	}
+	preview := imaging.GrayPreview(width, height, pixels)
+
+	warm, err := ApplyNamedPalette(preview, PaletteBone)
+	if err != nil {
+		b.Fatalf("warm ApplyNamedPalette returned error: %v", err)
+	}
+	warm.Release()
+
+	b.ReportAllocs()
+	b.SetBytes(int64(len(pixels)))
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		paletted, err := ApplyNamedPalette(preview, PaletteBone)
+		if err != nil {
+			b.Fatalf("ApplyNamedPalette returned error: %v", err)
+		}
+		paletted.Release()
+	}
+}

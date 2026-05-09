@@ -3,6 +3,7 @@ package processing
 import (
 	"fmt"
 	"strings"
+	"unsafe"
 
 	"xrayview/backend/internal/bufpool"
 	"xrayview/backend/internal/imaging"
@@ -54,18 +55,27 @@ func ApplyNamedPalette(
 		return imaging.PreviewImage{}, fmt.Errorf("palette must be one of: none, hot, bone")
 	}
 
-	var lookup [256][4]uint8
+	var lookup [256]uint32
 	for index := range lookup {
-		lookup[index] = colorFn(uint8(index))
+		lookup[index] = rgbaUint32(colorFn(uint8(index)))
 	}
 
 	pixels := bufpool.GetUint8(len(preview.Pixels) * 4)
-	for index, value := range preview.Pixels {
-		base := index * 4
-		copy(pixels[base:base+4], lookup[value][:])
+	if len(preview.Pixels) > 0 {
+		rgbaPixels := unsafe.Slice((*uint32)(unsafe.Pointer(&pixels[0])), len(preview.Pixels))
+		for index, value := range preview.Pixels {
+			rgbaPixels[index] = lookup[value]
+		}
 	}
 
 	return imaging.RGBAPreviewWithRelease(preview.Width, preview.Height, pixels, bufpool.PutUint8), nil
+}
+
+func rgbaUint32(rgba [4]uint8) uint32 {
+	return uint32(rgba[0]) |
+		uint32(rgba[1])<<8 |
+		uint32(rgba[2])<<16 |
+		uint32(rgba[3])<<24
 }
 
 func hotColor(value uint8) [4]uint8 {
