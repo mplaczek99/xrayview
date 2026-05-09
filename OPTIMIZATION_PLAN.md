@@ -611,6 +611,14 @@ time speedup and ~0.913 ms faster per mask.
 **Where:** `frontend/src/lib/desktopBackend.ts:38–40`. `getJobs` does
 `new Set(jobIds)`. Cosmetic — singleton `getJob` is one ID.
 
+**Status:** completed by routing desktop and mock batch job ID lists through
+a shared `uniqueJobIds` helper that skips the `Set` allocation for singleton
+batches while preserving duplicate removal for multi-ID batches. Validation
+with `validate-singleton-job-id-dedupe.mjs` on 5,000,000 singleton payload
+preps per sample: before averaged ~168.559 ms/sample; after averaged
+~15.707 ms/sample. That is a ~10.73x time speedup, about 152.852 ms faster
+per sample.
+
 ### 33. Per-ProcessingTab re-renders on every store change
 
 **Where:** `frontend/src/components/processing/ProcessingTab.tsx`.

@@ -4,6 +4,7 @@ import type {
 } from "./generated/contracts";
 import { normalizeBackendError } from "./backendErrors";
 import { buildProcessStudyCommand } from "./commandBuilders";
+import { uniqueJobIds } from "./jobIds";
 import type { BackendAPI } from "./runtimeTypes";
 import { getWailsBindings } from "./wails";
 
@@ -37,7 +38,9 @@ export function createDesktopBackendAPI(): BackendAPI {
     getJob: async (jobId) =>
       invokeTypedDesktopBinding(() => bindings.GetJobSnapshot({ jobId })),
     getJobs: async (jobIds) =>
-      invokeTypedDesktopBinding(() => bindings.GetJobsSnapshot({ jobIds: [...new Set(jobIds)] })),
+      invokeTypedDesktopBinding(() =>
+        bindings.GetJobsSnapshot({ jobIds: uniqueJobIds(jobIds) }),
+      ),
     cancelJob: async (jobId) =>
       invokeTypedDesktopBinding(() => bindings.CancelJobByID({ jobId })),
     measureLineAnnotation: async (studyId, annotation): Promise<LineAnnotation> => {

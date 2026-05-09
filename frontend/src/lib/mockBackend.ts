@@ -8,6 +8,7 @@ import type {
   StartedJob,
 } from "./generated/contracts";
 import { normalizeBackendError } from "./backendErrors";
+import { uniqueJobIds } from "./jobIds";
 import { MOCK_PROCESSING_MANIFEST } from "./mockProcessingManifest";
 import { MOCK_PROCESSED_DICOM_PATH } from "./mockRuntime";
 import {
@@ -202,7 +203,7 @@ export function createMockBackendAPI(): BackendAPI {
       return snapshot;
     },
     getJobs: async (jobIds): Promise<ContractJobSnapshot[]> => {
-      const unique = [...new Set(jobIds)];
+      const unique = uniqueJobIds(jobIds);
       return unique.flatMap((jobId) => {
         const snapshot = mockJobs.get(jobId);
         return snapshot ? [snapshot] : [];
