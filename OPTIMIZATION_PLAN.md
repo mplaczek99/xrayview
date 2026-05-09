@@ -492,6 +492,17 @@ so the count is recomputed on every transition.
 **Fix:** subsumed by #14 — once `pendingJobIds` is a maintained set, the
 selector returns its `.size`.
 
+**Status:** completed by the maintained `WorkbenchState.pendingJobIds`
+set in `frontend/src/app/store/workbenchStore.ts` and the O(1)
+`selectPendingJobCount` implementation in
+`frontend/src/app/store/selectors.ts`, with validation in
+`frontend/scripts/validate-pending-job-count-selector.mjs`. Validation
+on linux/amd64, i5-13400: before, the old `Object.values(jobs).filter`
+selector averaged ~1641.087 ms for 1000 reads over a 10000-job map;
+after, `pendingJobIds.size` averaged ~0.025 ms for the same 1000 reads.
+That is a ~66104x time speedup, about 1641.062 ms faster per 1000
+selector reads.
+
 ### 26. Hardcoded fast-poll interval of 200 ms
 
 **Where:** `frontend/src/features/jobs/useJobs.ts:11` (`FAST_POLL_MS = 200`).
