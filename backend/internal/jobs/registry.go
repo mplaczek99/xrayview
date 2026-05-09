@@ -21,7 +21,8 @@ type StartJobOutcome struct {
 // Created=false instead of launching a duplicate; entries are inserted at
 // StartJob and released by whichever path drives the job to a terminal
 // state (Complete, Fail, markCancelledLocked). Snapshots returned to callers
-// are deep-cloned so they can be read and mutated without holding the lock.
+// are copied by value; nested pointers stored in registry snapshots are treated
+// as immutable after assignment.
 type Registry struct {
 	mu                 sync.RWMutex
 	newJobID           idGenerator
@@ -146,7 +147,7 @@ func (registry *Registry) Get(jobID string) (contracts.JobSnapshot, error) {
 		return contracts.JobSnapshot{}, contracts.NotFound(fmt.Sprintf("job not found: %s", jobID))
 	}
 
-	return cloneJobSnapshot(entry.snapshot), nil
+	return entry.snapshot, nil
 }
 
 func (registry *Registry) UpdateProgress(
@@ -223,6 +224,7 @@ func (registry *Registry) Fail(jobID string, err error) (contracts.JobSnapshot, 
 	if !ok {
 		backendErr = contracts.Internal(err.Error())
 	}
+	backendErr = cloneBackendError(backendErr)
 
 	registry.mu.Lock()
 	defer registry.mu.Unlock()
@@ -392,10 +394,9 @@ func (registry *Registry) evictOldTerminalJobsLocked(keepJobID string) {
 	}
 }
 
-// cloneJobSnapshot deep-copies a snapshot's pointer fields so returned
-// snapshots can be read and mutated outside the registry lock. Do not
-// "optimize" this into a direct return — the pointer fields would alias the
-// live entry and a later registry mutation would race the caller.
+// cloneJobSnapshot deep-copies a snapshot's pointer fields for mutation paths
+// that hand a changed live entry back to callers. Get returns a value copy
+// directly because registry-owned nested values are immutable after assignment.
 func cloneJobSnapshot(snapshot contracts.JobSnapshot) contracts.JobSnapshot {
 	cloned := snapshot
 
@@ -407,12 +408,16 @@ func cloneJobSnapshot(snapshot contracts.JobSnapshot) contracts.JobSnapshot {
 		cloned.Result = &result
 	}
 	if snapshot.Error != nil {
-		backendErr := *snapshot.Error
-		if backendErr.Details != nil {
-			backendErr.Details = append([]string(nil), backendErr.Details...)
-		}
+		backendErr := cloneBackendError(*snapshot.Error)
 		cloned.Error = &backendErr
 	}
 
 	return cloned
+}
+
+func cloneBackendError(err contracts.BackendError) contracts.BackendError {
+	if err.Details != nil {
+		err.Details = append([]string(nil), err.Details...)
+	}
+	return err
 }

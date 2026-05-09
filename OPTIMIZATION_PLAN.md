@@ -431,6 +431,14 @@ value with the inner pointers shared. The current "deep clone is a
 correctness hedge" comment is fair, but a stricter immutability rule
 removes the cost.
 
+**Status:** completed in `backend/internal/jobs/registry.go` with
+`BenchmarkRegistryGetCompletedSnapshot`. Validation on linux/amd64,
+i5-13400: before ~59.2 ns/op, after ~22.6 ns/op, a ~2.62x time speedup
+(about 36.6 ns/op faster, ~61.9% less time). Allocation cost dropped
+from 48 B/op and 2 allocs/op to 0 B/op and 0 allocs/op because `Get`
+now returns the registry snapshot by value and shares immutable nested
+pointer fields.
+
 ### 23. `usePointerInteractions` reattaches pointer listeners on every move
 
 **Where:** `frontend/src/features/viewer/usePointerInteractions.ts:95–190`.

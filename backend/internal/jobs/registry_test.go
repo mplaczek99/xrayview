@@ -442,7 +442,7 @@ func TestRegistryFailWrapsPlainErrorsAsInternal(t *testing.T) {
 	}
 }
 
-func TestRegistryGetReturnsIndependentSnapshotCopies(t *testing.T) {
+func TestRegistryGetReturnsSnapshotValueCopy(t *testing.T) {
 	registry := NewRegistry(sequenceJobIDs("job-1"))
 
 	started, err := registry.StartJob(
@@ -454,45 +454,74 @@ func TestRegistryGetReturnsIndependentSnapshotCopies(t *testing.T) {
 		t.Fatalf("StartJob returned error: %v", err)
 	}
 
-	if _, err := registry.Fail(
-		started.Snapshot.JobID,
-		contracts.InvalidInput("bad request").WithDetails("detail-1"),
-	); err != nil {
-		t.Fatalf("Fail returned error: %v", err)
-	}
-
 	first, err := registry.Get(started.Snapshot.JobID)
 	if err != nil {
 		t.Fatalf("first Get returned error: %v", err)
 	}
-	if first.StudyID == nil {
-		t.Fatal("StudyID = nil, want populated study id")
-	}
-	if first.Error == nil || len(first.Error.Details) != 1 {
-		t.Fatalf("Error = %#v, want cloned backend error details", first.Error)
-	}
 
-	*first.StudyID = "mutated-study"
-	first.Error.Message = "mutated message"
-	first.Error.Details[0] = "mutated detail"
+	if _, err := registry.UpdateProgress(
+		started.Snapshot.JobID,
+		contracts.JobStateRunning,
+		25,
+		"rendering",
+		"Rendering preview",
+	); err != nil {
+		t.Fatalf("UpdateProgress returned error: %v", err)
+	}
 
 	second, err := registry.Get(started.Snapshot.JobID)
 	if err != nil {
 		t.Fatalf("second Get returned error: %v", err)
 	}
-	if second.StudyID == nil {
-		t.Fatal("second StudyID = nil, want populated study id")
+	if got, want := first.State, contracts.JobStateQueued; got != want {
+		t.Fatalf("first State = %q, want %q", got, want)
 	}
-	if got, want := *second.StudyID, "study-1"; got != want {
-		t.Fatalf("StudyID = %q, want %q", got, want)
+	if got, want := first.Progress.Stage, "queued"; got != want {
+		t.Fatalf("first Progress.Stage = %q, want %q", got, want)
 	}
-	if second.Error == nil {
-		t.Fatal("second Error = nil, want backend error payload")
+	if got, want := second.State, contracts.JobStateRunning; got != want {
+		t.Fatalf("second State = %q, want %q", got, want)
 	}
-	if got, want := second.Error.Message, "bad request"; got != want {
-		t.Fatalf("Error.Message = %q, want %q", got, want)
+	if got, want := second.Progress.Stage, "rendering"; got != want {
+		t.Fatalf("second Progress.Stage = %q, want %q", got, want)
 	}
-	if got, want := second.Error.Details[0], "detail-1"; got != want {
-		t.Fatalf("Error.Details[0] = %q, want %q", got, want)
+}
+
+func BenchmarkRegistryGetCompletedSnapshot(b *testing.B) {
+	registry := NewRegistry(sequenceJobIDs("job-1"))
+	started, err := registry.StartJob(
+		contracts.JobKindProcessStudy,
+		"study-1",
+		"fingerprint-1",
+	)
+	if err != nil {
+		b.Fatalf("StartJob returned error: %v", err)
+	}
+	if _, err := registry.Complete(
+		started.Snapshot.JobID,
+		contracts.JobResult{
+			Kind: contracts.JobKindProcessStudy,
+			Payload: contracts.ProcessStudyCommandResult{
+				StudyID:      "study-1",
+				PreviewPath:  "/tmp/preview.png",
+				DicomPath:    "/tmp/output.dcm",
+				LoadedWidth:  2048,
+				LoadedHeight: 1536,
+			},
+		},
+	); err != nil {
+		b.Fatalf("Complete returned error: %v", err)
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for index := 0; index < b.N; index++ {
+		snapshot, err := registry.Get(started.Snapshot.JobID)
+		if err != nil {
+			b.Fatalf("Get returned error: %v", err)
+		}
+		if snapshot.Result == nil {
+			b.Fatal("Result = nil, want completed payload")
+		}
 	}
 }
