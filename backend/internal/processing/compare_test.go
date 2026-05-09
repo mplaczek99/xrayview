@@ -53,6 +53,64 @@ func TestCombineComparisonExpandsGrayProcessedOutput(t *testing.T) {
 	}
 }
 
+func TestCombineComparisonParallelPathMatchesExpectedPixels(t *testing.T) {
+	const (
+		width  = 257
+		height = 256
+	)
+	leftPixels := benchmarkGrayComparePixels(width * height)
+	rightGrayPixels := benchmarkGrayComparePixels(width * height)
+	rightRGBAPixels := benchmarkRGBAComparePixels(width * height)
+	left := imaging.GrayPreview(width, height, leftPixels)
+
+	for _, testCase := range []struct {
+		name  string
+		right imaging.PreviewImage
+	}{
+		{name: "gray_right", right: imaging.GrayPreview(width, height, rightGrayPixels)},
+		{name: "rgba_right", right: imaging.RGBAPreview(width, height, rightRGBAPixels)},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			got, err := CombineComparison(left, testCase.right)
+			if err != nil {
+				t.Fatalf("CombineComparison returned error: %v", err)
+			}
+			defer got.Release()
+
+			for _, point := range [][2]int{
+				{0, 0},
+				{width - 1, 0},
+				{width / 2, height / 2},
+				{0, height - 1},
+				{width - 1, height - 1},
+			} {
+				x, y := point[0], point[1]
+				leftValue := leftPixels[y*width+x]
+				leftBase := (y*width*2 + x) * 4
+				if want := []uint8{leftValue, leftValue, leftValue, 255}; !equalBytes(got.Pixels[leftBase:leftBase+4], want) {
+					t.Fatalf("left pixel (%d,%d) = %v, want %v", x, y, got.Pixels[leftBase:leftBase+4], want)
+				}
+
+				rightBase := (y*width*2 + width + x) * 4
+				var want []uint8
+				switch testCase.right.Format {
+				case imaging.FormatGray8:
+					rightValue := rightGrayPixels[y*width+x]
+					want = []uint8{rightValue, rightValue, rightValue, 255}
+				case imaging.FormatRGBA8:
+					srcBase := (y*width + x) * 4
+					want = rightRGBAPixels[srcBase : srcBase+4]
+				default:
+					t.Fatalf("unexpected right format %q", testCase.right.Format)
+				}
+				if !equalBytes(got.Pixels[rightBase:rightBase+4], want) {
+					t.Fatalf("right pixel (%d,%d) = %v, want %v", x, y, got.Pixels[rightBase:rightBase+4], want)
+				}
+			}
+		})
+	}
+}
+
 func TestCombineComparisonRequiresGrayLeftSource(t *testing.T) {
 	_, err := CombineComparison(
 		imaging.RGBAPreview(1, 1, []uint8{0, 0, 0, 255}),
@@ -71,4 +129,83 @@ func TestCombineComparisonRequiresMatchingDimensions(t *testing.T) {
 	if err == nil {
 		t.Fatal("CombineComparison returned nil error, want dimension mismatch failure")
 	}
+}
+
+func BenchmarkCombineComparisonGrayRight(b *testing.B) {
+	const (
+		width  = 2048
+		height = 1536
+	)
+	leftPixels := benchmarkGrayComparePixels(width * height)
+	rightPixels := benchmarkGrayComparePixels(width * height)
+	left := imaging.GrayPreview(width, height, leftPixels)
+	right := imaging.GrayPreview(width, height, rightPixels)
+
+	warmup, err := CombineComparison(left, right)
+	if err != nil {
+		b.Fatalf("CombineComparison returned error: %v", err)
+	}
+	warmup.Release()
+
+	b.ReportAllocs()
+	b.SetBytes(int64(width * height * 2 * 4))
+	b.ResetTimer()
+	for range b.N {
+		got, err := CombineComparison(left, right)
+		if err != nil {
+			b.Fatalf("CombineComparison returned error: %v", err)
+		}
+		got.Release()
+	}
+}
+
+func BenchmarkCombineComparisonRGBARight(b *testing.B) {
+	const (
+		width  = 2048
+		height = 1536
+	)
+	leftPixels := benchmarkGrayComparePixels(width * height)
+	rightPixels := benchmarkRGBAComparePixels(width * height)
+	left := imaging.GrayPreview(width, height, leftPixels)
+	right := imaging.RGBAPreview(width, height, rightPixels)
+
+	warmup, err := CombineComparison(left, right)
+	if err != nil {
+		b.Fatalf("CombineComparison returned error: %v", err)
+	}
+	warmup.Release()
+
+	b.ReportAllocs()
+	b.SetBytes(int64(width * height * 2 * 4))
+	b.ResetTimer()
+	for range b.N {
+		got, err := CombineComparison(left, right)
+		if err != nil {
+			b.Fatalf("CombineComparison returned error: %v", err)
+		}
+		got.Release()
+	}
+}
+
+func benchmarkGrayComparePixels(count int) []uint8 {
+	pixels := make([]uint8, count)
+	for index := range pixels {
+		pixels[index] = uint8((index*37 + index/257) & 0xff)
+	}
+
+	return pixels
+}
+
+func benchmarkRGBAComparePixels(count int) []uint8 {
+	pixels := make([]uint8, count*4)
+	for index := 0; index < count; index++ {
+		value := uint8((index*37 + index/257) & 0xff)
+		base := index * 4
+		pixels[base] = value
+		pixels[base+1] = value / 2
+		pixels[base+2] = 255 - value
+		pixels[base+3] = 255
+	}
+
+	return pixels
 }

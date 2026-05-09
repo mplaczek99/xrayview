@@ -360,6 +360,13 @@ side-by-side images, written sequentially.
 than per-pixel writes for the Gray8 case (the loop currently iterates
 column-by-column writing four bytes at a time).
 
+**Status:** completed in `backend/internal/processing/compare.go` with
+`BenchmarkCombineComparisonGrayRight` and
+`BenchmarkCombineComparisonRGBARight`. Validation on linux/amd64,
+i5-13400: gray-vs-gray before ~6.62 ms/op (3.80 GB/s), after
+~0.76 ms/op (33.3 GB/s); gray-vs-RGBA before ~4.58 ms/op (5.49 GB/s),
+after ~1.04 ms/op (24.1 GB/s).
+
 ### 19. `equalizeHistogramInPlace` is single-threaded
 
 **Where:** `backend/internal/processing/grayscale.go:165–206`. Histogram
