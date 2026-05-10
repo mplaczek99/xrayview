@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"xrayview/backend/internal/contracts"
@@ -34,6 +35,10 @@ type Catalog struct {
 	rootDir string
 	path    string
 	now     func() time.Time
+
+	mu     sync.Mutex
+	loaded bool
+	cache  StudyCatalog
 }
 
 func New(rootDir string) *Catalog {
@@ -70,6 +75,23 @@ func (catalog *Catalog) Ensure() error {
 // we rename the bad file to *.corrupt first, then surface the error.
 // That keeps the next save() from silently overwriting the evidence.
 func (catalog *Catalog) Load() (StudyCatalog, error) {
+	catalog.mu.Lock()
+	defer catalog.mu.Unlock()
+
+	value, err := catalog.loadFromDisk()
+	if err != nil {
+		catalog.loaded = false
+		catalog.cache = emptyStudyCatalog()
+		return value, err
+	}
+
+	catalog.cache = cloneStudyCatalog(value)
+	catalog.loaded = true
+
+	return cloneStudyCatalog(value), nil
+}
+
+func (catalog *Catalog) loadFromDisk() (StudyCatalog, error) {
 	contents, err := os.ReadFile(catalog.path)
 	if err != nil {
 		return emptyStudyCatalog(), nil
@@ -90,7 +112,10 @@ func (catalog *Catalog) Load() (StudyCatalog, error) {
 }
 
 func (catalog *Catalog) RecordOpenedStudy(study contracts.StudyRecord) error {
-	value := catalog.loadOrDefault()
+	catalog.mu.Lock()
+	defer catalog.mu.Unlock()
+
+	value := catalog.loadOrDefaultLocked()
 	filtered := make([]RecentStudyEntry, 0, len(value.RecentStudies))
 	for _, entry := range value.RecentStudies {
 		if entry.InputPath != study.InputPath {
@@ -112,13 +137,20 @@ func (catalog *Catalog) RecordOpenedStudy(study contracts.StudyRecord) error {
 	return catalog.save(value)
 }
 
-func (catalog *Catalog) loadOrDefault() StudyCatalog {
-	value, err := catalog.Load()
+func (catalog *Catalog) loadOrDefaultLocked() StudyCatalog {
+	if catalog.loaded {
+		return cloneStudyCatalog(catalog.cache)
+	}
+
+	value, err := catalog.loadFromDisk()
 	if err != nil {
 		return emptyStudyCatalog()
 	}
 
-	return value
+	catalog.cache = cloneStudyCatalog(value)
+	catalog.loaded = true
+
+	return cloneStudyCatalog(value)
 }
 
 func (catalog *Catalog) save(value StudyCatalog) error {
@@ -142,6 +174,9 @@ func (catalog *Catalog) save(value StudyCatalog) error {
 			fmt.Sprintf("failed to write study catalog %s: %v", catalog.path, err),
 		)
 	}
+
+	catalog.cache = cloneStudyCatalog(value)
+	catalog.loaded = true
 
 	return nil
 }
@@ -172,5 +207,20 @@ func persistedMeasurementScale(
 func emptyStudyCatalog() StudyCatalog {
 	return StudyCatalog{
 		RecentStudies: []RecentStudyEntry{},
+	}
+}
+
+func cloneStudyCatalog(value StudyCatalog) StudyCatalog {
+	recentStudies := make([]RecentStudyEntry, len(value.RecentStudies))
+	for index, entry := range value.RecentStudies {
+		recentStudies[index] = entry
+		if entry.MeasurementScale != nil {
+			scale := *entry.MeasurementScale
+			recentStudies[index].MeasurementScale = &scale
+		}
+	}
+
+	return StudyCatalog{
+		RecentStudies: recentStudies,
 	}
 }

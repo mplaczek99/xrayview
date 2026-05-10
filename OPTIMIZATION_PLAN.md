@@ -670,6 +670,19 @@ again. For the 10-entry cap it doesn't matter, but as a pattern it
 regenerates the file each time. If it ever grows, switch to append-only
 with periodic compaction.
 
+**Status:** completed by keeping a synchronized in-memory snapshot inside
+`Catalog`. `RecordOpenedStudy` now reads and unmarshals the catalog only when
+the cache is cold, then updates the cached recent-study list and writes the
+same compact JSON snapshot format. `Load` still reads the persisted file so
+explicit load calls keep the existing corruption-handling behavior. Validation:
+`go -C backend test ./internal/persistence` and `npm run backend:test` pass.
+Before/after benchmark
+(`go -C backend test ./internal/persistence -run ^$ -bench
+BenchmarkCatalogRecordOpenedStudy -benchmem -count=5`): before averaged
+~27.395 us/op with 60 allocs/op; after averaged ~12.521 us/op with 14
+allocs/op. That is a ~2.19x speedup, about 14.873 us faster per recorded open
+in this benchmark.
+
 ### 36. `desktop/sidecar.go:newSidecarTransport` caps at 2 idle conns
 
 **Where:** `desktop/sidecar.go:46–48` (`sidecarMaxIdleConns = 2`). Fine
