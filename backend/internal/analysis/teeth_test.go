@@ -360,7 +360,12 @@ func TestRemoveSmallMaskComponentsKeepsRegionsBiggerThanFiftyPixels(t *testing.T
 }
 
 func TestNineBMPFindsFourLargeToothComponents(t *testing.T) {
-	preview := decodeGrayFixture(t, fixturePath(t, "images", "BMP", "9.bmp"))
+	bmpPath := fixturePath(t, "images", "BMP", "9.bmp")
+	if _, err := os.Stat(bmpPath); err != nil {
+		t.Skipf("missing BMP fixture: %v", err)
+	}
+
+	preview := decodeGrayFixture(t, bmpPath)
 	gray, err := grayPixels(preview)
 	if err != nil {
 		t.Fatalf("grayPixels returned error: %v", err)
