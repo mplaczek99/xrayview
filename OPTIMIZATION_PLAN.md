@@ -651,6 +651,17 @@ multi-window debugging it can be confusing.
 the existing logger so a slow consumer is visible. (Operational, not
 performance.)
 
+**Status:** completed by adding an internal monotonic
+`xrayview_sse_dropped_frames_total` counter on the SSE hub and warning through
+the router logger whenever a broadcast drops frames for a full client buffer.
+The log also includes the per-broadcast drop count, current client count, and
+client buffer size. Validation: `go -C backend test ./internal/httpapi` passes,
+including a slow-consumer test that fills the 16-frame buffer and verifies the
+counter/log output on overflow. Current SSE broadcast benchmark
+(`go -C backend test ./internal/httpapi -run ^$ -bench BenchmarkSSEHubBroadcast
+-benchmem -count=5`) averages ~12.36 ns/op with no clients and ~718.94 ns/op
+with 8 clients, with no drop logging on the non-overflow path.
+
 ### 35. Catalog persistence reads-then-writes the whole file on every open
 
 **Where:** `backend/internal/persistence/catalog.go:92–113`

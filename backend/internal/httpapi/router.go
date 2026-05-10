@@ -96,7 +96,7 @@ func NewRouter(deps RouterDeps) http.Handler {
 
 	// Wire the SSE hub. If the service supports OnJobUpdate, every job
 	// transition (progress or terminal) is broadcast to connected SSE clients.
-	hub := newSSEHub()
+	hub := newSSEHub(deps.Logger)
 	if subscriber, ok := deps.Service.(jobUpdateSubscriber); ok {
 		subscriber.OnJobUpdate(hub.broadcast)
 	}

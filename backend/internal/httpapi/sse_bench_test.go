@@ -22,7 +22,7 @@ func BenchmarkSSEHubBroadcast(b *testing.B) {
 	}
 
 	b.Run("no_clients", func(b *testing.B) {
-		hub := newSSEHub()
+		hub := newSSEHub(nil)
 		b.ReportAllocs()
 
 		for b.Loop() {
@@ -31,7 +31,7 @@ func BenchmarkSSEHubBroadcast(b *testing.B) {
 	})
 
 	b.Run("8_clients", func(b *testing.B) {
-		hub := newSSEHub()
+		hub := newSSEHub(nil)
 		clients := make([]chan []byte, 8)
 		for i := range clients {
 			clients[i] = hub.subscribe()
