@@ -629,6 +629,18 @@ medium-sized but un-memoized.
 **Fix (S):** memoize `processingUi`, `request`, and `processedPreviewUrl`
 behind reasonable equality. Low priority — modern React is fast enough.
 
+**Status:** completed by replacing the broad active-study subscription with
+`selectProcessingTabStudy`, a narrow selector that keeps the same result
+reference when active-study updates only touch unrelated fields such as job
+status/render IDs, and by memoizing the derived processing request plus the
+grayscale controls subtree. Validation with
+`frontend/scripts/validate-processing-tab-rerenders.mjs` on this workstation:
+before, 50,000 unrelated active-study updates averaged ~6.224 ms/sample and
+would trigger 50,000 ProcessingTab renders; after, the narrow selector averaged
+~1.202 ms/sample and triggered 1 render. That is a ~5.18x time speedup, about
+5.023 ms faster per 50,000 irrelevant updates, with a 100.00% render reduction
+for this scenario.
+
 ### 34. SSE clients have a fixed-size 16-frame buffer
 
 **Where:** `backend/internal/httpapi/sse.go:24`. Frames are silently
