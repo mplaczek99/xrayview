@@ -2,6 +2,17 @@ package main
 
 import "testing"
 
+func TestNewSidecarTransportRetainsBurstIdleConnections(t *testing.T) {
+	transport := newSidecarTransport()
+
+	if got, want := transport.MaxIdleConns, sidecarMaxIdleConns; got != want {
+		t.Fatalf("MaxIdleConns = %d, want %d", got, want)
+	}
+	if got, want := transport.MaxIdleConnsPerHost, sidecarMaxIdleConns; got != want {
+		t.Fatalf("MaxIdleConnsPerHost = %d, want %d", got, want)
+	}
+}
+
 func TestResolveRuntimeModeDefaultsToDesktop(t *testing.T) {
 	t.Setenv(sidecarRuntimeEnvKey, "")
 

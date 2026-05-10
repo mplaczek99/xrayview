@@ -690,6 +690,18 @@ for desktop, but tests that hammer the sidecar through HTTP will
 re-handshake constantly. If sidecar mode ever moves under heavier
 load (e.g., headless CLI batch), bump it.
 
+**Status:** completed by raising the sidecar HTTP transport idle pool to 32
+connections per host, enough to retain a burst of desktop/sidecar requests
+without repeatedly reopening loopback TCP connections. Added
+`BenchmarkSidecarTransportBurstReuse`, which issues 16-request bursts against
+an `httptest` sidecar and reports opened connections per burst. Validation:
+`go -C desktop test ./...` passes. Before/after benchmark
+(`go -C desktop test . -run ^$ -bench BenchmarkSidecarTransportBurstReuse
+-benchmem -count=5`): before averaged ~815.934 us/op and ~12.528 new
+connections/op; after averaged ~377.597 us/op and ~0.0048 new connections/op.
+That is a ~2.16x speedup, about 438.337 us faster per 16-request burst, with
+new connection churn effectively removed after warmup.
+
 ---
 
 ## Where to start
