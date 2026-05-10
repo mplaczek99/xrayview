@@ -97,6 +97,22 @@ func TestProcessGrayscalePixelsEqualizeLeavesFlatImageUntouched(t *testing.T) {
 	}
 }
 
+func TestEqualizeHistogramInPlaceParallelPathMatchesSerialReference(t *testing.T) {
+	size := minParallelEqualizePixels + 257
+	pixels := make([]uint8, size)
+	for index := range pixels {
+		pixels[index] = uint8((index*37 + index/17) & 0xff)
+	}
+	want := append([]uint8(nil), pixels...)
+	equalizeHistogramSerialReference(want)
+
+	equalizeHistogramInPlace(pixels)
+
+	if !equalBytes(pixels, want) {
+		t.Fatal("parallel histogram equalization does not match serial reference")
+	}
+}
+
 func TestProcessPreviewImageRequiresGrayPreviewInput(t *testing.T) {
 	_, _, err := ProcessPreviewImage(imaging.RGBAPreview(1, 1, []uint8{0, 0, 0, 255}), GrayscaleControls{})
 	if err == nil {
@@ -111,6 +127,7 @@ func TestProcessPreviewImageMatchesGrayscaleFixture(t *testing.T) {
 	}
 
 	preview := render.RenderSourceImage(study.Image, render.DefaultRenderPlan())
+	defer preview.Release()
 	processed, mode, err := ProcessPreviewImage(preview, GrayscaleControls{
 		Brightness: 10,
 		Contrast:   1.4,
@@ -119,6 +136,7 @@ func TestProcessPreviewImageMatchesGrayscaleFixture(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ProcessPreviewImage returned error: %v", err)
 	}
+	defer processed.Release()
 
 	if got, want := mode, "grayscale with brightness +10 with contrast 1.4 with histogram equalization"; got != want {
 		t.Fatalf("mode = %q, want %q", got, want)
@@ -133,6 +151,28 @@ func TestProcessPreviewImageMatchesGrayscaleFixture(t *testing.T) {
 	}
 	if got, want := processed.Pixels, want.Pixels; !equalBytes(got, want) {
 		t.Fatalf("processed preview does not match the grayscale fixture")
+	}
+}
+
+func TestProcessPreviewImageReturnsPooledBuffer(t *testing.T) {
+	preview := imaging.GrayPreview(4, 1, []uint8{0, 64, 128, 255})
+	controls := GrayscaleControls{Contrast: 1.0}
+
+	warm, _, err := ProcessPreviewImage(preview, controls)
+	if err != nil {
+		t.Fatalf("warm ProcessPreviewImage returned error: %v", err)
+	}
+	warm.Release()
+
+	allocs := testing.AllocsPerRun(100, func() {
+		processed, _, err := ProcessPreviewImage(preview, controls)
+		if err != nil {
+			t.Fatalf("ProcessPreviewImage returned error: %v", err)
+		}
+		processed.Release()
+	})
+	if allocs != 0 {
+		t.Fatalf("ProcessPreviewImage pooled allocs/run = %v, want 0", allocs)
 	}
 }
 
@@ -195,6 +235,54 @@ func BenchmarkProcessGrayscalePixels(b *testing.B) {
 	})
 }
 
+func BenchmarkProcessPreviewImage(b *testing.B) {
+	const width, height = 2048, 1536
+	size := width * height
+	pixels := make([]uint8, size)
+	for i := range pixels {
+		pixels[i] = uint8(i % 256)
+	}
+
+	preview := imaging.GrayPreview(width, height, pixels)
+
+	b.Run("identity", func(b *testing.B) {
+		benchmarkProcessPreviewImage(b, preview, GrayscaleControls{Contrast: 1.0}, size)
+	})
+	b.Run("invert+brightness+contrast", func(b *testing.B) {
+		benchmarkProcessPreviewImage(b, preview, GrayscaleControls{
+			Invert:     true,
+			Brightness: 20,
+			Contrast:   1.5,
+		}, size)
+	})
+}
+
+func benchmarkProcessPreviewImage(
+	b *testing.B,
+	preview imaging.PreviewImage,
+	controls GrayscaleControls,
+	size int,
+) {
+	b.Helper()
+
+	warm, _, err := ProcessPreviewImage(preview, controls)
+	if err != nil {
+		b.Fatalf("warm ProcessPreviewImage returned error: %v", err)
+	}
+	warm.Release()
+
+	b.ReportAllocs()
+	b.SetBytes(int64(size))
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		processed, _, err := ProcessPreviewImage(preview, controls)
+		if err != nil {
+			b.Fatalf("ProcessPreviewImage returned error: %v", err)
+		}
+		processed.Release()
+	}
+}
+
 func BenchmarkApplyLookupInPlace(b *testing.B) {
 	const size = 2048 * 1536
 	pixels := make([]uint8, size)
@@ -210,6 +298,64 @@ func BenchmarkApplyLookupInPlace(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		applyLookupInPlace(pixels, &lookup)
 	}
+}
+
+func BenchmarkEqualizeHistogramInPlace(b *testing.B) {
+	const size = 2048 * 1536
+	source := make([]uint8, size)
+	for i := range source {
+		source[i] = uint8((i*37 + i/17) & 0xff)
+	}
+	pixels := make([]uint8, size)
+
+	b.ReportAllocs()
+	b.SetBytes(int64(size))
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		b.StopTimer()
+		copy(pixels, source)
+		b.StartTimer()
+		equalizeHistogramInPlace(pixels)
+	}
+}
+
+func equalizeHistogramSerialReference(pixels []uint8) {
+	var histogram [256]int
+	for _, value := range pixels {
+		histogram[value]++
+	}
+
+	total := len(pixels)
+	cdf := 0
+	cdfMin := 0
+	found := false
+
+	for _, count := range histogram {
+		cdf += count
+		if !found && count != 0 {
+			cdfMin = cdf
+			found = true
+		}
+	}
+
+	if cdfMin == total {
+		return
+	}
+
+	var lookup [256]uint8
+	cdf = 0
+	denom := total - cdfMin
+	for index, count := range histogram {
+		cdf += count
+		if cdf <= cdfMin {
+			continue
+		}
+
+		value := ((cdf-cdfMin)*255 + denom/2) / denom
+		lookup[index] = uint8(value)
+	}
+
+	applyLookupInPlace(pixels, &lookup)
 }
 
 func equalBytes(left, right []uint8) bool {

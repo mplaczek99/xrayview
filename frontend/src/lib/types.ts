@@ -44,3 +44,7 @@ export interface ProcessResult extends PreviewResult {
   dicomPath: string;
   mode: string;
 }
+
+export interface AnalysisResult extends PreviewResult {
+  mode: string;
+}

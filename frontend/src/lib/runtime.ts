@@ -1,29 +1,33 @@
 import type { JobResultPayload, JobSnapshot } from "../features/jobs/model";
 import {
-  FALLBACK_PROCESSING_MANIFEST,
   buildOutputName,
-  createDesktopBackendAPI,
-  createMockBackendAPI,
   ensureDicomExtension,
-} from "./backend";
+} from "./backendUtils";
+import { createDesktopBackendAPI } from "./desktopBackend";
 import { buildDesktopPreviewUrl, isDesktopRuntime } from "./desktop";
 import type {
   JobResult,
   JobSnapshot as ContractJobSnapshot,
   OpenStudyCommandResult,
+  AnalyzeStudyCommandResult,
   ProcessStudyCommandResult,
   RenderStudyCommandResult,
 } from "./generated/contracts";
+import { createMockBackendAPI } from "./mockBackend";
+import { MOCK_PROCESSING_MANIFEST } from "./mockProcessingManifest";
 import { resolveRuntimeConfiguration } from "./runtimeConfig";
 import { createDesktopShellAPI, createMockShellAPI } from "./shell";
 import type { BackendAPI, RuntimeAdapter } from "./runtimeTypes";
 import type {
+  AnalysisResult,
   OpenedStudy,
   PreviewResult,
   ProcessResult,
   ProcessingRequest,
   RuntimeMode,
 } from "./types";
+
+export const FALLBACK_PROCESSING_MANIFEST = MOCK_PROCESSING_MANIFEST;
 
 function resolvePreviewUrl(
   previewPath: string,
@@ -76,6 +80,16 @@ function asProcessResult(
   };
 }
 
+function asAnalysisResult(
+  payload: AnalyzeStudyCommandResult,
+  runtime: RuntimeMode,
+): AnalysisResult {
+  return {
+    ...asPreviewResult(payload, runtime),
+    mode: payload.mode,
+  };
+}
+
 function normalizeJobResultPayload(
   result: JobResult,
   runtime: RuntimeMode,
@@ -85,6 +99,11 @@ function normalizeJobResultPayload(
       return {
         kind: "renderStudy",
         payload: asPreviewResult(result.payload, runtime),
+      };
+    case "analyzeStudy":
+      return {
+        kind: "analyzeStudy",
+        payload: asAnalysisResult(result.payload, runtime),
       };
     case "processStudy":
       return {
@@ -142,12 +161,25 @@ function createRuntimeAdapter(
     openStudy: async (inputPath) =>
       asOpenedStudy(await backend.openStudy(inputPath), mode),
     startRenderStudyJob: (studyId) => backend.startRenderStudyJob(studyId),
+    startAnalyzeStudyJob: (studyId) => backend.startAnalyzeStudyJob(studyId),
     startProcessStudyJob: (studyId, request) =>
       backend.startProcessStudyJob(studyId, request),
     getJob: async (jobId) =>
       normalizeJobSnapshot(await backend.getJob(jobId), mode),
-    getJobs: async (jobIds) =>
-      (await backend.getJobs(jobIds)).map((s) => normalizeJobSnapshot(s, mode)),
+    getJobs: async (jobIds) => {
+      const snapshots = await backend.getJobs(jobIds);
+      const jobs = new Array<JobSnapshot>(snapshots.length);
+      for (let index = 0; index < snapshots.length; index += 1) {
+        jobs[index] = normalizeJobSnapshot(snapshots[index], mode);
+      }
+      return jobs;
+    },
+    forEachJob: async (jobIds, visitor) => {
+      const snapshots = await backend.getJobs(jobIds);
+      for (const snapshot of snapshots) {
+        visitor(normalizeJobSnapshot(snapshot, mode));
+      }
+    },
     cancelJob: async (jobId) =>
       normalizeJobSnapshot(await backend.cancelJob(jobId), mode),
     measureLineAnnotation: (studyId, annotation) =>
@@ -178,4 +210,4 @@ export function getRuntimeAdapter(): RuntimeAdapter {
   return activeRuntime;
 }
 
-export { FALLBACK_PROCESSING_MANIFEST, buildOutputName, ensureDicomExtension };
+export { buildOutputName, ensureDicomExtension };

@@ -172,61 +172,43 @@ func (app *DesktopApp) PickSaveDicomPath(defaultName string) (string, error) {
 func (app *DesktopApp) OpenStudy(
 	command backendapi.OpenStudyCommand,
 ) (backendapi.OpenStudyCommandResult, error) {
-	if app.backend != nil {
-		return app.backend.OpenStudy(command)
-	}
-
-	return invokeViaHTTP[backendapi.OpenStudyCommandResult](app, "open_study", command)
+	return dispatch(app, backendapi.Service.OpenStudy, "open_study", command)
 }
 
 func (app *DesktopApp) StartRenderJob(
 	command backendapi.RenderStudyCommand,
 ) (backendapi.StartedJob, error) {
-	if app.backend != nil {
-		return app.backend.StartRenderJob(command)
-	}
+	return dispatch(app, backendapi.Service.StartRenderJob, "start_render_job", command)
+}
 
-	return invokeViaHTTP[backendapi.StartedJob](app, "start_render_job", command)
+func (app *DesktopApp) StartAnalyzeJob(
+	command backendapi.AnalyzeStudyCommand,
+) (backendapi.StartedJob, error) {
+	return dispatch(app, backendapi.Service.StartAnalyzeJob, "start_analyze_job", command)
 }
 
 func (app *DesktopApp) StartProcessJob(
 	command backendapi.ProcessStudyCommand,
 ) (backendapi.StartedJob, error) {
-	if app.backend != nil {
-		return app.backend.StartProcessJob(command)
-	}
-
-	return invokeViaHTTP[backendapi.StartedJob](app, "start_process_job", command)
+	return dispatch(app, backendapi.Service.StartProcessJob, "start_process_job", command)
 }
 
 func (app *DesktopApp) GetJobSnapshot(
 	command backendapi.JobCommand,
 ) (backendapi.JobSnapshot, error) {
-	if app.backend != nil {
-		return app.backend.GetJob(command)
-	}
-
-	return invokeViaHTTP[backendapi.JobSnapshot](app, "get_job", command)
+	return dispatch(app, backendapi.Service.GetJob, "get_job", command)
 }
 
 func (app *DesktopApp) GetJobsSnapshot(
 	command backendapi.GetJobsCommand,
 ) ([]backendapi.JobSnapshot, error) {
-	if app.backend != nil {
-		return app.backend.GetJobs(command)
-	}
-
-	return invokeViaHTTP[[]backendapi.JobSnapshot](app, "get_jobs", command)
+	return dispatch(app, backendapi.Service.GetJobs, "get_jobs", command)
 }
 
 func (app *DesktopApp) CancelJobByID(
 	command backendapi.JobCommand,
 ) (backendapi.JobSnapshot, error) {
-	if app.backend != nil {
-		return app.backend.CancelJob(command)
-	}
-
-	return invokeViaHTTP[backendapi.JobSnapshot](app, "cancel_job", command)
+	return dispatch(app, backendapi.Service.CancelJob, "cancel_job", command)
 }
 
 func (app *DesktopApp) GetProcessingManifest() backendapi.ProcessingManifest {
@@ -245,15 +227,20 @@ func (app *DesktopApp) GetProcessingManifest() backendapi.ProcessingManifest {
 func (app *DesktopApp) MeasureLineAnnotation(
 	command backendapi.MeasureLineAnnotationCommand,
 ) (backendapi.MeasureLineAnnotationCommandResult, error) {
+	return dispatch(app, backendapi.Service.MeasureLineAnnotation, "measure_line_annotation", command)
+}
+
+func dispatch[Cmd any, Result any](
+	app *DesktopApp,
+	embedded func(backendapi.Service, Cmd) (Result, error),
+	httpCommand string,
+	command Cmd,
+) (Result, error) {
 	if app.backend != nil {
-		return app.backend.MeasureLineAnnotation(command)
+		return embedded(app.backend, command)
 	}
 
-	return invokeViaHTTP[backendapi.MeasureLineAnnotationCommandResult](
-		app,
-		"measure_line_annotation",
-		command,
-	)
+	return invokeViaHTTP[Result](app, httpCommand, command)
 }
 
 func (app *DesktopApp) ServeAsset(writer http.ResponseWriter, request *http.Request) {

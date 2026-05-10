@@ -55,20 +55,42 @@ func NewWindowTransform(window imaging.WindowLevel) *WindowTransform {
 }
 
 func ResolveWindow(source imaging.SourceImage, mode WindowMode) *WindowTransform {
+	transform, ok := resolveWindow(source, mode)
+	if !ok {
+		return nil
+	}
+	return &transform
+}
+
+func resolveWindow(source imaging.SourceImage, mode WindowMode) (WindowTransform, bool) {
 	switch mode.Kind {
 	case WindowModeDefault:
 		if source.DefaultWindow == nil {
-			return nil
+			return WindowTransform{}, false
 		}
 
-		return NewWindowTransform(*source.DefaultWindow)
+		return newWindowTransform(*source.DefaultWindow)
 	case WindowModeFullRange:
-		return nil
+		return WindowTransform{}, false
 	case WindowModeManual:
-		return NewWindowTransform(mode.ManualWindow)
+		return newWindowTransform(mode.ManualWindow)
 	default:
-		return nil
+		return WindowTransform{}, false
 	}
+}
+
+func newWindowTransform(window imaging.WindowLevel) (WindowTransform, bool) {
+	if window.Width <= 1.0 {
+		return WindowTransform{}, false
+	}
+
+	scale := 255.0 / (window.Width - 1.0)
+	return WindowTransform{
+		lower:  window.Center - 0.5 - (window.Width-1.0)/2.0,
+		upper:  window.Center - 0.5 + (window.Width-1.0)/2.0,
+		scale:  scale,
+		offset: 127.5 - (window.Center-0.5)*scale,
+	}, true
 }
 
 func (transform WindowTransform) Map(value float32) uint8 {

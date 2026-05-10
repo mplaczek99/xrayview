@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -78,6 +79,9 @@ func TestDecodeBuildsScaledMonochromeStudyFromNativePixelData(t *testing.T) {
 	if got, want := study.Image.MaxValue, float32(190); got != want {
 		t.Fatalf("Image.MaxValue = %v, want %v", got, want)
 	}
+	if study.Image.FitsUint16 {
+		t.Fatal("Image.FitsUint16 = true, want false for negative rescaled values")
+	}
 	if !study.Image.Invert {
 		t.Fatal("Image.Invert = false, want true for MONOCHROME1")
 	}
@@ -123,6 +127,255 @@ func TestDecodeBuildsScaledMonochromeStudyFromNativePixelData(t *testing.T) {
 	}
 	if got, want := study.MeasurementScale.Source, "PixelSpacing"; got != want {
 		t.Fatalf("MeasurementScale.Source = %q, want %q", got, want)
+	}
+}
+
+func TestDecodeNativePixelDataRecordsUint16FitFlag(t *testing.T) {
+	tests := []struct {
+		name         string
+		metadata     Metadata
+		raw          []byte
+		slope        float32
+		intercept    float32
+		wantFitsU16  bool
+		wantStorage  imaging.SourceStorage
+		wantMinValue float32
+		wantMaxValue float32
+		wantUint16   []uint16
+	}{
+		{
+			name: "unscaled unsigned 8 bit",
+			metadata: Metadata{
+				Rows:                      1,
+				Columns:                   2,
+				SamplesPerPixel:           1,
+				BitsAllocated:             8,
+				BitsStored:                8,
+				PixelRepresentation:       0,
+				PhotometricInterpretation: "MONOCHROME2",
+			},
+			raw:          []byte{0, 255},
+			slope:        1,
+			wantFitsU16:  true,
+			wantStorage:  imaging.SourceStorageUint16,
+			wantMinValue: 0,
+			wantMaxValue: 255,
+			wantUint16:   []uint16{0, 255},
+		},
+		{
+			name: "integer rescale within uint16",
+			metadata: Metadata{
+				Rows:                      1,
+				Columns:                   2,
+				SamplesPerPixel:           1,
+				BitsAllocated:             16,
+				BitsStored:                12,
+				PixelRepresentation:       0,
+				PhotometricInterpretation: "MONOCHROME2",
+			},
+			raw:          []byte{0x01, 0x00, 0xff, 0x0f},
+			slope:        2,
+			intercept:    5,
+			wantFitsU16:  true,
+			wantStorage:  imaging.SourceStorageUint16,
+			wantMinValue: 7,
+			wantMaxValue: 8195,
+			wantUint16:   []uint16{7, 8195},
+		},
+		{
+			name: "rescaled negative",
+			metadata: Metadata{
+				Rows:                      1,
+				Columns:                   2,
+				SamplesPerPixel:           1,
+				BitsAllocated:             8,
+				BitsStored:                8,
+				PixelRepresentation:       0,
+				PhotometricInterpretation: "MONOCHROME2",
+			},
+			raw:          []byte{0, 255},
+			slope:        1,
+			intercept:    -1,
+			wantFitsU16:  false,
+			wantStorage:  imaging.SourceStorageFloat32,
+			wantMinValue: -1,
+			wantMaxValue: 254,
+		},
+		{
+			name: "fractional rescale",
+			metadata: Metadata{
+				Rows:                      1,
+				Columns:                   2,
+				SamplesPerPixel:           1,
+				BitsAllocated:             8,
+				BitsStored:                8,
+				PixelRepresentation:       0,
+				PhotometricInterpretation: "MONOCHROME2",
+			},
+			raw:          []byte{1, 3},
+			slope:        0.5,
+			wantFitsU16:  false,
+			wantStorage:  imaging.SourceStorageFloat32,
+			wantMinValue: 0.5,
+			wantMaxValue: 1.5,
+		},
+		{
+			name: "rescaled above uint16",
+			metadata: Metadata{
+				Rows:                      1,
+				Columns:                   2,
+				SamplesPerPixel:           1,
+				BitsAllocated:             16,
+				BitsStored:                16,
+				PixelRepresentation:       0,
+				PhotometricInterpretation: "MONOCHROME2",
+			},
+			raw:          []byte{0xff, 0xff, 0x00, 0x00},
+			slope:        2,
+			wantFitsU16:  false,
+			wantStorage:  imaging.SourceStorageFloat32,
+			wantMinValue: 0,
+			wantMaxValue: 131070,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			state := sourceStudyState{
+				metadata:         test.metadata,
+				rescaleSlope:     test.slope,
+				rescaleIntercept: test.intercept,
+			}
+			image, err := state.decodeNativePixelData(test.raw, binary.LittleEndian)
+			if err != nil {
+				t.Fatalf("decodeNativePixelData returned error: %v", err)
+			}
+
+			if got := image.FitsUint16; got != test.wantFitsU16 {
+				t.Fatalf("FitsUint16 = %v, want %v", got, test.wantFitsU16)
+			}
+			if got := image.Storage; got != test.wantStorage {
+				t.Fatalf("Storage = %q, want %q", got, test.wantStorage)
+			}
+			if got := image.MinValue; got != test.wantMinValue {
+				t.Fatalf("MinValue = %v, want %v", got, test.wantMinValue)
+			}
+			if got := image.MaxValue; got != test.wantMaxValue {
+				t.Fatalf("MaxValue = %v, want %v", got, test.wantMaxValue)
+			}
+			if test.wantUint16 != nil {
+				if got := image.Uint16Pixels; !slices.Equal(got, test.wantUint16) {
+					t.Fatalf("Uint16Pixels = %v, want %v", got, test.wantUint16)
+				}
+			}
+		})
+	}
+}
+
+func TestDecodeU16MonochromeSpecializedPaths(t *testing.T) {
+	tests := []struct {
+		name    string
+		samples []uint16
+		cfg     sourceDecodeConfig
+		want    []float32
+		wantMin float32
+		wantMax float32
+	}{
+		{
+			name:    "unsigned full range",
+			samples: []uint16{0, 65535},
+			cfg: sourceDecodeConfig{
+				bitsStored:          16,
+				pixelRepresentation: 0,
+				slope:               1,
+			},
+			want:    []float32{0, 65535},
+			wantMin: 0,
+			wantMax: 65535,
+		},
+		{
+			name:    "unsigned full range rescaled",
+			samples: []uint16{0, 10},
+			cfg: sourceDecodeConfig{
+				bitsStored:          16,
+				pixelRepresentation: 0,
+				slope:               2,
+				intercept:           -1,
+			},
+			want:    []float32{-1, 19},
+			wantMin: -1,
+			wantMax: 19,
+		},
+		{
+			name:    "unsigned masked",
+			samples: []uint16{0x1001, 0x0fff},
+			cfg: sourceDecodeConfig{
+				bitsStored:          12,
+				pixelRepresentation: 0,
+				slope:               1,
+			},
+			want:    []float32{1, 4095},
+			wantMin: 1,
+			wantMax: 4095,
+		},
+		{
+			name:    "unsigned masked rescaled",
+			samples: []uint16{0x1001, 0x0fff},
+			cfg: sourceDecodeConfig{
+				bitsStored:          12,
+				pixelRepresentation: 0,
+				slope:               2,
+				intercept:           -1,
+			},
+			want:    []float32{1, 8189},
+			wantMin: 1,
+			wantMax: 8189,
+		},
+		{
+			name:    "signed",
+			samples: []uint16{0x07ff, 0x0800, 0x0fff},
+			cfg: sourceDecodeConfig{
+				bitsStored:          12,
+				pixelRepresentation: 1,
+				slope:               1,
+			},
+			want:    []float32{2047, -2048, -1},
+			wantMin: -2048,
+			wantMax: 2047,
+		},
+		{
+			name:    "signed rescaled",
+			samples: []uint16{0x07ff, 0x0800, 0x0fff},
+			cfg: sourceDecodeConfig{
+				bitsStored:          12,
+				pixelRepresentation: 1,
+				slope:               2,
+				intercept:           1,
+			},
+			want:    []float32{4095, -4095, -1},
+			wantMin: -4095,
+			wantMax: 4095,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			pixels, minVal, maxVal := decodeU16Monochrome(test.samples, test.cfg)
+			if len(pixels) != len(test.want) {
+				t.Fatalf("len(pixels) = %d, want %d", len(pixels), len(test.want))
+			}
+			for i, want := range test.want {
+				if got := pixels[i]; got != want {
+					t.Fatalf("pixels[%d] = %v, want %v", i, got, want)
+				}
+			}
+			if minVal != test.wantMin {
+				t.Fatalf("minVal = %v, want %v", minVal, test.wantMin)
+			}
+			if maxVal != test.wantMax {
+				t.Fatalf("maxVal = %v, want %v", maxVal, test.wantMax)
+			}
+		})
 	}
 }
 
@@ -450,8 +703,8 @@ func TestDecodeCompressedImageBuildsSourceImageFromJPEGPayload(t *testing.T) {
 	if got, want := sourceImage.Format, imaging.FormatGrayFloat32; got != want {
 		t.Fatalf("Format = %q, want %q", got, want)
 	}
-	if got, want := len(sourceImage.Pixels), 2; got != want {
-		t.Fatalf("len(Pixels) = %d, want %d", got, want)
+	if got, want := sourceImage.PixelCount(), 2; got != want {
+		t.Fatalf("PixelCount() = %d, want %d", got, want)
 	}
 	if sourceImage.DefaultWindow == nil {
 		t.Fatal("DefaultWindow = nil, want resolved window metadata")
@@ -464,6 +717,9 @@ func TestDecodeCompressedImageBuildsSourceImageFromJPEGPayload(t *testing.T) {
 	}
 	if !sourceImage.Invert {
 		t.Fatal("Invert = false, want true for MONOCHROME1")
+	}
+	if !sourceImage.FitsUint16 {
+		t.Fatal("FitsUint16 = false, want true for decoded grayscale JPEG")
 	}
 	if sourceImage.MinValue >= sourceImage.MaxValue {
 		t.Fatalf("MinValue = %v, MaxValue = %v, want increasing intensity range", sourceImage.MinValue, sourceImage.MaxValue)
@@ -812,8 +1068,8 @@ func TestDecodeWithContextCancelledDuringParse(t *testing.T) {
 	// Cancel after 6 reads to fire during metadata parsing, before pixel data.
 	ctx, cancel := context.WithCancel(context.Background())
 	reader := &cancelAfterNReadsReader{
-		inner: bytes.NewReader(dicomData),
-		limit: 6,
+		inner:  bytes.NewReader(dicomData),
+		limit:  6,
 		cancel: cancel,
 	}
 

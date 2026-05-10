@@ -11,7 +11,7 @@ import type {
   ProcessingControls,
 } from "../../lib/generated/contracts";
 import type { ProcessingRequest } from "../../lib/types";
-import type { JobSnapshot, ProcessingRunState } from "../../features/jobs/model";
+import type { JobSnapshot } from "../../features/jobs/model";
 import { recordJobSubmit } from "../../features/jobs/benchmarks";
 import { advanceJobProgressTiming } from "../../features/jobs/progressTiming";
 import {
@@ -25,6 +25,7 @@ import {
   type WorkbenchState,
   type WorkbenchStudy,
 } from "../../features/study/model";
+import { applyJobToStudy } from "./applyJob";
 
 const runtime = getRuntimeAdapter();
 
@@ -36,6 +37,7 @@ const INITIAL_STATE: WorkbenchState = {
   studyOrder: [],
   jobs: {},
   jobOrder: [],
+  pendingJobIds: new Set<string>(),
   isOpeningStudy: false,
   workbenchStatus: "Open a DICOM study or BMP/TIFF image to begin.",
 };
@@ -44,6 +46,42 @@ type Listener = () => void;
 
 function nextJobOrder(currentOrder: readonly string[], jobId: string): string[] {
   return [jobId, ...currentOrder.filter((entry) => entry !== jobId)];
+}
+
+function activeJob(jobId: string | null, jobs: WorkbenchState["jobs"]): JobSnapshot | null {
+  if (!jobId) {
+    return null;
+  }
+
+  return jobs[jobId] ?? null;
+}
+
+function isPendingJob(job: JobSnapshot | null): boolean {
+  return job !== null && (
+    job.state === "queued" ||
+    job.state === "running" ||
+    job.state === "cancelling"
+  );
+}
+
+function nextPendingJobIds(
+  currentIds: ReadonlySet<string>,
+  previous: JobSnapshot | undefined,
+  next: JobSnapshot,
+): ReadonlySet<string> {
+  const wasPending = isPendingJob(previous ?? null);
+  const isPending = isPendingJob(next);
+  if (wasPending === isPending) {
+    return currentIds;
+  }
+
+  const ids = new Set(currentIds);
+  if (isPending) {
+    ids.add(next.jobId);
+  } else {
+    ids.delete(next.jobId);
+  }
+  return ids;
 }
 
 // Returns true if the incoming backend snapshot has no meaningful change vs what
@@ -94,139 +132,6 @@ function createPendingJobSnapshot(
     ...snapshot,
     timing: advanceJobProgressTiming(null, snapshot),
   };
-}
-
-function applyRenderJob(study: WorkbenchStudy, job: JobSnapshot): WorkbenchStudy {
-  switch (job.state) {
-    case "queued":
-    case "running":
-    case "cancelling":
-      return {
-        ...study,
-        renderJobId: job.jobId,
-        status: job.progress.message,
-      };
-    case "completed":
-      if (job.result?.kind !== "renderStudy") {
-        return study;
-      }
-
-      return {
-        ...study,
-        renderJobId: job.jobId,
-        originalPreview: job.result.payload,
-        measurementScale: job.result.payload.measurementScale ?? study.measurementScale,
-        status: job.fromCache
-          ? "Preview ready from cache."
-          : "Study loaded. Drag to pan, scroll to zoom, or draw a line measurement.",
-      };
-    case "failed":
-      return {
-        ...study,
-        renderJobId: job.jobId,
-        status: formatBackendError(job.error, "Preview loading failed."),
-      };
-    case "cancelled":
-      return {
-        ...study,
-        renderJobId: job.jobId,
-        status: "Preview rendering cancelled.",
-      };
-  }
-}
-
-function applyProcessJob(study: WorkbenchStudy, job: JobSnapshot): WorkbenchStudy {
-  switch (job.state) {
-    case "queued":
-    case "running":
-      return {
-        ...study,
-        status: job.progress.message,
-        processing: {
-          ...study.processing,
-          runStatus: {
-            state: "running",
-            jobId: job.jobId,
-            progress: job.progress,
-            timing: job.timing,
-          },
-        },
-      };
-    case "cancelling":
-      return {
-        ...study,
-        status: job.progress.message,
-        processing: {
-          ...study.processing,
-          runStatus: {
-            state: "cancelling",
-            jobId: job.jobId,
-            progress: job.progress,
-            timing: job.timing,
-          },
-        },
-      };
-    case "completed":
-      if (job.result?.kind !== "processStudy") {
-        return study;
-      }
-
-      return {
-        ...study,
-        measurementScale: job.result.payload.measurementScale ?? study.measurementScale,
-        status: job.fromCache ? "Processing loaded from cache." : "Processing complete.",
-        processing: {
-          ...study.processing,
-          output: job.result.payload,
-          runStatus: {
-            state: "success",
-            jobId: job.jobId,
-            outputPath: job.result.payload.dicomPath,
-            fromCache: job.fromCache,
-          },
-        },
-      };
-    case "failed":
-      return {
-        ...study,
-        status: formatBackendError(job.error, "Processing failed."),
-        processing: {
-          ...study.processing,
-          runStatus: {
-            state: "error",
-            jobId: job.jobId,
-            error:
-              job.error ?? {
-                code: "internal",
-                message: "Processing failed.",
-                details: [],
-                recoverable: false,
-              },
-          },
-        },
-      };
-    case "cancelled":
-      return {
-        ...study,
-        status: "Processing cancelled.",
-        processing: {
-          ...study.processing,
-          runStatus: {
-            state: "cancelled",
-            jobId: job.jobId,
-          },
-        },
-      };
-  }
-}
-
-function applyJobToStudy(study: WorkbenchStudy, job: JobSnapshot): WorkbenchStudy {
-  switch (job.jobKind) {
-    case "renderStudy":
-      return applyRenderJob(study, job);
-    case "processStudy":
-      return applyProcessJob(study, job);
-  }
 }
 
 class WorkbenchStore {
@@ -334,6 +239,36 @@ class WorkbenchStore {
         ...current,
         isOpeningStudy: false,
         workbenchStatus: formatBackendError(error, "Opening the study failed."),
+      }));
+    }
+  }
+
+  async runActiveStudyAnalysis() {
+    const study = this.activeStudy();
+    if (!study) {
+      return;
+    }
+
+    if (isPendingJob(activeJob(study.analysisJobId, this.state.jobs))) {
+      return;
+    }
+
+    try {
+      const started = await runtime.startAnalyzeStudyJob(study.studyId);
+      recordJobSubmit(started.jobId);
+      this.receiveJobUpdate(
+        createPendingJobSnapshot(
+          started.jobId,
+          "analyzeStudy",
+          study.studyId,
+          "Queued tooth and bone level analysis...",
+        ),
+      );
+      await this.syncJob(started.jobId);
+    } catch (error) {
+      this.setStudyState(study.studyId, (current) => ({
+        ...current,
+        status: formatBackendError(error, "Tooth and bone level analysis failed."),
       }));
     }
   }
@@ -566,6 +501,11 @@ class WorkbenchStore {
         ...current.jobs,
         [job.jobId]: nextJob,
       };
+      const pendingJobIds = nextPendingJobIds(
+        current.pendingJobIds,
+        previous,
+        nextJob,
+      );
       const studies = { ...current.studies };
       if (nextJob.studyId && studies[nextJob.studyId]) {
         studies[nextJob.studyId] = applyJobToStudy(studies[nextJob.studyId], nextJob);
@@ -578,6 +518,7 @@ class WorkbenchStore {
         jobs,
         studies,
         jobOrder: nextJobOrder(current.jobOrder, nextJob.jobId),
+        pendingJobIds,
         workbenchStatus: activeStudy?.status ?? current.workbenchStatus,
       };
     });
@@ -683,77 +624,3 @@ export function useWorkbenchStore<T>(selector: (state: WorkbenchState) => T): T 
     () => selector(workbenchActions.getState()),
   );
 }
-
-// createSelector: memoize a derived value on a single input slice.
-// Re-runs resultFn only when inputSelector returns a new reference (Object.is).
-function createSelector<T, R>(
-  inputSelector: (s: WorkbenchState) => T,
-  resultFn: (input: T) => R,
-): (s: WorkbenchState) => R {
-  let lastInput: T;
-  let lastResult: R;
-  let initialized = false;
-  return (s: WorkbenchState): R => {
-    const input = inputSelector(s);
-    if (initialized && Object.is(lastInput, input)) {
-      return lastResult;
-    }
-    lastInput = input;
-    lastResult = resultFn(input);
-    initialized = true;
-    return lastResult;
-  };
-}
-
-// createSelector2: memoize a derived value on two independent input slices.
-function createSelector2<A, B, R>(
-  selA: (s: WorkbenchState) => A,
-  selB: (s: WorkbenchState) => B,
-  resultFn: (a: A, b: B) => R,
-): (s: WorkbenchState) => R {
-  let lastA: A;
-  let lastB: B;
-  let lastResult: R;
-  let initialized = false;
-  return (s: WorkbenchState): R => {
-    const a = selA(s);
-    const b = selB(s);
-    if (initialized && Object.is(lastA, a) && Object.is(lastB, b)) {
-      return lastResult;
-    }
-    lastA = a;
-    lastB = b;
-    lastResult = resultFn(a, b);
-    initialized = true;
-    return lastResult;
-  };
-}
-
-export const selectJobs = (s: WorkbenchState) => s.jobs;
-export const selectJobOrder = (s: WorkbenchState) => s.jobOrder;
-export const selectStudies = (s: WorkbenchState) => s.studies;
-export const selectIsOpeningStudy = (s: WorkbenchState) => s.isOpeningStudy;
-export const selectWorkbenchStatus = (s: WorkbenchState) => s.workbenchStatus;
-export const selectManifest = (s: WorkbenchState) => s.manifest;
-
-// Memoized on s.jobs: skips Object.values().filter() when jobs map is unchanged.
-export const selectPendingJobCount = createSelector(
-  (s) => s.jobs,
-  (jobs) =>
-    Object.values(jobs).filter(
-      (job) =>
-        job.state === "queued" ||
-        job.state === "running" ||
-        job.state === "cancelling",
-    ).length,
-);
-
-// Memoized on activeStudyId + studies: returns cached reference when neither changes.
-export const selectActiveStudy = createSelector2(
-  (s) => s.activeStudyId,
-  (s) => s.studies,
-  (activeStudyId, studies) =>
-    activeStudyId ? studies[activeStudyId] ?? null : null,
-);
-
-export type { ProcessingRunState };

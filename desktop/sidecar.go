@@ -44,7 +44,7 @@ const (
 	sidecarBinaryNameBase      = "xrayview-backend"
 	sidecarStartupBenchmarkEnv = "XRAYVIEW_BENCH_LOG_SIDECAR_STARTUP"
 	sidecarIdleConnTimeout     = 30 * time.Second
-	sidecarMaxIdleConns        = 2
+	sidecarMaxIdleConns        = 32
 )
 
 var errSidecarUnavailable = errors.New("backend is not reachable")

@@ -22,6 +22,7 @@ export interface BackendAPI {
   loadProcessingManifest(): Promise<ProcessingManifest>;
   openStudy(inputPath: string): Promise<OpenStudyCommandResult>;
   startRenderStudyJob(studyId: string): Promise<StartedJob>;
+  startAnalyzeStudyJob(studyId: string): Promise<StartedJob>;
   startProcessStudyJob(
     studyId: string,
     request: ProcessingRequest,
@@ -44,12 +45,17 @@ export interface RuntimeAdapter {
   pickSaveDicomPath(defaultName: string): Promise<string | null>;
   openStudy(inputPath: string): Promise<OpenedStudy>;
   startRenderStudyJob(studyId: string): Promise<StartedJob>;
+  startAnalyzeStudyJob(studyId: string): Promise<StartedJob>;
   startProcessStudyJob(
     studyId: string,
     request: ProcessingRequest,
   ): Promise<StartedJob>;
   getJob(jobId: string): Promise<JobSnapshot>;
   getJobs(jobIds: string[]): Promise<JobSnapshot[]>;
+  forEachJob(
+    jobIds: string[],
+    visitor: (job: JobSnapshot) => void,
+  ): Promise<void>;
   cancelJob(jobId: string): Promise<JobSnapshot>;
   measureLineAnnotation(
     studyId: string,

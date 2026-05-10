@@ -3,17 +3,22 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	backendapi "xrayview/backend"
 )
 
 const serveAssetBenchmarkPayloadSize = 512 * 1024
+const sidecarTransportBurstSize = 16
 
 func BenchmarkServeAssetFromDisk(b *testing.B) {
 	previewPath := filepath.Join(b.TempDir(), "preview.png")
@@ -168,4 +173,80 @@ func BenchmarkInvokeViaHTTP(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		_, _ = app.GetJobSnapshot(command)
 	}
+}
+
+// BenchmarkSidecarTransportBurstReuse measures bursty sidecar traffic where
+// more concurrent requests finish idle than the transport pool can retain.
+func BenchmarkSidecarTransportBurstReuse(b *testing.B) {
+	var newConnCount atomic.Int64
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
+	}))
+	server.Config.ConnState = func(_ net.Conn, state http.ConnState) {
+		if state == http.StateNew {
+			newConnCount.Add(1)
+		}
+	}
+	server.Start()
+	defer server.Close()
+
+	transport := newSidecarTransport()
+	defer transport.CloseIdleConnections()
+	client := &http.Client{
+		Timeout:   sidecarRequestTimeout,
+		Transport: transport,
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		var firstErr error
+		var errOnce sync.Once
+		var wg sync.WaitGroup
+		wg.Add(sidecarTransportBurstSize)
+		for requestIndex := 0; requestIndex < sidecarTransportBurstSize; requestIndex++ {
+			go func() {
+				defer wg.Done()
+
+				response, err := client.Get(server.URL)
+				if err != nil {
+					errOnce.Do(func() {
+						firstErr = err
+					})
+					return
+				}
+				defer response.Body.Close()
+				if _, err := io.Copy(io.Discard, response.Body); err != nil {
+					errOnce.Do(func() {
+						firstErr = err
+					})
+					return
+				}
+				if response.StatusCode != http.StatusOK {
+					errOnce.Do(func() {
+						firstErr = errUnexpectedBenchmarkStatus(response.StatusCode)
+					})
+				}
+			}()
+		}
+		wg.Wait()
+		if firstErr != nil {
+			b.Fatal(firstErr)
+		}
+	}
+
+	b.ReportMetric(float64(newConnCount.Load())/float64(b.N), "new_conns/op")
+}
+
+func errUnexpectedBenchmarkStatus(statusCode int) error {
+	return &unexpectedBenchmarkStatusError{statusCode: statusCode}
+}
+
+type unexpectedBenchmarkStatusError struct {
+	statusCode int
+}
+
+func (err *unexpectedBenchmarkStatusError) Error() string {
+	return "unexpected benchmark status: " + strconv.Itoa(err.statusCode)
 }

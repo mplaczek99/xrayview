@@ -3,37 +3,25 @@ import type {
   JobSnapshot as ContractJobSnapshot,
   JobState,
   LineAnnotation,
-  MeasureLineAnnotationCommandResult,
   OpenStudyCommandResult,
-  PaletteName,
   ProcessingManifest,
   StartedJob,
 } from "./generated/contracts";
 import { normalizeBackendError } from "./backendErrors";
-import { buildProcessStudyCommand } from "./commandBuilders";
-import { MOCK_PROCESSED_DICOM_PATH } from "./mockRuntime";
+import { uniqueJobIds } from "./jobIds";
 import { MOCK_PROCESSING_MANIFEST } from "./mockProcessingManifest";
+import { MOCK_PROCESSED_DICOM_PATH } from "./mockRuntime";
 import {
   createMockPreview,
   measureMockLineAnnotation,
 } from "./mockStudy";
 import type { BackendAPI } from "./runtimeTypes";
-import type { ProcessingRequest } from "./types";
-import { getWailsBindings } from "./wails";
-
-const PALETTE_LABELS: Record<PaletteName, string> = {
-  none: "Neutral",
-  hot: "Hot",
-  bone: "Bone",
-};
 
 const mockJobs = new Map<string, ContractJobSnapshot>();
 const mockJobControllers = new Map<string, { cancelled: boolean }>();
 
 let mockStudySequence = 0;
 let mockJobSequence = 0;
-
-export const FALLBACK_PROCESSING_MANIFEST = MOCK_PROCESSING_MANIFEST;
 
 function fileNameFromPath(inputPath: string): string {
   return inputPath.split(/[\\/]/).pop() ?? inputPath;
@@ -153,16 +141,6 @@ function startMockJob(
   return { jobId };
 }
 
-async function invokeTypedDesktopBinding<T>(
-  invoke: () => Promise<T>,
-): Promise<T> {
-  try {
-    return await invoke();
-  } catch (error) {
-    throw normalizeBackendError(error);
-  }
-}
-
 export function createMockBackendAPI(): BackendAPI {
   return {
     mode: "mock",
@@ -183,6 +161,18 @@ export function createMockBackendAPI(): BackendAPI {
           previewPath: createMockPreview(false, "none"),
           loadedWidth: 1200,
           loadedHeight: 820,
+          measurementScale: null,
+        },
+      })),
+    startAnalyzeStudyJob: async (studyId) =>
+      startMockJob("analyzeStudy", studyId, () => ({
+        kind: "analyzeStudy",
+        payload: {
+          studyId,
+          previewPath: createMockPreview(true, "none"),
+          loadedWidth: 1200,
+          loadedHeight: 820,
+          mode: "dynamic tooth and bone level overlay",
           measurementScale: null,
         },
       })),
@@ -213,7 +203,7 @@ export function createMockBackendAPI(): BackendAPI {
       return snapshot;
     },
     getJobs: async (jobIds): Promise<ContractJobSnapshot[]> => {
-      const unique = [...new Set(jobIds)];
+      const unique = uniqueJobIds(jobIds);
       return unique.flatMap((jobId) => {
         const snapshot = mockJobs.get(jobId);
         return snapshot ? [snapshot] : [];
@@ -275,51 +265,4 @@ export function createMockBackendAPI(): BackendAPI {
     measureLineAnnotation: async (_studyId, annotation): Promise<LineAnnotation> =>
       measureMockLineAnnotation(annotation),
   };
-}
-
-export function createDesktopBackendAPI(): BackendAPI {
-  const bindings = getWailsBindings();
-
-  return {
-    mode: "desktop",
-    loadProcessingManifest: () =>
-      invokeTypedDesktopBinding(() => bindings.GetProcessingManifest()),
-    openStudy: async (inputPath): Promise<OpenStudyCommandResult> =>
-      invokeTypedDesktopBinding(() => bindings.OpenStudy({ inputPath })),
-    startRenderStudyJob: async (studyId) =>
-      invokeTypedDesktopBinding(() => bindings.StartRenderJob({ studyId })),
-    startProcessStudyJob: async (studyId, request) =>
-      invokeTypedDesktopBinding(() =>
-        bindings.StartProcessJob(buildProcessStudyCommand(studyId, request)),
-      ),
-    getJob: async (jobId) =>
-      invokeTypedDesktopBinding(() => bindings.GetJobSnapshot({ jobId })),
-    getJobs: async (jobIds) =>
-      invokeTypedDesktopBinding(() => bindings.GetJobsSnapshot({ jobIds: [...new Set(jobIds)] })),
-    cancelJob: async (jobId) =>
-      invokeTypedDesktopBinding(() => bindings.CancelJobByID({ jobId })),
-    measureLineAnnotation: async (studyId, annotation): Promise<LineAnnotation> => {
-      const payload = await invokeTypedDesktopBinding(() =>
-        bindings.MeasureLineAnnotation({
-          studyId,
-          annotation,
-        }),
-      );
-      return payload.annotation;
-    },
-  };
-}
-
-export function ensureDicomExtension(path: string): string {
-  return /\.(dcm|dicom)$/i.test(path) ? path : `${path}.dcm`;
-}
-
-export function buildOutputName(inputPath: string): string {
-  const fileName = fileNameFromPath(inputPath) || "study.dcm";
-  const baseName = fileName.replace(/\.(dcm|dicom)$/i, "");
-  return `${baseName}_processed.dcm`;
-}
-
-export function paletteLabel(palette: PaletteName): string {
-  return PALETTE_LABELS[palette];
 }

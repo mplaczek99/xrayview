@@ -39,12 +39,14 @@ export interface WorkbenchStudy {
   inputName: string;
   measurementScale: MeasurementScale | null;
   originalPreview: PreviewResult | null;
+  analysisPreview: PreviewResult | null;
   annotations: AnnotationBundle;
   viewer: ViewerSession;
   processing: ProcessingSession;
   runtime: RuntimeMode;
   status: string;
   renderJobId: string | null;
+  analysisJobId: string | null;
 }
 
 export interface WorkbenchState {
@@ -55,6 +57,7 @@ export interface WorkbenchState {
   studyOrder: string[];
   jobs: Record<string, JobSnapshot>;
   jobOrder: string[];
+  pendingJobIds: ReadonlySet<string>;
   isOpeningStudy: boolean;
   workbenchStatus: string;
 }
@@ -97,6 +100,7 @@ export function createWorkbenchStudy(
     inputName: study.inputName,
     measurementScale: study.measurementScale,
     originalPreview: null,
+    analysisPreview: null,
     annotations: emptyAnnotationBundle(),
     viewer: {
       tool: "pan",
@@ -110,5 +114,6 @@ export function createWorkbenchStudy(
     runtime: study.runtime,
     status: "Study opened. Rendering source preview...",
     renderJobId: null,
+    analysisJobId: null,
   };
 }

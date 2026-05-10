@@ -5,6 +5,85 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-05-10
+
+### Added
+
+- Tooth and bone level analysis pipeline, reintroduced with a new learned-model approach (the v0.3.1 release removed the legacy heuristic version):
+  - `start_analyze_job` command, `AnalyzeStudyCommand` / `AnalyzeStudyCommandResult` (with a `mode` string describing the run), `JobKindAnalyzeStudy`, and the `analyzeStudy` `JobResultPayload` variant in the shared contract
+  - `backend/internal/analysis/teeth.go` and `teeth_test.go` covering tooth detection, contour smoothing, speck filtering, and bone-level outline extraction
+  - Embedded learned-model assets under `backend/internal/analysis/`: `bone_exemplar_model.bin.gz`, `bone_feature_table_model.bin.gz`, `feature_table_model.bin.gz`, and `learned_model.bin`, each loaded by a sibling `*.go` file with magic-string and gzip framing
+  - Asset-generation tools `backend/internal/analysis/tools/bonetable/main.go` and `backend/internal/analysis/tools/learnedmodel/main.go`
+  - Row-parallel work helpers in `backend/internal/analysis/parallel.go` used across scoring, mask generation, and stroke coverage
+  - Frontend wiring: `WorkbenchStudy.analysisPreview` / `analysisJobId`, `AnalysisResult` type, `applyAnalyzeJob` in `frontend/src/app/store/applyJob.ts`, and a working "Analyze" button in `ViewTab` that dispatches `runActiveStudyAnalysis` and overlays the analysis preview when ready
+- Configurable backend job worker pool via `XRAYVIEW_BACKEND_WORKERS` (default `min(4, runtime.NumCPU()-1)`, floor 1); documented in `backend/README.md`
+- New `BackendService` interface in `backend/internal/contracts/service.go` consumed by transport adapters, replacing the per-command nil-check fan-out in `desktop/app.go` with a single generic `dispatch` helper
+- uint16 source image storage path: `imaging.SourceStorage` enum (`float32` / `uint16`), `SourceImage.Uint16Pixels`, `FitsUint16`, `PixelCount()`, and `StorageKind()`. The DICOM decoder records uint16 fit during decode and emits uint16 storage when the modality range allows, halving in-memory pixel buffer size; the render pipeline has a dedicated uint16 path
+- SSE dropped-frame observability on the broadcaster, plus an SSE bench test
+- Cached preview-root resolution on the `/preview` endpoint (avoids `filepath.EvalSymlinks` on every request)
+- Cached render LUTs across job runs
+- `runtime.forEachJob` streaming callback so the frontend job poller can apply snapshots without an intermediate array
+- Pending job IDs tracked as a dedicated `ReadonlySet<string>` on `WorkbenchState` for O(1) reads (previously derived by filtering all jobs each tick)
+- Annotation drag override (`draftLineOverride`) so live drags render smoothly without committing intermediate state through the store
+- Frontend module split for testability and rerender hygiene:
+  - `frontend/src/app/store/applyJob.ts` and `selectors.ts` extracted from `workbenchStore.ts`
+  - `frontend/src/lib/backendUtils.ts`, `desktopBackend.ts`, `jobIds.ts`, and `mockBackend.ts` (formerly `backend.ts`) split from the monolithic backend module
+  - `frontend/src/features/jobs/progressEstimator.ts`, `progressFormatting.ts`, and `useProgressClock.ts` carved out of `progressTiming.ts`
+  - `frontend/src/features/viewer/usePointerInteractions.ts`, `useViewportFrame.ts`, and `useWheelZoom.ts` carved out of `ViewerCanvas.tsx`
+- Validation scripts under `frontend/scripts/`:
+  - `validate-annotation-edit-drag.mjs`
+  - `validate-fast-poll-cadence.mjs`
+  - `validate-pending-job-count-selector.mjs`
+  - `validate-pointer-interactions.mjs`
+  - `validate-processing-tab-rerenders.mjs`
+  - `validate-runtime-get-jobs-normalization.mjs`
+  - `validate-singleton-job-id-dedupe.mjs`
+- Backend benchmark tests: `backend/internal/httpapi/sse_bench_test.go`, `backend/internal/persistence/catalog_bench_test.go`
+
+### Changed
+
+- Worker pool size is now resolved at startup from `runtime.NumCPU()` and the `XRAYVIEW_BACKEND_WORKERS` override instead of the previous hard-coded 3
+- Backend job service lifecycle collapsed into a generic `startJob` / `jobSpec` helper that shares the validate → fingerprint → cache → reserve → launch flow across render, analyze, and process jobs
+- Memory cache `StoreSourcePreview` now defensively copies the caller's preview pixels so callers can return pooled buffers immediately after the call (previously it took ownership)
+- `useJobs` polling cadence reworked: an `ACTIVE_POLL_MS` (500 ms) base for live jobs with a `RECENT_TRANSITION_POLL_MS` (200 ms) burst after a state change, plus event-driven suppression when SSE updates are fresh
+- `ViewTab` now prefers `analysisPreview` over `originalPreview` when an analysis result exists, and the Analyze button shows an "Analyzing..." label while the job is in flight
+- Annotation selection is preserved across pan gestures
+- `GrayscaleControls` and the `ProcessingTab` study selection path memoized to cut needless rerenders
+- `JobCenter` now titles `analyzeStudy` jobs as "Analyze Teeth And Bone"
+- Sidecar HTTP client `MaxIdleConns` / `MaxIdleConnsPerHost` increased
+- Catalog record persistence streamlined (fewer marshal allocations on each write)
+- Study registry eviction comments and behavior clarified
+- Pooled HTTP request body buffers now bounded so a single oversized request can't poison the pool
+- Streaming snapshots used in job polling instead of full slice copies
+- Fast path added for singleton job batches (`getJobs` with one ID)
+- Map-based feature table lookups replace the linear scan
+
+### Performance
+
+This release contains a large body of optimization work:
+
+- **DICOM decode**: uint16 storage halves source-buffer memory; uint16 fit recorded once during decode; decode cache footprint reduced
+- **Render**: cached LUTs across runs, preview buffer reuse via `bufpool`, dedicated uint16 render path
+- **Analysis**: row-parallel scoring, mask reuse, reduced component allocations, optimized binary morphology, optimized stroke coverage and contour smoothing
+- **Processing**: parallelized comparison rendering with a precomputed gray LUT, faster grayscale blur borders, faster palette application
+- **HTTP / SSE**: improved broadcast frame handling, dropped-frame metric exposed, pooled request body buffer cap, larger sidecar idle connection pool
+- **Jobs**: streaming snapshot reads, singleton-batch fast path, faster registry job reads, configurable worker pool
+- **Frontend**: `ProcessingTab` rerender reduction via memoized selectors and stable callbacks; pending job IDs tracked as a set; SSE-driven polling skips when events are fresh; `runtime.forEachJob` avoids intermediate allocations
+- **Pointer interactions**: stabilized drag listeners and annotation edit drags without losing pointer capture
+
+### Fixed
+
+- Annotation selection cleared when a pan gesture started; selection now survives panning
+- Annotation edit drags occasionally lost their target on rapid pointer moves
+- Pointer drag listeners could leak after some interrupted gestures
+- Tooth detection produced jagged outlines and tiny specks; a smoothing pass plus speck filter cleans both up
+- DICOM decode cache held more memory than necessary on warm sessions
+
+### Removed
+
+- Dead tooth-analysis helpers carried forward from the earlier pipeline that were no longer reachable
+- Internal optimization-plan and cleanup-plan tracking documents that were authored and consumed within this release cycle
+
 ## [0.3.1] - 2026-04-23
 
 ### Added

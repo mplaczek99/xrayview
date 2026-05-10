@@ -1,17 +1,15 @@
 import { useEffect } from "react";
 import type { JobSnapshot as ContractJobSnapshot } from "../../lib/generated/contracts";
 import { getRuntimeAdapter, normalizeJobSnapshot } from "../../lib/runtime";
-import {
-  selectPendingJobCount,
-  useWorkbenchStore,
-  workbenchActions,
-} from "../../app/store/workbenchStore";
+import { useWorkbenchStore, workbenchActions } from "../../app/store/workbenchStore";
+import { selectPendingJobCount } from "../../app/store/selectors";
 import {
   clearJobSubmitTiming,
   logCompletedJobVisibleTiming,
 } from "./benchmarks";
 
-const FAST_POLL_MS = 200;
+const ACTIVE_POLL_MS = 500;
+const RECENT_TRANSITION_POLL_MS = 200;
 const QUEUED_POLL_MS = 1000;
 const MAX_POLL_MS = 2000;
 const IDLE_POLL_MS = 0;
@@ -40,7 +38,7 @@ export function useJobs() {
     let cancelled = false;
     let timer: number | undefined;
     let unsubscribeEvent: (() => void) | undefined;
-    let currentIntervalMs = FAST_POLL_MS;
+    let currentIntervalMs = ACTIVE_POLL_MS;
     // Tracks the last time a job-update event was received via Wails/SSE.
     // When fresh (< EVENT_STALE_MS ago), HTTP polling is suppressed entirely.
     let lastEventAtMs = 0;
@@ -79,14 +77,9 @@ export function useJobs() {
 
     async function pollPendingJobs() {
       const state = workbenchActions.getState();
-      const pendingJobs = Object.values(state.jobs).filter(
-        (job) =>
-          job.state === "queued" ||
-          job.state === "running" ||
-          job.state === "cancelling",
-      );
+      const pendingJobIds = [...state.pendingJobIds];
 
-      if (pendingJobs.length === 0) {
+      if (pendingJobIds.length === 0) {
         scheduleNext(IDLE_POLL_MS);
         return;
       }
@@ -99,19 +92,23 @@ export function useJobs() {
       }
 
       // Snapshot pre-poll state for progress change detection.
-      const prePollState = new Map(
-        pendingJobs.map((job) => [job.jobId, { percent: job.progress.percent, state: job.state }]),
-      );
+      const prePollState = new Map<string, { percent: number; state: string }>();
+      for (const jobId of pendingJobIds) {
+        const job = state.jobs[jobId];
+        if (job) {
+          prePollState.set(jobId, {
+            percent: job.progress.percent,
+            state: job.state,
+          });
+        }
+      }
 
-      // Batch fetch: deduplicate IDs and fetch all snapshots in one request.
-      const jobIds = [...new Set(pendingJobs.map((job) => job.jobId))];
       try {
-        const snapshots = await runtime.getJobs(jobIds);
-        if (!cancelled) {
-          for (const job of snapshots) {
+        await runtime.forEachJob(pendingJobIds, (job) => {
+          if (!cancelled) {
             applyJobUpdate(job);
           }
-        }
+        });
       } catch {
         // Batch fetch failed; individual job states remain unchanged until
         // the next poll cycle.
@@ -121,23 +118,24 @@ export function useJobs() {
         return;
       }
 
-      const updatedJobs = Object.values(workbenchActions.getState().jobs).filter(
-        (job) =>
-          job.state === "queued" ||
-          job.state === "running" ||
-          job.state === "cancelling",
-      );
+      const updatedState = workbenchActions.getState();
+      const updatedJobIds = [...updatedState.pendingJobIds];
 
-      if (updatedJobs.length === 0) {
+      if (updatedJobIds.length === 0) {
         scheduleNext(IDLE_POLL_MS);
         return;
       }
 
       let anyProgress = false;
+      let anyStateTransition = false;
       let allQueued = true;
       let anyNearComplete = false;
 
-      for (const job of updatedJobs) {
+      for (const jobId of updatedJobIds) {
+        const job = updatedState.jobs[jobId];
+        if (!job) {
+          continue;
+        }
         if (job.state !== "queued") {
           allQueued = false;
         }
@@ -147,7 +145,10 @@ export function useJobs() {
         const pre = prePollState.get(job.jobId);
         if (pre !== undefined) {
           // Percent advance or state transition (queued → running) counts as progress.
-          if (job.progress.percent > pre.percent || job.state !== pre.state) {
+          if (job.state !== pre.state) {
+            anyStateTransition = true;
+            anyProgress = true;
+          } else if (job.progress.percent > pre.percent) {
             anyProgress = true;
           }
         }
@@ -155,13 +156,17 @@ export function useJobs() {
 
       // Completion events arrive in the embedded desktop path, but progress
       // updates still come from polling while a job is running.
-      if (anyProgress || anyNearComplete) {
-        // Progress detected or near-complete: reset to fast polling.
-        currentIntervalMs = FAST_POLL_MS;
+      if (anyStateTransition || anyNearComplete) {
+        // State transitions and near-complete jobs get a brief fast cadence.
+        currentIntervalMs = RECENT_TRANSITION_POLL_MS;
+        scheduleNext(currentIntervalMs);
+      } else if (anyProgress) {
+        // Progress detected: reset to the active cadence.
+        currentIntervalMs = ACTIVE_POLL_MS;
         scheduleNext(currentIntervalMs);
       } else if (allQueued) {
         // Queued-only: use steady slow interval without advancing the backoff state.
-        // currentIntervalMs stays at FAST_POLL_MS so backoff starts fresh when running begins.
+        // currentIntervalMs stays at ACTIVE_POLL_MS so backoff starts fresh when running begins.
         scheduleNext(QUEUED_POLL_MS);
       } else {
         // No progress on running/cancelling jobs: schedule at current interval then double.

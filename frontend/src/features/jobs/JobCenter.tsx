@@ -1,12 +1,16 @@
 import { useMemo, useState, useCallback } from "react";
-import { workbenchActions, useWorkbenchStore, selectJobOrder, selectJobs, selectStudies } from "../../app/store/workbenchStore";
+import { workbenchActions, useWorkbenchStore } from "../../app/store/workbenchStore";
+import { selectJobOrder, selectJobs, selectStudies } from "../../app/store/selectors";
 import { formatBackendError } from "../../lib/backendErrors";
-import { describeProgress, useProgressClock } from "./progressTiming";
+import { describeProgress } from "./progressFormatting";
+import { useProgressClock } from "./useProgressClock";
 
 function titleForJob(kind: string): string {
   switch (kind) {
     case "renderStudy":
       return "Render Preview";
+    case "analyzeStudy":
+      return "Analyze Teeth And Bone";
     case "processStudy":
       return "Process Study";
     default:

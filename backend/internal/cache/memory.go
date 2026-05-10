@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"xrayview/backend/internal/bufpool"
 	"xrayview/backend/internal/contracts"
 	"xrayview/backend/internal/imaging"
 )
@@ -95,6 +96,35 @@ func (memory *Memory) LoadRender(
 	return cloneRenderResult(payload), true
 }
 
+func (memory *Memory) StoreAnalyze(
+	fingerprint string,
+	result contracts.AnalyzeStudyCommandResult,
+) {
+	memory.storeLocked(fingerprint, contracts.JobResult{
+		Kind:    contracts.JobKindAnalyzeStudy,
+		Payload: cloneAnalyzeResult(result),
+	})
+}
+
+func (memory *Memory) LoadAnalyze(
+	fingerprint string,
+) (contracts.AnalyzeStudyCommandResult, bool) {
+	var zero contracts.AnalyzeStudyCommandResult
+
+	result, ok := memory.loadLocked(fingerprint, contracts.JobKindAnalyzeStudy)
+	if !ok {
+		return zero, false
+	}
+
+	payload, ok := result.Payload.(contracts.AnalyzeStudyCommandResult)
+	if !ok {
+		memory.discardInvalidEntry(fingerprint, result.Kind, "analyze payload type mismatch")
+		return zero, false
+	}
+
+	return cloneAnalyzeResult(payload), true
+}
+
 func (memory *Memory) StoreProcess(
 	fingerprint string,
 	result contracts.ProcessStudyCommandResult,
@@ -124,23 +154,24 @@ func (memory *Memory) LoadProcess(
 	return cloneProcessResult(payload), true
 }
 
-// StoreSourcePreview stores a preview in the cache. The cache takes ownership
-// of preview.Pixels — callers must not mutate the slice after calling Store.
-// LoadSourcePreview returns a defensive clone, so readers are always safe.
+// StoreSourcePreview stores a defensive preview copy. Callers retain ownership
+// of preview.Pixels and may release pooled buffers after Store returns.
+// LoadSourcePreview also returns a defensive clone, so readers are always safe.
 func (memory *Memory) StoreSourcePreview(inputPath string, preview imaging.PreviewImage) {
 	memory.mu.Lock()
 	defer memory.mu.Unlock()
 
+	cachedPreview := copyPreviewImage(preview)
 	if existing, ok := memory.sourcePreviews[inputPath]; ok {
 		memory.sourcePreviewBytes -= existing.preview.ByteSize()
-		existing.preview = preview
-		memory.sourcePreviewBytes += preview.ByteSize()
+		existing.preview = cachedPreview
+		memory.sourcePreviewBytes += cachedPreview.ByteSize()
 		memory.movePreviewToFrontLocked(existing)
 	} else {
-		entry := &sourcePreviewEntry{inputPath: inputPath, preview: preview}
+		entry := &sourcePreviewEntry{inputPath: inputPath, preview: cachedPreview}
 		memory.sourcePreviews[inputPath] = entry
 		memory.pushPreviewFrontLocked(entry)
-		memory.sourcePreviewBytes += preview.ByteSize()
+		memory.sourcePreviewBytes += cachedPreview.ByteSize()
 	}
 	memory.evictSourcePreviewLocked()
 }
@@ -301,6 +332,14 @@ func resultArtifactsExist(
 	switch result.Kind {
 	case contracts.JobKindRenderStudy:
 		payload, ok := result.Payload.(contracts.RenderStudyCommandResult)
+		if !ok {
+			warnPayloadTypeMismatch(logger, fingerprint, result.Kind)
+			return false
+		}
+
+		return artifactExists(logger, fingerprint, result.Kind, payload.PreviewPath)
+	case contracts.JobKindAnalyzeStudy:
+		payload, ok := result.Payload.(contracts.AnalyzeStudyCommandResult)
 		if !ok {
 			warnPayloadTypeMismatch(logger, fingerprint, result.Kind)
 			return false
@@ -475,6 +514,13 @@ func cloneRenderResult(
 	return result
 }
 
+func cloneAnalyzeResult(
+	result contracts.AnalyzeStudyCommandResult,
+) contracts.AnalyzeStudyCommandResult {
+	result.MeasurementScale = cloneMeasurementScale(result.MeasurementScale)
+	return result
+}
+
 func cloneProcessResult(
 	result contracts.ProcessStudyCommandResult,
 ) contracts.ProcessStudyCommandResult {
@@ -494,6 +540,28 @@ func cloneMeasurementScale(
 }
 
 func clonePreviewImage(preview imaging.PreviewImage) imaging.PreviewImage {
-	preview.Pixels = append([]uint8(nil), preview.Pixels...)
-	return preview
+	pixels := bufpool.GetUint8(len(preview.Pixels))
+	copy(pixels, preview.Pixels)
+	switch preview.Format {
+	case imaging.FormatGray8:
+		return imaging.GrayPreviewWithRelease(preview.Width, preview.Height, pixels, bufpool.PutUint8)
+	case imaging.FormatRGBA8:
+		return imaging.RGBAPreviewWithRelease(preview.Width, preview.Height, pixels, bufpool.PutUint8)
+	default:
+		preview.Pixels = pixels
+		return preview
+	}
+}
+
+func copyPreviewImage(preview imaging.PreviewImage) imaging.PreviewImage {
+	pixels := append([]uint8(nil), preview.Pixels...)
+	switch preview.Format {
+	case imaging.FormatGray8:
+		return imaging.GrayPreview(preview.Width, preview.Height, pixels)
+	case imaging.FormatRGBA8:
+		return imaging.RGBAPreview(preview.Width, preview.Height, pixels)
+	default:
+		preview.Pixels = pixels
+		return preview
+	}
 }

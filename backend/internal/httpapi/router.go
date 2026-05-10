@@ -17,6 +17,8 @@ import (
 	"xrayview/backend/internal/persistence"
 )
 
+const maxPooledBodyBufferCap = 64 * 1024
+
 // bodyPool reuses request body read buffers across handler calls.
 var bodyPool = sync.Pool{New: func() any { return new(bytes.Buffer) }}
 
@@ -34,26 +36,6 @@ var jsonWriterPool = sync.Pool{New: func() any {
 	return &jsonWriterEntry{buf: buf, enc: json.NewEncoder(buf)}
 }}
 
-// BackendService is the router's view of the command surface. It is a
-// narrower mirror of app.BackendService so this package doesn't import
-// internal/app (keeps the router independent of app wiring for tests).
-// Keep the command methods in sync with app.BackendService. The extra
-// methods on that interface (job update callbacks, study count, etc.) are
-// picked up via optional type assertions further down this file rather
-// than by adding them here.
-type BackendService interface {
-	OpenStudy(command contracts.OpenStudyCommand) (contracts.OpenStudyCommandResult, error)
-	StartRenderJob(command contracts.RenderStudyCommand) (contracts.StartedJob, error)
-	StartProcessJob(command contracts.ProcessStudyCommand) (contracts.StartedJob, error)
-	GetJob(command contracts.JobCommand) (contracts.JobSnapshot, error)
-	GetJobs(command contracts.GetJobsCommand) ([]contracts.JobSnapshot, error)
-	CancelJob(command contracts.JobCommand) (contracts.JobSnapshot, error)
-	GetProcessingManifest() contracts.ProcessingManifest
-	MeasureLineAnnotation(
-		command contracts.MeasureLineAnnotationCommand,
-	) (contracts.MeasureLineAnnotationCommandResult, error)
-}
-
 type supportedJobKindsProvider interface {
 	SupportedJobKinds() []string
 }
@@ -63,7 +45,7 @@ type studyCountProvider interface {
 }
 
 type RouterDeps struct {
-	Service     BackendService
+	Service     contracts.BackendService
 	Config      config.Config
 	Logger      *slog.Logger
 	Cache       *cache.Store
@@ -102,7 +84,7 @@ type runtimeCacheEntry struct {
 	studyCount int
 }
 
-// jobUpdateSubscriber is an optional interface that BackendService implementations
+// jobUpdateSubscriber is an optional interface that backend service implementations
 // may satisfy to receive all job-state transitions (progress + terminal).
 // The router uses a type assertion so the interface is not required.
 type jobUpdateSubscriber interface {
@@ -114,7 +96,7 @@ func NewRouter(deps RouterDeps) http.Handler {
 
 	// Wire the SSE hub. If the service supports OnJobUpdate, every job
 	// transition (progress or terminal) is broadcast to connected SSE clients.
-	hub := newSSEHub()
+	hub := newSSEHub(deps.Logger)
 	if subscriber, ok := deps.Service.(jobUpdateSubscriber); ok {
 		subscriber.OnJobUpdate(hub.broadcast)
 	}
@@ -172,9 +154,8 @@ func NewRouter(deps RouterDeps) http.Handler {
 	// Single dispatch table for every backend command. To add a new command:
 	// declare it in contracts/backend-contract-v1.schema.json, run
 	// `npm run contracts:generate` to refresh the TS + Go bindings, then add
-	// a case below plus a handleXxx that decodes the payload and forwards to
-	// deps.Service. Anything that isn't a POST to a known command name is
-	// rejected here before it reaches the service.
+	// a case below that forwards to deps.Service. Anything that isn't a POST
+	// to a known command name is rejected here before it reaches the service.
 	mux.HandleFunc(CommandsPath+"/", func(writer http.ResponseWriter, request *http.Request) {
 		commandName := strings.TrimPrefix(request.URL.Path, CommandsPath+"/")
 		if request.Method != http.MethodPost {
@@ -213,19 +194,21 @@ func NewRouter(deps RouterDeps) http.Handler {
 		case contracts.CommandGetProcessingManifest:
 			writeJSON(writer, http.StatusOK, deps.Service.GetProcessingManifest())
 		case contracts.CommandOpenStudy:
-			handleOpenStudy(writer, request, deps)
+			handleCommand(writer, request, deps.Service.OpenStudy)
 		case contracts.CommandStartRenderJob:
-			handleStartRenderJob(writer, request, deps)
+			handleCommand(writer, request, deps.Service.StartRenderJob)
+		case contracts.CommandStartAnalyzeJob:
+			handleCommand(writer, request, deps.Service.StartAnalyzeJob)
 		case contracts.CommandStartProcessJob:
-			handleStartProcessJob(writer, request, deps)
+			handleCommand(writer, request, deps.Service.StartProcessJob)
 		case contracts.CommandGetJob:
-			handleGetJob(writer, request, deps)
+			handleCommand(writer, request, deps.Service.GetJob)
 		case contracts.CommandGetJobs:
-			handleGetJobs(writer, request, deps)
+			handleCommand(writer, request, deps.Service.GetJobs)
 		case contracts.CommandCancelJob:
-			handleCancelJob(writer, request, deps)
+			handleCommand(writer, request, deps.Service.CancelJob)
 		case contracts.CommandMeasureLineAnnotation:
-			handleMeasureLineAnnotation(writer, request, deps)
+			handleCommand(writer, request, deps.Service.MeasureLineAnnotation)
 		default:
 			deps.Logger.Info("backend command not implemented", slog.String("command", commandName))
 			writeJSON(writer, http.StatusNotImplemented, contracts.BackendError{
@@ -282,18 +265,19 @@ func buildRuntimeResponse(deps RouterDeps) runtimeResponse {
 	}
 }
 
-func resolveSupportedJobKinds(service BackendService) []string {
+func resolveSupportedJobKinds(service contracts.BackendService) []string {
 	if provider, ok := service.(supportedJobKindsProvider); ok {
 		return provider.SupportedJobKinds()
 	}
 
 	return []string{
 		string(contracts.JobKindRenderStudy),
+		string(contracts.JobKindAnalyzeStudy),
 		string(contracts.JobKindProcessStudy),
 	}
 }
 
-func resolveStudyCount(service BackendService) int {
+func resolveStudyCount(service contracts.BackendService) int {
 	if provider, ok := service.(studyCountProvider); ok {
 		return provider.StudyCount()
 	}
@@ -315,114 +299,18 @@ func writeJSON(writer http.ResponseWriter, statusCode int, payload any) {
 	jsonWriterPool.Put(je)
 }
 
-// Every handleXxx below follows the same shape: decode the request body
-// into a contracts.*Command, forward to the service, map any error through
-// writeBackendError, and otherwise write the result as JSON. If you're
-// adding a new command, copy this and swap the types.
-func handleOpenStudy(writer http.ResponseWriter, request *http.Request, deps RouterDeps) {
-	var command contracts.OpenStudyCommand
+func handleCommand[Cmd any, Result any](
+	writer http.ResponseWriter,
+	request *http.Request,
+	fn func(Cmd) (Result, error),
+) {
+	var command Cmd
 	if err := decodeJSONRequest(request, &command); err != nil {
 		writeBackendError(writer, err)
 		return
 	}
 
-	result, err := deps.Service.OpenStudy(command)
-	if err != nil {
-		writeBackendError(writer, err)
-		return
-	}
-
-	writeJSON(writer, http.StatusOK, result)
-}
-
-func handleStartRenderJob(writer http.ResponseWriter, request *http.Request, deps RouterDeps) {
-	var command contracts.RenderStudyCommand
-	if err := decodeJSONRequest(request, &command); err != nil {
-		writeBackendError(writer, err)
-		return
-	}
-
-	started, err := deps.Service.StartRenderJob(command)
-	if err != nil {
-		writeBackendError(writer, err)
-		return
-	}
-
-	writeJSON(writer, http.StatusOK, started)
-}
-
-func handleStartProcessJob(writer http.ResponseWriter, request *http.Request, deps RouterDeps) {
-	var command contracts.ProcessStudyCommand
-	if err := decodeJSONRequest(request, &command); err != nil {
-		writeBackendError(writer, err)
-		return
-	}
-
-	started, err := deps.Service.StartProcessJob(command)
-	if err != nil {
-		writeBackendError(writer, err)
-		return
-	}
-
-	writeJSON(writer, http.StatusOK, started)
-}
-
-func handleGetJob(writer http.ResponseWriter, request *http.Request, deps RouterDeps) {
-	var command contracts.JobCommand
-	if err := decodeJSONRequest(request, &command); err != nil {
-		writeBackendError(writer, err)
-		return
-	}
-
-	snapshot, err := deps.Service.GetJob(command)
-	if err != nil {
-		writeBackendError(writer, err)
-		return
-	}
-
-	writeJSON(writer, http.StatusOK, snapshot)
-}
-
-func handleGetJobs(writer http.ResponseWriter, request *http.Request, deps RouterDeps) {
-	var command contracts.GetJobsCommand
-	if err := decodeJSONRequest(request, &command); err != nil {
-		writeBackendError(writer, err)
-		return
-	}
-
-	snapshots, err := deps.Service.GetJobs(command)
-	if err != nil {
-		writeBackendError(writer, err)
-		return
-	}
-
-	writeJSON(writer, http.StatusOK, snapshots)
-}
-
-func handleCancelJob(writer http.ResponseWriter, request *http.Request, deps RouterDeps) {
-	var command contracts.JobCommand
-	if err := decodeJSONRequest(request, &command); err != nil {
-		writeBackendError(writer, err)
-		return
-	}
-
-	snapshot, err := deps.Service.CancelJob(command)
-	if err != nil {
-		writeBackendError(writer, err)
-		return
-	}
-
-	writeJSON(writer, http.StatusOK, snapshot)
-}
-
-func handleMeasureLineAnnotation(writer http.ResponseWriter, request *http.Request, deps RouterDeps) {
-	var command contracts.MeasureLineAnnotationCommand
-	if err := decodeJSONRequest(request, &command); err != nil {
-		writeBackendError(writer, err)
-		return
-	}
-
-	result, err := deps.Service.MeasureLineAnnotation(command)
+	result, err := fn(command)
 	if err != nil {
 		writeBackendError(writer, err)
 		return
@@ -432,9 +320,8 @@ func handleMeasureLineAnnotation(writer http.ResponseWriter, request *http.Reque
 }
 
 func decodeJSONRequest(request *http.Request, payload any) error {
-	buf := bodyPool.Get().(*bytes.Buffer)
-	buf.Reset()
-	defer bodyPool.Put(buf)
+	buf := getBodyBuffer()
+	defer putBodyBuffer(buf)
 
 	if _, err := buf.ReadFrom(request.Body); err != nil {
 		return contracts.InvalidInput("invalid command payload").WithDetails(err.Error())
@@ -462,6 +349,19 @@ func decodeJSONRequest(request *http.Request, payload any) error {
 	}
 
 	return nil
+}
+
+func getBodyBuffer() *bytes.Buffer {
+	buf := bodyPool.Get().(*bytes.Buffer)
+	buf.Reset()
+	return buf
+}
+
+func putBodyBuffer(buf *bytes.Buffer) {
+	if buf.Cap() > maxPooledBodyBufferCap {
+		return
+	}
+	bodyPool.Put(buf)
 }
 
 func writeBackendError(writer http.ResponseWriter, err error) {

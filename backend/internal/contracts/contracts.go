@@ -8,6 +8,7 @@ const (
 	CommandGetProcessingManifest CommandName = "get_processing_manifest"
 	CommandOpenStudy             CommandName = "open_study"
 	CommandStartRenderJob        CommandName = "start_render_job"
+	CommandStartAnalyzeJob       CommandName = "start_analyze_job"
 	CommandStartProcessJob       CommandName = "start_process_job"
 	CommandGetJob                CommandName = "get_job"
 	CommandGetJobs               CommandName = "get_jobs"
@@ -19,6 +20,7 @@ var SupportedCommands = []CommandName{
 	CommandGetProcessingManifest,
 	CommandOpenStudy,
 	CommandStartRenderJob,
+	CommandStartAnalyzeJob,
 	CommandStartProcessJob,
 	CommandGetJob,
 	CommandGetJobs,

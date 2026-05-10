@@ -873,10 +873,13 @@ func TestWorkflowReusesDecodeAndSourcePreviewAcrossRenderAndProcessJobs(t *testi
 }
 
 func TestStartRenderJobBoundsConcurrentExecutions(t *testing.T) {
+	const wantWorkers = 2
+	t.Setenv(workerCountEnvKey, fmt.Sprintf("%d", wantWorkers))
+
 	studyRegistry := studies.New()
 	studyDir := t.TempDir()
-	studiesUnderTest := make([]contracts.StudyRecord, 0, maxConcurrentJobs+2)
-	for index := 0; index < maxConcurrentJobs+2; index++ {
+	studiesUnderTest := make([]contracts.StudyRecord, 0, wantWorkers+2)
+	for index := 0; index < wantWorkers+2; index++ {
 		inputPath := filepath.Join(studyDir, fmt.Sprintf("study-%d.dcm", index))
 		if err := os.WriteFile(inputPath, []byte("dicom"), 0o644); err != nil {
 			t.Fatalf("WriteFile returned error: %v", err)
@@ -902,7 +905,7 @@ func TestStartRenderJobBoundsConcurrentExecutions(t *testing.T) {
 		nil,
 		dicomexport.GoWriter{},
 		func() (studyDecoder, error) { return decoder, nil },
-		sequenceJobIDs("job-1", "job-2", "job-3", "job-4", "job-5"),
+		sequenceJobIDs("job-1", "job-2", "job-3", "job-4"),
 	)
 
 	jobIDs := make([]string, 0, len(studiesUnderTest))
@@ -914,11 +917,15 @@ func TestStartRenderJobBoundsConcurrentExecutions(t *testing.T) {
 		jobIDs = append(jobIDs, started.JobID)
 	}
 
-	for index := 0; index < maxConcurrentJobs; index++ {
+	if got := service.workerCount; got != wantWorkers {
+		t.Fatalf("workerCount = %d, want %d", got, wantWorkers)
+	}
+
+	for index := 0; index < service.workerCount; index++ {
 		select {
 		case <-decoder.started:
 		case <-time.After(2 * time.Second):
-			t.Fatalf("expected %d running decodes before timeout", maxConcurrentJobs)
+			t.Fatalf("expected %d running decodes before timeout", service.workerCount)
 		}
 	}
 
@@ -937,9 +944,41 @@ func TestStartRenderJobBoundsConcurrentExecutions(t *testing.T) {
 		}
 	}
 
-	if got, want := decoder.MaxActive(), maxConcurrentJobs; got != want {
+	if got, want := decoder.MaxActive(), service.workerCount; got != want {
 		t.Fatalf("max active decodes = %d, want %d", got, want)
 	}
+}
+
+func TestServiceWorkerCountDefaultsAndEnvironment(t *testing.T) {
+	t.Run("default", func(t *testing.T) {
+		t.Setenv(workerCountEnvKey, "")
+		service := newService(nil, nil, nil, nil, nil, nil)
+		defer service.Stop()
+
+		if got, want := service.workerCount, defaultWorkerCount(); got != want {
+			t.Fatalf("workerCount = %d, want %d", got, want)
+		}
+	})
+
+	t.Run("environment override", func(t *testing.T) {
+		t.Setenv(workerCountEnvKey, "7")
+		service := newService(nil, nil, nil, nil, nil, nil)
+		defer service.Stop()
+
+		if got, want := service.workerCount, 7; got != want {
+			t.Fatalf("workerCount = %d, want %d", got, want)
+		}
+	})
+
+	t.Run("invalid environment falls back to default", func(t *testing.T) {
+		t.Setenv(workerCountEnvKey, "0")
+		service := newService(nil, nil, nil, nil, nil, nil)
+		defer service.Stop()
+
+		if got, want := service.workerCount, defaultWorkerCount(); got != want {
+			t.Fatalf("workerCount = %d, want %d", got, want)
+		}
+	})
 }
 
 func TestServiceRejectsBlankIdentifiers(t *testing.T) {

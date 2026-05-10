@@ -5,6 +5,7 @@ import type {
   JobState,
 } from "../../lib/generated/contracts";
 import type {
+  AnalysisResult,
   PreviewResult,
   ProcessResult,
 } from "../../lib/types";
@@ -26,6 +27,7 @@ export interface JobProgressTiming {
 
 export type JobResultPayload =
   | { kind: "renderStudy"; payload: PreviewResult }
+  | { kind: "analyzeStudy"; payload: AnalysisResult }
   | { kind: "processStudy"; payload: ProcessResult };
 
 export interface JobSnapshot {

@@ -42,6 +42,29 @@ func TestSourceImageValidateAcceptsSharedDecodeModel(t *testing.T) {
 	}
 }
 
+func TestSourceImageValidateAcceptsUint16Storage(t *testing.T) {
+	image := SourceImage{
+		Width:        2,
+		Height:       2,
+		Format:       FormatGrayFloat32,
+		Storage:      SourceStorageUint16,
+		Uint16Pixels: []uint16{0, 64, 128, 255},
+		MinValue:     0,
+		MaxValue:     255,
+		FitsUint16:   true,
+	}
+
+	if err := image.Validate(); err != nil {
+		t.Fatalf("Validate returned error: %v", err)
+	}
+	if got, want := image.ByteSize(), uint64(8); got != want {
+		t.Fatalf("ByteSize() = %d, want %d", got, want)
+	}
+	if got, want := image.PixelCount(), 4; got != want {
+		t.Fatalf("PixelCount() = %d, want %d", got, want)
+	}
+}
+
 func TestSourceImageValidateRejectsInvalidShape(t *testing.T) {
 	image := SourceImage{
 		Width:    2,
@@ -55,6 +78,23 @@ func TestSourceImageValidateRejectsInvalidShape(t *testing.T) {
 	err := image.Validate()
 	if err == nil {
 		t.Fatal("Validate returned nil error, want pixel-count failure")
+	}
+}
+
+func TestSourceImageValidateRejectsInvalidUint16FitFlag(t *testing.T) {
+	image := SourceImage{
+		Width:      2,
+		Height:     1,
+		Format:     FormatGrayFloat32,
+		Pixels:     []float32{-1, 0},
+		MinValue:   -1,
+		MaxValue:   0,
+		FitsUint16: true,
+	}
+
+	err := image.Validate()
+	if err == nil {
+		t.Fatal("Validate returned nil error, want uint16 range failure")
 	}
 }
 
@@ -82,4 +122,36 @@ func TestPreviewImageValidateRejectsUnknownFormat(t *testing.T) {
 	if err == nil {
 		t.Fatal("Validate returned nil error, want format failure")
 	}
+}
+
+func TestPreviewImageReleaseIsIdempotentForSameOwner(t *testing.T) {
+	releaseCalls := 0
+	image := GrayPreviewWithRelease(2, 1, []uint8{1, 2}, func(pixels []uint8) {
+		releaseCalls++
+		if got, want := pixels, []uint8{1, 2}; !equalUint8(got, want) {
+			t.Fatalf("released pixels = %v, want %v", got, want)
+		}
+	})
+
+	image.Release()
+	image.Release()
+
+	if releaseCalls != 1 {
+		t.Fatalf("release calls = %d, want 1", releaseCalls)
+	}
+	if image.Pixels != nil {
+		t.Fatalf("released image pixels = %v, want nil", image.Pixels)
+	}
+}
+
+func equalUint8(left, right []uint8) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if left[i] != right[i] {
+			return false
+		}
+	}
+	return true
 }

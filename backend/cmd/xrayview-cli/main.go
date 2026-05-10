@@ -135,7 +135,7 @@ func decodeSource(args []string) error {
 		Width:                 study.Image.Width,
 		Height:                study.Image.Height,
 		Format:                study.Image.Format,
-		PixelCount:            len(study.Image.Pixels),
+		PixelCount:            study.Image.PixelCount(),
 		MinValue:              study.Image.MinValue,
 		MaxValue:              study.Image.MaxValue,
 		DefaultWindow:         study.Image.DefaultWindow,

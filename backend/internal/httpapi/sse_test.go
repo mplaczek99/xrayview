@@ -2,7 +2,9 @@ package httpapi
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,7 +15,7 @@ import (
 )
 
 func TestSSEHubBroadcastDeliveredWithinLatencyBudget(t *testing.T) {
-	hub := newSSEHub()
+	hub := newSSEHub(nil)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hub.serveSSE(w, r)
@@ -87,7 +89,7 @@ func TestSSEHubBroadcastDeliveredWithinLatencyBudget(t *testing.T) {
 }
 
 func TestSSEHubMultipleClientsAllReceiveBroadcast(t *testing.T) {
-	hub := newSSEHub()
+	hub := newSSEHub(nil)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hub.serveSSE(w, r)
@@ -137,7 +139,7 @@ func TestSSEHubMultipleClientsAllReceiveBroadcast(t *testing.T) {
 }
 
 func TestSSEHubClientDisconnectDoesNotBlockBroadcast(t *testing.T) {
-	hub := newSSEHub()
+	hub := newSSEHub(nil)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hub.serveSSE(w, r)
@@ -165,6 +167,48 @@ func TestSSEHubClientDisconnectDoesNotBlockBroadcast(t *testing.T) {
 	case <-done:
 	case <-time.After(50 * time.Millisecond):
 		t.Fatal("broadcast blocked after client disconnected")
+	}
+}
+
+func TestSSEHubCountsAndLogsDroppedFramesForSlowConsumer(t *testing.T) {
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	hub := newSSEHub(logger)
+	hub.subscribe()
+
+	for i := range sseClientBufferSize {
+		hub.broadcast(contracts.JobSnapshot{
+			JobID:   "buffer-fill-job",
+			JobKind: contracts.JobKindRenderStudy,
+			State:   contracts.JobStateRunning,
+			Progress: contracts.JobProgress{
+				Percent: i,
+				Stage:   "rendering",
+				Message: "Rendering preview",
+			},
+		})
+	}
+
+	if got := hub.droppedFrameCount(); got != 0 {
+		t.Fatalf("droppedFrameCount after filling buffer = %d, want 0", got)
+	}
+
+	hub.broadcast(contracts.JobSnapshot{
+		JobID:   "dropped-frame-job",
+		JobKind: contracts.JobKindRenderStudy,
+		State:   contracts.JobStateRunning,
+	})
+
+	if got := hub.droppedFrameCount(); got != 1 {
+		t.Fatalf("droppedFrameCount after overflow = %d, want 1", got)
+	}
+
+	logOutput := logs.String()
+	if !strings.Contains(logOutput, "xrayview_sse_dropped_frames_total=1") {
+		t.Fatalf("log output missing cumulative dropped-frame counter: %q", logOutput)
+	}
+	if !strings.Contains(logOutput, "sse_client_buffer_size=16") {
+		t.Fatalf("log output missing SSE client buffer size: %q", logOutput)
 	}
 }
 

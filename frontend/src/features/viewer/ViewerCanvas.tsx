@@ -1,27 +1,18 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type {
-  PointerEvent as ReactPointerEvent,
-} from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   AnnotationBundle,
-  AnnotationPoint,
   LineAnnotation,
 } from "../../lib/generated/contracts";
 import { AnnotationLayer } from "../annotations/AnnotationLayer";
+import { type ViewerTool } from "../annotations/tools";
 import {
-  createManualLineAnnotation,
-  getLineAnnotation,
-  type ViewerTool,
-} from "../annotations/tools";
-import {
-  clampPointToImage,
   createViewport,
   getViewerTransform,
-  screenToImage,
-  zoomAtPoint,
-  type ViewerFrame,
   type ViewerImageSize,
 } from "./viewport";
+import { usePointerInteractions } from "./usePointerInteractions";
+import { useViewportFrame } from "./useViewportFrame";
+import { useWheelZoom } from "./useWheelZoom";
 
 interface ViewerCanvasProps {
   previewUrl: string | null;
@@ -34,23 +25,6 @@ interface ViewerCanvasProps {
   onSelectAnnotation: (annotationId: string | null) => void;
   onCreateLine: (annotation: LineAnnotation) => void | Promise<void>;
   onUpdateLine: (annotation: LineAnnotation) => void | Promise<void>;
-}
-
-type ViewerInteraction =
-  | {
-      kind: "pan";
-      pointerStart: AnnotationPoint;
-      panStart: Pick<ReturnType<typeof createViewport>, "panX" | "panY">;
-    }
-  | { kind: "draw" }
-  | {
-      kind: "edit";
-      annotationId: string;
-      endpoint: "start" | "end";
-    };
-
-function pointDistance(left: AnnotationPoint, right: AnnotationPoint): number {
-  return Math.hypot(left.x - right.x, left.y - right.y);
 }
 
 export function ViewerCanvas({
@@ -67,86 +41,32 @@ export function ViewerCanvas({
 }: ViewerCanvasProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const imgRef = useRef<HTMLImageElement | null>(null);
-  const [frame, setFrame] = useState<ViewerFrame>({ width: 0, height: 0 });
   const [viewport, setViewport] = useState(createViewport);
   const [loadFailed, setLoadFailed] = useState(false);
   const [imageReady, setImageReady] = useState(false);
   const [resolvedImageSize, setResolvedImageSize] = useState<ViewerImageSize | null>(
     imageSize,
   );
-  const [interaction, setInteraction] = useState<ViewerInteraction | null>(null);
-  const [draftLine, setDraftLine] = useState<LineAnnotation | null>(null);
-  const [hoverCoord, setHoverCoord] = useState<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
     setResolvedImageSize(imageSize);
   }, [imageSize]);
 
   const canvasVisible = !!previewUrl && !loadFailed;
+  const frame = useViewportFrame(containerRef, canvasVisible);
 
-  useLayoutEffect(() => {
-    const element = containerRef.current;
-    if (!element) {
-      return;
-    }
-
-    const updateFrame = () => {
-      const rect = element.getBoundingClientRect();
-      setFrame({
-        width: rect.width,
-        height: rect.height,
-      });
-    };
-
-    updateFrame();
-
-    const observer = new ResizeObserver(() => {
-      updateFrame();
-    });
-    observer.observe(element);
-
-    return () => {
-      observer.disconnect();
-    };
-  }, [canvasVisible]);
-
-  const wheelStateRef = useRef({ resolvedImageSize, imageReady, frame });
-  useEffect(() => {
-    wheelStateRef.current = { resolvedImageSize, imageReady, frame };
-  }, [resolvedImageSize, imageReady, frame]);
-
-  useEffect(() => {
-    const element = containerRef.current;
-    if (!element) return;
-
-    function handleWheel(event: WheelEvent) {
-      const { resolvedImageSize: imgSize, imageReady: ready, frame: fr } =
-        wheelStateRef.current;
-      if (!imgSize || !ready) return;
-
-      event.preventDefault();
-      const rect = element!.getBoundingClientRect();
-      const pointer = {
-        x: event.clientX - rect.left,
-        y: event.clientY - rect.top,
-      };
-      const factor = event.deltaY < 0 ? 1.12 : 0.9;
-      setViewport((current) =>
-        zoomAtPoint(current, fr, imgSize, pointer, factor),
-      );
-    }
-
-    element.addEventListener("wheel", handleWheel, { passive: false });
-    return () => {
-      element.removeEventListener("wheel", handleWheel);
-    };
-  }, [canvasVisible]);
+  useWheelZoom({
+    containerRef,
+    enabled: canvasVisible,
+    frame,
+    imageReady,
+    imageSize: resolvedImageSize,
+    setViewport,
+  });
 
   useEffect(() => {
     setLoadFailed(false);
     setImageReady(false);
-    setInteraction(null);
-    setDraftLine(null);
     setViewport(createViewport());
     if (!previewUrl && !imageSize) {
       setResolvedImageSize(null);
@@ -171,209 +91,35 @@ export function ViewerCanvas({
 
     return getViewerTransform(frame, resolvedImageSize, viewport);
   }, [frame, resolvedImageSize, viewport]);
+  const {
+    beginBackgroundInteraction,
+    beginHandleDrag,
+    displayedAnnotations,
+    draftDistance,
+    draftLine,
+    draftLineOverride,
+    handleMouseLeave,
+    handleMouseMove,
+    hoverCoord,
+    isDrawingLine,
+    resetPointerInteractions,
+  } = usePointerInteractions({
+    containerRef,
+    annotations,
+    imageReady,
+    imageSize: resolvedImageSize,
+    tool,
+    transform,
+    viewport,
+    setViewport,
+    onSelectAnnotation,
+    onCreateLine,
+    onUpdateLine,
+  });
 
-  const draftLineRef = useRef(draftLine);
-  useEffect(() => { draftLineRef.current = draftLine; }, [draftLine]);
-
-  const callbacksRef = useRef({ onCreateLine, onSelectAnnotation, onUpdateLine });
   useEffect(() => {
-    callbacksRef.current = { onCreateLine, onSelectAnnotation, onUpdateLine };
-  }, [onCreateLine, onSelectAnnotation, onUpdateLine]);
-
-  useEffect(() => {
-    const activeInteraction = interaction;
-    const activeTransform = transform;
-    const activeImageSize = resolvedImageSize;
-    if (!activeInteraction || !activeTransform || !activeImageSize) {
-      return;
-    }
-    const stableInteraction = activeInteraction;
-    const stableTransform = activeTransform;
-    const stableImageSize = activeImageSize;
-
-    function handlePointerMove(event: PointerEvent) {
-      const rect = containerRef.current?.getBoundingClientRect();
-      if (!rect) {
-        return;
-      }
-
-      const pointer = {
-        x: event.clientX - rect.left,
-        y: event.clientY - rect.top,
-      };
-
-      if (stableInteraction.kind === "pan") {
-        setViewport((current) => ({
-          ...current,
-          panX:
-            stableInteraction.panStart.panX +
-            (pointer.x - stableInteraction.pointerStart.x),
-          panY:
-            stableInteraction.panStart.panY +
-            (pointer.y - stableInteraction.pointerStart.y),
-        }));
-        return;
-      }
-
-      const imagePoint = clampPointToImage(
-        screenToImage(pointer, stableTransform),
-        stableImageSize,
-      );
-      if (stableInteraction.kind === "draw") {
-        setDraftLine((current) =>
-          current
-            ? {
-                ...current,
-                end: imagePoint,
-              }
-            : current,
-        );
-        return;
-      }
-
-      setDraftLine((current) =>
-        current
-          ? {
-              ...current,
-              [stableInteraction.endpoint]: imagePoint,
-            }
-          : current,
-      );
-    }
-
-    function handlePointerUp() {
-      const nextDraft = draftLineRef.current;
-      const nextInteraction = stableInteraction;
-      setInteraction(null);
-      setDraftLine(null);
-
-      if (!nextDraft) {
-        return;
-      }
-
-      if (
-        pointDistance(nextDraft.start, nextDraft.end) < 2 ||
-        !stableImageSize
-      ) {
-        return;
-      }
-
-      const cbs = callbacksRef.current;
-      if (nextInteraction.kind === "draw") {
-        void cbs.onCreateLine(nextDraft);
-        cbs.onSelectAnnotation(nextDraft.id);
-        return;
-      }
-
-      void cbs.onUpdateLine(nextDraft);
-      cbs.onSelectAnnotation(nextDraft.id);
-    }
-
-    const container = containerRef.current;
-    if (!container) return;
-
-    container.addEventListener("pointermove", handlePointerMove);
-    container.addEventListener("pointerup", handlePointerUp);
-
-    return () => {
-      container.removeEventListener("pointermove", handlePointerMove);
-      container.removeEventListener("pointerup", handlePointerUp);
-    };
-  }, [interaction, resolvedImageSize, transform]);
-
-  const displayedAnnotations = useMemo(() => {
-    if (interaction?.kind !== "edit" || !draftLine) {
-      return annotations;
-    }
-
-    return {
-      ...annotations,
-      lines: annotations.lines.map((annotation) =>
-        annotation.id === draftLine.id ? draftLine : annotation,
-      ),
-    };
-  }, [annotations, draftLine, interaction]);
-
-  function pointerToLocalPoint(
-    event: ReactPointerEvent<HTMLDivElement>,
-  ): AnnotationPoint {
-    const rect = event.currentTarget.getBoundingClientRect();
-    return {
-      x: event.clientX - rect.left,
-      y: event.clientY - rect.top,
-    };
-  }
-
-  function handleMouseMove(event: React.MouseEvent<HTMLDivElement>) {
-    if (!transform || !resolvedImageSize || !imageReady) {
-      setHoverCoord(null);
-      return;
-    }
-    const rect = event.currentTarget.getBoundingClientRect();
-    const pointer = { x: event.clientX - rect.left, y: event.clientY - rect.top };
-    const imgPt = screenToImage(pointer, transform);
-    if (imgPt.x < 0 || imgPt.y < 0 || imgPt.x > resolvedImageSize.width || imgPt.y > resolvedImageSize.height) {
-      setHoverCoord(null);
-      return;
-    }
-    setHoverCoord({ x: Math.round(imgPt.x), y: Math.round(imgPt.y) });
-  }
-
-  function handleMouseLeave() {
-    setHoverCoord(null);
-  }
-
-  const draftDistance = useMemo(() => {
-    if (!draftLine) return null;
-    return pointDistance(draftLine.start, draftLine.end);
-  }, [draftLine]);
-
-  function beginBackgroundInteraction(
-    event: ReactPointerEvent<HTMLDivElement>,
-  ) {
-    if (!transform || !resolvedImageSize || !imageReady || event.button !== 0) {
-      return;
-    }
-
-    event.currentTarget.setPointerCapture(event.pointerId);
-    const pointer = pointerToLocalPoint(event);
-    if (tool === "measureLine") {
-      const imagePoint = clampPointToImage(
-        screenToImage(pointer, transform),
-        resolvedImageSize,
-      );
-      const annotation = createManualLineAnnotation(imagePoint, imagePoint);
-      setDraftLine(annotation);
-      setInteraction({ kind: "draw" });
-      onSelectAnnotation(null);
-      return;
-    }
-
-    setInteraction({
-      kind: "pan",
-      pointerStart: pointer,
-      panStart: {
-        panX: viewport.panX,
-        panY: viewport.panY,
-      },
-    });
-    onSelectAnnotation(null);
-  }
-
-  function beginHandleDrag(annotationId: string, endpoint: "start" | "end") {
-    const annotation = getLineAnnotation(annotations, annotationId);
-    if (!annotation || !annotation.editable) {
-      return;
-    }
-
-    setDraftLine(annotation);
-    setInteraction({
-      kind: "edit",
-      annotationId,
-      endpoint,
-    });
-    onSelectAnnotation(annotationId);
-  }
+    resetPointerInteractions();
+  }, [previewUrl]);
 
   if (!previewUrl || loadFailed) {
     return (
@@ -462,7 +208,8 @@ export function ViewerCanvas({
             transform={transform}
             annotations={displayedAnnotations}
             selectedAnnotationId={selectedAnnotationId}
-            draftLine={interaction?.kind === "draw" ? draftLine : null}
+            draftLine={isDrawingLine ? draftLine : null}
+            draftLineOverride={draftLineOverride}
             onSelectAnnotation={onSelectAnnotation}
             onStartHandleDrag={beginHandleDrag}
           />

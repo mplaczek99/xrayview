@@ -16,6 +16,7 @@ import (
 	"reflect"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -50,6 +51,7 @@ type testBackendService struct {
 type mockBackendService struct {
 	openStudy             func(contracts.OpenStudyCommand) (contracts.OpenStudyCommandResult, error)
 	startRenderJob        func(contracts.RenderStudyCommand) (contracts.StartedJob, error)
+	startAnalyzeJob       func(contracts.AnalyzeStudyCommand) (contracts.StartedJob, error)
 	startProcessJob       func(contracts.ProcessStudyCommand) (contracts.StartedJob, error)
 	getJob                func(contracts.JobCommand) (contracts.JobSnapshot, error)
 	getJobs               func(contracts.GetJobsCommand) ([]contracts.JobSnapshot, error)
@@ -68,6 +70,15 @@ func (service mockBackendService) StartRenderJob(
 	command contracts.RenderStudyCommand,
 ) (contracts.StartedJob, error) {
 	return service.startRenderJob(command)
+}
+
+func (service mockBackendService) StartAnalyzeJob(
+	command contracts.AnalyzeStudyCommand,
+) (contracts.StartedJob, error) {
+	if service.startAnalyzeJob != nil {
+		return service.startAnalyzeJob(command)
+	}
+	return contracts.StartedJob{}, nil
 }
 
 func (service mockBackendService) StartProcessJob(
@@ -158,6 +169,12 @@ func (service testBackendService) StartRenderJob(
 	command contracts.RenderStudyCommand,
 ) (contracts.StartedJob, error) {
 	return service.jobs.StartRenderJob(command)
+}
+
+func (service testBackendService) StartAnalyzeJob(
+	command contracts.AnalyzeStudyCommand,
+) (contracts.StartedJob, error) {
+	return service.jobs.StartAnalyzeJob(command)
 }
 
 func (service testBackendService) StartProcessJob(
@@ -1508,6 +1525,53 @@ func BenchmarkWriteJSON(b *testing.B) {
 }
 
 func BenchmarkDecodeJSONRequest(b *testing.B) {
+	payload := `{"jobId":"bench-job-id-1234-5678-abcd"}`
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		req := httptest.NewRequest(http.MethodPost, CommandsPath+"/get_job", strings.NewReader(payload))
+		var cmd contracts.JobCommand
+		if err := decodeJSONRequest(req, &cmd); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func TestPutBodyBufferDropsOversizedBuffers(t *testing.T) {
+	previousPool := bodyPool
+	bodyPool = sync.Pool{New: func() any { return new(bytes.Buffer) }}
+	t.Cleanup(func() {
+		bodyPool = previousPool
+	})
+
+	oversized := bytes.NewBuffer(make([]byte, 0, maxPooledBodyBufferCap+1))
+	putBodyBuffer(oversized)
+
+	got := getBodyBuffer()
+	if got.Cap() > maxPooledBodyBufferCap {
+		t.Fatalf("getBodyBuffer() cap = %d, want <= %d", got.Cap(), maxPooledBodyBufferCap)
+	}
+}
+
+func BenchmarkDecodeJSONRequestSmallAfterOversizeBody(b *testing.B) {
+	previousPool := bodyPool
+	bodyPool = sync.Pool{New: func() any { return new(bytes.Buffer) }}
+	b.Cleanup(func() {
+		bodyPool = previousPool
+	})
+
+	largePayload := `{"value":"` + strings.Repeat("x", 10*1024*1024) + `"}`
+	req := httptest.NewRequest(http.MethodPost, CommandsPath+"/get_job", strings.NewReader(largePayload))
+	var large struct {
+		Value string `json:"value"`
+	}
+	if err := decodeJSONRequest(req, &large); err != nil {
+		b.Fatal(err)
+	}
+	if len(large.Value) != 10*1024*1024 {
+		b.Fatalf("large payload length = %d", len(large.Value))
+	}
+
 	payload := `{"jobId":"bench-job-id-1234-5678-abcd"}`
 	b.ReportAllocs()
 	b.ResetTimer()

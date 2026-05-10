@@ -1,5 +1,6 @@
-import { useMemo, useState } from "react";
-import { workbenchActions, useWorkbenchStore, selectActiveStudy, selectManifest } from "../../app/store/workbenchStore";
+import { useCallback, useMemo, useState } from "react";
+import { workbenchActions, useWorkbenchStore } from "../../app/store/workbenchStore";
+import { selectManifest, selectProcessingTabStudy } from "../../app/store/selectors";
 import { formatBackendError } from "../../lib/backendErrors";
 import { FALLBACK_PROCESSING_MANIFEST } from "../../lib/runtime";
 import type {
@@ -14,36 +15,56 @@ import {
 import {
   createProcessingForm,
 } from "../../features/study/model";
-import { describeProgress, useProgressClock } from "../../features/jobs/progressTiming";
+import { describeProgress } from "../../features/jobs/progressFormatting";
+import { useProgressClock } from "../../features/jobs/useProgressClock";
 import { DicomViewer } from "../viewer/DicomViewer";
 import { GrayscaleControls } from "./GrayscaleControls";
 
 const CUSTOM_PRESET_ID = "__custom";
 
 export function ProcessingTab() {
-  const study = useWorkbenchStore(selectActiveStudy);
+  const study = useWorkbenchStore(selectProcessingTabStudy);
   const manifest = useWorkbenchStore(selectManifest);
   const processingUi = useMemo(() => buildProcessingUiState(manifest), [manifest]);
-  const defaultPreset =
-    manifest.presets.find((preset) => preset.id === manifest.defaultPresetId) ??
-    manifest.presets[0] ??
-    FALLBACK_PROCESSING_MANIFEST.presets[0];
-  const form = study?.processing.form ?? createProcessingForm(processingUi.defaultControls);
-  const runStatus = study?.processing.runStatus ?? { state: "idle" as const };
-  const activePreset =
-    processingUi.presets.find((preset) =>
-      processingControlsEqual(preset.controls, form.controls),
-    ) ?? null;
+  const defaultPreset = useMemo(
+    () =>
+      manifest.presets.find((preset) => preset.id === manifest.defaultPresetId) ??
+      manifest.presets[0] ??
+      FALLBACK_PROCESSING_MANIFEST.presets[0],
+    [manifest],
+  );
+  const fallbackForm = useMemo(
+    () => createProcessingForm(processingUi.defaultControls),
+    [processingUi.defaultControls],
+  );
+  const form = study?.form ?? fallbackForm;
+  const runStatus = study?.runStatus ?? { state: "idle" as const };
+  const activePreset = useMemo(
+    () =>
+      processingUi.presets.find((preset) =>
+        processingControlsEqual(preset.controls, form.controls),
+      ) ?? null,
+    [form.controls, processingUi.presets],
+  );
   const baselinePreset = activePreset ?? defaultPreset;
-  const request: ProcessingRequest = {
-    controls: form.controls,
-    compare: form.compare,
-    outputPath: form.outputPath,
-    presetId: baselinePreset.id,
-    presetControls: baselinePreset.controls,
-  };
-  const previewUrl = study?.originalPreview?.previewUrl ?? null;
-  const processedPreviewUrl = study?.processing.output?.previewUrl ?? null;
+  const request = useMemo<ProcessingRequest>(
+    () => ({
+      controls: form.controls,
+      compare: form.compare,
+      outputPath: form.outputPath,
+      presetId: baselinePreset.id,
+      presetControls: baselinePreset.controls,
+    }),
+    [
+      baselinePreset.controls,
+      baselinePreset.id,
+      form.compare,
+      form.controls,
+      form.outputPath,
+    ],
+  );
+  const previewUrl = study?.originalPreviewUrl ?? null;
+  const processedPreviewUrl = study?.processedPreviewUrl ?? null;
   const [compareView, setCompareView] = useState<"original" | "processed" | "split">("processed");
   const busy = runStatus.state === "running" || runStatus.state === "cancelling";
   const isCancelling = runStatus.state === "cancelling";
@@ -62,19 +83,22 @@ export function ProcessingTab() {
       : null;
   const canRun = Boolean(study) && !busy;
 
-  function updateControls(nextControls: ProcessingControls) {
+  const updateControls = useCallback((nextControls: ProcessingControls) => {
     workbenchActions.setProcessingControls(nextControls);
-  }
+  }, []);
 
-  function updateControl<K extends keyof ProcessingControls>(
-    key: K,
-    value: ProcessingControls[K],
-  ) {
-    updateControls({
-      ...form.controls,
-      [key]: value,
-    });
-  }
+  const updateControl = useCallback(
+    <K extends keyof ProcessingControls>(
+      key: K,
+      value: ProcessingControls[K],
+    ) => {
+      updateControls({
+        ...form.controls,
+        [key]: value,
+      });
+    },
+    [form.controls, updateControls],
+  );
 
   return (
     <>

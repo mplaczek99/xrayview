@@ -1,3 +1,4 @@
+import { memo } from "react";
 import type { ProcessingControls } from "../../lib/generated/contracts";
 
 interface GrayscaleControlsProps {
@@ -25,7 +26,7 @@ function clamp(value: number, min: number, max: number): number | null {
   return Math.min(max, Math.max(min, value));
 }
 
-export function GrayscaleControls({
+function GrayscaleControlsComponent({
   controls,
   busy,
   onUpdateControl,
@@ -144,3 +145,5 @@ export function GrayscaleControls({
     </section>
   );
 }
+
+export const GrayscaleControls = memo(GrayscaleControlsComponent);
