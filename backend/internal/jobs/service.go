@@ -187,7 +187,7 @@ func (service *Service) StartAnalyzeJob(
 ) (contracts.StartedJob, error) {
 	return startJob(service, command, jobSpec[
 		contracts.AnalyzeStudyCommand,
-		string,
+		analyzeJobInput,
 		contracts.AnalyzeStudyCommandResult,
 	]{
 		name: "analyze",
@@ -203,17 +203,28 @@ func (service *Service) StartAnalyzeJob(
 			_ contracts.StudyRecord,
 			_ contracts.AnalyzeStudyCommand,
 			fingerprint string,
-		) (string, error) {
-			return service.cache.ArtifactPath("analyze", fingerprint, "png")
+		) (analyzeJobInput, error) {
+			previewPath, err := service.cache.ArtifactPath("analyze", fingerprint, "png")
+			if err != nil {
+				return analyzeJobInput{}, err
+			}
+			filledPreviewPath, err := service.cache.ArtifactPath("analyze-filled", fingerprint, "png")
+			if err != nil {
+				return analyzeJobInput{}, err
+			}
+			return analyzeJobInput{
+				previewPath:       previewPath,
+				filledPreviewPath: filledPreviewPath,
+			}, nil
 		},
 		execute: func(
 			ctx context.Context,
 			jobID string,
 			study contracts.StudyRecord,
-			previewPath string,
+			input analyzeJobInput,
 			fingerprint string,
 		) {
-			service.executeAnalyzeJob(ctx, jobID, study, fingerprint, previewPath)
+			service.executeAnalyzeJob(ctx, jobID, study, fingerprint, input)
 		},
 	})
 }
@@ -460,6 +471,11 @@ type processJobInput struct {
 	resolved    processing.ResolvedProcessStudy
 	previewPath string
 	dicomPath   string
+}
+
+type analyzeJobInput struct {
+	previewPath       string
+	filledPreviewPath string
 }
 
 // startJob is the common StartXJob lifecycle: validate inputs, fingerprint the
@@ -733,9 +749,16 @@ func (service *Service) executeAnalyzeJob(
 	jobID string,
 	study contracts.StudyRecord,
 	fingerprint string,
-	previewPath string,
+	input analyzeJobInput,
 ) {
+	previewPath := input.previewPath
+	filledPreviewPath := input.filledPreviewPath
+	cleanupAnalyzePaths := func() {
+		cleanupPaths(previewPath, filledPreviewPath)
+	}
+
 	if service.finishCancelledIfRequested(ctx, jobID, "queued", previewPath) {
+		cleanupPaths(filledPreviewPath)
 		return
 	}
 
@@ -746,6 +769,7 @@ func (service *Service) executeAnalyzeJob(
 		cleanupPath: func() string {
 			return previewPath
 		},
+		onCancel: cleanupAnalyzePaths,
 		work: func() error {
 			return validateInputFile(study.InputPath)
 		},
@@ -762,6 +786,7 @@ func (service *Service) executeAnalyzeJob(
 		cleanupPath: func() string {
 			return previewPath
 		},
+		onCancel: cleanupAnalyzePaths,
 		work: func() error {
 			loaded, err := service.loadSourceStudy(ctx, contracts.JobKindAnalyzeStudy, study)
 			if err != nil {
@@ -783,6 +808,7 @@ func (service *Service) executeAnalyzeJob(
 		cleanupPath: func() string {
 			return previewPath
 		},
+		onCancel: cleanupAnalyzePaths,
 		work: func() error {
 			sourcePreview := service.loadOrRenderSourcePreview(study.InputPath, sourceStudy.Image)
 			defer sourcePreview.Release()
@@ -807,13 +833,20 @@ func (service *Service) executeAnalyzeJob(
 			return previewPath
 		},
 		onError: func() {
-			cleanupPaths(previewPath)
+			cleanupAnalyzePaths()
 		},
+		onCancel: cleanupAnalyzePaths,
 		work: func() error {
 			if err := render.SavePreviewPNG(previewPath, analysisResult.Preview); err != nil {
 				return contracts.Internal(fmt.Sprintf("write analyze preview PNG: %v", err))
 			}
+			if err := render.SavePreviewPNG(filledPreviewPath, analysisResult.FilledPreview); err != nil {
+				return contracts.Internal(fmt.Sprintf("write filled analyze preview PNG: %v", err))
+			}
 			if info, err := os.Stat(previewPath); err == nil {
+				service.cache.AddArtifactBytes(info.Size())
+			}
+			if info, err := os.Stat(filledPreviewPath); err == nil {
 				service.cache.AddArtifactBytes(info.Size())
 			}
 			return nil
@@ -828,16 +861,17 @@ func (service *Service) executeAnalyzeJob(
 		jobID,
 		fingerprint,
 		contracts.AnalyzeStudyCommandResult{
-			StudyID:          study.StudyID,
-			PreviewPath:      previewPath,
-			LoadedWidth:      sourceStudy.Image.Width,
-			LoadedHeight:     sourceStudy.Image.Height,
-			Mode:             analysisResult.Mode,
-			MeasurementScale: cloneMeasurementScale(sourceStudy.MeasurementScale),
+			StudyID:           study.StudyID,
+			PreviewPath:       previewPath,
+			FilledPreviewPath: filledPreviewPath,
+			LoadedWidth:       sourceStudy.Image.Width,
+			LoadedHeight:      sourceStudy.Image.Height,
+			Mode:              analysisResult.Mode,
+			MeasurementScale:  cloneMeasurementScale(sourceStudy.MeasurementScale),
 		},
 		service.memoryCache.StoreAnalyze,
 		func(result contracts.AnalyzeStudyCommandResult) {
-			cleanupPaths(result.PreviewPath)
+			cleanupPaths(result.PreviewPath, result.FilledPreviewPath)
 		},
 	)
 }

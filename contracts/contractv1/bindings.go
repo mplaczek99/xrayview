@@ -327,6 +327,7 @@ const BackendContractSchemaJSON = `{
       "properties": {
         "studyId": { "type": "string" },
         "previewPath": { "type": "string" },
+        "filledPreviewPath": { "type": "string" },
         "loadedWidth": { "type": "number" },
         "loadedHeight": { "type": "number" },
         "mode": { "type": "string" },
@@ -337,7 +338,7 @@ const BackendContractSchemaJSON = `{
           ]
         }
       },
-      "required": ["studyId", "previewPath", "loadedWidth", "loadedHeight", "mode"]
+      "required": ["studyId", "previewPath", "filledPreviewPath", "loadedWidth", "loadedHeight", "mode"]
     },
     "ProcessStudyCommand": {
       "type": "object",

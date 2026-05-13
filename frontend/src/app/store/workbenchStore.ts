@@ -288,6 +288,21 @@ class WorkbenchStore {
     }));
   }
 
+  setAnalysisOverlayMode(mode: WorkbenchStudy["viewer"]["analysisOverlayMode"]) {
+    const study = this.activeStudy();
+    if (!study) {
+      return;
+    }
+
+    this.setStudyState(study.studyId, (current) => ({
+      ...current,
+      viewer: {
+        ...current.viewer,
+        analysisOverlayMode: mode,
+      },
+    }));
+  }
+
   selectAnnotation(annotationId: string | null) {
     const study = this.activeStudy();
     if (!study) {

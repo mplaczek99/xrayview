@@ -86,6 +86,7 @@ function asAnalysisResult(
 ): AnalysisResult {
   return {
     ...asPreviewResult(payload, runtime),
+    filledPreviewUrl: resolvePreviewUrl(payload.filledPreviewPath, runtime),
     mode: payload.mode,
   };
 }

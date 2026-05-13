@@ -345,7 +345,8 @@ func resultArtifactsExist(
 			return false
 		}
 
-		return artifactExists(logger, fingerprint, result.Kind, payload.PreviewPath)
+		return artifactExists(logger, fingerprint, result.Kind, payload.PreviewPath) &&
+			artifactExists(logger, fingerprint, result.Kind, payload.FilledPreviewPath)
 	case contracts.JobKindProcessStudy:
 		payload, ok := result.Payload.(contracts.ProcessStudyCommandResult)
 		if !ok {

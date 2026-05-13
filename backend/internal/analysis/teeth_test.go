@@ -184,6 +184,33 @@ func TestOverlayMasksOutlinesToothAndSuppressesBoneInsideTooth(t *testing.T) {
 	}
 }
 
+func TestOverlayFilledMasksColorsToothInteriorAndSuppressesBoneInsideTooth(t *testing.T) {
+	const width = 9
+	const height = 9
+
+	gray := make([]uint8, width*height)
+	for index := range gray {
+		gray[index] = 96
+	}
+	toothMask := make([]uint8, width*height)
+	boneMask := make([]uint8, width*height)
+	fillMaskRect(toothMask, width, 3, 3, 3, 3)
+	fillMaskRect(boneMask, width, 1, 1, 7, 7)
+
+	preview := overlayFilledMasks(gray, toothMask, boneMask, width, height)
+	redMask := redDominantMaskFromRGBA(preview)
+	greenMask := greenDominantMaskFromRGBA(preview)
+	if greenMask[4*width+4] == 0 {
+		t.Fatal("tooth interior was not filled green")
+	}
+	if redMask[1*width+1] == 0 {
+		t.Fatal("bone section was not filled red")
+	}
+	if redMask[4*width+4] != 0 {
+		t.Fatal("bone fill was drawn inside tooth interior")
+	}
+}
+
 func TestOverlayMasksDrawsOneCleanBoneOutlineWithoutInternalLoops(t *testing.T) {
 	const width = 9
 	const height = 9
@@ -310,6 +337,9 @@ func TestGenerateToothOverlayDrawsInnerOutline(t *testing.T) {
 	}
 	if result.Preview.Format != imaging.FormatRGBA8 {
 		t.Fatalf("Preview.Format = %q, want %q", result.Preview.Format, imaging.FormatRGBA8)
+	}
+	if result.FilledPreview.Format != imaging.FormatRGBA8 {
+		t.Fatalf("FilledPreview.Format = %q, want %q", result.FilledPreview.Format, imaging.FormatRGBA8)
 	}
 	if !strings.Contains(result.Mode, "tooth and bone level") {
 		t.Fatalf("Mode = %q, want tooth and bone level mode", result.Mode)
@@ -583,6 +613,9 @@ func BenchmarkGenerateToothOverlay(b *testing.B) {
 		}
 		if len(result.Preview.Pixels) == 0 {
 			b.Fatal("empty preview")
+		}
+		if len(result.FilledPreview.Pixels) == 0 {
+			b.Fatal("empty filled preview")
 		}
 	}
 }

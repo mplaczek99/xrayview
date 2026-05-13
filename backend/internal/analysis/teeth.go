@@ -13,12 +13,14 @@ var boneOverlayRed = [3]uint8{255, 0, 0}
 
 // AnalyzeAlgorithmVersion is part of the Analyze result cache key. Change it
 // only when the generated overlay semantics intentionally change.
-const AnalyzeAlgorithmVersion = "lowpass-fair-uniform-tooth-and-bone-contour-overlay-v3"
+const AnalyzeAlgorithmVersion = "lowpass-fair-uniform-tooth-and-bone-contour-overlay-v4"
 
 const minimumToothAreaFloorPixels = 51
 const toothOutlineThicknessPixels = 2
 const boneLineThicknessPixels = 0
 const boneOutlineThicknessPixels = 2
+const toothFillAlpha = 112
+const boneFillAlpha = 104
 const overlayContourLowPassIterations = 18
 const overlayContourSmoothingIterations = 4
 const overlayContourFairingIterations = 14
@@ -30,6 +32,7 @@ const overlayStrokeWidthPixels = 2.6
 
 type ToothOverlayResult struct {
 	Preview        imaging.PreviewImage
+	FilledPreview  imaging.PreviewImage
 	ToothPixels    int
 	BonePixels     int
 	Coverage       float64
@@ -153,13 +156,22 @@ func GenerateToothOverlay(preview imaging.PreviewImage) (ToothOverlayResult, err
 	if bonePixels < width/8 {
 		mode = mode + "; no reliable bone level found"
 	}
+	thickenedBoneMask := thickenBoneLineMaskWithWorkspace(boneMask, width, height, boneLineThicknessPixels, workspace)
 
 	return ToothOverlayResult{
 		Preview: overlayMasksWithWorkspace(
 			workspace,
 			gray,
 			toothMask,
-			thickenBoneLineMaskWithWorkspace(boneMask, width, height, boneLineThicknessPixels, workspace),
+			thickenedBoneMask,
+			preview.Width,
+			preview.Height,
+		),
+		FilledPreview: overlayFilledMasksWithWorkspace(
+			workspace,
+			gray,
+			toothMask,
+			thickenedBoneMask,
 			preview.Width,
 			preview.Height,
 		),
@@ -261,7 +273,13 @@ func overlayMasks(gray []uint8, toothMask []uint8, boneMask []uint8, width, heig
 	return overlayMasksWithWorkspace(workspace, gray, toothMask, boneMask, width, height)
 }
 
-func overlayMasksWithWorkspace(workspace *maskWorkspace, gray []uint8, toothMask []uint8, boneMask []uint8, width, height uint32) imaging.PreviewImage {
+func overlayFilledMasks(gray []uint8, toothMask []uint8, boneMask []uint8, width, height uint32) imaging.PreviewImage {
+	workspace := newMaskWorkspace()
+	defer workspace.release()
+	return overlayFilledMasksWithWorkspace(workspace, gray, toothMask, boneMask, width, height)
+}
+
+func grayscaleRGBA(gray []uint8) []uint8 {
 	rgba := make([]uint8, len(gray)*4)
 	for index, value := range gray {
 		base := index * 4
@@ -270,6 +288,11 @@ func overlayMasksWithWorkspace(workspace *maskWorkspace, gray []uint8, toothMask
 		rgba[base+2] = value
 		rgba[base+3] = 255
 	}
+	return rgba
+}
+
+func overlayMasksWithWorkspace(workspace *maskWorkspace, gray []uint8, toothMask []uint8, boneMask []uint8, width, height uint32) imaging.PreviewImage {
+	rgba := grayscaleRGBA(gray)
 
 	widthInt := int(width)
 	heightInt := int(height)
@@ -278,6 +301,26 @@ func overlayMasksWithWorkspace(workspace *maskWorkspace, gray []uint8, toothMask
 		widthInt,
 		heightInt,
 		boneOutlineSourceMaskWithWorkspace(boneMask, widthInt, heightInt, workspace),
+		boneOverlayRed,
+		toothMask,
+	)
+	drawSmoothedMaskContours(rgba, widthInt, heightInt, toothMask, toothOverlayGreen, nil)
+	return imaging.RGBAPreview(width, height, rgba)
+}
+
+func overlayFilledMasksWithWorkspace(workspace *maskWorkspace, gray []uint8, toothMask []uint8, boneMask []uint8, width, height uint32) imaging.PreviewImage {
+	rgba := grayscaleRGBA(gray)
+
+	widthInt := int(width)
+	heightInt := int(height)
+	boneFillMask := boneOutlineSourceMaskWithWorkspace(boneMask, widthInt, heightInt, workspace)
+	compositeMaskFill(rgba, boneFillMask, boneOverlayRed, boneFillAlpha, toothMask)
+	compositeMaskFill(rgba, toothMask, toothOverlayGreen, toothFillAlpha, nil)
+	drawSmoothedMaskContours(
+		rgba,
+		widthInt,
+		heightInt,
+		boneFillMask,
 		boneOverlayRed,
 		toothMask,
 	)
@@ -868,6 +911,29 @@ func compositeOverlayCoverage(rgba []uint8, coverage []float64, color [3]uint8) 
 		rgba[base+0] = uint8((uint32(rgba[base+0])*inverse + uint32(color[0])*q + 127) / 255)
 		rgba[base+1] = uint8((uint32(rgba[base+1])*inverse + uint32(color[1])*q + 127) / 255)
 		rgba[base+2] = uint8((uint32(rgba[base+2])*inverse + uint32(color[2])*q + 127) / 255)
+		rgba[base+3] = 255
+	}
+}
+
+func compositeMaskFill(rgba []uint8, mask []uint8, color [3]uint8, alpha uint32, excludeMask []uint8) {
+	if alpha == 0 || len(mask)*4 != len(rgba) {
+		return
+	}
+	if alpha > 255 {
+		alpha = 255
+	}
+	inverse := uint32(255) - alpha
+	for index, value := range mask {
+		if value == 0 {
+			continue
+		}
+		if len(excludeMask) == len(mask) && excludeMask[index] != 0 {
+			continue
+		}
+		base := index * 4
+		rgba[base+0] = uint8((uint32(rgba[base+0])*inverse + uint32(color[0])*alpha + 127) / 255)
+		rgba[base+1] = uint8((uint32(rgba[base+1])*inverse + uint32(color[1])*alpha + 127) / 255)
+		rgba[base+2] = uint8((uint32(rgba[base+2])*inverse + uint32(color[2])*alpha + 127) / 255)
 		rgba[base+3] = 255
 	}
 }

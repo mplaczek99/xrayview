@@ -6,12 +6,38 @@ import type {
 // Mock previews are deterministic SVG data URLs, so cache by variant instead
 // of re-encoding the same image every time controls rerender the UI.
 const previewCache = new Map<string, string>();
+type MockOverlayStyle = "outline" | "filled";
 
 function encodeSvg(svg: string): string {
   return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
 }
 
-function overlayMarkup(palette: Palette, processed: boolean): string {
+function outlineOverlayMarkup(tint: string): string {
+  return `
+    <rect x="118" y="94" width="170" height="88" rx="18" fill="none" stroke="${tint}" stroke-width="8" />
+    <rect x="312" y="84" width="194" height="112" rx="22" fill="none" stroke="${tint}" stroke-width="8" />
+    <rect x="520" y="236" width="206" height="102" rx="24" fill="none" stroke="${tint}" stroke-width="8" />
+    <circle cx="404" cy="292" r="36" fill="none" stroke="rgba(244, 96, 154, 0.9)" stroke-width="7" />
+    <circle cx="274" cy="214" r="20" fill="none" stroke="rgba(244, 96, 154, 0.86)" stroke-width="6" />
+    <g stroke="rgba(222, 233, 111, 0.95)" stroke-width="2">
+      <line x1="210" y1="96" x2="194" y2="208" />
+      <line x1="360" y1="86" x2="350" y2="208" />
+      <line x1="620" y1="234" x2="598" y2="360" />
+    </g>
+  `;
+}
+
+function filledOverlayMarkup(tint: string): string {
+  return `
+    <rect x="118" y="94" width="170" height="88" rx="18" fill="${tint}" />
+    <rect x="312" y="84" width="194" height="112" rx="22" fill="${tint}" />
+    <rect x="520" y="236" width="206" height="102" rx="24" fill="${tint}" />
+    <circle cx="404" cy="292" r="36" fill="rgba(244, 96, 154, 0.46)" />
+    <circle cx="274" cy="214" r="20" fill="rgba(244, 96, 154, 0.42)" />
+  `;
+}
+
+function overlayMarkup(palette: Palette, processed: boolean, style: MockOverlayStyle): string {
   if (!processed) {
     return "";
   }
@@ -25,17 +51,12 @@ function overlayMarkup(palette: Palette, processed: boolean): string {
         ? "rgba(94,217,197,0.24)"
         : "rgba(86,207,226,0.22)";
 
+  const overlay = style === "filled"
+    ? filledOverlayMarkup(tint)
+    : outlineOverlayMarkup(tint);
+
   return `
-    <rect x="118" y="94" width="170" height="88" rx="18" fill="${tint}" />
-    <rect x="312" y="84" width="194" height="112" rx="22" fill="${tint}" />
-    <rect x="520" y="236" width="206" height="102" rx="24" fill="${tint}" />
-    <circle cx="404" cy="292" r="36" fill="rgba(244, 96, 154, 0.46)" />
-    <circle cx="274" cy="214" r="20" fill="rgba(244, 96, 154, 0.42)" />
-    <g stroke="rgba(222, 233, 111, 0.95)" stroke-width="2">
-      <line x1="210" y1="96" x2="194" y2="208" />
-      <line x1="360" y1="86" x2="350" y2="208" />
-      <line x1="620" y1="234" x2="598" y2="360" />
-    </g>
+    ${overlay}
     <g font-family="Aptos, Segoe UI, sans-serif" font-size="12" font-weight="700">
       <rect x="260" y="126" width="92" height="28" rx="10" fill="rgba(53, 200, 156, 0.9)" />
       <text x="306" y="144" fill="#07120d" text-anchor="middle">Calculus</text>
@@ -46,8 +67,12 @@ function overlayMarkup(palette: Palette, processed: boolean): string {
   `;
 }
 
-export function createMockPreview(processed: boolean, palette: Palette): string {
-  const cacheKey = `${processed}:${palette}`;
+export function createMockPreview(
+  processed: boolean,
+  palette: Palette,
+  style: MockOverlayStyle = "filled",
+): string {
+  const cacheKey = `${processed}:${palette}:${style}`;
   const cached = previewCache.get(cacheKey);
   if (cached) {
     return cached;
@@ -86,7 +111,7 @@ export function createMockPreview(processed: boolean, palette: Palette): string 
         <path d="M312 516 C404 470 534 470 616 502" />
         <path d="M650 504 C742 462 874 466 964 518" />
       </g>
-      ${overlayMarkup(palette, processed)}
+      ${overlayMarkup(palette, processed, style)}
     </svg>
   `);
 
