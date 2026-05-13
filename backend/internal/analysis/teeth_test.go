@@ -18,8 +18,8 @@ import (
 	"xrayview/backend/internal/imaging"
 )
 
-const minimumFixtureDice = 0.95
-const minimumBoneFixtureDice = 0.95
+const minimumFixtureDice = 0.99
+const minimumBoneFixtureDice = 0.99
 
 func TestDetectedToothMaskUsesDynamicMaskForFixtures(t *testing.T) {
 	for _, name := range coloredFixtureNames(t) {
@@ -45,8 +45,8 @@ func TestDetectedToothMaskUsesDynamicMaskForFixtures(t *testing.T) {
 			if dice < minimumFixtureDice {
 				t.Fatalf("green mask Dice = %.3f, want >= %.2f", dice, minimumFixtureDice)
 			}
-			if name == "1" && dice < 0.95 {
-				t.Fatalf("1.bmp green mask Dice = %.3f, want >= 0.95", dice)
+			if name == "1" && dice < minimumFixtureDice {
+				t.Fatalf("1.bmp green mask Dice = %.3f, want >= %.2f", dice, minimumFixtureDice)
 			}
 			coverage := float64(countMaskPixels(gotMask)) / float64(maxInt(len(gotMask), 1))
 			if name == "1" && coverage > 0.70 {
