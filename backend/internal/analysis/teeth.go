@@ -13,7 +13,7 @@ var boneOverlayRed = [3]uint8{255, 0, 0}
 
 // AnalyzeAlgorithmVersion is part of the Analyze result cache key. Change it
 // only when the generated overlay semantics intentionally change.
-const AnalyzeAlgorithmVersion = "lowpass-fair-uniform-tooth-and-bone-contour-overlay-v4"
+const AnalyzeAlgorithmVersion = "section-boundary-tooth-and-bone-overlay-v5"
 
 const minimumToothAreaFloorPixels = 51
 const toothOutlineThicknessPixels = 2
@@ -296,15 +296,9 @@ func overlayMasksWithWorkspace(workspace *maskWorkspace, gray []uint8, toothMask
 
 	widthInt := int(width)
 	heightInt := int(height)
-	drawSmoothedMaskContours(
-		rgba,
-		widthInt,
-		heightInt,
-		boneOutlineSourceMaskWithWorkspace(boneMask, widthInt, heightInt, workspace),
-		boneOverlayRed,
-		toothMask,
-	)
-	drawSmoothedMaskContours(rgba, widthInt, heightInt, toothMask, toothOverlayGreen, nil)
+	boneSectionMask := visibleBoneSectionMaskWithWorkspace(toothMask, boneMask, widthInt, heightInt, workspace)
+	drawMaskOutlineWithWorkspace(workspace, rgba, widthInt, heightInt, boneSectionMask, boneOverlayRed, boneOutlineThicknessPixels)
+	drawMaskOutlineWithWorkspace(workspace, rgba, widthInt, heightInt, toothMask, toothOverlayGreen, toothOutlineThicknessPixels)
 	return imaging.RGBAPreview(width, height, rgba)
 }
 
@@ -313,18 +307,11 @@ func overlayFilledMasksWithWorkspace(workspace *maskWorkspace, gray []uint8, too
 
 	widthInt := int(width)
 	heightInt := int(height)
-	boneFillMask := boneOutlineSourceMaskWithWorkspace(boneMask, widthInt, heightInt, workspace)
-	compositeMaskFill(rgba, boneFillMask, boneOverlayRed, boneFillAlpha, toothMask)
+	boneSectionMask := visibleBoneSectionMaskWithWorkspace(toothMask, boneMask, widthInt, heightInt, workspace)
+	compositeMaskFill(rgba, boneSectionMask, boneOverlayRed, boneFillAlpha, nil)
 	compositeMaskFill(rgba, toothMask, toothOverlayGreen, toothFillAlpha, nil)
-	drawSmoothedMaskContours(
-		rgba,
-		widthInt,
-		heightInt,
-		boneFillMask,
-		boneOverlayRed,
-		toothMask,
-	)
-	drawSmoothedMaskContours(rgba, widthInt, heightInt, toothMask, toothOverlayGreen, nil)
+	drawMaskOutlineWithWorkspace(workspace, rgba, widthInt, heightInt, boneSectionMask, boneOverlayRed, boneOutlineThicknessPixels)
+	drawMaskOutlineWithWorkspace(workspace, rgba, widthInt, heightInt, toothMask, toothOverlayGreen, toothOutlineThicknessPixels)
 	return imaging.RGBAPreview(width, height, rgba)
 }
 
@@ -332,17 +319,47 @@ func boneOutlineMask(toothMask []uint8, boneMask []uint8, width, height int) []u
 	workspace := newMaskWorkspace()
 	defer workspace.release()
 
-	source := boneOutlineSourceMaskWithWorkspace(boneMask, width, height, workspace)
+	source := visibleBoneSectionMaskWithWorkspace(toothMask, boneMask, width, height, workspace)
 	outline := workspace.getMask(len(source))
 	work := workspace.getMask(len(source))
 	scratch := workspace.getMask(len(source))
 	innerOutlineMaskInto(outline, work, scratch, workspace.countScratch(width), source, width, height, boneOutlineThicknessPixels)
-	for index, value := range toothMask {
-		if value != 0 {
-			outline[index] = 0
+	return append([]uint8(nil), outline...)
+}
+
+func visibleBoneSectionMaskWithWorkspace(toothMask []uint8, boneMask []uint8, width, height int, workspace *maskWorkspace) []uint8 {
+	source := boneOutlineSourceMaskWithWorkspace(boneMask, width, height, workspace)
+	if len(source) == 0 || len(toothMask) != len(source) {
+		return source
+	}
+
+	visible := workspace.getMask(len(source))
+	for index, value := range source {
+		if value != 0 && toothMask[index] == 0 {
+			visible[index] = 1
 		}
 	}
-	return append([]uint8(nil), outline...)
+	return visible
+}
+
+func drawMaskOutlineWithWorkspace(
+	workspace *maskWorkspace,
+	rgba []uint8,
+	width int,
+	height int,
+	mask []uint8,
+	color [3]uint8,
+	thickness int,
+) {
+	if len(mask) == 0 || len(mask)*4 != len(rgba) {
+		return
+	}
+
+	outline := workspace.getMask(len(mask))
+	work := workspace.getMask(len(mask))
+	scratch := workspace.getMask(len(mask))
+	innerOutlineMaskInto(outline, work, scratch, workspace.countScratch(width), mask, width, height, thickness)
+	compositeMaskFill(rgba, outline, color, 255, nil)
 }
 
 func boneOutlineSourceMask(boneMask []uint8, width, height int) []uint8 {

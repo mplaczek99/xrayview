@@ -243,25 +243,29 @@ func TestOverlayMasksDrawsOneCleanBoneOutlineWithoutInternalLoops(t *testing.T) 
 	}
 }
 
-func TestOverlayMasksDrawsAntialiasedSmoothedContours(t *testing.T) {
-	const width = 24
-	const height = 24
+func TestOverlayMasksDrawExactFilledSectionBoundaries(t *testing.T) {
+	const width = 12
+	const height = 10
 
 	gray := make([]uint8, width*height)
+	for index := range gray {
+		gray[index] = 96
+	}
 	toothMask := make([]uint8, width*height)
-	fillMaskRect(toothMask, width, 6, 6, 12, 12)
+	boneMask := make([]uint8, width*height)
+	fillMaskRect(toothMask, width, 4, 3, 3, 3)
+	fillMaskRect(boneMask, width, 1, 1, 9, 7)
 
-	preview := overlayMasks(gray, toothMask, nil, width, height)
-	partialGreenPixels := 0
-	for index := 0; index < len(preview.Pixels)/4; index++ {
-		base := index * 4
-		if isPartialGreenOverlayPixel(preview.Pixels[base], preview.Pixels[base+1], preview.Pixels[base+2]) {
-			partialGreenPixels++
-		}
-	}
-	if partialGreenPixels == 0 {
-		t.Fatal("smoothed contour did not produce antialiased green edge pixels")
-	}
+	outlinePreview := overlayMasks(gray, toothMask, boneMask, width, height)
+	filledPreview := overlayFilledMasks(gray, toothMask, boneMask, width, height)
+
+	wantRed := innerOutlineMask(redDominantMaskFromRGBA(filledPreview), width, height, boneOutlineThicknessPixels)
+	gotRed := redMaskFromRGBA(outlinePreview)
+	assertMasksEqual(t, gotRed, wantRed)
+
+	wantGreen := innerOutlineMask(greenDominantMaskFromRGBA(filledPreview), width, height, toothOutlineThicknessPixels)
+	gotGreen := greenMaskFromRGBA(outlinePreview)
+	assertMasksEqual(t, gotGreen, wantGreen)
 }
 
 func TestSmoothClosedContourReducesHighFrequencyJitter(t *testing.T) {
@@ -1105,13 +1109,6 @@ func redDominantMaskFromRGBA(preview imaging.PreviewImage) []uint8 {
 
 func isGreenOverlayPixel(red, green, blue uint8) bool {
 	return green >= 150 && int(green) > int(red)+35 && int(green) > int(blue)+35
-}
-
-func isPartialGreenOverlayPixel(red, green, blue uint8) bool {
-	return green > red && green > blue &&
-		(red != toothOverlayGreen[0] ||
-			green != toothOverlayGreen[1] ||
-			blue != toothOverlayGreen[2])
 }
 
 func isRedOverlayPixel(red, green, blue uint8) bool {
