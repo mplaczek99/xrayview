@@ -103,13 +103,12 @@ func TestGenerateToothOverlayDrawsBoneLevelRedOutlineForFixtures(t *testing.T) {
 			if err != nil {
 				t.Fatalf("grayPixels returned error: %v", err)
 			}
-			toothMask := detectToothMask(gray, int(preview.Width), int(preview.Height))
 			boneMask := detectBoneLevelMask(gray, int(preview.Width), int(preview.Height))
 			wantMask := dilateBinaryMask(
-				boneOutlineMask(toothMask, boneMask, int(preview.Width), int(preview.Height)),
+				boneOutlineMask(boneMask, int(preview.Width), int(preview.Height)),
 				int(preview.Width),
 				int(preview.Height),
-				3,
+				3+boneBackgroundBridgeRadius,
 			)
 			gotMask := redDominantMaskFromRGBA(result.Preview)
 			nearby := maskContainmentRatio(gotMask, wantMask)
@@ -243,7 +242,7 @@ func TestOverlayMasksDrawsOneCleanBoneOutlineWithoutInternalLoops(t *testing.T) 
 	}
 }
 
-func TestOverlayMasksDrawExactFilledSectionBoundaries(t *testing.T) {
+func TestOverlayMasksDrawNaturalBoneOutlineOccludedByTeeth(t *testing.T) {
 	const width = 12
 	const height = 10
 
@@ -257,13 +256,17 @@ func TestOverlayMasksDrawExactFilledSectionBoundaries(t *testing.T) {
 	fillMaskRect(boneMask, width, 1, 1, 9, 7)
 
 	outlinePreview := overlayMasks(gray, toothMask, boneMask, width, height)
-	filledPreview := overlayFilledMasks(gray, toothMask, boneMask, width, height)
 
-	wantRed := innerOutlineMask(redDominantMaskFromRGBA(filledPreview), width, height, boneOutlineThicknessPixels)
+	wantRed := boneOutlineMask(boneMask, width, height)
+	for index, value := range toothMask {
+		if value != 0 {
+			wantRed[index] = 0
+		}
+	}
 	gotRed := redMaskFromRGBA(outlinePreview)
 	assertMasksEqual(t, gotRed, wantRed)
 
-	wantGreen := innerOutlineMask(greenDominantMaskFromRGBA(filledPreview), width, height, toothOutlineThicknessPixels)
+	wantGreen := innerOutlineMask(toothMask, width, height, toothOutlineThicknessPixels)
 	gotGreen := greenMaskFromRGBA(outlinePreview)
 	assertMasksEqual(t, gotGreen, wantGreen)
 }
