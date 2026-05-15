@@ -690,6 +690,7 @@ func (service *Service) executeRenderJob(
 	}
 
 	var preview imaging.PreviewImage
+	defer preview.Release()
 	if !service.runJobStage(ctx, jobID, jobStage{
 		percent: 75,
 		stage:   "renderingPreview",
@@ -701,7 +702,6 @@ func (service *Service) executeRenderJob(
 	}) {
 		return
 	}
-	defer preview.Release()
 
 	var previewPath string
 	if !service.runJobStage(ctx, jobID, jobStage{
@@ -935,6 +935,7 @@ func (service *Service) executeProcessJob(
 	}
 
 	var output processing.PipelineOutput
+	defer output.Preview.Release()
 	if !service.runJobStage(ctx, jobID, jobStage{
 		percent: 65,
 		stage:   "processingPixels",
@@ -960,7 +961,6 @@ func (service *Service) executeProcessJob(
 	}) {
 		return
 	}
-	defer output.Preview.Release()
 
 	if !service.runJobStage(ctx, jobID, jobStage{
 		percent: 84,
