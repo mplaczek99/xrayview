@@ -94,7 +94,13 @@ func (catalog *Catalog) Load() (StudyCatalog, error) {
 func (catalog *Catalog) loadFromDisk() (StudyCatalog, error) {
 	contents, err := os.ReadFile(catalog.path)
 	if err != nil {
-		return emptyStudyCatalog(), nil
+		if os.IsNotExist(err) {
+			return emptyStudyCatalog(), nil
+		}
+
+		return emptyStudyCatalog(), contracts.Internal(
+			fmt.Sprintf("failed to read study catalog %s: %v", catalog.path, err),
+		)
 	}
 
 	var value StudyCatalog
@@ -115,7 +121,11 @@ func (catalog *Catalog) RecordOpenedStudy(study contracts.StudyRecord) error {
 	catalog.mu.Lock()
 	defer catalog.mu.Unlock()
 
-	value := catalog.loadOrDefaultLocked()
+	value, err := catalog.loadOrDefaultLocked()
+	if err != nil {
+		return err
+	}
+
 	filtered := make([]RecentStudyEntry, 0, len(value.RecentStudies))
 	for _, entry := range value.RecentStudies {
 		if entry.InputPath != study.InputPath {
@@ -137,20 +147,25 @@ func (catalog *Catalog) RecordOpenedStudy(study contracts.StudyRecord) error {
 	return catalog.save(value)
 }
 
-func (catalog *Catalog) loadOrDefaultLocked() StudyCatalog {
+func (catalog *Catalog) loadOrDefaultLocked() (StudyCatalog, error) {
 	if catalog.loaded {
-		return cloneStudyCatalog(catalog.cache)
+		return cloneStudyCatalog(catalog.cache), nil
 	}
 
 	value, err := catalog.loadFromDisk()
 	if err != nil {
-		return emptyStudyCatalog()
+		if backendErr, ok := err.(contracts.BackendError); ok &&
+			backendErr.Code == contracts.BackendErrorCodeCacheCorrupted {
+			return emptyStudyCatalog(), nil
+		}
+
+		return emptyStudyCatalog(), err
 	}
 
 	catalog.cache = cloneStudyCatalog(value)
 	catalog.loaded = true
 
-	return cloneStudyCatalog(value)
+	return cloneStudyCatalog(value), nil
 }
 
 func (catalog *Catalog) save(value StudyCatalog) error {
