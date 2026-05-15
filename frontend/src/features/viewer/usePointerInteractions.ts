@@ -39,6 +39,7 @@ type ViewerInteraction =
 
 interface UsePointerInteractionsOptions {
   containerRef: RefObject<HTMLDivElement>;
+  enabled: boolean;
   annotations: AnnotationBundle;
   imageReady: boolean;
   imageSize: ViewerImageSize | null;
@@ -67,6 +68,7 @@ function pointerToLocalPoint(
 
 export function usePointerInteractions({
   containerRef,
+  enabled,
   annotations,
   imageReady,
   imageSize,
@@ -185,6 +187,10 @@ export function usePointerInteractions({
       cbs.onSelectAnnotation(nextDraft.id);
     }
 
+    if (!enabled) {
+      return;
+    }
+
     const container = containerRef.current;
     if (!container) {
       return;
@@ -197,7 +203,7 @@ export function usePointerInteractions({
       container.removeEventListener("pointermove", handlePointerMove);
       container.removeEventListener("pointerup", handlePointerUp);
     };
-  }, [containerRef, setViewport]);
+  }, [containerRef, enabled, setViewport]);
 
   const displayedAnnotations = annotations;
   const draftLineOverride = interaction?.kind === "edit" ? draftLine : null;

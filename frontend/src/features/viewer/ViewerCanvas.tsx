@@ -105,6 +105,7 @@ export function ViewerCanvas({
     resetPointerInteractions,
   } = usePointerInteractions({
     containerRef,
+    enabled: canvasVisible,
     annotations,
     imageReady,
     imageSize: resolvedImageSize,
