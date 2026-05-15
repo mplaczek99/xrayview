@@ -497,22 +497,29 @@ class WorkbenchStore {
       return;
     }
 
-    const selectedPath = await runtime.pickSaveDicomPath(buildOutputName(study.inputPath));
-    if (!selectedPath) {
-      return;
-    }
+    try {
+      const selectedPath = await runtime.pickSaveDicomPath(buildOutputName(study.inputPath));
+      if (!selectedPath) {
+        return;
+      }
 
-    const outputPath = ensureDicomExtension(selectedPath);
-    this.setStudyState(study.studyId, (current) => ({
-      ...current,
-      processing: {
-        ...current.processing,
-        form: {
-          ...current.processing.form,
-          outputPath,
+      const outputPath = ensureDicomExtension(selectedPath);
+      this.setStudyState(study.studyId, (current) => ({
+        ...current,
+        processing: {
+          ...current.processing,
+          form: {
+            ...current.processing.form,
+            outputPath,
+          },
         },
-      },
-    }));
+      }));
+    } catch (error) {
+      this.setStudyState(study.studyId, (current) => ({
+        ...current,
+        status: formatBackendError(error, "Choosing the save location failed."),
+      }));
+    }
   }
 
   async runActiveStudyProcessing() {
