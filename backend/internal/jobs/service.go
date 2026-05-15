@@ -682,7 +682,7 @@ func (service *Service) executeRenderJob(
 				return err
 			}
 			sourceStudy = loaded
-			service.memoryCache.StoreMeasurementScale(study.InputPath, sourceStudy.MeasurementScale)
+			service.memoryCache.StoreMeasurementScale(inputCacheKey(study.InputPath), sourceStudy.MeasurementScale)
 			return nil
 		},
 	}) {
@@ -800,7 +800,7 @@ func (service *Service) executeAnalyzeJob(
 				return err
 			}
 			sourceStudy = loaded
-			service.memoryCache.StoreMeasurementScale(study.InputPath, sourceStudy.MeasurementScale)
+			service.memoryCache.StoreMeasurementScale(inputCacheKey(study.InputPath), sourceStudy.MeasurementScale)
 			return nil
 		},
 	}) {
@@ -927,7 +927,7 @@ func (service *Service) executeProcessJob(
 				return err
 			}
 			sourceStudy = loaded
-			service.memoryCache.StoreMeasurementScale(study.InputPath, sourceStudy.MeasurementScale)
+			service.memoryCache.StoreMeasurementScale(inputCacheKey(study.InputPath), sourceStudy.MeasurementScale)
 			return nil
 		},
 	}) {
