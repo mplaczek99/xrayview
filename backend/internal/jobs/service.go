@@ -1248,7 +1248,7 @@ func validateInputFile(inputPath string) error {
 }
 
 // The Namespace string embedded in every fingerprint ("render-study-v2",
-// "process-study-v4") is a deliberate cache-bust key. Analyze uses a stable
+// "process-study-v5") is a deliberate cache-bust key. Analyze uses a stable
 // namespace plus analysis.AnalyzeAlgorithmVersion so algorithm changes are
 // explicit.
 func renderFingerprint(study contracts.StudyRecord) (string, error) {
@@ -1285,6 +1285,7 @@ func processFingerprint(
 		Namespace     string                 `json:"namespace"`
 		InputPath     string                 `json:"inputPath"`
 		InputIdentity inputFileIdentity      `json:"inputIdentity"`
+		OutputPath    *string                `json:"outputPath"`
 		PresetID      string                 `json:"presetId"`
 		Invert        bool                   `json:"invert"`
 		Brightness    *int                   `json:"brightness"`
@@ -1293,9 +1294,10 @@ func processFingerprint(
 		Compare       bool                   `json:"compare"`
 		Palette       *contracts.PaletteName `json:"palette"`
 	}{
-		Namespace:     "process-study-v4",
+		Namespace:     "process-study-v5",
 		InputPath:     study.InputPath,
 		InputIdentity: currentInputFileIdentity(study.InputPath),
+		OutputPath:    fingerprintOutputPath(command.OutputPath),
 		PresetID:      command.PresetID,
 		Invert:        command.Invert,
 		Brightness:    command.Brightness,
@@ -1304,6 +1306,15 @@ func processFingerprint(
 		Compare:       command.Compare,
 		Palette:       command.Palette,
 	})
+}
+
+func fingerprintOutputPath(outputPath *string) *string {
+	if outputPath == nil {
+		return nil
+	}
+
+	value := filepath.Clean(strings.TrimSpace(*outputPath))
+	return &value
 }
 
 func fingerprintJSON(value any) (string, error) {

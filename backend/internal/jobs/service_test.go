@@ -824,7 +824,7 @@ func TestStartProcessJobWritesPreviewAndServesCachedSnapshot(t *testing.T) {
 	}
 }
 
-func TestStartProcessJobUsesCacheAcrossOutputPaths(t *testing.T) {
+func TestStartProcessJobHonorsDifferentOutputPaths(t *testing.T) {
 	studyRegistry, study := registerTestStudy(t)
 	cacheStore := cache.New(filepath.Join(t.TempDir(), "cache"))
 	sourceStudy := syntheticSourceStudy()
@@ -860,6 +860,9 @@ func TestStartProcessJobUsesCacheAcrossOutputPaths(t *testing.T) {
 	if !ok {
 		t.Fatalf("first Result.Payload type = %T, want contracts.ProcessStudyCommandResult", firstSnapshot.Result.Payload)
 	}
+	if got, want := firstResult.DicomPath, firstOutputPath; got != want {
+		t.Fatalf("first DicomPath = %q, want %q", got, want)
+	}
 
 	secondOutputPath := filepath.Join(t.TempDir(), "second-output.dcm")
 	secondStarted, err := service.StartProcessJob(contracts.ProcessStudyCommand{
@@ -874,26 +877,26 @@ func TestStartProcessJobUsesCacheAcrossOutputPaths(t *testing.T) {
 		t.Fatalf("second StartProcessJob returned error: %v", err)
 	}
 
-	secondSnapshot, err := service.GetJob(contracts.JobCommand{JobID: secondStarted.JobID})
-	if err != nil {
-		t.Fatalf("GetJob returned error: %v", err)
-	}
+	secondSnapshot := waitForTerminalJob(t, service, secondStarted.JobID)
 	if got, want := secondSnapshot.State, contracts.JobStateCompleted; got != want {
 		t.Fatalf("second State = %q, want %q", got, want)
 	}
-	if !secondSnapshot.FromCache {
-		t.Fatal("second FromCache = false, want true")
+	if secondSnapshot.FromCache {
+		t.Fatal("second FromCache = true, want fresh job for different output path")
 	}
 
 	secondResult, ok := secondSnapshot.Result.Payload.(contracts.ProcessStudyCommandResult)
 	if !ok {
 		t.Fatalf("second Result.Payload type = %T, want contracts.ProcessStudyCommandResult", secondSnapshot.Result.Payload)
 	}
-	if got, want := secondResult.DicomPath, firstResult.DicomPath; got != want {
-		t.Fatalf("second DicomPath = %q, want reused %q", got, want)
+	if got, want := secondResult.DicomPath, secondOutputPath; got != want {
+		t.Fatalf("second DicomPath = %q, want %q", got, want)
 	}
-	if _, err := os.Stat(secondOutputPath); !os.IsNotExist(err) {
-		t.Fatalf("second output path unexpectedly exists, err = %v", err)
+	if secondResult.DicomPath == firstResult.DicomPath {
+		t.Fatalf("second DicomPath reused first output path %q", firstResult.DicomPath)
+	}
+	if info, err := os.Stat(secondOutputPath); err != nil || info.IsDir() {
+		t.Fatalf("second output path missing or invalid: %v", err)
 	}
 }
 
