@@ -16,9 +16,10 @@ type ResolvedProcessStudy struct {
 
 // ResolveProcessStudyCommand merges the caller's ProcessStudyCommand with
 // the preset it names. Scalar fields (Brightness, Contrast, Palette) take
-// the command value when the caller set one, otherwise the preset's.
-// Boolean toggles (Invert, Equalize) are ORed — either source can turn
-// them on, and neither can turn them off once the other enabled them.
+// the command value when the caller set one, otherwise the preset's. Boolean
+// controls are required contract fields, so they are treated as the caller's
+// final requested values; callers that want an unchanged preset should send
+// the preset's boolean values.
 func ResolveProcessStudyCommand(
 	command contracts.ProcessStudyCommand,
 ) (ResolvedProcessStudy, error) {
@@ -67,10 +68,10 @@ func ResolveProcessStudyCommand(
 
 	return ResolvedProcessStudy{
 		Controls: GrayscaleControls{
-			Invert:     command.Invert || preset.Controls.Invert,
+			Invert:     command.Invert,
 			Brightness: valueOr(command.Brightness, preset.Controls.Brightness),
 			Contrast:   valueOr(command.Contrast, preset.Controls.Contrast),
-			Equalize:   command.Equalize || preset.Controls.Equalize,
+			Equalize:   command.Equalize,
 		},
 		Palette: normalizedPalette,
 		Compare: command.Compare,

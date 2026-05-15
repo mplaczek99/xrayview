@@ -6,7 +6,7 @@ import (
 	"xrayview/backend/internal/contracts"
 )
 
-func TestResolveProcessStudyCommandAppliesPresetAndExplicitOverrides(t *testing.T) {
+func TestResolveProcessStudyCommandAppliesPresetScalarsAndFinalBooleans(t *testing.T) {
 	brightness := 24
 	contrast := 2.25
 	palette := contracts.PaletteHot
@@ -33,7 +33,7 @@ func TestResolveProcessStudyCommandAppliesPresetAndExplicitOverrides(t *testing.
 	if got, want := resolved.Controls.Contrast, contrast; got != want {
 		t.Fatalf("Contrast = %v, want %v", got, want)
 	}
-	if got, want := resolved.Controls.Equalize, true; got != want {
+	if got, want := resolved.Controls.Equalize, false; got != want {
 		t.Fatalf("Equalize = %v, want %v", got, want)
 	}
 	if got, want := resolved.Palette, PaletteHot; got != want {
@@ -41,6 +41,28 @@ func TestResolveProcessStudyCommandAppliesPresetAndExplicitOverrides(t *testing.
 	}
 	if got, want := resolved.Compare, true; got != want {
 		t.Fatalf("Compare = %v, want %v", got, want)
+	}
+}
+
+func TestResolveProcessStudyCommandCanDisablePresetBooleanControls(t *testing.T) {
+	resolved, err := ResolveProcessStudyCommand(contracts.ProcessStudyCommand{
+		PresetID: "xray",
+		// The xray preset has Equalize=true. The command field is the final
+		// requested value, so false must remain false.
+		Equalize: false,
+	})
+	if err != nil {
+		t.Fatalf("ResolveProcessStudyCommand returned error: %v", err)
+	}
+
+	if got, want := resolved.Controls.Equalize, false; got != want {
+		t.Fatalf("Equalize = %v, want %v", got, want)
+	}
+	if got, want := resolved.Controls.Brightness, 10; got != want {
+		t.Fatalf("Brightness = %d, want xray preset default %d", got, want)
+	}
+	if got, want := resolved.Palette, PaletteBone; got != want {
+		t.Fatalf("Palette = %q, want xray preset default %q", got, want)
 	}
 }
 
