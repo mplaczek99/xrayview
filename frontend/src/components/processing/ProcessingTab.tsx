@@ -2,12 +2,10 @@ import { useCallback, useMemo, useState } from "react";
 import { workbenchActions, useWorkbenchStore } from "../../app/store/workbenchStore";
 import { selectManifest, selectProcessingTabStudy } from "../../app/store/selectors";
 import { formatBackendError } from "../../lib/backendErrors";
-import { FALLBACK_PROCESSING_MANIFEST } from "../../lib/runtime";
 import type {
   PaletteName as Palette,
   ProcessingControls,
 } from "../../lib/generated/contracts";
-import type { ProcessingRequest } from "../../lib/types";
 import {
   buildProcessingUiState,
   processingControlsEqual,
@@ -26,13 +24,6 @@ export function ProcessingTab() {
   const study = useWorkbenchStore(selectProcessingTabStudy);
   const manifest = useWorkbenchStore(selectManifest);
   const processingUi = useMemo(() => buildProcessingUiState(manifest), [manifest]);
-  const defaultPreset = useMemo(
-    () =>
-      manifest.presets.find((preset) => preset.id === manifest.defaultPresetId) ??
-      manifest.presets[0] ??
-      FALLBACK_PROCESSING_MANIFEST.presets[0],
-    [manifest],
-  );
   const fallbackForm = useMemo(
     () => createProcessingForm(processingUi.defaultControls),
     [processingUi.defaultControls],
@@ -45,23 +36,6 @@ export function ProcessingTab() {
         processingControlsEqual(preset.controls, form.controls),
       ) ?? null,
     [form.controls, processingUi.presets],
-  );
-  const baselinePreset = activePreset ?? defaultPreset;
-  const request = useMemo<ProcessingRequest>(
-    () => ({
-      controls: form.controls,
-      compare: form.compare,
-      outputPath: form.outputPath,
-      presetId: baselinePreset.id,
-      presetControls: baselinePreset.controls,
-    }),
-    [
-      baselinePreset.controls,
-      baselinePreset.id,
-      form.compare,
-      form.controls,
-      form.outputPath,
-    ],
   );
   const previewUrl = study?.originalPreviewUrl ?? null;
   const processedPreviewUrl = study?.processedPreviewUrl ?? null;
@@ -92,12 +66,9 @@ export function ProcessingTab() {
       key: K,
       value: ProcessingControls[K],
     ) => {
-      updateControls({
-        ...form.controls,
-        [key]: value,
-      });
+      workbenchActions.setProcessingControl(key, value);
     },
-    [form.controls, updateControls],
+    [],
   );
 
   return (
@@ -271,7 +242,7 @@ export function ProcessingTab() {
             className="button button--primary processing-run-btn"
             type="button"
             data-testid="action-start-process"
-            onClick={() => void workbenchActions.runActiveStudyProcessing(request)}
+            onClick={() => void workbenchActions.runActiveStudyProcessing()}
             disabled={!canRun}
           >
             {busy ? (

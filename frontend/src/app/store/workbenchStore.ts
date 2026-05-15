@@ -9,6 +9,8 @@ import { formatBackendError } from "../../lib/backendErrors";
 import type {
   LineAnnotation,
   ProcessingControls,
+  ProcessingManifest,
+  ProcessingPreset,
 } from "../../lib/generated/contracts";
 import type { ProcessingRequest } from "../../lib/types";
 import type { JobSnapshot } from "../../features/jobs/model";
@@ -25,6 +27,7 @@ import {
   type WorkbenchState,
   type WorkbenchStudy,
 } from "../../features/study/model";
+import { processingControlsEqual } from "../../features/processing/presets";
 import { applyJobToStudy } from "./applyJob";
 
 const runtime = getRuntimeAdapter();
@@ -131,6 +134,37 @@ function createPendingJobSnapshot(
   return {
     ...snapshot,
     timing: advanceJobProgressTiming(null, snapshot),
+  };
+}
+
+function baselinePresetForControls(
+  manifest: ProcessingManifest,
+  controls: ProcessingControls,
+): ProcessingPreset {
+  const defaultPreset =
+    manifest.presets.find((preset) => preset.id === manifest.defaultPresetId) ??
+    manifest.presets[0] ??
+    FALLBACK_PROCESSING_MANIFEST.presets[0];
+  const matchedPreset = manifest.presets.find((preset) =>
+    processingControlsEqual(preset.controls, controls),
+  );
+
+  return matchedPreset ?? defaultPreset;
+}
+
+function processingRequestForStudy(
+  manifest: ProcessingManifest,
+  study: WorkbenchStudy,
+): ProcessingRequest {
+  const { form } = study.processing;
+  const baselinePreset = baselinePresetForControls(manifest, form.controls);
+
+  return {
+    controls: { ...form.controls },
+    compare: form.compare,
+    outputPath: form.outputPath,
+    presetId: baselinePreset.id,
+    presetControls: { ...baselinePreset.controls },
   };
 }
 
@@ -355,7 +389,7 @@ class WorkbenchStore {
     // Accumulate latest value. If a rAF is already scheduled, it will pick
     // up this value when it fires — coalescing rapid slider events into one
     // state update per animation frame.
-    this._pendingControls = controls;
+    this._pendingControls = { ...controls };
     this._pendingControlsStudyId = study.studyId;
 
     if (!this._controlsRaf) {
@@ -364,6 +398,26 @@ class WorkbenchStore {
         this.commitPendingControls();
       });
     }
+  }
+
+  setProcessingControl<K extends keyof ProcessingControls>(
+    key: K,
+    value: ProcessingControls[K],
+  ) {
+    const study = this.activeStudy();
+    if (!study) {
+      return;
+    }
+
+    const baseControls =
+      this._pendingControlsStudyId === study.studyId && this._pendingControls
+        ? this._pendingControls
+        : study.processing.form.controls;
+
+    this.setProcessingControls({
+      ...baseControls,
+      [key]: value,
+    });
   }
 
   private commitPendingControls() {
@@ -385,6 +439,20 @@ class WorkbenchStore {
         },
       },
     }));
+  }
+
+  private flushPendingControlsForStudy(studyId: string): WorkbenchStudy | null {
+    if (this._pendingControlsStudyId !== studyId || !this._pendingControls) {
+      return this.state.studies[studyId] ?? null;
+    }
+
+    if (this._controlsRaf) {
+      cancelAnimationFrame(this._controlsRaf);
+      this._controlsRaf = 0;
+    }
+
+    this.commitPendingControls();
+    return this.state.studies[studyId] ?? null;
   }
 
   setProcessingCompare(compare: boolean) {
@@ -437,8 +505,13 @@ class WorkbenchStore {
     this.setProcessingOutputPath(ensureDicomExtension(selectedPath));
   }
 
-  async runActiveStudyProcessing(request: ProcessingRequest) {
-    const study = this.activeStudy();
+  async runActiveStudyProcessing() {
+    let study = this.activeStudy();
+    if (!study) {
+      return;
+    }
+
+    study = this.flushPendingControlsForStudy(study.studyId);
     if (!study) {
       return;
     }
@@ -451,6 +524,7 @@ class WorkbenchStore {
     }
 
     try {
+      const request = processingRequestForStudy(this.state.manifest, study);
       const started = await runtime.startProcessStudyJob(study.studyId, request);
       recordJobSubmit(started.jobId);
       this.receiveJobUpdate(
