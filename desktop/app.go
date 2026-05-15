@@ -23,9 +23,10 @@ const (
 )
 
 type DesktopApp struct {
-	ctx     context.Context
-	sidecar *SidecarController
-	backend backendapi.Service
+	ctx         context.Context
+	sidecar     *SidecarController
+	backend     backendapi.Service
+	previewRoot string
 }
 
 func NewDesktopApp() (*DesktopApp, error) {
@@ -40,13 +41,15 @@ func NewDesktopApp() (*DesktopApp, error) {
 		}, nil
 	}
 
-	backend, err := backendapi.NewEmbeddedService(resolveSidecarBaseDir(), nil)
+	baseDir := resolveSidecarBaseDir()
+	backend, err := backendapi.NewEmbeddedService(baseDir, nil)
 	if err != nil {
 		return nil, fmt.Errorf("construct in-process backend: %w", err)
 	}
 
 	return &DesktopApp{
-		backend: backend,
+		backend:     backend,
+		previewRoot: filepath.Join(baseDir, "cache"),
 	}, nil
 }
 
@@ -265,7 +268,36 @@ func (app *DesktopApp) ServeAsset(writer http.ResponseWriter, request *http.Requ
 		return
 	}
 
-	file, err := os.Open(rawPath)
+	rootDir, err := app.previewCacheRoot()
+	if err != nil {
+		http.Error(writer, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	resolvedRoot, err := filepath.EvalSymlinks(rootDir)
+	if err != nil {
+		http.Error(writer, fmt.Sprintf("cache root unavailable: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	resolvedTarget, err := filepath.EvalSymlinks(rawPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			http.Error(writer, fmt.Sprintf("preview artifact not found: %s", rawPath), http.StatusNotFound)
+			return
+		}
+
+		http.Error(writer, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	rel, err := filepath.Rel(resolvedRoot, resolvedTarget)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		http.Error(writer, "preview path outside cache root", http.StatusForbidden)
+		return
+	}
+
+	file, err := os.Open(resolvedTarget)
 	if err != nil {
 		if os.IsNotExist(err) {
 			http.Error(writer, fmt.Sprintf("preview artifact not found: %s", rawPath), http.StatusNotFound)
@@ -293,7 +325,7 @@ func (app *DesktopApp) ServeAsset(writer http.ResponseWriter, request *http.Requ
 	writer.Header().Set("Cache-Control", "public, max-age=3600")
 	writer.Header().Set("ETag", etag)
 
-	contentType := mime.TypeByExtension(filepath.Ext(rawPath))
+	contentType := mime.TypeByExtension(filepath.Ext(resolvedTarget))
 	if contentType == "" {
 		header := make([]byte, 512)
 		n, readErr := file.Read(header)
@@ -310,6 +342,18 @@ func (app *DesktopApp) ServeAsset(writer http.ResponseWriter, request *http.Requ
 
 	writer.Header().Set("content-type", contentType)
 	http.ServeContent(writer, request, info.Name(), info.ModTime(), file)
+}
+
+func (app *DesktopApp) previewCacheRoot() (string, error) {
+	if strings.TrimSpace(app.previewRoot) != "" {
+		return filepath.Clean(app.previewRoot), nil
+	}
+
+	if app.sidecar != nil && app.sidecar.Enabled() {
+		return app.sidecar.CacheDir()
+	}
+
+	return "", errors.New("preview cache root is not configured")
 }
 
 func invokeViaHTTP[T any](app *DesktopApp, command string, payload any) (T, error) {

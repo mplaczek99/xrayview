@@ -3,8 +3,10 @@ package main
 import (
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -126,19 +128,29 @@ func (service stubBackendService) GetJobs(
 	return []backendapi.JobSnapshot{}, nil
 }
 
-func TestServeAssetServesPreviewArtifact(t *testing.T) {
-	app := &DesktopApp{}
+func newPreviewAssetTestApp(t *testing.T) (*DesktopApp, string) {
+	t.Helper()
+	rootDir := t.TempDir()
+	return &DesktopApp{previewRoot: rootDir}, rootDir
+}
 
-	previewPath := filepath.Join(t.TempDir(), "preview.png")
+func newPreviewAssetRequest(previewPath string) *http.Request {
+	return httptest.NewRequest(
+		http.MethodGet,
+		previewEndpointPath+"?path="+url.QueryEscape(previewPath),
+		nil,
+	)
+}
+
+func TestServeAssetServesPreviewArtifact(t *testing.T) {
+	app, rootDir := newPreviewAssetTestApp(t)
+
+	previewPath := filepath.Join(rootDir, "preview.png")
 	if err := os.WriteFile(previewPath, tinyPNG, 0o644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
-	request := httptest.NewRequest(
-		http.MethodGet,
-		previewEndpointPath+"?path="+previewPath,
-		nil,
-	)
+	request := newPreviewAssetRequest(previewPath)
 	recorder := httptest.NewRecorder()
 
 	app.ServeAsset(recorder, request)
@@ -157,14 +169,14 @@ func TestServeAssetServesPreviewArtifact(t *testing.T) {
 }
 
 func TestServeAssetSetsCacheControlAndETag(t *testing.T) {
-	app := &DesktopApp{}
+	app, rootDir := newPreviewAssetTestApp(t)
 
-	previewPath := filepath.Join(t.TempDir(), "preview.png")
+	previewPath := filepath.Join(rootDir, "preview.png")
 	if err := os.WriteFile(previewPath, tinyPNG, 0o644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
-	request := httptest.NewRequest(http.MethodGet, previewEndpointPath+"?path="+previewPath, nil)
+	request := newPreviewAssetRequest(previewPath)
 	recorder := httptest.NewRecorder()
 	app.ServeAsset(recorder, request)
 
@@ -180,23 +192,23 @@ func TestServeAssetSetsCacheControlAndETag(t *testing.T) {
 }
 
 func TestServeAssetReturns304OnMatchingETag(t *testing.T) {
-	app := &DesktopApp{}
+	app, rootDir := newPreviewAssetTestApp(t)
 
-	previewPath := filepath.Join(t.TempDir(), "preview.png")
+	previewPath := filepath.Join(rootDir, "preview.png")
 	if err := os.WriteFile(previewPath, tinyPNG, 0o644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
 	// Cold request to capture ETag.
 	cold := httptest.NewRecorder()
-	app.ServeAsset(cold, httptest.NewRequest(http.MethodGet, previewEndpointPath+"?path="+previewPath, nil))
+	app.ServeAsset(cold, newPreviewAssetRequest(previewPath))
 	etag := cold.Header().Get("ETag")
 	if etag == "" {
 		t.Fatal("cold request returned no ETag")
 	}
 
 	// Conditional request with matching ETag must return 304.
-	req := httptest.NewRequest(http.MethodGet, previewEndpointPath+"?path="+previewPath, nil)
+	req := newPreviewAssetRequest(previewPath)
 	req.Header.Set("If-None-Match", etag)
 	recorder := httptest.NewRecorder()
 	app.ServeAsset(recorder, req)
@@ -210,14 +222,14 @@ func TestServeAssetReturns304OnMatchingETag(t *testing.T) {
 }
 
 func TestServeAssetReturns200OnStaleETag(t *testing.T) {
-	app := &DesktopApp{}
+	app, rootDir := newPreviewAssetTestApp(t)
 
-	previewPath := filepath.Join(t.TempDir(), "preview.png")
+	previewPath := filepath.Join(rootDir, "preview.png")
 	if err := os.WriteFile(previewPath, tinyPNG, 0o644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, previewEndpointPath+"?path="+previewPath, nil)
+	req := newPreviewAssetRequest(previewPath)
 	req.Header.Set("If-None-Match", `"stale-etag"`)
 	recorder := httptest.NewRecorder()
 	app.ServeAsset(recorder, req)
@@ -227,6 +239,46 @@ func TestServeAssetReturns200OnStaleETag(t *testing.T) {
 	}
 	if recorder.Body.Len() == 0 {
 		t.Error("ServeAsset() stale ETag should return full body")
+	}
+}
+
+func TestServeAssetRejectsPathOutsideCacheRoot(t *testing.T) {
+	app, _ := newPreviewAssetTestApp(t)
+
+	outsidePath := filepath.Join(t.TempDir(), "outside.png")
+	if err := os.WriteFile(outsidePath, tinyPNG, 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	recorder := httptest.NewRecorder()
+	app.ServeAsset(recorder, newPreviewAssetRequest(outsidePath))
+
+	if recorder.Code != http.StatusForbidden {
+		t.Fatalf("ServeAsset() status = %d, want %d", recorder.Code, http.StatusForbidden)
+	}
+}
+
+func TestServeAssetRejectsSymlinkEscape(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink behaviour differs on Windows")
+	}
+
+	app, rootDir := newPreviewAssetTestApp(t)
+	outsidePath := filepath.Join(t.TempDir(), "outside.png")
+	if err := os.WriteFile(outsidePath, tinyPNG, 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	linkPath := filepath.Join(rootDir, "escape.png")
+	if err := os.Symlink(outsidePath, linkPath); err != nil {
+		t.Fatalf("Symlink() error = %v", err)
+	}
+
+	recorder := httptest.NewRecorder()
+	app.ServeAsset(recorder, newPreviewAssetRequest(linkPath))
+
+	if recorder.Code != http.StatusForbidden {
+		t.Fatalf("ServeAsset() status = %d, want %d", recorder.Code, http.StatusForbidden)
 	}
 }
 
