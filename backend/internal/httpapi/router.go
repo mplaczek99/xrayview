@@ -20,7 +20,11 @@ import (
 const maxPooledBodyBufferCap = 64 * 1024
 
 // bodyPool reuses request body read buffers across handler calls.
-var bodyPool = sync.Pool{New: func() any { return new(bytes.Buffer) }}
+var bodyPool = newBodyPool()
+
+func newBodyPool() *sync.Pool {
+	return &sync.Pool{New: func() any { return new(bytes.Buffer) }}
+}
 
 // jsonWriterEntry pools a bytes.Buffer + json.Encoder pair for writeJSON.
 // The encoder's writer is permanently wired to the buffer; callers Reset()

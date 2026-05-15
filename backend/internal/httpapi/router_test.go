@@ -16,7 +16,6 @@ import (
 	"reflect"
 	"runtime"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -1539,7 +1538,7 @@ func BenchmarkDecodeJSONRequest(b *testing.B) {
 
 func TestPutBodyBufferDropsOversizedBuffers(t *testing.T) {
 	previousPool := bodyPool
-	bodyPool = sync.Pool{New: func() any { return new(bytes.Buffer) }}
+	bodyPool = newBodyPool()
 	t.Cleanup(func() {
 		bodyPool = previousPool
 	})
@@ -1555,7 +1554,7 @@ func TestPutBodyBufferDropsOversizedBuffers(t *testing.T) {
 
 func BenchmarkDecodeJSONRequestSmallAfterOversizeBody(b *testing.B) {
 	previousPool := bodyPool
-	bodyPool = sync.Pool{New: func() any { return new(bytes.Buffer) }}
+	bodyPool = newBodyPool()
 	b.Cleanup(func() {
 		bodyPool = previousPool
 	})
