@@ -502,7 +502,17 @@ class WorkbenchStore {
       return;
     }
 
-    this.setProcessingOutputPath(ensureDicomExtension(selectedPath));
+    const outputPath = ensureDicomExtension(selectedPath);
+    this.setStudyState(study.studyId, (current) => ({
+      ...current,
+      processing: {
+        ...current.processing,
+        form: {
+          ...current.processing.form,
+          outputPath,
+        },
+      },
+    }));
   }
 
   async runActiveStudyProcessing() {
