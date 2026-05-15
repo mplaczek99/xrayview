@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -135,6 +136,63 @@ func TestSSEHubMultipleClientsAllReceiveBroadcast(t *testing.T) {
 		if snap.JobID != "multi-client-job" {
 			t.Fatalf("client %d jobId = %q, want %q", i, snap.JobID, "multi-client-job")
 		}
+	}
+}
+
+func TestSSEHubClearsServerWriteTimeoutForLongLivedStream(t *testing.T) {
+	hub := newSSEHub(nil)
+
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hub.serveSSE(w, r)
+	}))
+	server.Config.WriteTimeout = 25 * time.Millisecond
+	server.Start()
+	defer server.Close()
+
+	resp, err := http.Get(server.URL) //nolint:noctx
+	if err != nil {
+		t.Fatalf("GET /events: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if got, want := resp.StatusCode, http.StatusOK; got != want {
+		t.Fatalf("status = %d, want %d", got, want)
+	}
+
+	dataCh := make(chan string, 1)
+	errCh := make(chan error, 1)
+	go func() {
+		scanner := bufio.NewScanner(resp.Body)
+		for scanner.Scan() {
+			line := scanner.Text()
+			if strings.HasPrefix(line, "data: ") {
+				dataCh <- line[6:]
+				return
+			}
+		}
+		if err := scanner.Err(); err != nil {
+			errCh <- err
+			return
+		}
+		errCh <- io.EOF
+	}()
+
+	time.Sleep(3 * server.Config.WriteTimeout)
+	hub.broadcast(contracts.JobSnapshot{JobID: "after-write-timeout"})
+
+	select {
+	case dataLine := <-dataCh:
+		var got contracts.JobSnapshot
+		if err := json.Unmarshal([]byte(dataLine), &got); err != nil {
+			t.Fatalf("unmarshal SSE frame: %v", err)
+		}
+		if got.JobID != "after-write-timeout" {
+			t.Fatalf("jobId = %q, want %q", got.JobID, "after-write-timeout")
+		}
+	case err := <-errCh:
+		t.Fatalf("read SSE frame: %v", err)
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("timed out waiting for SSE frame after server write timeout elapsed")
 	}
 }
 

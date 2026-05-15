@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"xrayview/backend/internal/contracts"
 )
@@ -113,6 +114,11 @@ func (h *sseHub) serveSSE(writer http.ResponseWriter, request *http.Request) {
 	if !ok {
 		http.Error(writer, "streaming not supported", http.StatusInternalServerError)
 		return
+	}
+	// SSE streams are intentionally long-lived. Clear the server write timeout
+	// for this request so an idle stream can still deliver a later job update.
+	if err := http.NewResponseController(writer).SetWriteDeadline(time.Time{}); err != nil && h.logger != nil {
+		h.logger.Debug("sse write deadline not adjustable", slog.String("error", err.Error()))
 	}
 
 	writer.Header().Set("Content-Type", "text/event-stream")
