@@ -87,6 +87,57 @@ func (decoder *countingServiceDecoder) CallCount() int {
 	return decoder.calls
 }
 
+type fileContentDecoder struct {
+	mu    sync.Mutex
+	calls int
+}
+
+func (decoder *fileContentDecoder) DecodeStudy(
+	ctx context.Context,
+	path string,
+) (dicommeta.SourceStudy, error) {
+	if err := ctx.Err(); err != nil {
+		return dicommeta.SourceStudy{}, err
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return dicommeta.SourceStudy{}, err
+	}
+
+	decoder.mu.Lock()
+	decoder.calls++
+	decoder.mu.Unlock()
+
+	width := uint32(2)
+	if strings.Contains(string(raw), "version-two") {
+		width = 3
+	}
+
+	pixels := make([]float32, width)
+	for index := range pixels {
+		pixels[index] = float32(index)
+	}
+
+	return dicommeta.SourceStudy{
+		Image: imaging.SourceImage{
+			Width:    width,
+			Height:   1,
+			Format:   imaging.FormatGrayFloat32,
+			Pixels:   pixels,
+			MinValue: 0,
+			MaxValue: float32(width - 1),
+		},
+	}, nil
+}
+
+func (decoder *fileContentDecoder) CallCount() int {
+	decoder.mu.Lock()
+	defer decoder.mu.Unlock()
+
+	return decoder.calls
+}
+
 type concurrencyTrackingDecoder struct {
 	mu        sync.Mutex
 	study     dicommeta.SourceStudy
@@ -299,6 +350,92 @@ func TestStartRenderJobWritesPreviewAndServesCachedSnapshot(t *testing.T) {
 	}
 	if got, want := cachedResult.PreviewPath, result.PreviewPath; got != want {
 		t.Fatalf("cached PreviewPath = %q, want %q", got, want)
+	}
+}
+
+func TestStartRenderJobInvalidatesCachesWhenInputFileAtSamePathChanges(t *testing.T) {
+	studyRegistry, study := registerTestStudy(t)
+	if err := os.WriteFile(study.InputPath, []byte("version-one"), 0o644); err != nil {
+		t.Fatalf("WriteFile first version returned error: %v", err)
+	}
+
+	cacheStore := cache.New(filepath.Join(t.TempDir(), "cache"))
+	decoder := &fileContentDecoder{}
+	service := newService(
+		cacheStore,
+		studyRegistry,
+		nil,
+		dicomexport.GoWriter{},
+		func() (studyDecoder, error) { return decoder, nil },
+		sequenceJobIDs("job-1", "job-2"),
+	)
+
+	var renderMu sync.Mutex
+	renderedWidths := []uint32{}
+	service.renderSourcePreview = func(
+		source imaging.SourceImage,
+		_ render.RenderPlan,
+	) imaging.PreviewImage {
+		renderMu.Lock()
+		renderedWidths = append(renderedWidths, source.Width)
+		renderMu.Unlock()
+
+		pixels := make([]uint8, source.PixelCount())
+		for index := range pixels {
+			pixels[index] = uint8(source.Width)
+		}
+		return imaging.GrayPreview(source.Width, source.Height, pixels)
+	}
+
+	firstStarted, err := service.StartRenderJob(contracts.RenderStudyCommand{StudyID: study.StudyID})
+	if err != nil {
+		t.Fatalf("first StartRenderJob returned error: %v", err)
+	}
+	firstSnapshot := waitForTerminalJob(t, service, firstStarted.JobID)
+	if firstSnapshot.FromCache {
+		t.Fatal("first FromCache = true, want fresh render")
+	}
+	firstResult, ok := firstSnapshot.Result.Payload.(contracts.RenderStudyCommandResult)
+	if !ok {
+		t.Fatalf("first Result.Payload type = %T, want contracts.RenderStudyCommandResult", firstSnapshot.Result.Payload)
+	}
+	if got, want := firstResult.LoadedWidth, uint32(2); got != want {
+		t.Fatalf("first LoadedWidth = %d, want %d", got, want)
+	}
+
+	if err := os.WriteFile(study.InputPath, []byte("version-two-with-a-different-size"), 0o644); err != nil {
+		t.Fatalf("WriteFile second version returned error: %v", err)
+	}
+
+	secondStarted, err := service.StartRenderJob(contracts.RenderStudyCommand{StudyID: study.StudyID})
+	if err != nil {
+		t.Fatalf("second StartRenderJob returned error: %v", err)
+	}
+	secondSnapshot := waitForTerminalJob(t, service, secondStarted.JobID)
+	if secondSnapshot.FromCache {
+		t.Fatal("second FromCache = true after same-path file replacement, want fresh render")
+	}
+	secondResult, ok := secondSnapshot.Result.Payload.(contracts.RenderStudyCommandResult)
+	if !ok {
+		t.Fatalf("second Result.Payload type = %T, want contracts.RenderStudyCommandResult", secondSnapshot.Result.Payload)
+	}
+	if got, want := secondResult.LoadedWidth, uint32(3); got != want {
+		t.Fatalf("second LoadedWidth = %d, want %d", got, want)
+	}
+	if secondResult.PreviewPath == firstResult.PreviewPath {
+		t.Fatalf("second PreviewPath reused %q after input replacement", secondResult.PreviewPath)
+	}
+	if got, want := decoder.CallCount(), 2; got != want {
+		t.Fatalf("DecodeStudy calls = %d, want %d", got, want)
+	}
+
+	renderMu.Lock()
+	defer renderMu.Unlock()
+	if got, want := len(renderedWidths), 2; got != want {
+		t.Fatalf("renderSourcePreview calls = %d, want %d", got, want)
+	}
+	if got, want := renderedWidths[1], uint32(3); got != want {
+		t.Fatalf("second rendered source width = %d, want %d", got, want)
 	}
 }
 

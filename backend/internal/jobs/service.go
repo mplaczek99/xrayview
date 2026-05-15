@@ -478,6 +478,13 @@ type analyzeJobInput struct {
 	filledPreviewPath string
 }
 
+type inputFileIdentity struct {
+	State           string `json:"state"`
+	Size            int64  `json:"size,omitempty"`
+	Mode            uint32 `json:"mode,omitempty"`
+	ModTimeUnixNano int64  `json:"modTimeUnixNano,omitempty"`
+}
+
 // startJob is the common StartXJob lifecycle: validate inputs, fingerprint the
 // request, short-circuit on a memory cache hit, reserve or dedupe a registry
 // entry, attach cancellation, and hand execution to the correct worker queue.
@@ -1137,8 +1144,9 @@ func (service *Service) loadSourceStudy(
 		)
 	}
 
-	sourceStudy, err := service.decodeCache.GetOrDecode(
+	sourceStudy, err := service.decodeCache.GetOrDecodeWithKey(
 		ctx,
+		inputCacheKey(study.InputPath),
 		study.InputPath,
 		benchmarkingDecoder{
 			delegate: decoder,
@@ -1158,12 +1166,13 @@ func (service *Service) loadOrRenderSourcePreview(
 	inputPath string,
 	source imaging.SourceImage,
 ) imaging.PreviewImage {
-	if preview, ok := service.memoryCache.LoadSourcePreview(inputPath); ok {
+	cacheKey := inputCacheKey(inputPath)
+	if preview, ok := service.memoryCache.LoadSourcePreview(cacheKey); ok {
 		return preview
 	}
 
 	preview := service.renderSourcePreview(source, render.DefaultRenderPlan())
-	service.memoryCache.StoreSourcePreview(inputPath, preview)
+	service.memoryCache.StoreSourcePreview(cacheKey, preview)
 	return preview
 }
 
@@ -1238,29 +1247,33 @@ func validateInputFile(inputPath string) error {
 	return nil
 }
 
-// The Namespace string embedded in every fingerprint ("render-study-v1",
-// "process-study-v3") is a deliberate cache-bust key. Render/process keep the
-// historical version suffix in the namespace. Analyze uses a stable namespace
-// plus analysis.AnalyzeAlgorithmVersion so algorithm changes are explicit.
+// The Namespace string embedded in every fingerprint ("render-study-v2",
+// "process-study-v4") is a deliberate cache-bust key. Analyze uses a stable
+// namespace plus analysis.AnalyzeAlgorithmVersion so algorithm changes are
+// explicit.
 func renderFingerprint(study contracts.StudyRecord) (string, error) {
 	return fingerprintJSON(struct {
-		Namespace string `json:"namespace"`
-		InputPath string `json:"inputPath"`
+		Namespace     string            `json:"namespace"`
+		InputPath     string            `json:"inputPath"`
+		InputIdentity inputFileIdentity `json:"inputIdentity"`
 	}{
-		Namespace: "render-study-v1",
-		InputPath: study.InputPath,
+		Namespace:     "render-study-v2",
+		InputPath:     study.InputPath,
+		InputIdentity: currentInputFileIdentity(study.InputPath),
 	})
 }
 
 func analyzeFingerprint(study contracts.StudyRecord) (string, error) {
 	return fingerprintJSON(struct {
-		Namespace        string `json:"namespace"`
-		AlgorithmVersion string `json:"algorithmVersion"`
-		InputPath        string `json:"inputPath"`
+		Namespace        string            `json:"namespace"`
+		AlgorithmVersion string            `json:"algorithmVersion"`
+		InputPath        string            `json:"inputPath"`
+		InputIdentity    inputFileIdentity `json:"inputIdentity"`
 	}{
 		Namespace:        analyzeFingerprintNamespace,
 		AlgorithmVersion: analysis.AnalyzeAlgorithmVersion,
 		InputPath:        study.InputPath,
+		InputIdentity:    currentInputFileIdentity(study.InputPath),
 	})
 }
 
@@ -1269,25 +1282,27 @@ func processFingerprint(
 	command contracts.ProcessStudyCommand,
 ) (string, error) {
 	return fingerprintJSON(struct {
-		Namespace  string                 `json:"namespace"`
-		InputPath  string                 `json:"inputPath"`
-		PresetID   string                 `json:"presetId"`
-		Invert     bool                   `json:"invert"`
-		Brightness *int                   `json:"brightness"`
-		Contrast   *float64               `json:"contrast"`
-		Equalize   bool                   `json:"equalize"`
-		Compare    bool                   `json:"compare"`
-		Palette    *contracts.PaletteName `json:"palette"`
+		Namespace     string                 `json:"namespace"`
+		InputPath     string                 `json:"inputPath"`
+		InputIdentity inputFileIdentity      `json:"inputIdentity"`
+		PresetID      string                 `json:"presetId"`
+		Invert        bool                   `json:"invert"`
+		Brightness    *int                   `json:"brightness"`
+		Contrast      *float64               `json:"contrast"`
+		Equalize      bool                   `json:"equalize"`
+		Compare       bool                   `json:"compare"`
+		Palette       *contracts.PaletteName `json:"palette"`
 	}{
-		Namespace:  "process-study-v3",
-		InputPath:  study.InputPath,
-		PresetID:   command.PresetID,
-		Invert:     command.Invert,
-		Brightness: command.Brightness,
-		Contrast:   command.Contrast,
-		Equalize:   command.Equalize,
-		Compare:    command.Compare,
-		Palette:    command.Palette,
+		Namespace:     "process-study-v4",
+		InputPath:     study.InputPath,
+		InputIdentity: currentInputFileIdentity(study.InputPath),
+		PresetID:      command.PresetID,
+		Invert:        command.Invert,
+		Brightness:    command.Brightness,
+		Contrast:      command.Contrast,
+		Equalize:      command.Equalize,
+		Compare:       command.Compare,
+		Palette:       command.Palette,
 	})
 }
 
@@ -1299,6 +1314,37 @@ func fingerprintJSON(value any) (string, error) {
 
 	sum := sha256.Sum256(payload)
 	return hex.EncodeToString(sum[:]), nil
+}
+
+func currentInputFileIdentity(inputPath string) inputFileIdentity {
+	info, err := os.Stat(inputPath)
+	if err != nil {
+		return inputFileIdentity{State: "unavailable"}
+	}
+
+	state := "file"
+	if info.IsDir() {
+		state = "directory"
+	}
+
+	return inputFileIdentity{
+		State:           state,
+		Size:            info.Size(),
+		Mode:            uint32(info.Mode()),
+		ModTimeUnixNano: info.ModTime().UnixNano(),
+	}
+}
+
+func inputCacheKey(inputPath string) string {
+	identity := currentInputFileIdentity(inputPath)
+	return fmt.Sprintf(
+		"%s\x00%s\x00%d\x00%d\x00%d",
+		inputPath,
+		identity.State,
+		identity.Size,
+		identity.Mode,
+		identity.ModTimeUnixNano,
+	)
 }
 
 type benchmarkingDecoder struct {
