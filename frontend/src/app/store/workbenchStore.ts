@@ -224,18 +224,18 @@ class WorkbenchStore {
       return;
     }
 
-    const selectedPath = await runtime.pickDicomFile();
-    if (!selectedPath) {
-      return;
-    }
-
-    this.setState((current) => ({
-      ...current,
-      isOpeningStudy: true,
-      workbenchStatus: "Opening study...",
-    }));
-
     try {
+      const selectedPath = await runtime.pickDicomFile();
+      if (!selectedPath) {
+        return;
+      }
+
+      this.setState((current) => ({
+        ...current,
+        isOpeningStudy: true,
+        workbenchStatus: "Opening study...",
+      }));
+
       const study = await runtime.openStudy(selectedPath);
       const workbenchStudy = createWorkbenchStudy(
         study,
