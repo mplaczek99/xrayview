@@ -107,7 +107,8 @@ func TestGenerateToothOverlayDrawsBoneLevelRedOutlineForFixtures(t *testing.T) {
 			boneMask := detectBoneLevelMask(gray, int(preview.Width), int(preview.Height))
 			workspace := newMaskWorkspace()
 			boneSource := boneBackgroundSourceMaskWithWorkspace(boneMask, toothMask, int(preview.Width), int(preview.Height), workspace)
-			wantMask := innerOutlineMask(boneSource, int(preview.Width), int(preview.Height), boneOutlineThicknessPixels)
+			boneSectionSource := boneSectionFillSourceWithWorkspace(boneSource, gray, int(preview.Width), int(preview.Height), workspace)
+			wantMask := innerOutlineMask(boneSectionSource, int(preview.Width), int(preview.Height), boneOutlineThicknessPixels)
 			workspace.release()
 			clearMaskPixels(wantMask, toothMask)
 			gotMask := redDominantMaskFromRGBA(result.Preview)
@@ -215,6 +216,9 @@ func TestOverlayMasksDrawsOneCleanBoneOutlineWithoutInternalLoops(t *testing.T) 
 	const height = 9
 
 	gray := make([]uint8, width*height)
+	for index := range gray {
+		gray[index] = 96
+	}
 	toothMask := make([]uint8, width*height)
 	boneMask := make([]uint8, width*height)
 	fillMaskRect(boneMask, width, 2, 2, 5, 5)

@@ -19,11 +19,6 @@ function outlineOverlayMarkup(tint: string): string {
     <rect x="520" y="236" width="206" height="102" rx="24" fill="none" stroke="${tint}" stroke-width="8" />
     <circle cx="404" cy="292" r="36" fill="none" stroke="rgba(244, 96, 154, 0.9)" stroke-width="7" />
     <circle cx="274" cy="214" r="20" fill="none" stroke="rgba(244, 96, 154, 0.86)" stroke-width="6" />
-    <g stroke="rgba(222, 233, 111, 0.95)" stroke-width="2">
-      <line x1="210" y1="96" x2="194" y2="208" />
-      <line x1="360" y1="86" x2="350" y2="208" />
-      <line x1="620" y1="234" x2="598" y2="360" />
-    </g>
   `;
 }
 

@@ -13,7 +13,7 @@ var boneOverlayRed = [3]uint8{255, 0, 0}
 
 // AnalyzeAlgorithmVersion is part of the Analyze result cache key. Change it
 // only when the generated overlay semantics intentionally change.
-const AnalyzeAlgorithmVersion = "section-boundary-tooth-and-bone-overlay-v13"
+const AnalyzeAlgorithmVersion = "section-boundary-tooth-and-bone-overlay-v14"
 
 const minimumToothAreaFloorPixels = 51
 const toothOutlineThicknessPixels = 2
@@ -307,8 +307,8 @@ func overlayMasksWithWorkspace(workspace *maskWorkspace, gray []uint8, toothMask
 	widthInt := int(width)
 	heightInt := int(height)
 	boneSource := boneBackgroundSourceMaskWithWorkspace(boneMask, toothMask, widthInt, heightInt, workspace)
-	boneDisplaySource := boneOutlineDisplaySourceWithWorkspace(boneSource, gray, widthInt, heightInt, workspace)
-	drawMaskOutlineWithWorkspace(workspace, rgba, widthInt, heightInt, boneDisplaySource, boneOverlayRed, boneOutlineThicknessPixels, toothMask)
+	boneSectionSource := boneSectionFillSourceWithWorkspace(boneSource, gray, widthInt, heightInt, workspace)
+	drawMaskOutlineWithWorkspace(workspace, rgba, widthInt, heightInt, boneSectionSource, boneOverlayRed, boneOutlineThicknessPixels, toothMask)
 	drawMaskOutlineWithWorkspace(workspace, rgba, widthInt, heightInt, toothMask, toothOverlayGreen, toothOutlineThicknessPixels, nil)
 	return imaging.RGBAPreview(width, height, rgba)
 }
