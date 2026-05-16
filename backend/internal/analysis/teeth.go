@@ -11,17 +11,12 @@ import (
 var toothOverlayGreen = [3]uint8{102, 255, 0}
 var boneOverlayRed = [3]uint8{255, 0, 0}
 
-// AnalyzeAlgorithmVersion is part of the Analyze result cache key. Change it
-// only when the generated overlay semantics intentionally change.
-const AnalyzeAlgorithmVersion = "section-boundary-tooth-and-bone-overlay-v14"
-
 const minimumToothAreaFloorPixels = 51
 const toothOutlineThicknessPixels = 2
 const boneLineThicknessPixels = 0
 const boneOutlineThicknessPixels = 2
 const toothFillAlpha = 112
 const boneFillAlpha = 104
-const boneSectionBlackThreshold = 0
 const overlayContourLowPassIterations = 18
 const overlayContourSmoothingIterations = 4
 const overlayContourFairingIterations = 14
@@ -306,9 +301,7 @@ func overlayMasksWithWorkspace(workspace *maskWorkspace, gray []uint8, toothMask
 
 	widthInt := int(width)
 	heightInt := int(height)
-	boneSource := boneBackgroundSourceMaskWithWorkspace(boneMask, toothMask, widthInt, heightInt, workspace)
-	boneSectionSource := boneSectionFillSourceWithWorkspace(boneSource, gray, widthInt, heightInt, workspace)
-	drawMaskOutlineWithWorkspace(workspace, rgba, widthInt, heightInt, boneSectionSource, boneOverlayRed, boneOutlineThicknessPixels, toothMask)
+	drawMaskOutlineWithWorkspace(workspace, rgba, widthInt, heightInt, boneMask, boneOverlayRed, boneOutlineThicknessPixels, toothMask)
 	drawMaskOutlineWithWorkspace(workspace, rgba, widthInt, heightInt, toothMask, toothOverlayGreen, toothOutlineThicknessPixels, nil)
 	return imaging.RGBAPreview(width, height, rgba)
 }
@@ -318,44 +311,11 @@ func overlayFilledMasksWithWorkspace(workspace *maskWorkspace, gray []uint8, too
 
 	widthInt := int(width)
 	heightInt := int(height)
-	boneSource := boneBackgroundSourceMaskWithWorkspace(boneMask, toothMask, widthInt, heightInt, workspace)
-	boneFillSource := boneSectionFillSourceWithWorkspace(boneSource, gray, widthInt, heightInt, workspace)
-	compositeMaskFill(rgba, boneFillSource, boneOverlayRed, boneFillAlpha, toothMask)
-	drawMaskOutlineWithWorkspace(workspace, rgba, widthInt, heightInt, boneFillSource, boneOverlayRed, boneOutlineThicknessPixels, toothMask)
+	compositeMaskFill(rgba, boneMask, boneOverlayRed, boneFillAlpha, toothMask)
+	drawMaskOutlineWithWorkspace(workspace, rgba, widthInt, heightInt, boneMask, boneOverlayRed, boneOutlineThicknessPixels, toothMask)
 	compositeMaskFill(rgba, toothMask, toothOverlayGreen, toothFillAlpha, nil)
 	drawMaskOutlineWithWorkspace(workspace, rgba, widthInt, heightInt, toothMask, toothOverlayGreen, toothOutlineThicknessPixels, nil)
 	return imaging.RGBAPreview(width, height, rgba)
-}
-
-func boneOutlineDisplaySourceWithWorkspace(boneSource []uint8, gray []uint8, width, height int, workspace *maskWorkspace) []uint8 {
-	display := workspace.getMask(len(boneSource))
-	visited := workspace.getMask(len(boneSource))
-	fillSmallNonBlackHolesBinaryMaskInto(
-		display,
-		visited,
-		&workspace.queue,
-		boneSource,
-		gray,
-		width,
-		height,
-		maximumBoneDisplayHoleAreaPixels(width, height),
-		boneSectionBlackThreshold,
-	)
-	return display
-}
-
-func boneSectionFillSourceWithWorkspace(boneSource []uint8, gray []uint8, width, height int, workspace *maskWorkspace) []uint8 {
-	filled := workspace.getMask(len(boneSource))
-	outside := workspace.getMask(len(boneSource))
-	fillHolesBinaryMaskInto(filled, outside, &workspace.queue, boneSource, width, height)
-	if len(gray) == len(filled) {
-		for index, value := range gray {
-			if value <= boneSectionBlackThreshold {
-				filled[index] = 0
-			}
-		}
-	}
-	return filled
 }
 
 func boneOutlineMask(boneMask []uint8, width, height int) []uint8 {
@@ -397,32 +357,7 @@ func boneOutlineSourceMask(boneMask []uint8, width, height int) []uint8 {
 	return append([]uint8(nil), boneOutlineSourceMaskWithWorkspace(boneMask, width, height, workspace)...)
 }
 
-const boneBackgroundBridgeRadius = 3
 const boneHoleBridgeRadius = 1
-
-func boneBackgroundSourceMaskWithWorkspace(boneMask []uint8, toothMask []uint8, width, height int, workspace *maskWorkspace) []uint8 {
-	filtered := boneOutlineSourceMaskWithWorkspace(boneMask, width, height, workspace)
-	if len(toothMask) != len(filtered) {
-		return filtered
-	}
-	combined := workspace.getMask(len(filtered))
-	for index, value := range filtered {
-		if value != 0 || toothMask[index] != 0 {
-			combined[index] = 1
-		}
-	}
-	closed := workspace.getMask(len(combined))
-	copy(closed, combined)
-	work := workspace.getMask(len(combined))
-	scratch := workspace.getMask(len(combined))
-	closeBinaryMaskInPlace(closed, work, scratch, workspace.countScratch(width), width, height, boneBackgroundBridgeRadius)
-	for index, value := range closed {
-		if value != 0 {
-			combined[index] = 1
-		}
-	}
-	return combined
-}
 
 func boneOutlineSourceMaskWithWorkspace(boneMask []uint8, width, height int, workspace *maskWorkspace) []uint8 {
 	source := workspace.getMask(len(boneMask))
@@ -445,10 +380,6 @@ func boneOutlineSourceMaskWithWorkspace(boneMask []uint8, width, height int, wor
 
 func minimumBoneOutlineAreaPixels(width, height int) int {
 	return minInt(maxInt(width*height/1000, 16), 128)
-}
-
-func maximumBoneDisplayHoleAreaPixels(width, height int) int {
-	return minInt(maxInt(width*height/600, 96), 4096)
 }
 
 func drawSmoothedMaskContours(
@@ -1721,77 +1652,6 @@ func fillSmallHolesBinaryMask(mask []uint8, width, height, maxArea int) []uint8 
 		}
 	}
 	return out
-}
-
-func fillSmallNonBlackHolesBinaryMaskInto(out []uint8, visited []uint8, queue *[]int, mask []uint8, gray []uint8, width, height, maxArea int, blackThreshold uint8) {
-	copy(out, mask)
-	if len(mask) == 0 || maxArea <= 0 || width <= 0 || height <= 0 {
-		return
-	}
-
-	clear(visited[:len(mask)])
-	q := (*queue)[:0]
-	for y := 0; y < height; y++ {
-		for x := 0; x < width; x++ {
-			start := y*width + x
-			if visited[start] != 0 || mask[start] != 0 {
-				continue
-			}
-
-			visited[start] = 1
-			q = append(q[:0], start)
-			touchesBorder := false
-			blackHit := false
-			for head := 0; head < len(q); head++ {
-				index := q[head]
-				px := index % width
-				py := index / width
-				if px == 0 || py == 0 || px == width-1 || py == height-1 {
-					touchesBorder = true
-				}
-				if len(gray) == len(mask) && gray[index] <= blackThreshold {
-					blackHit = true
-				}
-
-				if px > 0 {
-					neighbor := index - 1
-					if visited[neighbor] == 0 && mask[neighbor] == 0 {
-						visited[neighbor] = 1
-						q = append(q, neighbor)
-					}
-				}
-				if px+1 < width {
-					neighbor := index + 1
-					if visited[neighbor] == 0 && mask[neighbor] == 0 {
-						visited[neighbor] = 1
-						q = append(q, neighbor)
-					}
-				}
-				if py > 0 {
-					neighbor := index - width
-					if visited[neighbor] == 0 && mask[neighbor] == 0 {
-						visited[neighbor] = 1
-						q = append(q, neighbor)
-					}
-				}
-				if py+1 < height {
-					neighbor := index + width
-					if visited[neighbor] == 0 && mask[neighbor] == 0 {
-						visited[neighbor] = 1
-						q = append(q, neighbor)
-					}
-				}
-			}
-
-			if touchesBorder || blackHit || len(q) > maxArea {
-				continue
-			}
-			for _, index := range q {
-				out[index] = 1
-			}
-		}
-	}
-	*queue = q
 }
 
 func minInt(left, right int) int {

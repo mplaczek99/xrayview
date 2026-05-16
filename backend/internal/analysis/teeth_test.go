@@ -85,6 +85,28 @@ func TestDetectedBoneLevelMaskUsesDynamicMaskForFixtures(t *testing.T) {
 	}
 }
 
+func TestGenerateToothOverlayFilledPreviewMatchesColoredBoneSectionsForFixtures(t *testing.T) {
+	for _, name := range coloredFixtureNames(t) {
+		t.Run(name, func(t *testing.T) {
+			bmpPath := fixturePath(t, "images", "BMP", name+".bmp")
+			pngPath := fixturePath(t, "images", "PNG", "Colored", name+".png")
+			preview := decodeGrayFixture(t, bmpPath)
+			result, err := GenerateToothOverlay(preview)
+			if err != nil {
+				t.Fatalf("GenerateToothOverlay returned error: %v", err)
+			}
+
+			gotMask := redDominantMaskFromRGBA(result.FilledPreview)
+			wantMask := redMaskFromImage(t, pngPath)
+			allowedMask := dilateBinaryMask(wantMask, int(preview.Width), int(preview.Height), 3)
+			contained := maskContainmentRatio(gotMask, allowedMask)
+			if contained < 0.98 {
+				t.Fatalf("filled preview red section containment = %.3f, want >= 0.98", contained)
+			}
+		})
+	}
+}
+
 func TestGenerateToothOverlayDrawsBoneLevelRedOutlineForFixtures(t *testing.T) {
 	for _, name := range coloredFixtureNames(t) {
 		t.Run(name, func(t *testing.T) {
@@ -105,11 +127,7 @@ func TestGenerateToothOverlayDrawsBoneLevelRedOutlineForFixtures(t *testing.T) {
 			}
 			toothMask := detectToothMask(gray, int(preview.Width), int(preview.Height))
 			boneMask := detectBoneLevelMask(gray, int(preview.Width), int(preview.Height))
-			workspace := newMaskWorkspace()
-			boneSource := boneBackgroundSourceMaskWithWorkspace(boneMask, toothMask, int(preview.Width), int(preview.Height), workspace)
-			boneSectionSource := boneSectionFillSourceWithWorkspace(boneSource, gray, int(preview.Width), int(preview.Height), workspace)
-			wantMask := innerOutlineMask(boneSectionSource, int(preview.Width), int(preview.Height), boneOutlineThicknessPixels)
-			workspace.release()
+			wantMask := innerOutlineMask(boneMask, int(preview.Width), int(preview.Height), boneOutlineThicknessPixels)
 			clearMaskPixels(wantMask, toothMask)
 			gotMask := redDominantMaskFromRGBA(result.Preview)
 			nearby := maskContainmentRatio(gotMask, wantMask)
@@ -165,14 +183,10 @@ func TestOverlayMasksOutlinesToothAndSuppressesBoneInsideTooth(t *testing.T) {
 	boneMask := make([]uint8, width*height)
 	fillMaskRect(toothMask, width, 1, 1, 7, 7)
 	boneMask[4*width+4] = 1
-	boneMask[0] = 1
 
 	preview := overlayMasks(gray, toothMask, boneMask, width, height)
 	redMask := redDominantMaskFromRGBA(preview)
 	greenMask := greenDominantMaskFromRGBA(preview)
-	if redMask[0] != 0 {
-		t.Fatal("small isolated bone speckle was outlined red")
-	}
 	if redMask[4*width+4] != 0 {
 		t.Fatal("bone pixel inside tooth was drawn red")
 	}
@@ -223,15 +237,10 @@ func TestOverlayMasksDrawsOneCleanBoneOutlineWithoutInternalLoops(t *testing.T) 
 	boneMask := make([]uint8, width*height)
 	fillMaskRect(boneMask, width, 2, 2, 5, 5)
 	fillMaskRect(toothMask, width, 3, 3, 3, 3)
-	boneMask[4*width+4] = 0
-	boneMask[0] = 1
 
 	preview := overlayMasks(gray, toothMask, boneMask, width, height)
 	redMask := redDominantMaskFromRGBA(preview)
 	greenMask := greenDominantMaskFromRGBA(preview)
-	if redMask[0] != 0 {
-		t.Fatal("small isolated bone component was outlined red")
-	}
 	if countMaskPixels(redMask) == 0 {
 		t.Fatal("main bone level boundary was not outlined red")
 	}
@@ -246,7 +255,7 @@ func TestOverlayMasksDrawsOneCleanBoneOutlineWithoutInternalLoops(t *testing.T) 
 	}
 }
 
-func TestOverlayMasksFillsHolesSealedByBoneBackgroundBridge(t *testing.T) {
+func TestOverlayFilledMasksDoesNotFillBoneSectionHoles(t *testing.T) {
 	const width = 25
 	const height = 25
 
@@ -262,51 +271,18 @@ func TestOverlayMasksFillsHolesSealedByBoneBackgroundBridge(t *testing.T) {
 			boneMask[y*width+x] = 0
 		}
 	}
-	for y := 2; y <= 7; y++ {
-		boneMask[y*width+12] = 0
-	}
-
-	outlinePreview := overlayMasks(gray, toothMask, boneMask, width, height)
-	outlineRed := redDominantMaskFromRGBA(outlinePreview)
-	if outlineRed[12*width+7] != 0 || outlineRed[7*width+12] != 0 {
-		t.Fatal("bone hole sealed by bridge was still outlined red")
-	}
 
 	filledPreview := overlayFilledMasks(gray, toothMask, boneMask, width, height)
 	filledRed := redDominantMaskFromRGBA(filledPreview)
-	if filledRed[12*width+12] == 0 {
-		t.Fatal("bone hole sealed by bridge was not filled red")
+	if filledRed[4*width+4] == 0 {
+		t.Fatal("provided bone section was not filled red")
+	}
+	if filledRed[12*width+12] != 0 {
+		t.Fatal("hole outside the provided bone section was filled red")
 	}
 }
 
-func TestBoneBackgroundSourceDoesNotFillAreasSealedOnlyByTeeth(t *testing.T) {
-	const width = 25
-	const height = 25
-
-	toothMask := make([]uint8, width*height)
-	boneMask := make([]uint8, width*height)
-	fillMaskRect(boneMask, width, 4, 4, 17, 17)
-	for y := 8; y <= 16; y++ {
-		for x := 8; x <= 16; x++ {
-			boneMask[y*width+x] = 0
-		}
-	}
-	for y := 4; y <= 8; y++ {
-		for x := 8; x <= 16; x++ {
-			boneMask[y*width+x] = 0
-			toothMask[y*width+x] = 1
-		}
-	}
-
-	workspace := newMaskWorkspace()
-	defer workspace.release()
-	source := boneBackgroundSourceMaskWithWorkspace(boneMask, toothMask, width, height, workspace)
-	if source[12*width+12] != 0 {
-		t.Fatal("bone background source filled a gap enclosed only after tooth composition")
-	}
-}
-
-func TestOverlayFilledMasksFillsVisibleBoneSectionGapsSealedByTeeth(t *testing.T) {
+func TestOverlayFilledMasksDoesNotFillAreasSealedOnlyByTeeth(t *testing.T) {
 	const width = 25
 	const height = 25
 
@@ -331,8 +307,8 @@ func TestOverlayFilledMasksFillsVisibleBoneSectionGapsSealedByTeeth(t *testing.T
 
 	preview := overlayFilledMasks(gray, toothMask, boneMask, width, height)
 	redMask := redDominantMaskFromRGBA(preview)
-	if redMask[12*width+12] == 0 {
-		t.Fatal("visible bone section gap sealed by teeth was not filled red")
+	if redMask[12*width+12] != 0 {
+		t.Fatal("area sealed only by teeth was filled red")
 	}
 }
 
@@ -354,34 +330,6 @@ func TestOverlayFilledMasksDoesNotFillBlackBoneSectionGaps(t *testing.T) {
 	redMask := redDominantMaskFromRGBA(preview)
 	if redMask[12*width+12] != 0 {
 		t.Fatal("black bone section gap was filled red")
-	}
-}
-
-func TestOverlayMasksSuppressesSmallNonBlackBoneHoleOutlines(t *testing.T) {
-	const width = 25
-	const height = 25
-
-	gray := make([]uint8, width*height)
-	for index := range gray {
-		gray[index] = 96
-	}
-	toothMask := make([]uint8, width*height)
-	boneMask := make([]uint8, width*height)
-	fillMaskRect(boneMask, width, 4, 4, 17, 17)
-	fillMaskRect(toothMask, width, 6, 4, 13, 4)
-	fillMaskRect(toothMask, width, 6, 6, 4, 13)
-	fillMaskRect(toothMask, width, 15, 6, 4, 13)
-	fillMaskRect(boneMask, width, 11, 11, 3, 3)
-	for y := 11; y < 14; y++ {
-		for x := 11; x < 14; x++ {
-			boneMask[y*width+x] = 0
-		}
-	}
-
-	preview := overlayMasks(gray, toothMask, boneMask, width, height)
-	redMask := redDominantMaskFromRGBA(preview)
-	if redMask[11*width+11] != 0 || redMask[11*width+13] != 0 || redMask[13*width+11] != 0 || redMask[13*width+13] != 0 {
-		t.Fatal("small non-black bone hole was still outlined red")
 	}
 }
 

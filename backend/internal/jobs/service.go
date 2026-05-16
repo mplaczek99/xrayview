@@ -56,6 +56,7 @@ type Service struct {
 	logger                 *slog.Logger
 	newDecoder             decodeHelperFactory
 	secondaryCaptureWriter dicomexport.Writer
+	cacheSessionID         string
 	memoryCache            *cache.Memory // finished job payloads keyed by fingerprint; separate from decodeCache (source-study decode)
 	registry               *Registry
 	decodeCache            *studies.DecodeCache // source-study decode dedupe; separate from memoryCache (result payloads)
@@ -160,7 +161,7 @@ func (service *Service) StartRenderJob(
 			return command.StudyID
 		},
 		fingerprint: func(study contracts.StudyRecord, _ contracts.RenderStudyCommand) (string, error) {
-			return renderFingerprint(study)
+			return renderFingerprint(study, service.cacheSessionID)
 		},
 		cacheLoad: service.memoryCache.LoadRender,
 		prepare: func(
@@ -196,7 +197,7 @@ func (service *Service) StartAnalyzeJob(
 			return command.StudyID
 		},
 		fingerprint: func(study contracts.StudyRecord, _ contracts.AnalyzeStudyCommand) (string, error) {
-			return analyzeFingerprint(study)
+			return analyzeFingerprint(study, service.cacheSessionID)
 		},
 		cacheLoad: service.memoryCache.LoadAnalyze,
 		prepare: func(
@@ -242,8 +243,10 @@ func (service *Service) StartProcessJob(
 		studyID: func(command contracts.ProcessStudyCommand) string {
 			return command.StudyID
 		},
-		fingerprint: processFingerprint,
-		cacheLoad:   service.memoryCache.LoadProcess,
+		fingerprint: func(study contracts.StudyRecord, command contracts.ProcessStudyCommand) (string, error) {
+			return processFingerprint(study, command, service.cacheSessionID)
+		},
+		cacheLoad: service.memoryCache.LoadProcess,
 		prepare: func(
 			_ contracts.StudyRecord,
 			command contracts.ProcessStudyCommand,
@@ -357,6 +360,7 @@ func newService(
 		logger:                 logger,
 		newDecoder:             decoderFactory,
 		secondaryCaptureWriter: secondaryCaptureWriter,
+		cacheSessionID:         newCacheSessionID(),
 		memoryCache:            cache.NewMemory(logger),
 		registry:               NewRegistry(jobIDFactory),
 		decodeCache:            studies.NewDecodeCache(0),
@@ -1247,42 +1251,45 @@ func validateInputFile(inputPath string) error {
 	return nil
 }
 
-// The Namespace string embedded in every fingerprint ("render-study-v2",
-// "process-study-v5") is a deliberate cache-bust key. Analyze uses a stable
-// namespace plus analysis.AnalyzeAlgorithmVersion so algorithm changes are
-// explicit.
-func renderFingerprint(study contracts.StudyRecord) (string, error) {
+// Job fingerprints include a service-session id so generated artifacts are only
+// reused during the current program run. A restart recomputes outputs and gets
+// fresh paths, so algorithm changes do not require cache-busting versions.
+func renderFingerprint(study contracts.StudyRecord, sessionID string) (string, error) {
 	return fingerprintJSON(struct {
 		Namespace     string            `json:"namespace"`
+		SessionID     string            `json:"sessionId"`
 		InputPath     string            `json:"inputPath"`
 		InputIdentity inputFileIdentity `json:"inputIdentity"`
 	}{
-		Namespace:     "render-study-v2",
+		Namespace:     "render-study",
+		SessionID:     sessionID,
 		InputPath:     study.InputPath,
 		InputIdentity: currentInputFileIdentity(study.InputPath),
 	})
 }
 
-func analyzeFingerprint(study contracts.StudyRecord) (string, error) {
+func analyzeFingerprint(study contracts.StudyRecord, sessionID string) (string, error) {
 	return fingerprintJSON(struct {
-		Namespace        string            `json:"namespace"`
-		AlgorithmVersion string            `json:"algorithmVersion"`
-		InputPath        string            `json:"inputPath"`
-		InputIdentity    inputFileIdentity `json:"inputIdentity"`
+		Namespace     string            `json:"namespace"`
+		SessionID     string            `json:"sessionId"`
+		InputPath     string            `json:"inputPath"`
+		InputIdentity inputFileIdentity `json:"inputIdentity"`
 	}{
-		Namespace:        analyzeFingerprintNamespace,
-		AlgorithmVersion: analysis.AnalyzeAlgorithmVersion,
-		InputPath:        study.InputPath,
-		InputIdentity:    currentInputFileIdentity(study.InputPath),
+		Namespace:     analyzeFingerprintNamespace,
+		SessionID:     sessionID,
+		InputPath:     study.InputPath,
+		InputIdentity: currentInputFileIdentity(study.InputPath),
 	})
 }
 
 func processFingerprint(
 	study contracts.StudyRecord,
 	command contracts.ProcessStudyCommand,
+	sessionID string,
 ) (string, error) {
 	return fingerprintJSON(struct {
 		Namespace     string                 `json:"namespace"`
+		SessionID     string                 `json:"sessionId"`
 		InputPath     string                 `json:"inputPath"`
 		InputIdentity inputFileIdentity      `json:"inputIdentity"`
 		OutputPath    *string                `json:"outputPath"`
@@ -1294,7 +1301,8 @@ func processFingerprint(
 		Compare       bool                   `json:"compare"`
 		Palette       *contracts.PaletteName `json:"palette"`
 	}{
-		Namespace:     "process-study-v5",
+		Namespace:     "process-study",
+		SessionID:     sessionID,
 		InputPath:     study.InputPath,
 		InputIdentity: currentInputFileIdentity(study.InputPath),
 		OutputPath:    fingerprintOutputPath(command.OutputPath),
@@ -1433,6 +1441,15 @@ func generateJobID() (string, error) {
 	hex.Encode(encoded[24:36], raw[10:16])
 
 	return string(encoded), nil
+}
+
+func newCacheSessionID() string {
+	var raw [16]byte
+	if _, err := rand.Read(raw[:]); err == nil {
+		return hex.EncodeToString(raw[:])
+	}
+
+	return fmt.Sprintf("pid-%d", os.Getpid())
 }
 
 func isTerminalState(state contracts.JobState) bool {
