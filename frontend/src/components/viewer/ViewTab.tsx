@@ -197,6 +197,7 @@ export function ViewTab() {
         <div className="study-layout__viewer">
           <ViewerCanvas
             previewUrl={previewUrl}
+            viewportResetKey={study.studyId}
             imageSize={imageSize}
             annotations={annotations}
             selectedAnnotationId={selectedAnnotationId}

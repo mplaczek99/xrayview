@@ -16,6 +16,7 @@ import { useWheelZoom } from "./useWheelZoom";
 
 interface ViewerCanvasProps {
   previewUrl: string | null;
+  viewportResetKey: string | null;
   imageSize: ViewerImageSize | null;
   annotations: AnnotationBundle;
   selectedAnnotationId: string | null;
@@ -29,6 +30,7 @@ interface ViewerCanvasProps {
 
 export function ViewerCanvas({
   previewUrl,
+  viewportResetKey,
   imageSize,
   annotations,
   selectedAnnotationId,
@@ -67,7 +69,6 @@ export function ViewerCanvas({
   useEffect(() => {
     setLoadFailed(false);
     setImageReady(false);
-    setViewport(createViewport());
     if (!previewUrl && !imageSize) {
       setResolvedImageSize(null);
     }
@@ -83,6 +84,10 @@ export function ViewerCanvas({
       }
     }
   }, [previewUrl]);
+
+  useEffect(() => {
+    setViewport(createViewport());
+  }, [viewportResetKey]);
 
   const transform = useMemo(() => {
     if (!resolvedImageSize || frame.width === 0 || frame.height === 0) {
@@ -117,7 +122,7 @@ export function ViewerCanvas({
 
   useEffect(() => {
     resetPointerInteractions();
-  }, [previewUrl]);
+  }, [previewUrl, viewportResetKey]);
 
   if (!previewUrl || loadFailed) {
     return (
