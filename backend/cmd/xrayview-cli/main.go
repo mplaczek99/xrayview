@@ -20,6 +20,7 @@ import (
 	"strconv"
 	"strings"
 
+	"xrayview/backend/internal/analysis"
 	"xrayview/backend/internal/config"
 	"xrayview/backend/internal/contracts"
 	"xrayview/backend/internal/dicommeta"
@@ -64,6 +65,8 @@ func runWithIO(args []string, stdout, stderr io.Writer) error {
 		return renderPreview(args[1:])
 	case "process-preview":
 		return processPreview(args[1:])
+	case "analyze-preview":
+		return analyzePreview(args[1:])
 	case "export-secondary-capture":
 		return exportSecondaryCapture(args[1:])
 	case "list-commands":
@@ -92,6 +95,72 @@ func printConfig() error {
 	encoder := json.NewEncoder(os.Stdout)
 	encoder.SetIndent("", "  ")
 	return encoder.Encode(cfg)
+}
+
+func analyzePreview(args []string) error {
+	filled := false
+	positional := make([]string, 0, 2)
+	for _, arg := range args {
+		switch arg {
+		case "--filled":
+			filled = true
+		default:
+			if strings.HasPrefix(arg, "-") {
+				return fmt.Errorf("unknown analyze-preview flag: %s", arg)
+			}
+			positional = append(positional, arg)
+		}
+	}
+	if len(positional) != 2 {
+		return fmt.Errorf("analyze-preview requires INPUT_DCM OUTPUT_PNG and accepts optional --filled")
+	}
+
+	inputPath := positional[0]
+	outputPath := positional[1]
+	study, err := dicommeta.DecodeFile(inputPath)
+	if err != nil {
+		return err
+	}
+	sourcePreview := render.RenderSourceImage(study.Image, analysis.ToothOverlayRenderPlan(inputPath, study.Image))
+	defer sourcePreview.Release()
+	result, err := analysis.GenerateToothOverlay(sourcePreview)
+	if err != nil {
+		return err
+	}
+
+	preview := result.Preview
+	if filled {
+		preview = result.FilledPreview
+	}
+	if err := render.SavePreviewPNG(outputPath, preview); err != nil {
+		return err
+	}
+
+	summary := struct {
+		PreviewOutput  string  `json:"previewOutput"`
+		LoadedWidth    uint32  `json:"loadedWidth"`
+		LoadedHeight   uint32  `json:"loadedHeight"`
+		Filled         bool    `json:"filled"`
+		Mode           string  `json:"mode"`
+		ToothPixels    int     `json:"toothPixels"`
+		BonePixels     int     `json:"bonePixels"`
+		Coverage       float64 `json:"coverage"`
+		CandidateCount int     `json:"candidateCount"`
+	}{
+		PreviewOutput:  outputPath,
+		LoadedWidth:    study.Image.Width,
+		LoadedHeight:   study.Image.Height,
+		Filled:         filled,
+		Mode:           result.Mode,
+		ToothPixels:    result.ToothPixels,
+		BonePixels:     result.BonePixels,
+		Coverage:       result.Coverage,
+		CandidateCount: result.CandidateCount,
+	}
+
+	encoder := json.NewEncoder(os.Stdout)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(summary)
 }
 
 func inspectDecode(paths []string) error {
@@ -434,6 +503,7 @@ func printUsage(stream io.Writer) {
 	fmt.Fprintln(stream, "  decode-source decode source pixels directly in Go")
 	fmt.Fprintln(stream, "  render-preview render a grayscale PNG preview through the phase 16 Go pipeline")
 	fmt.Fprintln(stream, "  process-preview render then run the phase 19 preview processing pipeline")
+	fmt.Fprintln(stream, "  analyze-preview render the tooth and bone analysis overlay preview")
 	fmt.Fprintln(stream, "  export-secondary-capture render, process, and write a phase 29 Go DICOM export")
 	fmt.Fprintln(stream, "  list-commands print supported command names")
 	fmt.Fprintln(stream, "  version       print service and contract version")

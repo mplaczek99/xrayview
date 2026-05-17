@@ -74,7 +74,7 @@ type Service struct {
 const decodeBenchmarkEnvKey = "XRAYVIEW_BENCH_LOG_DECODES"
 
 const analyzeFingerprintNamespace = "analyze-study"
-const analyzeOutputVersion = "sections-reference-mask-v2"
+const analyzeOutputVersion = "sections-reference-mask-v16"
 
 const workerCountEnvKey = "XRAYVIEW_BACKEND_WORKERS"
 
