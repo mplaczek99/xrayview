@@ -123,6 +123,12 @@ func TestGenerateToothOverlayFilledPreviewMatchesColoredBoneSectionsForFixtures(
 func TestGenerateToothOverlaySectionsMatchNineColoredReference(t *testing.T) {
 	bmpPath := fixturePath(t, "images", "BMP", "9.bmp")
 	pngPath := fixturePath(t, "images", "PNG", "Colored", "9.png")
+	if _, err := os.Stat(bmpPath); err != nil {
+		t.Skipf("missing BMP fixture: %v", err)
+	}
+	if _, err := os.Stat(pngPath); err != nil {
+		t.Skipf("missing colored PNG fixture: %v", err)
+	}
 
 	study, err := dicommeta.DecodeFile(bmpPath)
 	if err != nil {
@@ -226,6 +232,10 @@ func TestGenerateToothOverlayDrawsToothGreenOutlineAndBlocksInternalBoneRedForFi
 
 func TestGenerateToothOverlaySuppressesBoneOutlineOnImageFrame(t *testing.T) {
 	bmpPath := fixturePath(t, "images", "BMP", "9.bmp")
+	if _, err := os.Stat(bmpPath); err != nil {
+		t.Skipf("missing BMP fixture: %v", err)
+	}
+
 	preview := decodeGrayFixture(t, bmpPath)
 	result, err := GenerateToothOverlay(preview)
 	if err != nil {
