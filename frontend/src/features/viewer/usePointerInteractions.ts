@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   Dispatch,
-  MouseEvent as ReactMouseEvent,
   PointerEvent as ReactPointerEvent,
   RefObject,
   SetStateAction,
@@ -82,7 +81,6 @@ export function usePointerInteractions({
 }: UsePointerInteractionsOptions) {
   const [interaction, setInteraction] = useState<ViewerInteraction | null>(null);
   const [draftLine, setDraftLine] = useState<LineAnnotation | null>(null);
-  const [hoverCoord, setHoverCoord] = useState<{ x: number; y: number } | null>(null);
 
   const draftLineRef = useRef(draftLine);
   const imageSizeRef = useRef(imageSize);
@@ -216,35 +214,6 @@ export function usePointerInteractions({
     return pointDistance(draftLine.start, draftLine.end);
   }, [draftLine]);
 
-  function handleMouseMove(event: ReactMouseEvent<HTMLDivElement>) {
-    if (!transform || !imageSize || !imageReady) {
-      setHoverCoord(null);
-      return;
-    }
-
-    const rect = event.currentTarget.getBoundingClientRect();
-    const pointer = {
-      x: event.clientX - rect.left,
-      y: event.clientY - rect.top,
-    };
-    const imagePoint = screenToImage(pointer, transform);
-    if (
-      imagePoint.x < 0 ||
-      imagePoint.y < 0 ||
-      imagePoint.x > imageSize.width ||
-      imagePoint.y > imageSize.height
-    ) {
-      setHoverCoord(null);
-      return;
-    }
-
-    setHoverCoord({ x: Math.round(imagePoint.x), y: Math.round(imagePoint.y) });
-  }
-
-  function handleMouseLeave() {
-    setHoverCoord(null);
-  }
-
   function beginBackgroundInteraction(
     event: ReactPointerEvent<HTMLDivElement>,
   ) {
@@ -304,7 +273,6 @@ export function usePointerInteractions({
     draftLineRef.current = null;
     setInteraction(null);
     setDraftLine(null);
-    setHoverCoord(null);
   }
 
   return {
@@ -314,9 +282,6 @@ export function usePointerInteractions({
     draftDistance,
     draftLine,
     draftLineOverride,
-    handleMouseLeave,
-    handleMouseMove,
-    hoverCoord,
     isDrawingLine: interaction?.kind === "draw",
     resetPointerInteractions,
   };

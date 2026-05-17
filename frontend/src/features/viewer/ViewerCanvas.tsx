@@ -98,9 +98,6 @@ export function ViewerCanvas({
     draftDistance,
     draftLine,
     draftLineOverride,
-    handleMouseLeave,
-    handleMouseMove,
-    hoverCoord,
     isDrawingLine,
     resetPointerInteractions,
   } = usePointerInteractions({
@@ -142,11 +139,6 @@ export function ViewerCanvas({
   return (
     <div className="viewer-stage viewer-stage--interactive">
       <div className="viewer-stage__hud">
-        {hoverCoord && (
-          <span className="viewer-stage__hud-chip viewer-stage__hud-chip--coord">
-            {hoverCoord.x}, {hoverCoord.y}
-          </span>
-        )}
         {draftDistance !== null && draftDistance >= 2 && (
           <span className="viewer-stage__hud-chip viewer-stage__hud-chip--dist">
             {Math.round(draftDistance)} px
@@ -168,8 +160,6 @@ export function ViewerCanvas({
         ref={containerRef}
         className={`viewer-canvas viewer-canvas--${tool}`}
         onPointerDown={beginBackgroundInteraction}
-        onMouseMove={handleMouseMove}
-        onMouseLeave={handleMouseLeave}
       >
         <img
           ref={imgRef}
