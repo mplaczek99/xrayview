@@ -66,15 +66,27 @@ func (cache *DecodeCache) GetOrDecode(
 	path string,
 	decoder sourceStudyDecoder,
 ) (dicommeta.SourceStudy, error) {
+	return cache.GetOrDecodeWithKey(ctx, path, path, decoder)
+}
+
+// GetOrDecodeWithKey returns a cached SourceStudy identified by key, decoding
+// from path on a miss. This lets callers include file metadata in the cache
+// identity while still handing the real filesystem path to the decoder.
+func (cache *DecodeCache) GetOrDecodeWithKey(
+	ctx context.Context,
+	key string,
+	path string,
+	decoder sourceStudyDecoder,
+) (dicommeta.SourceStudy, error) {
 	cache.mu.Lock()
-	if entry, ok := cache.entries[path]; ok {
+	if entry, ok := cache.entries[key]; ok {
 		cache.moveToFrontLocked(entry)
 		study := entry.study
 		cache.mu.Unlock()
 		return study, nil
 	}
 
-	if inflight, ok := cache.inflight[path]; ok {
+	if inflight, ok := cache.inflight[key]; ok {
 		cache.mu.Unlock()
 		select {
 		case <-ctx.Done():
@@ -88,24 +100,24 @@ func (cache *DecodeCache) GetOrDecode(
 	}
 
 	inflight := &decodeInflight{done: make(chan struct{})}
-	cache.inflight[path] = inflight
+	cache.inflight[key] = inflight
 	cache.mu.Unlock()
 
 	study, err := decoder.DecodeStudy(ctx, path)
 
 	cache.mu.Lock()
 	if err == nil {
-		if entry, ok := cache.entries[path]; ok {
+		if entry, ok := cache.entries[key]; ok {
 			cache.moveToFrontLocked(entry)
 			inflight.study = entry.study
 		} else {
 			entryBytes := study.Image.ByteSize()
 			entry := &decodeCacheEntry{
-				key:      path,
+				key:      key,
 				study:    study,
 				byteSize: entryBytes,
 			}
-			cache.entries[path] = entry
+			cache.entries[key] = entry
 			cache.pushFrontLocked(entry)
 			cache.totalBytes += entryBytes
 			inflight.study = study
@@ -115,7 +127,7 @@ func (cache *DecodeCache) GetOrDecode(
 	}
 
 	inflight.err = err
-	delete(cache.inflight, path)
+	delete(cache.inflight, key)
 	close(inflight.done)
 	cache.mu.Unlock()
 

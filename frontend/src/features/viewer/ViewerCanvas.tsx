@@ -16,6 +16,7 @@ import { useWheelZoom } from "./useWheelZoom";
 
 interface ViewerCanvasProps {
   previewUrl: string | null;
+  viewportResetKey: string | null;
   imageSize: ViewerImageSize | null;
   annotations: AnnotationBundle;
   selectedAnnotationId: string | null;
@@ -29,6 +30,7 @@ interface ViewerCanvasProps {
 
 export function ViewerCanvas({
   previewUrl,
+  viewportResetKey,
   imageSize,
   annotations,
   selectedAnnotationId,
@@ -67,7 +69,6 @@ export function ViewerCanvas({
   useEffect(() => {
     setLoadFailed(false);
     setImageReady(false);
-    setViewport(createViewport());
     if (!previewUrl && !imageSize) {
       setResolvedImageSize(null);
     }
@@ -84,6 +85,10 @@ export function ViewerCanvas({
     }
   }, [previewUrl]);
 
+  useEffect(() => {
+    setViewport(createViewport());
+  }, [viewportResetKey]);
+
   const transform = useMemo(() => {
     if (!resolvedImageSize || frame.width === 0 || frame.height === 0) {
       return null;
@@ -98,13 +103,11 @@ export function ViewerCanvas({
     draftDistance,
     draftLine,
     draftLineOverride,
-    handleMouseLeave,
-    handleMouseMove,
-    hoverCoord,
     isDrawingLine,
     resetPointerInteractions,
   } = usePointerInteractions({
     containerRef,
+    enabled: canvasVisible,
     annotations,
     imageReady,
     imageSize: resolvedImageSize,
@@ -119,7 +122,7 @@ export function ViewerCanvas({
 
   useEffect(() => {
     resetPointerInteractions();
-  }, [previewUrl]);
+  }, [previewUrl, viewportResetKey]);
 
   if (!previewUrl || loadFailed) {
     return (
@@ -141,11 +144,6 @@ export function ViewerCanvas({
   return (
     <div className="viewer-stage viewer-stage--interactive">
       <div className="viewer-stage__hud">
-        {hoverCoord && (
-          <span className="viewer-stage__hud-chip viewer-stage__hud-chip--coord">
-            {hoverCoord.x}, {hoverCoord.y}
-          </span>
-        )}
         {draftDistance !== null && draftDistance >= 2 && (
           <span className="viewer-stage__hud-chip viewer-stage__hud-chip--dist">
             {Math.round(draftDistance)} px
@@ -167,8 +165,6 @@ export function ViewerCanvas({
         ref={containerRef}
         className={`viewer-canvas viewer-canvas--${tool}`}
         onPointerDown={beginBackgroundInteraction}
-        onMouseMove={handleMouseMove}
-        onMouseLeave={handleMouseLeave}
       >
         <img
           ref={imgRef}

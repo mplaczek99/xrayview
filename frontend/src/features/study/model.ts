@@ -5,6 +5,7 @@ import type {
   ProcessingManifest,
 } from "../../lib/generated/contracts";
 import type {
+  AnalysisResult,
   OpenedStudy,
   PreviewResult,
   ProcessResult,
@@ -31,6 +32,7 @@ export interface ProcessingSession {
 export interface ViewerSession {
   tool: ViewerTool;
   selectedAnnotationId: string | null;
+  analysisOverlayMode: "outline" | "sections";
 }
 
 export interface WorkbenchStudy {
@@ -39,7 +41,7 @@ export interface WorkbenchStudy {
   inputName: string;
   measurementScale: MeasurementScale | null;
   originalPreview: PreviewResult | null;
-  analysisPreview: PreviewResult | null;
+  analysisPreview: AnalysisResult | null;
   annotations: AnnotationBundle;
   viewer: ViewerSession;
   processing: ProcessingSession;
@@ -105,6 +107,7 @@ export function createWorkbenchStudy(
     viewer: {
       tool: "pan",
       selectedAnnotationId: null,
+      analysisOverlayMode: "outline",
     },
     processing: {
       form: createProcessingForm(defaultControls),

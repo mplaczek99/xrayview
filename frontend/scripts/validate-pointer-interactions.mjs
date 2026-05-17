@@ -101,6 +101,7 @@ function Harness() {
   );
   const pointerInteractions = usePointerInteractions({
     containerRef,
+    enabled: true,
     annotations,
     imageReady: true,
     imageSize,

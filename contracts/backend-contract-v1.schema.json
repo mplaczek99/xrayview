@@ -318,6 +318,7 @@
       "properties": {
         "studyId": { "type": "string" },
         "previewPath": { "type": "string" },
+        "filledPreviewPath": { "type": "string" },
         "loadedWidth": { "type": "number" },
         "loadedHeight": { "type": "number" },
         "mode": { "type": "string" },
@@ -328,7 +329,7 @@
           ]
         }
       },
-      "required": ["studyId", "previewPath", "loadedWidth", "loadedHeight", "mode"]
+      "required": ["studyId", "previewPath", "filledPreviewPath", "loadedWidth", "loadedHeight", "mode"]
     },
     "ProcessStudyCommand": {
       "type": "object",

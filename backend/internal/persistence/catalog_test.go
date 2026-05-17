@@ -95,6 +95,54 @@ func TestLoadMissingCatalogReturnsEmptyRecentStudiesArray(t *testing.T) {
 	}
 }
 
+func TestLoadReturnsReadErrorWhenCatalogPathIsDirectory(t *testing.T) {
+	rootDir := t.TempDir()
+	catalogPath := filepath.Join(rootDir, "catalog.json")
+	if err := os.Mkdir(catalogPath, 0o755); err != nil {
+		t.Fatalf("Mkdir returned error: %v", err)
+	}
+
+	catalog := New(rootDir)
+	_, err := catalog.Load()
+	if err == nil {
+		t.Fatal("Load returned nil error, want internal read error")
+	}
+
+	backendErr, ok := err.(contracts.BackendError)
+	if !ok {
+		t.Fatalf("error type = %T, want contracts.BackendError", err)
+	}
+	if got, want := backendErr.Code, contracts.BackendErrorCodeInternal; got != want {
+		t.Fatalf("error code = %q, want %q", got, want)
+	}
+}
+
+func TestRecordOpenedStudyReturnsReadErrorWhenCatalogPathIsDirectory(t *testing.T) {
+	rootDir := t.TempDir()
+	catalogPath := filepath.Join(rootDir, "catalog.json")
+	if err := os.Mkdir(catalogPath, 0o755); err != nil {
+		t.Fatalf("Mkdir returned error: %v", err)
+	}
+
+	catalog := New(rootDir)
+	err := catalog.RecordOpenedStudy(contracts.StudyRecord{
+		StudyID:   "study-1",
+		InputPath: "/tmp/one.dcm",
+		InputName: "one.dcm",
+	})
+	if err == nil {
+		t.Fatal("RecordOpenedStudy returned nil error, want internal read error")
+	}
+
+	backendErr, ok := err.(contracts.BackendError)
+	if !ok {
+		t.Fatalf("error type = %T, want contracts.BackendError", err)
+	}
+	if got, want := backendErr.Code, contracts.BackendErrorCodeInternal; got != want {
+		t.Fatalf("error code = %q, want %q", got, want)
+	}
+}
+
 func TestRecordOpenedStudyReordersExistingStudyWithoutDuplicate(t *testing.T) {
 	catalog := New(t.TempDir())
 	nowCalls := 0

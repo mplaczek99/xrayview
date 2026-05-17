@@ -87,6 +87,57 @@ func (decoder *countingServiceDecoder) CallCount() int {
 	return decoder.calls
 }
 
+type fileContentDecoder struct {
+	mu    sync.Mutex
+	calls int
+}
+
+func (decoder *fileContentDecoder) DecodeStudy(
+	ctx context.Context,
+	path string,
+) (dicommeta.SourceStudy, error) {
+	if err := ctx.Err(); err != nil {
+		return dicommeta.SourceStudy{}, err
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return dicommeta.SourceStudy{}, err
+	}
+
+	decoder.mu.Lock()
+	decoder.calls++
+	decoder.mu.Unlock()
+
+	width := uint32(2)
+	if strings.Contains(string(raw), "version-two") {
+		width = 3
+	}
+
+	pixels := make([]float32, width)
+	for index := range pixels {
+		pixels[index] = float32(index)
+	}
+
+	return dicommeta.SourceStudy{
+		Image: imaging.SourceImage{
+			Width:    width,
+			Height:   1,
+			Format:   imaging.FormatGrayFloat32,
+			Pixels:   pixels,
+			MinValue: 0,
+			MaxValue: float32(width - 1),
+		},
+	}, nil
+}
+
+func (decoder *fileContentDecoder) CallCount() int {
+	decoder.mu.Lock()
+	defer decoder.mu.Unlock()
+
+	return decoder.calls
+}
+
 type concurrencyTrackingDecoder struct {
 	mu        sync.Mutex
 	study     dicommeta.SourceStudy
@@ -302,6 +353,92 @@ func TestStartRenderJobWritesPreviewAndServesCachedSnapshot(t *testing.T) {
 	}
 }
 
+func TestStartRenderJobInvalidatesCachesWhenInputFileAtSamePathChanges(t *testing.T) {
+	studyRegistry, study := registerTestStudy(t)
+	if err := os.WriteFile(study.InputPath, []byte("version-one"), 0o644); err != nil {
+		t.Fatalf("WriteFile first version returned error: %v", err)
+	}
+
+	cacheStore := cache.New(filepath.Join(t.TempDir(), "cache"))
+	decoder := &fileContentDecoder{}
+	service := newService(
+		cacheStore,
+		studyRegistry,
+		nil,
+		dicomexport.GoWriter{},
+		func() (studyDecoder, error) { return decoder, nil },
+		sequenceJobIDs("job-1", "job-2"),
+	)
+
+	var renderMu sync.Mutex
+	renderedWidths := []uint32{}
+	service.renderSourcePreview = func(
+		source imaging.SourceImage,
+		_ render.RenderPlan,
+	) imaging.PreviewImage {
+		renderMu.Lock()
+		renderedWidths = append(renderedWidths, source.Width)
+		renderMu.Unlock()
+
+		pixels := make([]uint8, source.PixelCount())
+		for index := range pixels {
+			pixels[index] = uint8(source.Width)
+		}
+		return imaging.GrayPreview(source.Width, source.Height, pixels)
+	}
+
+	firstStarted, err := service.StartRenderJob(contracts.RenderStudyCommand{StudyID: study.StudyID})
+	if err != nil {
+		t.Fatalf("first StartRenderJob returned error: %v", err)
+	}
+	firstSnapshot := waitForTerminalJob(t, service, firstStarted.JobID)
+	if firstSnapshot.FromCache {
+		t.Fatal("first FromCache = true, want fresh render")
+	}
+	firstResult, ok := firstSnapshot.Result.Payload.(contracts.RenderStudyCommandResult)
+	if !ok {
+		t.Fatalf("first Result.Payload type = %T, want contracts.RenderStudyCommandResult", firstSnapshot.Result.Payload)
+	}
+	if got, want := firstResult.LoadedWidth, uint32(2); got != want {
+		t.Fatalf("first LoadedWidth = %d, want %d", got, want)
+	}
+
+	if err := os.WriteFile(study.InputPath, []byte("version-two-with-a-different-size"), 0o644); err != nil {
+		t.Fatalf("WriteFile second version returned error: %v", err)
+	}
+
+	secondStarted, err := service.StartRenderJob(contracts.RenderStudyCommand{StudyID: study.StudyID})
+	if err != nil {
+		t.Fatalf("second StartRenderJob returned error: %v", err)
+	}
+	secondSnapshot := waitForTerminalJob(t, service, secondStarted.JobID)
+	if secondSnapshot.FromCache {
+		t.Fatal("second FromCache = true after same-path file replacement, want fresh render")
+	}
+	secondResult, ok := secondSnapshot.Result.Payload.(contracts.RenderStudyCommandResult)
+	if !ok {
+		t.Fatalf("second Result.Payload type = %T, want contracts.RenderStudyCommandResult", secondSnapshot.Result.Payload)
+	}
+	if got, want := secondResult.LoadedWidth, uint32(3); got != want {
+		t.Fatalf("second LoadedWidth = %d, want %d", got, want)
+	}
+	if secondResult.PreviewPath == firstResult.PreviewPath {
+		t.Fatalf("second PreviewPath reused %q after input replacement", secondResult.PreviewPath)
+	}
+	if got, want := decoder.CallCount(), 2; got != want {
+		t.Fatalf("DecodeStudy calls = %d, want %d", got, want)
+	}
+
+	renderMu.Lock()
+	defer renderMu.Unlock()
+	if got, want := len(renderedWidths), 2; got != want {
+		t.Fatalf("renderSourcePreview calls = %d, want %d", got, want)
+	}
+	if got, want := renderedWidths[1], uint32(3); got != want {
+		t.Fatalf("second rendered source width = %d, want %d", got, want)
+	}
+}
+
 func TestStartRenderJobReusesCachedResultAcrossStudyReopen(t *testing.T) {
 	inputPath := filepath.Join(t.TempDir(), "study.dcm")
 	if err := os.WriteFile(inputPath, []byte("dicom"), 0o644); err != nil {
@@ -389,6 +526,105 @@ func TestStartRenderJobReusesCachedResultAcrossStudyReopen(t *testing.T) {
 	}
 	if secondResult.StudyID == *secondSnapshot.StudyID {
 		t.Fatal("second payload StudyID unexpectedly matched top-level cached study id")
+	}
+}
+
+func TestStartAnalyzeJobUsesSessionScopedArtifacts(t *testing.T) {
+	studyRegistry, study := registerTestStudy(t)
+	cacheStore := cache.New(filepath.Join(t.TempDir(), "cache"))
+	sourceStudy := dicommeta.SourceStudy{
+		Image: imaging.SourceImage{
+			Width:    32,
+			Height:   32,
+			Format:   imaging.FormatGrayFloat32,
+			Pixels:   make([]float32, 32*32),
+			MinValue: 0,
+			MaxValue: 255,
+			DefaultWindow: &imaging.WindowLevel{
+				Center: 127.5,
+				Width:  255,
+			},
+		},
+	}
+	for index := range sourceStudy.Image.Pixels {
+		sourceStudy.Image.Pixels[index] = float32(index % 256)
+	}
+	decoder := &countingServiceDecoder{study: sourceStudy}
+	service := newService(
+		cacheStore,
+		studyRegistry,
+		nil,
+		dicomexport.GoWriter{},
+		func() (studyDecoder, error) { return decoder, nil },
+		sequenceJobIDs("job-1", "job-2"),
+	)
+
+	started, err := service.StartAnalyzeJob(contracts.AnalyzeStudyCommand{StudyID: study.StudyID})
+	if err != nil {
+		t.Fatalf("StartAnalyzeJob returned error: %v", err)
+	}
+	firstSnapshot := waitForTerminalJob(t, service, started.JobID)
+	if firstSnapshot.FromCache {
+		t.Fatal("first FromCache = true, want fresh analysis")
+	}
+	firstResult, ok := firstSnapshot.Result.Payload.(contracts.AnalyzeStudyCommandResult)
+	if !ok {
+		t.Fatalf("first Result.Payload type = %T, want contracts.AnalyzeStudyCommandResult", firstSnapshot.Result.Payload)
+	}
+
+	cachedStarted, err := service.StartAnalyzeJob(contracts.AnalyzeStudyCommand{StudyID: study.StudyID})
+	if err != nil {
+		t.Fatalf("cached StartAnalyzeJob returned error: %v", err)
+	}
+	cachedSnapshot, err := service.GetJob(contracts.JobCommand{JobID: cachedStarted.JobID})
+	if err != nil {
+		t.Fatalf("GetJob returned error: %v", err)
+	}
+	if !cachedSnapshot.FromCache {
+		t.Fatal("cached FromCache = false, want in-session cache hit")
+	}
+	cachedResult, ok := cachedSnapshot.Result.Payload.(contracts.AnalyzeStudyCommandResult)
+	if !ok {
+		t.Fatalf("cached Result.Payload type = %T, want contracts.AnalyzeStudyCommandResult", cachedSnapshot.Result.Payload)
+	}
+	if got, want := cachedResult.PreviewPath, firstResult.PreviewPath; got != want {
+		t.Fatalf("cached PreviewPath = %q, want %q", got, want)
+	}
+	if got, want := decoder.CallCount(), 1; got != want {
+		t.Fatalf("DecodeStudy calls before restart = %d, want %d", got, want)
+	}
+	service.Stop()
+
+	restarted := newService(
+		cacheStore,
+		studyRegistry,
+		nil,
+		dicomexport.GoWriter{},
+		func() (studyDecoder, error) { return decoder, nil },
+		sequenceJobIDs("job-3"),
+	)
+	defer restarted.Stop()
+
+	restartedStarted, err := restarted.StartAnalyzeJob(contracts.AnalyzeStudyCommand{StudyID: study.StudyID})
+	if err != nil {
+		t.Fatalf("restarted StartAnalyzeJob returned error: %v", err)
+	}
+	restartedSnapshot := waitForTerminalJob(t, restarted, restartedStarted.JobID)
+	if restartedSnapshot.FromCache {
+		t.Fatal("restarted FromCache = true, want fresh analysis after service restart")
+	}
+	restartedResult, ok := restartedSnapshot.Result.Payload.(contracts.AnalyzeStudyCommandResult)
+	if !ok {
+		t.Fatalf("restarted Result.Payload type = %T, want contracts.AnalyzeStudyCommandResult", restartedSnapshot.Result.Payload)
+	}
+	if got, want := decoder.CallCount(), 2; got != want {
+		t.Fatalf("DecodeStudy calls after restart = %d, want %d", got, want)
+	}
+	if restartedResult.PreviewPath == firstResult.PreviewPath {
+		t.Fatalf("restarted PreviewPath reused %q after service restart", restartedResult.PreviewPath)
+	}
+	if restartedResult.FilledPreviewPath == firstResult.FilledPreviewPath {
+		t.Fatalf("restarted FilledPreviewPath reused %q after service restart", restartedResult.FilledPreviewPath)
 	}
 }
 
@@ -687,7 +923,7 @@ func TestStartProcessJobWritesPreviewAndServesCachedSnapshot(t *testing.T) {
 	}
 }
 
-func TestStartProcessJobUsesCacheAcrossOutputPaths(t *testing.T) {
+func TestStartProcessJobHonorsDifferentOutputPaths(t *testing.T) {
 	studyRegistry, study := registerTestStudy(t)
 	cacheStore := cache.New(filepath.Join(t.TempDir(), "cache"))
 	sourceStudy := syntheticSourceStudy()
@@ -723,6 +959,9 @@ func TestStartProcessJobUsesCacheAcrossOutputPaths(t *testing.T) {
 	if !ok {
 		t.Fatalf("first Result.Payload type = %T, want contracts.ProcessStudyCommandResult", firstSnapshot.Result.Payload)
 	}
+	if got, want := firstResult.DicomPath, firstOutputPath; got != want {
+		t.Fatalf("first DicomPath = %q, want %q", got, want)
+	}
 
 	secondOutputPath := filepath.Join(t.TempDir(), "second-output.dcm")
 	secondStarted, err := service.StartProcessJob(contracts.ProcessStudyCommand{
@@ -737,26 +976,26 @@ func TestStartProcessJobUsesCacheAcrossOutputPaths(t *testing.T) {
 		t.Fatalf("second StartProcessJob returned error: %v", err)
 	}
 
-	secondSnapshot, err := service.GetJob(contracts.JobCommand{JobID: secondStarted.JobID})
-	if err != nil {
-		t.Fatalf("GetJob returned error: %v", err)
-	}
+	secondSnapshot := waitForTerminalJob(t, service, secondStarted.JobID)
 	if got, want := secondSnapshot.State, contracts.JobStateCompleted; got != want {
 		t.Fatalf("second State = %q, want %q", got, want)
 	}
-	if !secondSnapshot.FromCache {
-		t.Fatal("second FromCache = false, want true")
+	if secondSnapshot.FromCache {
+		t.Fatal("second FromCache = true, want fresh job for different output path")
 	}
 
 	secondResult, ok := secondSnapshot.Result.Payload.(contracts.ProcessStudyCommandResult)
 	if !ok {
 		t.Fatalf("second Result.Payload type = %T, want contracts.ProcessStudyCommandResult", secondSnapshot.Result.Payload)
 	}
-	if got, want := secondResult.DicomPath, firstResult.DicomPath; got != want {
-		t.Fatalf("second DicomPath = %q, want reused %q", got, want)
+	if got, want := secondResult.DicomPath, secondOutputPath; got != want {
+		t.Fatalf("second DicomPath = %q, want %q", got, want)
 	}
-	if _, err := os.Stat(secondOutputPath); !os.IsNotExist(err) {
-		t.Fatalf("second output path unexpectedly exists, err = %v", err)
+	if secondResult.DicomPath == firstResult.DicomPath {
+		t.Fatalf("second DicomPath reused first output path %q", firstResult.DicomPath)
+	}
+	if info, err := os.Stat(secondOutputPath); err != nil || info.IsDir() {
+		t.Fatalf("second output path missing or invalid: %v", err)
 	}
 }
 
@@ -1207,7 +1446,7 @@ func TestRenderAndProcessJobsRemovePreviewArtifactWhenPreviewWriteFails(t *testi
 		name        string
 		namespace   string
 		start       func(*Service, string) (contracts.StartedJob, error)
-		fingerprint func(contracts.StudyRecord) (string, error)
+		fingerprint func(contracts.StudyRecord, string) (string, error)
 		wantMessage string
 	}{
 		{
@@ -1244,7 +1483,7 @@ func TestRenderAndProcessJobsRemovePreviewArtifactWhenPreviewWriteFails(t *testi
 				}
 			}
 
-			fingerprint, err := test.fingerprint(study)
+			fingerprint, err := test.fingerprint(study, service.cacheSessionID)
 			if err != nil {
 				t.Fatalf("fingerprint returned error: %v", err)
 			}
@@ -1300,7 +1539,7 @@ func TestStartProcessJobWriterFailureCleansUpArtifactsAndDoesNotCacheFailure(t *
 		OutputPath: stringPointer(outputPath),
 	}
 
-	fingerprint, err := processFingerprint(study, command)
+	fingerprint, err := processFingerprint(study, command, service.cacheSessionID)
 	if err != nil {
 		t.Fatalf("processFingerprint returned error: %v", err)
 	}
@@ -1378,7 +1617,7 @@ func TestStartProcessJobCancellationDuringSecondaryCaptureWriteRemovesArtifacts(
 		OutputPath: stringPointer(outputPath),
 	}
 
-	fingerprint, err := processFingerprint(study, command)
+	fingerprint, err := processFingerprint(study, command, service.cacheSessionID)
 	if err != nil {
 		t.Fatalf("processFingerprint returned error: %v", err)
 	}

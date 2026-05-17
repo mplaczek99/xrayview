@@ -163,7 +163,7 @@ function makeStore_AFTER() {
   function setProcessingControls(controls) {
     const study = activeStudy();
     if (!study) return;
-    _pendingControls = controls;
+    _pendingControls = { ...controls };
     _pendingControlsStudyId = study.studyId;
     if (!_controlsRaf) {
       _controlsRaf = requestAnimationFrame(() => {
@@ -173,8 +173,39 @@ function makeStore_AFTER() {
     }
   }
 
+  function setProcessingControl(key, value) {
+    const study = activeStudy();
+    if (!study) return;
+    const baseControls =
+      _pendingControlsStudyId === study.studyId && _pendingControls
+        ? _pendingControls
+        : study.processing.form.controls;
+    setProcessingControls({ ...baseControls, [key]: value });
+  }
+
+  function flushPendingControlsForStudy(studyId) {
+    if (_pendingControlsStudyId !== studyId || !_pendingControls) {
+      return state.studies[studyId] ?? null;
+    }
+    if (_controlsRaf) {
+      cancelAnimationFrame(_controlsRaf);
+      _controlsRaf = 0;
+    }
+    commitPendingControls();
+    return state.studies[studyId] ?? null;
+  }
+
+  function runActiveStudyProcessing() {
+    const study = activeStudy();
+    if (!study) return null;
+    const flushedStudy = flushPendingControlsForStudy(study.studyId);
+    return flushedStudy?.processing.form.controls ?? null;
+  }
+
   return {
     setProcessingControls,
+    setProcessingControl,
+    runActiveStudyProcessing,
     getState: () => state,
     getListenerCount: () => listenerCount,
     resetListenerCount: () => { listenerCount = 0; },
@@ -288,6 +319,39 @@ test("AFTER: second frame after flush schedules new rAF independently", async ()
   assert.equal(store.getListenerCount(), 2, "AFTER: frame 2 → 1 more update (2 total)");
   assert.equal(store.getState().studies["study-1"].processing.form.controls.brightness, 40,
     "AFTER: frame 2 final value correct");
+});
+
+test("AFTER: single-field updates merge against pending controls", async () => {
+  resetRAF();
+  const store = makeStore_AFTER();
+
+  store.setProcessingControl("brightness", 40);
+  store.setProcessingControl("invert", true);
+
+  flushRAF();
+  await flushMicrotasks();
+
+  const controls = store.getState().studies["study-1"].processing.form.controls;
+  assert.equal(controls.brightness, 40, "AFTER: brightness is preserved from the pending change");
+  assert.equal(controls.invert, true, "AFTER: invert is applied on top of pending brightness");
+  assert.equal(store.getListenerCount(), 1, "AFTER: merged field updates still coalesce to 1 update");
+});
+
+test("AFTER: run processing flushes pending controls before building request", async () => {
+  resetRAF();
+  const store = makeStore_AFTER();
+
+  store.setProcessingControl("brightness", 25);
+  const requestControls = store.runActiveStudyProcessing();
+  await flushMicrotasks();
+
+  assert.equal(rafQueue.length, 0, "AFTER: pending rAF cancelled by synchronous flush");
+  assert.equal(requestControls.brightness, 25, "AFTER: request sees the pending brightness");
+  assert.equal(
+    store.getState().studies["study-1"].processing.form.controls.brightness,
+    25,
+    "AFTER: state is also flushed to the pending brightness",
+  );
 });
 
 test("AFTER: no update when no active study", async () => {

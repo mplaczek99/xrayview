@@ -142,6 +142,7 @@ export interface AnalyzeStudyCommand {
 export interface AnalyzeStudyCommandResult {
   studyId: string;
   previewPath: string;
+  filledPreviewPath: string;
   loadedWidth: number;
   loadedHeight: number;
   mode: string;

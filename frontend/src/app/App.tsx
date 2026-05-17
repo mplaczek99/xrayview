@@ -7,7 +7,7 @@ import { ViewTab } from "../components/viewer/ViewTab";
 import { JobCenter } from "../features/jobs/JobCenter";
 import { useJobs } from "../features/jobs/useJobs";
 import { workbenchActions, useWorkbenchStore } from "./store/workbenchStore";
-import { selectActiveStudy, selectWorkbenchStatus } from "./store/selectors";
+import { selectWorkbenchStatus } from "./store/selectors";
 import type { ActiveTab } from "../lib/types";
 
 const TABS: ActiveTab[] = ["view", "processing"];
@@ -53,9 +53,8 @@ export function App() {
     view: null,
     processing: null,
   });
-  const study = useWorkbenchStore(selectActiveStudy);
   const workbenchStatus = useWorkbenchStore(selectWorkbenchStatus);
-  const status = study?.status ?? workbenchStatus;
+  const status = workbenchStatus;
   useJobs();
 
   useEffect(() => {

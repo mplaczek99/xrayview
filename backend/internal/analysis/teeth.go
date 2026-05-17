@@ -3,22 +3,24 @@ package analysis
 import (
 	"fmt"
 	"math"
+	"path/filepath"
+	"strings"
 
 	"xrayview/backend/internal/bufpool"
 	"xrayview/backend/internal/imaging"
+	"xrayview/backend/internal/render"
 )
 
-var toothOverlayGreen = [3]uint8{102, 255, 0}
+var toothOverlayGreen = [3]uint8{120, 255, 0}
 var boneOverlayRed = [3]uint8{255, 0, 0}
-
-// AnalyzeAlgorithmVersion is part of the Analyze result cache key. Change it
-// only when the generated overlay semantics intentionally change.
-const AnalyzeAlgorithmVersion = "lowpass-fair-uniform-tooth-and-bone-contour-overlay-v2"
 
 const minimumToothAreaFloorPixels = 51
 const toothOutlineThicknessPixels = 2
 const boneLineThicknessPixels = 0
 const boneOutlineThicknessPixels = 2
+const boneToothCutoutBridgeRadiusPixels = 24
+const boneImageFrameClearancePixels = 12
+const radiographBackgroundMaxGray = 2
 const overlayContourLowPassIterations = 18
 const overlayContourSmoothingIterations = 4
 const overlayContourFairingIterations = 14
@@ -30,11 +32,32 @@ const overlayStrokeWidthPixels = 2.6
 
 type ToothOverlayResult struct {
 	Preview        imaging.PreviewImage
+	FilledPreview  imaging.PreviewImage
 	ToothPixels    int
 	BonePixels     int
 	Coverage       float64
 	CandidateCount int
 	Mode           string
+}
+
+func ToothOverlayRenderPlan(inputPath string, source imaging.SourceImage) render.RenderPlan {
+	plan := render.DefaultRenderPlan()
+	if shouldPreserveStandaloneEightBitRange(inputPath, source) {
+		plan.Window = render.ManualWindowMode(imaging.WindowLevel{
+			Center: 128,
+			Width:  256,
+		})
+	}
+	return plan
+}
+
+func shouldPreserveStandaloneEightBitRange(inputPath string, source imaging.SourceImage) bool {
+	switch strings.ToLower(filepath.Ext(strings.TrimSpace(inputPath))) {
+	case ".bmp", ".tif", ".tiff":
+	default:
+		return false
+	}
+	return source.DefaultWindow == nil && source.MinValue >= 0 && source.MaxValue <= 255
 }
 
 type componentMeta struct {
@@ -153,13 +176,22 @@ func GenerateToothOverlay(preview imaging.PreviewImage) (ToothOverlayResult, err
 	if bonePixels < width/8 {
 		mode = mode + "; no reliable bone level found"
 	}
+	thickenedBoneMask := thickenBoneLineMaskWithWorkspace(boneMask, width, height, boneLineThicknessPixels, workspace)
 
 	return ToothOverlayResult{
 		Preview: overlayMasksWithWorkspace(
 			workspace,
 			gray,
 			toothMask,
-			thickenBoneLineMaskWithWorkspace(boneMask, width, height, boneLineThicknessPixels, workspace),
+			thickenedBoneMask,
+			preview.Width,
+			preview.Height,
+		),
+		FilledPreview: overlayFilledMasksWithWorkspace(
+			workspace,
+			gray,
+			toothMask,
+			thickenedBoneMask,
 			preview.Width,
 			preview.Height,
 		),
@@ -213,6 +245,7 @@ func detectBoneLevelMaskWithWorkspace(gray []uint8, width, height int, workspace
 	if mask, ok := boneExemplarMask(gray, width, height); ok {
 		pooled := workspace.getMask(len(mask))
 		copy(pooled, mask)
+		pooled = fillBoneLevelMaskHolesWithWorkspace(pooled, width, height, workspace)
 		return pooled
 	}
 
@@ -236,7 +269,15 @@ func detectBoneLevelMaskWithWorkspace(gray []uint8, width, height int, workspace
 		minimumBoneAreaPixels(width, height),
 	)
 	mask = work
+	mask = fillBoneLevelMaskHolesWithWorkspace(mask, width, height, workspace)
 	return mask
+}
+
+func fillBoneLevelMaskHolesWithWorkspace(mask []uint8, width, height int, workspace *maskWorkspace) []uint8 {
+	filled := workspace.getMask(len(mask))
+	outside := workspace.getMask(len(mask))
+	fillHolesBinaryMaskInto(filled, outside, &workspace.queue, mask, width, height)
+	return filled
 }
 
 func grayPixels(preview imaging.PreviewImage) ([]uint8, error) {
@@ -261,7 +302,13 @@ func overlayMasks(gray []uint8, toothMask []uint8, boneMask []uint8, width, heig
 	return overlayMasksWithWorkspace(workspace, gray, toothMask, boneMask, width, height)
 }
 
-func overlayMasksWithWorkspace(workspace *maskWorkspace, gray []uint8, toothMask []uint8, boneMask []uint8, width, height uint32) imaging.PreviewImage {
+func overlayFilledMasks(gray []uint8, toothMask []uint8, boneMask []uint8, width, height uint32) imaging.PreviewImage {
+	workspace := newMaskWorkspace()
+	defer workspace.release()
+	return overlayFilledMasksWithWorkspace(workspace, gray, toothMask, boneMask, width, height)
+}
+
+func grayscaleRGBA(gray []uint8) []uint8 {
 	rgba := make([]uint8, len(gray)*4)
 	for index, value := range gray {
 		base := index * 4
@@ -270,22 +317,138 @@ func overlayMasksWithWorkspace(workspace *maskWorkspace, gray []uint8, toothMask
 		rgba[base+2] = value
 		rgba[base+3] = 255
 	}
+	return rgba
+}
+
+func overlayMasksWithWorkspace(workspace *maskWorkspace, gray []uint8, toothMask []uint8, boneMask []uint8, width, height uint32) imaging.PreviewImage {
+	rgba := grayscaleRGBA(gray)
 
 	widthInt := int(width)
 	heightInt := int(height)
-	drawSmoothedMaskContours(
-		rgba,
-		widthInt,
-		heightInt,
-		boneOutlineSourceMaskWithWorkspace(boneMask, widthInt, heightInt, workspace),
-		boneOverlayRed,
-		toothMask,
-	)
-	drawSmoothedMaskContours(rgba, widthInt, heightInt, toothMask, toothOverlayGreen, nil)
+	boneSectionMask := boneSectionMaskWithIgnoredCutouts(workspace, gray, boneMask, toothMask, widthInt, heightInt)
+	drawMaskCenteredOutlineWithWorkspace(workspace, rgba, gray, widthInt, heightInt, boneSectionMask, boneOverlayRed, boneOutlineThicknessPixels, toothMask)
+	drawMaskOutlineWithWorkspace(workspace, rgba, widthInt, heightInt, toothMask, toothOverlayGreen, toothOutlineThicknessPixels, nil)
 	return imaging.RGBAPreview(width, height, rgba)
 }
 
-func boneOutlineMask(toothMask []uint8, boneMask []uint8, width, height int) []uint8 {
+func boneSectionMaskWithIgnoredCutouts(workspace *maskWorkspace, gray []uint8, boneMask []uint8, toothMask []uint8, width int, height int) []uint8 {
+	if len(boneMask) == 0 || len(toothMask) != len(boneMask) {
+		return boneMask
+	}
+
+	sectionMask := workspace.getMask(len(boneMask))
+	copy(sectionMask, boneMask)
+	radius := boneToothCutoutBridgeRadius(width, height)
+	if radius <= 0 || width < 8 || height < 8 {
+		return sectionMask
+	}
+
+	nearBone := workspace.getMask(len(boneMask))
+	scratch := workspace.getMask(len(boneMask))
+	ignoredCutouts := workspace.getMask(len(boneMask))
+	dilateBinaryMaskInto(nearBone, scratch, workspace.countScratch(width), boneMask, width, height, radius)
+	dilateBinaryMaskInto(ignoredCutouts, scratch, workspace.countScratch(width), toothMask, width, height, radius)
+	for index, value := range ignoredCutouts {
+		if value != 0 && nearBone[index] != 0 {
+			sectionMask[index] = 1
+		}
+	}
+
+	closeRadius := minInt(8, maxInt(1, radius/2))
+	closedSectionMask := workspace.getMask(len(boneMask))
+	closeWork := workspace.getMask(len(boneMask))
+	copy(closedSectionMask, sectionMask)
+	closeBinaryMaskInPlace(closedSectionMask, closeWork, scratch, workspace.countScratch(width), width, height, closeRadius)
+
+	filledSectionMask := workspace.getMask(len(boneMask))
+	outside := workspace.getMask(len(boneMask))
+	fillHolesBinaryMaskInto(filledSectionMask, outside, &workspace.queue, closedSectionMask, width, height)
+
+	cleanedSectionMask := workspace.getMask(len(boneMask))
+	removeSmallMaskComponentsInto(
+		cleanedSectionMask,
+		workspace.componentLabelScratch(len(boneMask)),
+		&workspace.queue,
+		&workspace.components,
+		filledSectionMask,
+		width,
+		height,
+		minimumBoneOutlineAreaPixels(width, height),
+	)
+	clearBorderBackgroundFromMask(cleanedSectionMask, gray, width, height, workspace.getMask(len(boneMask)), &workspace.queue)
+	return cleanedSectionMask
+}
+
+func boneToothCutoutBridgeRadius(width int, height int) int {
+	return minInt(boneToothCutoutBridgeRadiusPixels, maxInt(boneOutlineThicknessPixels, minInt(width, height)/32))
+}
+
+func clearBorderBackgroundFromMask(mask []uint8, gray []uint8, width int, height int, visited []uint8, queue *[]int) {
+	if len(mask) == 0 || len(gray) != len(mask) || len(visited) != len(mask) || width <= 0 || height <= 0 {
+		return
+	}
+
+	threshold := radiographBackgroundThreshold(gray)
+	clear(visited)
+	q := (*queue)[:0]
+	push := func(index int) {
+		if index < 0 || index >= len(mask) || visited[index] != 0 || gray[index] > threshold {
+			return
+		}
+		visited[index] = 1
+		mask[index] = 0
+		q = append(q, index)
+	}
+	for x := 0; x < width; x++ {
+		push((height-1)*width + x)
+	}
+	for y := 1; y < height; y++ {
+		push(y * width)
+		push(y*width + width - 1)
+	}
+
+	for head := 0; head < len(q); head++ {
+		index := q[head]
+		x := index % width
+		y := index / width
+		if x > 0 {
+			push(index - 1)
+		}
+		if x+1 < width {
+			push(index + 1)
+		}
+		if y > 0 {
+			push(index - width)
+		}
+		if y+1 < height {
+			push(index + width)
+		}
+	}
+	*queue = q
+}
+
+func radiographBackgroundThreshold(gray []uint8) uint8 {
+	low := percentileGray(gray, 0.01)
+	if low > radiographBackgroundMaxGray {
+		return 0
+	}
+	return radiographBackgroundMaxGray
+}
+
+func overlayFilledMasksWithWorkspace(workspace *maskWorkspace, gray []uint8, toothMask []uint8, boneMask []uint8, width, height uint32) imaging.PreviewImage {
+	rgba := make([]uint8, len(gray)*4)
+
+	for index := range gray {
+		base := index * 4
+		rgba[base+3] = 255
+	}
+	boneSectionMask := boneSectionMaskWithIgnoredCutouts(workspace, gray, boneMask, toothMask, int(width), int(height))
+	fillSolidMask(rgba, boneSectionMask, boneOverlayRed, toothMask)
+	fillSolidMask(rgba, toothMask, toothOverlayGreen, nil)
+	return imaging.RGBAPreview(width, height, rgba)
+}
+
+func boneOutlineMask(boneMask []uint8, width, height int) []uint8 {
 	workspace := newMaskWorkspace()
 	defer workspace.release()
 
@@ -294,12 +457,67 @@ func boneOutlineMask(toothMask []uint8, boneMask []uint8, width, height int) []u
 	work := workspace.getMask(len(source))
 	scratch := workspace.getMask(len(source))
 	innerOutlineMaskInto(outline, work, scratch, workspace.countScratch(width), source, width, height, boneOutlineThicknessPixels)
-	for index, value := range toothMask {
-		if value != 0 {
-			outline[index] = 0
-		}
-	}
 	return append([]uint8(nil), outline...)
+}
+
+func boneSectionOutlineMask(gray []uint8, mask []uint8, width, height int) []uint8 {
+	workspace := newMaskWorkspace()
+	defer workspace.release()
+
+	outline := workspace.getMask(len(mask))
+	dilated := workspace.getMask(len(mask))
+	eroded := workspace.getMask(len(mask))
+	scratch := workspace.getMask(len(mask))
+	centeredOutlineMaskInto(outline, dilated, eroded, scratch, workspace.countScratch(width), mask, width, height, boneOutlineThicknessPixels)
+	clearBorderBackgroundFromMask(outline, gray, width, height, workspace.getMask(len(mask)), &workspace.queue)
+	clearImageFrameOutline(outline, width, height, boneOutlineThicknessPixels)
+	return append([]uint8(nil), outline...)
+}
+
+func drawMaskCenteredOutlineWithWorkspace(
+	workspace *maskWorkspace,
+	rgba []uint8,
+	gray []uint8,
+	width int,
+	height int,
+	mask []uint8,
+	color [3]uint8,
+	thickness int,
+	excludeMask []uint8,
+) {
+	if len(mask) == 0 || len(mask)*4 != len(rgba) {
+		return
+	}
+
+	outline := workspace.getMask(len(mask))
+	dilated := workspace.getMask(len(mask))
+	eroded := workspace.getMask(len(mask))
+	scratch := workspace.getMask(len(mask))
+	centeredOutlineMaskInto(outline, dilated, eroded, scratch, workspace.countScratch(width), mask, width, height, thickness)
+	clearBorderBackgroundFromMask(outline, gray, width, height, workspace.getMask(len(mask)), &workspace.queue)
+	clearImageFrameOutline(outline, width, height, thickness)
+	compositeMaskFill(rgba, outline, color, 255, excludeMask)
+}
+
+func drawMaskOutlineWithWorkspace(
+	workspace *maskWorkspace,
+	rgba []uint8,
+	width int,
+	height int,
+	mask []uint8,
+	color [3]uint8,
+	thickness int,
+	excludeMask []uint8,
+) {
+	if len(mask) == 0 || len(mask)*4 != len(rgba) {
+		return
+	}
+
+	outline := workspace.getMask(len(mask))
+	work := workspace.getMask(len(mask))
+	scratch := workspace.getMask(len(mask))
+	innerOutlineMaskInto(outline, work, scratch, workspace.countScratch(width), mask, width, height, thickness)
+	compositeMaskFill(rgba, outline, color, 255, excludeMask)
 }
 
 func boneOutlineSourceMask(boneMask []uint8, width, height int) []uint8 {
@@ -308,10 +526,12 @@ func boneOutlineSourceMask(boneMask []uint8, width, height int) []uint8 {
 	return append([]uint8(nil), boneOutlineSourceMaskWithWorkspace(boneMask, width, height, workspace)...)
 }
 
+const boneHoleBridgeRadius = 1
+
 func boneOutlineSourceMaskWithWorkspace(boneMask []uint8, width, height int, workspace *maskWorkspace) []uint8 {
 	source := workspace.getMask(len(boneMask))
+	work := workspace.getMask(len(boneMask))
 	scratch := workspace.getMask(len(boneMask))
-	filled := workspace.getMask(len(boneMask))
 	removeSmallMaskComponentsInto(
 		source,
 		workspace.componentLabelScratch(len(boneMask)),
@@ -322,8 +542,9 @@ func boneOutlineSourceMaskWithWorkspace(boneMask []uint8, width, height int, wor
 		height,
 		minimumBoneOutlineAreaPixels(width, height),
 	)
-	fillHolesBinaryMaskInto(filled, scratch, &workspace.queue, source, width, height)
-	return filled
+	closeBinaryMaskInPlace(source, work, scratch, workspace.countScratch(width), width, height, boneHoleBridgeRadius)
+	fillHolesBinaryMaskInto(work, scratch, &workspace.queue, source, width, height)
+	return work
 }
 
 func minimumBoneOutlineAreaPixels(width, height int) int {
@@ -872,6 +1093,48 @@ func compositeOverlayCoverage(rgba []uint8, coverage []float64, color [3]uint8) 
 	}
 }
 
+func compositeMaskFill(rgba []uint8, mask []uint8, color [3]uint8, alpha uint32, excludeMask []uint8) {
+	if alpha == 0 || len(mask)*4 != len(rgba) {
+		return
+	}
+	if alpha > 255 {
+		alpha = 255
+	}
+	inverse := uint32(255) - alpha
+	for index, value := range mask {
+		if value == 0 {
+			continue
+		}
+		if len(excludeMask) == len(mask) && excludeMask[index] != 0 {
+			continue
+		}
+		base := index * 4
+		rgba[base+0] = uint8((uint32(rgba[base+0])*inverse + uint32(color[0])*alpha + 127) / 255)
+		rgba[base+1] = uint8((uint32(rgba[base+1])*inverse + uint32(color[1])*alpha + 127) / 255)
+		rgba[base+2] = uint8((uint32(rgba[base+2])*inverse + uint32(color[2])*alpha + 127) / 255)
+		rgba[base+3] = 255
+	}
+}
+
+func fillSolidMask(rgba []uint8, mask []uint8, color [3]uint8, excludeMask []uint8) {
+	if len(mask)*4 != len(rgba) {
+		return
+	}
+	for index, value := range mask {
+		if value == 0 {
+			continue
+		}
+		if len(excludeMask) == len(mask) && excludeMask[index] != 0 {
+			continue
+		}
+		base := index * 4
+		rgba[base+0] = color[0]
+		rgba[base+1] = color[1]
+		rgba[base+2] = color[2]
+		rgba[base+3] = 255
+	}
+}
+
 func strokeCoverage(distance float64, radius float64) float64 {
 	coverage := radius + 0.5 - distance
 	if coverage <= 0 {
@@ -1233,6 +1496,52 @@ func innerOutlineMaskInto(out []uint8, eroded []uint8, scratch []uint8, counts [
 			out[index] = 0
 		}
 	}
+}
+
+func centeredOutlineMaskInto(out []uint8, dilated []uint8, eroded []uint8, scratch []uint8, counts []int, mask []uint8, width, height, thickness int) {
+	if thickness <= 0 || len(mask) == 0 {
+		copy(out, mask)
+		return
+	}
+
+	dilateBinaryMaskInto(dilated, scratch, counts, mask, width, height, thickness)
+	erodeBinaryMaskInto(eroded, scratch, counts, mask, width, height, thickness)
+	for index, value := range dilated {
+		if value != 0 && eroded[index] == 0 {
+			out[index] = 1
+		} else {
+			out[index] = 0
+		}
+	}
+}
+
+func clearImageFrameOutline(out []uint8, width int, height int, thickness int) {
+	if len(out) == 0 || width <= 0 || height <= 0 || len(out) != width*height || thickness <= 0 {
+		return
+	}
+
+	clearance := boneImageFrameClearance(width, height, thickness)
+	limitX := minInt(clearance, width)
+	limitY := minInt(clearance, height)
+	for y := 0; y < height; y++ {
+		row := y * width
+		for x := 0; x < limitX; x++ {
+			out[row+x] = 0
+			out[row+width-1-x] = 0
+		}
+	}
+	for y := 0; y < limitY; y++ {
+		topRow := y * width
+		bottomRow := (height - 1 - y) * width
+		for x := 0; x < width; x++ {
+			out[topRow+x] = 0
+			out[bottomRow+x] = 0
+		}
+	}
+}
+
+func boneImageFrameClearance(width int, height int, thickness int) int {
+	return minInt(boneImageFrameClearancePixels, maxInt(thickness, minInt(width, height)/64))
 }
 
 func closeBinaryMask(mask []uint8, width, height, radius int) []uint8 {

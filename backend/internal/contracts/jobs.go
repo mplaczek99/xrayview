@@ -54,12 +54,13 @@ type AnalyzeStudyCommand struct {
 }
 
 type AnalyzeStudyCommandResult struct {
-	StudyID          string            `json:"studyId"`
-	PreviewPath      string            `json:"previewPath"`
-	LoadedWidth      uint32            `json:"loadedWidth"`
-	LoadedHeight     uint32            `json:"loadedHeight"`
-	Mode             string            `json:"mode"`
-	MeasurementScale *MeasurementScale `json:"measurementScale,omitempty"`
+	StudyID           string            `json:"studyId"`
+	PreviewPath       string            `json:"previewPath"`
+	FilledPreviewPath string            `json:"filledPreviewPath"`
+	LoadedWidth       uint32            `json:"loadedWidth"`
+	LoadedHeight      uint32            `json:"loadedHeight"`
+	Mode              string            `json:"mode"`
+	MeasurementScale  *MeasurementScale `json:"measurementScale,omitempty"`
 }
 
 type ProcessStudyCommand struct {

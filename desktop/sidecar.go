@@ -133,6 +133,27 @@ func (controller *SidecarController) BaseURL() string {
 	return controller.baseURL
 }
 
+func (controller *SidecarController) CacheDir() (string, error) {
+	if err := controller.EnsureStarted(); err != nil {
+		return "", err
+	}
+
+	controller.mu.Lock()
+	defer controller.mu.Unlock()
+
+	health, err := controller.probeHealthLocked()
+	if err != nil {
+		return "", err
+	}
+
+	cacheDir := strings.TrimSpace(health.CacheDir)
+	if cacheDir == "" {
+		return "", errors.New("backend health response did not include cacheDir")
+	}
+
+	return filepath.Clean(cacheDir), nil
+}
+
 func (controller *SidecarController) BinaryPath() string {
 	if override := firstEnv(sidecarBinaryEnvKey, legacySidecarBinaryEnvKey); override != "" {
 		return override

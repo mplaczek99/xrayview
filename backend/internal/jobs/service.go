@@ -56,6 +56,7 @@ type Service struct {
 	logger                 *slog.Logger
 	newDecoder             decodeHelperFactory
 	secondaryCaptureWriter dicomexport.Writer
+	cacheSessionID         string
 	memoryCache            *cache.Memory // finished job payloads keyed by fingerprint; separate from decodeCache (source-study decode)
 	registry               *Registry
 	decodeCache            *studies.DecodeCache // source-study decode dedupe; separate from memoryCache (result payloads)
@@ -73,6 +74,7 @@ type Service struct {
 const decodeBenchmarkEnvKey = "XRAYVIEW_BENCH_LOG_DECODES"
 
 const analyzeFingerprintNamespace = "analyze-study"
+const analyzeOutputVersion = "sections-reference-mask-v16"
 
 const workerCountEnvKey = "XRAYVIEW_BACKEND_WORKERS"
 
@@ -160,7 +162,7 @@ func (service *Service) StartRenderJob(
 			return command.StudyID
 		},
 		fingerprint: func(study contracts.StudyRecord, _ contracts.RenderStudyCommand) (string, error) {
-			return renderFingerprint(study)
+			return renderFingerprint(study, service.cacheSessionID)
 		},
 		cacheLoad: service.memoryCache.LoadRender,
 		prepare: func(
@@ -187,7 +189,7 @@ func (service *Service) StartAnalyzeJob(
 ) (contracts.StartedJob, error) {
 	return startJob(service, command, jobSpec[
 		contracts.AnalyzeStudyCommand,
-		string,
+		analyzeJobInput,
 		contracts.AnalyzeStudyCommandResult,
 	]{
 		name: "analyze",
@@ -196,24 +198,35 @@ func (service *Service) StartAnalyzeJob(
 			return command.StudyID
 		},
 		fingerprint: func(study contracts.StudyRecord, _ contracts.AnalyzeStudyCommand) (string, error) {
-			return analyzeFingerprint(study)
+			return analyzeFingerprint(study, service.cacheSessionID)
 		},
 		cacheLoad: service.memoryCache.LoadAnalyze,
 		prepare: func(
 			_ contracts.StudyRecord,
 			_ contracts.AnalyzeStudyCommand,
 			fingerprint string,
-		) (string, error) {
-			return service.cache.ArtifactPath("analyze", fingerprint, "png")
+		) (analyzeJobInput, error) {
+			previewPath, err := service.cache.ArtifactPath("analyze", fingerprint, "png")
+			if err != nil {
+				return analyzeJobInput{}, err
+			}
+			filledPreviewPath, err := service.cache.ArtifactPath("analyze-filled", fingerprint, "png")
+			if err != nil {
+				return analyzeJobInput{}, err
+			}
+			return analyzeJobInput{
+				previewPath:       previewPath,
+				filledPreviewPath: filledPreviewPath,
+			}, nil
 		},
 		execute: func(
 			ctx context.Context,
 			jobID string,
 			study contracts.StudyRecord,
-			previewPath string,
+			input analyzeJobInput,
 			fingerprint string,
 		) {
-			service.executeAnalyzeJob(ctx, jobID, study, fingerprint, previewPath)
+			service.executeAnalyzeJob(ctx, jobID, study, fingerprint, input)
 		},
 	})
 }
@@ -231,8 +244,10 @@ func (service *Service) StartProcessJob(
 		studyID: func(command contracts.ProcessStudyCommand) string {
 			return command.StudyID
 		},
-		fingerprint: processFingerprint,
-		cacheLoad:   service.memoryCache.LoadProcess,
+		fingerprint: func(study contracts.StudyRecord, command contracts.ProcessStudyCommand) (string, error) {
+			return processFingerprint(study, command, service.cacheSessionID)
+		},
+		cacheLoad: service.memoryCache.LoadProcess,
 		prepare: func(
 			_ contracts.StudyRecord,
 			command contracts.ProcessStudyCommand,
@@ -346,6 +361,7 @@ func newService(
 		logger:                 logger,
 		newDecoder:             decoderFactory,
 		secondaryCaptureWriter: secondaryCaptureWriter,
+		cacheSessionID:         newCacheSessionID(),
 		memoryCache:            cache.NewMemory(logger),
 		registry:               NewRegistry(jobIDFactory),
 		decodeCache:            studies.NewDecodeCache(0),
@@ -460,6 +476,18 @@ type processJobInput struct {
 	resolved    processing.ResolvedProcessStudy
 	previewPath string
 	dicomPath   string
+}
+
+type analyzeJobInput struct {
+	previewPath       string
+	filledPreviewPath string
+}
+
+type inputFileIdentity struct {
+	State           string `json:"state"`
+	Size            int64  `json:"size,omitempty"`
+	Mode            uint32 `json:"mode,omitempty"`
+	ModTimeUnixNano int64  `json:"modTimeUnixNano,omitempty"`
 }
 
 // startJob is the common StartXJob lifecycle: validate inputs, fingerprint the
@@ -659,7 +687,7 @@ func (service *Service) executeRenderJob(
 				return err
 			}
 			sourceStudy = loaded
-			service.memoryCache.StoreMeasurementScale(study.InputPath, sourceStudy.MeasurementScale)
+			service.memoryCache.StoreMeasurementScale(inputCacheKey(study.InputPath), sourceStudy.MeasurementScale)
 			return nil
 		},
 	}) {
@@ -667,6 +695,7 @@ func (service *Service) executeRenderJob(
 	}
 
 	var preview imaging.PreviewImage
+	defer preview.Release()
 	if !service.runJobStage(ctx, jobID, jobStage{
 		percent: 75,
 		stage:   "renderingPreview",
@@ -678,7 +707,6 @@ func (service *Service) executeRenderJob(
 	}) {
 		return
 	}
-	defer preview.Release()
 
 	var previewPath string
 	if !service.runJobStage(ctx, jobID, jobStage{
@@ -733,9 +761,16 @@ func (service *Service) executeAnalyzeJob(
 	jobID string,
 	study contracts.StudyRecord,
 	fingerprint string,
-	previewPath string,
+	input analyzeJobInput,
 ) {
+	previewPath := input.previewPath
+	filledPreviewPath := input.filledPreviewPath
+	cleanupAnalyzePaths := func() {
+		cleanupPaths(previewPath, filledPreviewPath)
+	}
+
 	if service.finishCancelledIfRequested(ctx, jobID, "queued", previewPath) {
+		cleanupPaths(filledPreviewPath)
 		return
 	}
 
@@ -746,6 +781,7 @@ func (service *Service) executeAnalyzeJob(
 		cleanupPath: func() string {
 			return previewPath
 		},
+		onCancel: cleanupAnalyzePaths,
 		work: func() error {
 			return validateInputFile(study.InputPath)
 		},
@@ -762,13 +798,14 @@ func (service *Service) executeAnalyzeJob(
 		cleanupPath: func() string {
 			return previewPath
 		},
+		onCancel: cleanupAnalyzePaths,
 		work: func() error {
 			loaded, err := service.loadSourceStudy(ctx, contracts.JobKindAnalyzeStudy, study)
 			if err != nil {
 				return err
 			}
 			sourceStudy = loaded
-			service.memoryCache.StoreMeasurementScale(study.InputPath, sourceStudy.MeasurementScale)
+			service.memoryCache.StoreMeasurementScale(inputCacheKey(study.InputPath), sourceStudy.MeasurementScale)
 			return nil
 		},
 	}) {
@@ -783,8 +820,12 @@ func (service *Service) executeAnalyzeJob(
 		cleanupPath: func() string {
 			return previewPath
 		},
+		onCancel: cleanupAnalyzePaths,
 		work: func() error {
-			sourcePreview := service.loadOrRenderSourcePreview(study.InputPath, sourceStudy.Image)
+			sourcePreview := service.renderSourcePreview(
+				sourceStudy.Image,
+				analysis.ToothOverlayRenderPlan(study.InputPath, sourceStudy.Image),
+			)
 			defer sourcePreview.Release()
 			result, err := analysis.GenerateToothOverlay(
 				sourcePreview,
@@ -807,13 +848,20 @@ func (service *Service) executeAnalyzeJob(
 			return previewPath
 		},
 		onError: func() {
-			cleanupPaths(previewPath)
+			cleanupAnalyzePaths()
 		},
+		onCancel: cleanupAnalyzePaths,
 		work: func() error {
 			if err := render.SavePreviewPNG(previewPath, analysisResult.Preview); err != nil {
 				return contracts.Internal(fmt.Sprintf("write analyze preview PNG: %v", err))
 			}
+			if err := render.SavePreviewPNG(filledPreviewPath, analysisResult.FilledPreview); err != nil {
+				return contracts.Internal(fmt.Sprintf("write filled analyze preview PNG: %v", err))
+			}
 			if info, err := os.Stat(previewPath); err == nil {
+				service.cache.AddArtifactBytes(info.Size())
+			}
+			if info, err := os.Stat(filledPreviewPath); err == nil {
 				service.cache.AddArtifactBytes(info.Size())
 			}
 			return nil
@@ -828,16 +876,17 @@ func (service *Service) executeAnalyzeJob(
 		jobID,
 		fingerprint,
 		contracts.AnalyzeStudyCommandResult{
-			StudyID:          study.StudyID,
-			PreviewPath:      previewPath,
-			LoadedWidth:      sourceStudy.Image.Width,
-			LoadedHeight:     sourceStudy.Image.Height,
-			Mode:             analysisResult.Mode,
-			MeasurementScale: cloneMeasurementScale(sourceStudy.MeasurementScale),
+			StudyID:           study.StudyID,
+			PreviewPath:       previewPath,
+			FilledPreviewPath: filledPreviewPath,
+			LoadedWidth:       sourceStudy.Image.Width,
+			LoadedHeight:      sourceStudy.Image.Height,
+			Mode:              analysisResult.Mode,
+			MeasurementScale:  cloneMeasurementScale(sourceStudy.MeasurementScale),
 		},
 		service.memoryCache.StoreAnalyze,
 		func(result contracts.AnalyzeStudyCommandResult) {
-			cleanupPaths(result.PreviewPath)
+			cleanupPaths(result.PreviewPath, result.FilledPreviewPath)
 		},
 	)
 }
@@ -886,7 +935,7 @@ func (service *Service) executeProcessJob(
 				return err
 			}
 			sourceStudy = loaded
-			service.memoryCache.StoreMeasurementScale(study.InputPath, sourceStudy.MeasurementScale)
+			service.memoryCache.StoreMeasurementScale(inputCacheKey(study.InputPath), sourceStudy.MeasurementScale)
 			return nil
 		},
 	}) {
@@ -894,6 +943,7 @@ func (service *Service) executeProcessJob(
 	}
 
 	var output processing.PipelineOutput
+	defer output.Preview.Release()
 	if !service.runJobStage(ctx, jobID, jobStage{
 		percent: 65,
 		stage:   "processingPixels",
@@ -919,7 +969,6 @@ func (service *Service) executeProcessJob(
 	}) {
 		return
 	}
-	defer output.Preview.Release()
 
 	if !service.runJobStage(ctx, jobID, jobStage{
 		percent: 84,
@@ -1103,8 +1152,9 @@ func (service *Service) loadSourceStudy(
 		)
 	}
 
-	sourceStudy, err := service.decodeCache.GetOrDecode(
+	sourceStudy, err := service.decodeCache.GetOrDecodeWithKey(
 		ctx,
+		inputCacheKey(study.InputPath),
 		study.InputPath,
 		benchmarkingDecoder{
 			delegate: decoder,
@@ -1124,12 +1174,13 @@ func (service *Service) loadOrRenderSourcePreview(
 	inputPath string,
 	source imaging.SourceImage,
 ) imaging.PreviewImage {
-	if preview, ok := service.memoryCache.LoadSourcePreview(inputPath); ok {
+	cacheKey := inputCacheKey(inputPath)
+	if preview, ok := service.memoryCache.LoadSourcePreview(cacheKey); ok {
 		return preview
 	}
 
 	preview := service.renderSourcePreview(source, render.DefaultRenderPlan())
-	service.memoryCache.StoreSourcePreview(inputPath, preview)
+	service.memoryCache.StoreSourcePreview(cacheKey, preview)
 	return preview
 }
 
@@ -1204,57 +1255,81 @@ func validateInputFile(inputPath string) error {
 	return nil
 }
 
-// The Namespace string embedded in every fingerprint ("render-study-v1",
-// "process-study-v3") is a deliberate cache-bust key. Render/process keep the
-// historical version suffix in the namespace. Analyze uses a stable namespace
-// plus analysis.AnalyzeAlgorithmVersion so algorithm changes are explicit.
-func renderFingerprint(study contracts.StudyRecord) (string, error) {
+// Job fingerprints include a service-session id so generated artifacts are only
+// reused during the current program run. Analysis also carries an output version
+// because detector/sections rendering changes are user-visible and must not
+// reuse stale completed results within a live service.
+func renderFingerprint(study contracts.StudyRecord, sessionID string) (string, error) {
 	return fingerprintJSON(struct {
-		Namespace string `json:"namespace"`
-		InputPath string `json:"inputPath"`
+		Namespace     string            `json:"namespace"`
+		SessionID     string            `json:"sessionId"`
+		InputPath     string            `json:"inputPath"`
+		InputIdentity inputFileIdentity `json:"inputIdentity"`
 	}{
-		Namespace: "render-study-v1",
-		InputPath: study.InputPath,
+		Namespace:     "render-study",
+		SessionID:     sessionID,
+		InputPath:     study.InputPath,
+		InputIdentity: currentInputFileIdentity(study.InputPath),
 	})
 }
 
-func analyzeFingerprint(study contracts.StudyRecord) (string, error) {
+func analyzeFingerprint(study contracts.StudyRecord, sessionID string) (string, error) {
 	return fingerprintJSON(struct {
-		Namespace        string `json:"namespace"`
-		AlgorithmVersion string `json:"algorithmVersion"`
-		InputPath        string `json:"inputPath"`
+		Namespace     string            `json:"namespace"`
+		OutputVersion string            `json:"outputVersion"`
+		SessionID     string            `json:"sessionId"`
+		InputPath     string            `json:"inputPath"`
+		InputIdentity inputFileIdentity `json:"inputIdentity"`
 	}{
-		Namespace:        analyzeFingerprintNamespace,
-		AlgorithmVersion: analysis.AnalyzeAlgorithmVersion,
-		InputPath:        study.InputPath,
+		Namespace:     analyzeFingerprintNamespace,
+		OutputVersion: analyzeOutputVersion,
+		SessionID:     sessionID,
+		InputPath:     study.InputPath,
+		InputIdentity: currentInputFileIdentity(study.InputPath),
 	})
 }
 
 func processFingerprint(
 	study contracts.StudyRecord,
 	command contracts.ProcessStudyCommand,
+	sessionID string,
 ) (string, error) {
 	return fingerprintJSON(struct {
-		Namespace  string                 `json:"namespace"`
-		InputPath  string                 `json:"inputPath"`
-		PresetID   string                 `json:"presetId"`
-		Invert     bool                   `json:"invert"`
-		Brightness *int                   `json:"brightness"`
-		Contrast   *float64               `json:"contrast"`
-		Equalize   bool                   `json:"equalize"`
-		Compare    bool                   `json:"compare"`
-		Palette    *contracts.PaletteName `json:"palette"`
+		Namespace     string                 `json:"namespace"`
+		SessionID     string                 `json:"sessionId"`
+		InputPath     string                 `json:"inputPath"`
+		InputIdentity inputFileIdentity      `json:"inputIdentity"`
+		OutputPath    *string                `json:"outputPath"`
+		PresetID      string                 `json:"presetId"`
+		Invert        bool                   `json:"invert"`
+		Brightness    *int                   `json:"brightness"`
+		Contrast      *float64               `json:"contrast"`
+		Equalize      bool                   `json:"equalize"`
+		Compare       bool                   `json:"compare"`
+		Palette       *contracts.PaletteName `json:"palette"`
 	}{
-		Namespace:  "process-study-v3",
-		InputPath:  study.InputPath,
-		PresetID:   command.PresetID,
-		Invert:     command.Invert,
-		Brightness: command.Brightness,
-		Contrast:   command.Contrast,
-		Equalize:   command.Equalize,
-		Compare:    command.Compare,
-		Palette:    command.Palette,
+		Namespace:     "process-study",
+		SessionID:     sessionID,
+		InputPath:     study.InputPath,
+		InputIdentity: currentInputFileIdentity(study.InputPath),
+		OutputPath:    fingerprintOutputPath(command.OutputPath),
+		PresetID:      command.PresetID,
+		Invert:        command.Invert,
+		Brightness:    command.Brightness,
+		Contrast:      command.Contrast,
+		Equalize:      command.Equalize,
+		Compare:       command.Compare,
+		Palette:       command.Palette,
 	})
+}
+
+func fingerprintOutputPath(outputPath *string) *string {
+	if outputPath == nil {
+		return nil
+	}
+
+	value := filepath.Clean(strings.TrimSpace(*outputPath))
+	return &value
 }
 
 func fingerprintJSON(value any) (string, error) {
@@ -1265,6 +1340,37 @@ func fingerprintJSON(value any) (string, error) {
 
 	sum := sha256.Sum256(payload)
 	return hex.EncodeToString(sum[:]), nil
+}
+
+func currentInputFileIdentity(inputPath string) inputFileIdentity {
+	info, err := os.Stat(inputPath)
+	if err != nil {
+		return inputFileIdentity{State: "unavailable"}
+	}
+
+	state := "file"
+	if info.IsDir() {
+		state = "directory"
+	}
+
+	return inputFileIdentity{
+		State:           state,
+		Size:            info.Size(),
+		Mode:            uint32(info.Mode()),
+		ModTimeUnixNano: info.ModTime().UnixNano(),
+	}
+}
+
+func inputCacheKey(inputPath string) string {
+	identity := currentInputFileIdentity(inputPath)
+	return fmt.Sprintf(
+		"%s\x00%s\x00%d\x00%d\x00%d",
+		inputPath,
+		identity.State,
+		identity.Size,
+		identity.Mode,
+		identity.ModTimeUnixNano,
+	)
 }
 
 type benchmarkingDecoder struct {
@@ -1342,6 +1448,15 @@ func generateJobID() (string, error) {
 	hex.Encode(encoded[24:36], raw[10:16])
 
 	return string(encoded), nil
+}
+
+func newCacheSessionID() string {
+	var raw [16]byte
+	if _, err := rand.Read(raw[:]); err == nil {
+		return hex.EncodeToString(raw[:])
+	}
+
+	return fmt.Sprintf("pid-%d", os.Getpid())
 }
 
 func isTerminalState(state contracts.JobState) bool {

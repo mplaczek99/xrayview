@@ -11,11 +11,11 @@ import (
 )
 
 const (
-	featureTableXBins                = 192
-	featureTableYBins                = 288
-	featureTableNormalizedBins       = 48
+	featureTableXBins                = 256
+	featureTableYBins                = 512
+	featureTableNormalizedBins       = 64
 	featureTableScoreBins            = 32
-	featureTableProbabilityThreshold = 179
+	featureTableProbabilityThreshold = 192
 )
 
 //go:embed feature_table_model.bin.gz

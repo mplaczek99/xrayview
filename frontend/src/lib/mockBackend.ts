@@ -169,7 +169,8 @@ export function createMockBackendAPI(): BackendAPI {
         kind: "analyzeStudy",
         payload: {
           studyId,
-          previewPath: createMockPreview(true, "none"),
+          previewPath: createMockPreview(true, "none", "outline"),
+          filledPreviewPath: createMockPreview(true, "none", "filled"),
           loadedWidth: 1200,
           loadedHeight: 820,
           mode: "dynamic tooth and bone level overlay",

@@ -26,10 +26,10 @@ type legacyCLIOptions struct {
 	describePresets bool
 	describeStudy   bool
 	preset          string
-	invert          bool
+	invert          optionalBoolFlag
 	brightness      optionalIntFlag
 	contrast        optionalFloatFlag
-	equalize        bool
+	equalize        optionalBoolFlag
 	compare         bool
 	palette         string
 }
@@ -86,6 +86,34 @@ func (flagValue *optionalFloatFlag) Set(value string) error {
 	return nil
 }
 
+type optionalBoolFlag struct {
+	value bool
+	set   bool
+}
+
+func (flagValue *optionalBoolFlag) String() string {
+	if !flagValue.set {
+		return ""
+	}
+
+	return strconv.FormatBool(flagValue.value)
+}
+
+func (flagValue *optionalBoolFlag) Set(value string) error {
+	parsed, err := strconv.ParseBool(strings.TrimSpace(value))
+	if err != nil {
+		return err
+	}
+
+	flagValue.value = parsed
+	flagValue.set = true
+	return nil
+}
+
+func (flagValue *optionalBoolFlag) IsBoolFlag() bool {
+	return true
+}
+
 func runLegacyCLI(args []string, stdout, stderr io.Writer) error {
 	options, err := parseLegacyCLIArgs(args, stderr)
 	if err != nil {
@@ -116,10 +144,10 @@ func parseLegacyCLIArgs(args []string, stderr io.Writer) (legacyCLIOptions, erro
 	flagSet.BoolVar(&options.describePresets, "describe-presets", false, "Print processing preset metadata as JSON")
 	flagSet.BoolVar(&options.describeStudy, "describe-study", false, "Print study measurement metadata as JSON")
 	flagSet.StringVar(&options.preset, "preset", contracts.DefaultProcessingPresetID, "Processing preset")
-	flagSet.BoolVar(&options.invert, "invert", false, "Invert grayscale")
+	flagSet.Var(&options.invert, "invert", "Invert grayscale (true or false)")
 	flagSet.Var(&options.brightness, "brightness", "Brightness adjustment (-256 to 256)")
 	flagSet.Var(&options.contrast, "contrast", "Contrast multiplier (>= 0.0)")
-	flagSet.BoolVar(&options.equalize, "equalize", false, "Apply histogram equalization")
+	flagSet.Var(&options.equalize, "equalize", "Apply histogram equalization (true or false)")
 	flagSet.BoolVar(&options.compare, "compare", false, "Show before/after comparison")
 	flagSet.StringVar(&options.palette, "palette", "", "Color palette (none, hot, bone)")
 
@@ -255,23 +283,7 @@ func processLegacyStudy(
 		return err
 	}
 
-	command := contracts.ProcessStudyCommand{
-		PresetID: options.preset,
-		Invert:   options.invert,
-		Equalize: options.equalize,
-		Compare:  options.compare,
-	}
-	if options.brightness.set {
-		command.Brightness = &options.brightness.value
-	}
-	if options.contrast.set {
-		command.Contrast = &options.contrast.value
-	}
-	if palette := strings.TrimSpace(options.palette); palette != "" {
-		paletteName := contracts.PaletteName(palette)
-		command.Palette = &paletteName
-	}
-
+	command := legacyProcessCommand(options)
 	resolved, err := processing.ResolveProcessStudyCommand(command)
 	if err != nil {
 		return err
@@ -321,6 +333,46 @@ func processLegacyStudy(
 	return nil
 }
 
+func legacyProcessCommand(options legacyCLIOptions) contracts.ProcessStudyCommand {
+	command := contracts.ProcessStudyCommand{
+		PresetID: options.preset,
+		Compare:  options.compare,
+	}
+	if presetControls, ok := legacyPresetControls(options.preset); ok {
+		command.Invert = presetControls.Invert
+		command.Equalize = presetControls.Equalize
+	}
+	if options.invert.set {
+		command.Invert = options.invert.value
+	}
+	if options.equalize.set {
+		command.Equalize = options.equalize.value
+	}
+	if options.brightness.set {
+		command.Brightness = &options.brightness.value
+	}
+	if options.contrast.set {
+		command.Contrast = &options.contrast.value
+	}
+	if palette := strings.TrimSpace(options.palette); palette != "" {
+		paletteName := contracts.PaletteName(palette)
+		command.Palette = &paletteName
+	}
+
+	return command
+}
+
+func legacyPresetControls(presetID string) (contracts.ProcessingControls, bool) {
+	normalized := strings.ToLower(strings.TrimSpace(presetID))
+	for _, preset := range contracts.DefaultProcessingManifest().Presets {
+		if preset.ID == normalized {
+			return preset.Controls, true
+		}
+	}
+
+	return contracts.ProcessingControls{}, false
+}
+
 func decodeLegacyStudy(inputPath string) (dicommeta.SourceStudy, error) {
 	return dicommeta.DecodeFile(inputPath)
 }
@@ -342,10 +394,10 @@ func isPlainPreviewRequest(options legacyCLIOptions) bool {
 	return strings.TrimSpace(options.previewOutput) != "" &&
 		strings.TrimSpace(options.output) == "" &&
 		strings.EqualFold(options.preset, contracts.DefaultProcessingPresetID) &&
-		!options.invert &&
+		!options.invert.set &&
 		!options.brightness.set &&
 		!options.contrast.set &&
-		!options.equalize &&
+		!options.equalize.set &&
 		!options.compare &&
 		strings.TrimSpace(options.palette) == ""
 }
@@ -369,10 +421,10 @@ func printLegacyUsage(stream io.Writer) {
 	fmt.Fprintln(stream, "")
 	fmt.Fprintln(stream, "processing:")
 	fmt.Fprintln(stream, "  --preset <id>                 default, xray, or high-contrast")
-	fmt.Fprintln(stream, "  --invert                      invert grayscale")
+	fmt.Fprintln(stream, "  --invert[=true|false]         invert grayscale")
 	fmt.Fprintln(stream, "  --brightness <int>            brightness adjustment (-256 to 256)")
 	fmt.Fprintln(stream, "  --contrast <float>            contrast multiplier (>= 0.0)")
-	fmt.Fprintln(stream, "  --equalize                    apply histogram equalization")
+	fmt.Fprintln(stream, "  --equalize[=true|false]       apply histogram equalization")
 	fmt.Fprintln(stream, "  --compare                     show before/after comparison")
 	fmt.Fprintln(stream, "  --palette <name>              none, hot, or bone")
 }

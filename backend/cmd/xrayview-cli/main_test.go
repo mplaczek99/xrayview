@@ -120,6 +120,26 @@ func TestLegacyCLIAllowsLeadingArgumentSeparator(t *testing.T) {
 	}
 }
 
+func TestParseLegacyCLIArgsAcceptsExplicitBooleanValues(t *testing.T) {
+	var stderr bytes.Buffer
+	options, err := parseLegacyCLIArgs([]string{
+		"--input", "study.dcm",
+		"--preset", "xray",
+		"--invert",
+		"--equalize=false",
+	}, &stderr)
+	if err != nil {
+		t.Fatalf("parseLegacyCLIArgs returned error: %v\nstderr:\n%s", err, stderr.String())
+	}
+
+	if !options.invert.set || !options.invert.value {
+		t.Fatalf("invert = {set:%v value:%v}, want explicit true", options.invert.set, options.invert.value)
+	}
+	if !options.equalize.set || options.equalize.value {
+		t.Fatalf("equalize = {set:%v value:%v}, want explicit false", options.equalize.set, options.equalize.value)
+	}
+}
+
 func TestLegacyCLIPreviewAndProcessWriteExpectedArtifacts(t *testing.T) {
 	samplePath := sampleDicomPath(t)
 	tempDir := t.TempDir()
@@ -196,6 +216,40 @@ func TestLegacyCLIUsesDefaultOutputPathWhenNoOutputsProvided(t *testing.T) {
 	}
 	if !strings.Contains(stdout, defaultOutputPath) {
 		t.Fatalf("stdout missing default output path %q:\n%s", defaultOutputPath, stdout)
+	}
+}
+
+func TestLegacyProcessCommandPreservesPresetBooleanDefaults(t *testing.T) {
+	command := legacyProcessCommand(legacyCLIOptions{
+		preset: "xray",
+	})
+
+	if !command.Equalize {
+		t.Fatal("Equalize = false, want xray preset default true")
+	}
+	if command.Invert {
+		t.Fatal("Invert = true, want xray preset default false")
+	}
+}
+
+func TestLegacyProcessCommandOverridesPresetBooleansBothWays(t *testing.T) {
+	command := legacyProcessCommand(legacyCLIOptions{
+		preset: "xray",
+		invert: optionalBoolFlag{
+			value: true,
+			set:   true,
+		},
+		equalize: optionalBoolFlag{
+			value: false,
+			set:   true,
+		},
+	})
+
+	if !command.Invert {
+		t.Fatal("Invert = false, want explicit override true")
+	}
+	if command.Equalize {
+		t.Fatal("Equalize = true, want explicit override false")
 	}
 }
 

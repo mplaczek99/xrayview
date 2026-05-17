@@ -46,5 +46,6 @@ export interface ProcessResult extends PreviewResult {
 }
 
 export interface AnalysisResult extends PreviewResult {
+  filledPreviewUrl: string;
   mode: string;
 }

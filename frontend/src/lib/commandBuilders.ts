@@ -9,7 +9,7 @@ export function buildProcessStudyCommand(
     studyId,
     outputPath: request.outputPath,
     presetId: request.presetId,
-    invert: request.controls.invert && !request.presetControls.invert,
+    invert: request.controls.invert,
     brightness:
       request.controls.brightness !== request.presetControls.brightness
         ? request.controls.brightness
@@ -18,7 +18,7 @@ export function buildProcessStudyCommand(
       request.controls.contrast !== request.presetControls.contrast
         ? request.controls.contrast
         : null,
-    equalize: request.controls.equalize && !request.presetControls.equalize,
+    equalize: request.controls.equalize,
     compare: request.compare,
     palette:
       request.controls.palette !== request.presetControls.palette

@@ -5,6 +5,47 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2026-05-17
+
+### Added
+
+- Analyze overlay display toggle so users can switch between outlined and filled tooth/bone overlay rendering modes. New `FilledPreview` variant on `ToothOverlayResult`, the `analyzeOverlayFilled` flag in `WorkbenchStudy`, and an "Outline / Filled" toggle in `ViewTab`
+- Global workbench status surfaced in the app chrome (top bar) instead of per-tab, so job progress and errors remain visible while switching tabs
+- `analyze-preview` utility subcommand on `xrayview-cli` for rendering analyze overlays from a DICOM file with an optional `--filled` flag (`backend/cmd/xrayview-cli/main.go`)
+
+### Changed
+
+- Generated analyze artifacts (`Preview` and `FilledPreview`) are now scoped to individual job sessions instead of cached globally, ensuring session isolation across runs (`backend/internal/jobs/service.go`)
+- Bone-level overlay rendered as a continuous background region behind tooth overlays for clearer visual separation
+- Tooth feature table model retrained with a stricter Dice coefficient gate to reduce false positives
+- `JobCenter` panel collapsed by default for a cleaner initial workbench layout
+
+### Fixed
+
+- Viewport position is preserved when toggling tooth/bone overlays (previously snapped back to fit on every toggle)
+- Bone overlay section borders now render correctly: hole artifacts suppressed, contours aligned to section masks, and outline positioning matched to the underlying mask across differing image dimensions (`backend/internal/analysis/teeth.go`)
+- BMP and TIFF studies decoded into the internal PNG path now preserve their 8-bit value range and overlay alpha correctly
+- SSE stream broadcasts no longer drop frames or stall when clients write past the configured write timeout (`backend/internal/httpapi/sse.go`)
+- Viewer pointer interaction listeners properly reattach after a preview reload, fixing drag/pan loss after switching the active study
+- Save-location and study file pickers in the desktop shell surface errors and cancellation back to the workbench store instead of failing silently
+- Processing control slider edits no longer submit stale form state — pending controls are merged and flushed before dispatch; introduced `setProcessingControl` and a synchronous flush in `runActiveStudyProcessing`
+- Process job cache key now includes the output file path so different save destinations no longer collide on a shared cached artifact
+- Measurement scale cache key aligned with the preview cache derivation so measurements no longer reuse stale scale data
+- Boolean processing preset overrides (invert, equalize) in the legacy CLI no longer default to `false` when unset — proper tri-state handling via a new `optionalBoolFlag` type in `backend/cmd/xrayview-cli/legacy_cli.go`
+- Decode cache and source preview cache invalidate when the underlying study file is replaced (size, mtime, or file state change), preventing stale cached artifacts on overwrite
+- Picked output path is now applied to the captured study via study ID instead of re-reading the active study after dialog close, eliminating a race when the active study changes mid-dialog
+- Catalog read failures are reported to the user instead of silently failing on recent-studies load (`backend/internal/persistence/catalog.go`)
+- Preview buffers are correctly released when a job is cancelled mid-stage
+- HTTP body buffer pool reset in tests for proper isolation
+
+### Removed
+
+- Viewer hover coordinate readout from `ViewerCanvas` and `usePointerInteractions`
+
+### Security
+
+- Desktop preview asset serving now restricts file paths to the configured cache root, preventing path traversal escapes from the sidecar's asset endpoint (`desktop/app.go`, `desktop/sidecar.go`)
+
 ## [0.4.0] - 2026-05-10
 
 ### Added

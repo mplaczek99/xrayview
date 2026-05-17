@@ -56,9 +56,9 @@ export function applyAnalyzeJob(study: WorkbenchStudy, job: JobSnapshot): Workbe
         return study;
       }
 
-        const status = job.result.payload.mode.includes("no reliable tooth mask")
-          ? "Analysis completed, but no reliable tooth mask was found."
-          : job.fromCache
+      const status = job.result.payload.mode.includes("no reliable tooth mask")
+        ? "Analysis completed, but no reliable tooth mask was found."
+        : job.fromCache
           ? "Tooth and bone level overlay loaded from cache."
           : "Tooth and bone level overlay generated.";
 

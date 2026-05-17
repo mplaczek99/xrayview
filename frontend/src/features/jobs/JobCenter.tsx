@@ -45,7 +45,7 @@ export function JobCenter() {
   const jobOrder = useWorkbenchStore(selectJobOrder);
   const jobMap = useWorkbenchStore(selectJobs);
   const studies = useWorkbenchStore(selectStudies);
-  const [expanded, setExpanded] = useState(true);
+  const [expanded, setExpanded] = useState(false);
   const [dismissed, setDismissed] = useState<Set<string>>(new Set());
 
   const jobs = useMemo(

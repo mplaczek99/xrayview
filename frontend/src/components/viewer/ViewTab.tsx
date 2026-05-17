@@ -16,9 +16,15 @@ export function ViewTab() {
       null,
     [study?.measurementScale, study?.originalPreview?.measurementScale],
   );
-  const visiblePreview = study?.analysisPreview ?? study?.originalPreview ?? null;
-  const previewUrl = visiblePreview?.previewUrl ?? null;
-  const imageSize = visiblePreview?.imageSize ?? null;
+  const analysisPreview = study?.analysisPreview ?? null;
+  const originalPreview = study?.originalPreview ?? null;
+  const analysisOverlayMode = study?.viewer.analysisOverlayMode ?? "outline";
+  const previewUrl = analysisPreview
+    ? analysisOverlayMode === "sections"
+      ? analysisPreview.filledPreviewUrl
+      : analysisPreview.previewUrl
+    : originalPreview?.previewUrl ?? null;
+  const imageSize = (analysisPreview ?? originalPreview)?.imageSize ?? null;
   const analysisJob = study?.analysisJobId ? jobs[study.analysisJobId] ?? null : null;
   const isAnalyzing =
     analysisJob?.state === "queued" ||
@@ -142,6 +148,32 @@ export function ViewTab() {
             </svg>
             {isAnalyzing ? "Analyzing..." : "Analyze"}
           </button>
+          {analysisPreview && (
+            <div className="analysis-toggle" role="group" aria-label="Analysis overlay">
+              <button
+                className={`analysis-toggle__btn${
+                  analysisOverlayMode === "outline" ? " analysis-toggle__btn--active" : ""
+                }`}
+                type="button"
+                data-testid="action-analysis-outline"
+                aria-pressed={analysisOverlayMode === "outline"}
+                onClick={() => workbenchActions.setAnalysisOverlayMode("outline")}
+              >
+                Outline
+              </button>
+              <button
+                className={`analysis-toggle__btn${
+                  analysisOverlayMode === "sections" ? " analysis-toggle__btn--active" : ""
+                }`}
+                type="button"
+                data-testid="action-analysis-sections"
+                aria-pressed={analysisOverlayMode === "sections"}
+                onClick={() => workbenchActions.setAnalysisOverlayMode("sections")}
+              >
+                Sections
+              </button>
+            </div>
+          )}
           <button
             className="button button--ghost"
             type="button"
@@ -165,6 +197,7 @@ export function ViewTab() {
         <div className="study-layout__viewer">
           <ViewerCanvas
             previewUrl={previewUrl}
+            viewportResetKey={study.studyId}
             imageSize={imageSize}
             annotations={annotations}
             selectedAnnotationId={selectedAnnotationId}
