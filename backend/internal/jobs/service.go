@@ -74,6 +74,7 @@ type Service struct {
 const decodeBenchmarkEnvKey = "XRAYVIEW_BENCH_LOG_DECODES"
 
 const analyzeFingerprintNamespace = "analyze-study"
+const analyzeOutputVersion = "sections-reference-mask-v2"
 
 const workerCountEnvKey = "XRAYVIEW_BACKEND_WORKERS"
 
@@ -821,7 +822,10 @@ func (service *Service) executeAnalyzeJob(
 		},
 		onCancel: cleanupAnalyzePaths,
 		work: func() error {
-			sourcePreview := service.loadOrRenderSourcePreview(study.InputPath, sourceStudy.Image)
+			sourcePreview := service.renderSourcePreview(
+				sourceStudy.Image,
+				analysis.ToothOverlayRenderPlan(study.InputPath, sourceStudy.Image),
+			)
 			defer sourcePreview.Release()
 			result, err := analysis.GenerateToothOverlay(
 				sourcePreview,
@@ -1252,8 +1256,9 @@ func validateInputFile(inputPath string) error {
 }
 
 // Job fingerprints include a service-session id so generated artifacts are only
-// reused during the current program run. A restart recomputes outputs and gets
-// fresh paths, so algorithm changes do not require cache-busting versions.
+// reused during the current program run. Analysis also carries an output version
+// because detector/sections rendering changes are user-visible and must not
+// reuse stale completed results within a live service.
 func renderFingerprint(study contracts.StudyRecord, sessionID string) (string, error) {
 	return fingerprintJSON(struct {
 		Namespace     string            `json:"namespace"`
@@ -1271,11 +1276,13 @@ func renderFingerprint(study contracts.StudyRecord, sessionID string) (string, e
 func analyzeFingerprint(study contracts.StudyRecord, sessionID string) (string, error) {
 	return fingerprintJSON(struct {
 		Namespace     string            `json:"namespace"`
+		OutputVersion string            `json:"outputVersion"`
 		SessionID     string            `json:"sessionId"`
 		InputPath     string            `json:"inputPath"`
 		InputIdentity inputFileIdentity `json:"inputIdentity"`
 	}{
 		Namespace:     analyzeFingerprintNamespace,
+		OutputVersion: analyzeOutputVersion,
 		SessionID:     sessionID,
 		InputPath:     study.InputPath,
 		InputIdentity: currentInputFileIdentity(study.InputPath),

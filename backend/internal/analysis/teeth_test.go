@@ -15,7 +15,9 @@ import (
 
 	_ "golang.org/x/image/bmp"
 
+	"xrayview/backend/internal/dicommeta"
 	"xrayview/backend/internal/imaging"
+	"xrayview/backend/internal/render"
 )
 
 const minimumFixtureDice = 0.99
@@ -104,6 +106,36 @@ func TestGenerateToothOverlayFilledPreviewMatchesColoredBoneSectionsForFixtures(
 				t.Fatalf("filled preview red section containment = %.3f, want >= 0.98", contained)
 			}
 		})
+	}
+}
+
+func TestGenerateToothOverlaySectionsMatchNineColoredReference(t *testing.T) {
+	bmpPath := fixturePath(t, "images", "BMP", "9.bmp")
+	pngPath := fixturePath(t, "images", "PNG", "Colored", "9.png")
+
+	study, err := dicommeta.DecodeFile(bmpPath)
+	if err != nil {
+		t.Fatalf("DecodeFile returned error: %v", err)
+	}
+	preview := render.RenderSourceImage(study.Image, ToothOverlayRenderPlan(bmpPath, study.Image))
+	defer preview.Release()
+	result, err := GenerateToothOverlay(preview)
+	if err != nil {
+		t.Fatalf("GenerateToothOverlay returned error: %v", err)
+	}
+
+	gotGreen := greenMaskFromRGBA(result.FilledPreview)
+	wantGreen := greenMaskFromImage(t, pngPath)
+	greenDice := diceCoefficient(gotGreen, wantGreen)
+	if greenDice < 0.995 {
+		t.Fatalf("9.png green section Dice = %.4f, want >= 0.995", greenDice)
+	}
+
+	gotRed := redMaskFromRGBA(result.FilledPreview)
+	wantRed := redMaskFromImage(t, pngPath)
+	redDice := diceCoefficient(gotRed, wantRed)
+	if redDice < 0.995 {
+		t.Fatalf("9.png red section Dice = %.4f, want >= 0.995", redDice)
 	}
 }
 
@@ -222,6 +254,50 @@ func TestOverlayFilledMasksColorsToothInteriorAndSuppressesBoneInsideTooth(t *te
 	}
 	if redMask[4*width+4] != 0 {
 		t.Fatal("bone fill was drawn inside tooth interior")
+	}
+}
+
+func TestOverlayFilledMasksUsesReferencePalette(t *testing.T) {
+	const width = 5
+	const height = 3
+
+	gray := make([]uint8, width*height)
+	for index := range gray {
+		gray[index] = uint8(32 + index)
+	}
+	toothMask := make([]uint8, width*height)
+	boneMask := make([]uint8, width*height)
+	boneMask[1] = 1
+	boneMask[2] = 1
+	toothMask[2] = 1
+	toothMask[7] = 1
+
+	preview := overlayFilledMasks(gray, toothMask, boneMask, width, height)
+	tests := []struct {
+		name  string
+		index int
+		want  [3]uint8
+	}{
+		{name: "background", index: 0, want: [3]uint8{0, 0, 0}},
+		{name: "bone", index: 1, want: boneOverlayRed},
+		{name: "tooth over bone", index: 2, want: toothOverlayGreen},
+		{name: "tooth", index: 7, want: toothOverlayGreen},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			base := test.index * 4
+			got := [3]uint8{
+				preview.Pixels[base+0],
+				preview.Pixels[base+1],
+				preview.Pixels[base+2],
+			}
+			if got != test.want {
+				t.Fatalf("pixel RGB = %v, want %v", got, test.want)
+			}
+			if preview.Pixels[base+3] != 255 {
+				t.Fatalf("pixel alpha = %d, want 255", preview.Pixels[base+3])
+			}
+		})
 	}
 }
 

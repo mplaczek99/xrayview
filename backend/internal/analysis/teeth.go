@@ -3,20 +3,21 @@ package analysis
 import (
 	"fmt"
 	"math"
+	"path/filepath"
+	"strings"
 
 	"xrayview/backend/internal/bufpool"
 	"xrayview/backend/internal/imaging"
+	"xrayview/backend/internal/render"
 )
 
-var toothOverlayGreen = [3]uint8{102, 255, 0}
+var toothOverlayGreen = [3]uint8{120, 255, 0}
 var boneOverlayRed = [3]uint8{255, 0, 0}
 
 const minimumToothAreaFloorPixels = 51
 const toothOutlineThicknessPixels = 2
 const boneLineThicknessPixels = 0
 const boneOutlineThicknessPixels = 2
-const toothFillAlpha = 112
-const boneFillAlpha = 104
 const overlayContourLowPassIterations = 18
 const overlayContourSmoothingIterations = 4
 const overlayContourFairingIterations = 14
@@ -34,6 +35,26 @@ type ToothOverlayResult struct {
 	Coverage       float64
 	CandidateCount int
 	Mode           string
+}
+
+func ToothOverlayRenderPlan(inputPath string, source imaging.SourceImage) render.RenderPlan {
+	plan := render.DefaultRenderPlan()
+	if shouldPreserveStandaloneEightBitRange(inputPath, source) {
+		plan.Window = render.ManualWindowMode(imaging.WindowLevel{
+			Center: 128,
+			Width:  256,
+		})
+	}
+	return plan
+}
+
+func shouldPreserveStandaloneEightBitRange(inputPath string, source imaging.SourceImage) bool {
+	switch strings.ToLower(filepath.Ext(strings.TrimSpace(inputPath))) {
+	case ".bmp", ".tif", ".tiff":
+	default:
+		return false
+	}
+	return source.DefaultWindow == nil && source.MinValue >= 0 && source.MaxValue <= 255
 }
 
 type componentMeta struct {
@@ -307,14 +328,14 @@ func overlayMasksWithWorkspace(workspace *maskWorkspace, gray []uint8, toothMask
 }
 
 func overlayFilledMasksWithWorkspace(workspace *maskWorkspace, gray []uint8, toothMask []uint8, boneMask []uint8, width, height uint32) imaging.PreviewImage {
-	rgba := grayscaleRGBA(gray)
+	rgba := make([]uint8, len(gray)*4)
 
-	widthInt := int(width)
-	heightInt := int(height)
-	compositeMaskFill(rgba, boneMask, boneOverlayRed, boneFillAlpha, toothMask)
-	drawMaskOutlineWithWorkspace(workspace, rgba, widthInt, heightInt, boneMask, boneOverlayRed, boneOutlineThicknessPixels, toothMask)
-	compositeMaskFill(rgba, toothMask, toothOverlayGreen, toothFillAlpha, nil)
-	drawMaskOutlineWithWorkspace(workspace, rgba, widthInt, heightInt, toothMask, toothOverlayGreen, toothOutlineThicknessPixels, nil)
+	for index := range gray {
+		base := index * 4
+		rgba[base+3] = 255
+	}
+	fillSolidMask(rgba, boneMask, boneOverlayRed, toothMask)
+	fillSolidMask(rgba, toothMask, toothOverlayGreen, nil)
 	return imaging.RGBAPreview(width, height, rgba)
 }
 
@@ -943,6 +964,25 @@ func compositeMaskFill(rgba []uint8, mask []uint8, color [3]uint8, alpha uint32,
 		rgba[base+0] = uint8((uint32(rgba[base+0])*inverse + uint32(color[0])*alpha + 127) / 255)
 		rgba[base+1] = uint8((uint32(rgba[base+1])*inverse + uint32(color[1])*alpha + 127) / 255)
 		rgba[base+2] = uint8((uint32(rgba[base+2])*inverse + uint32(color[2])*alpha + 127) / 255)
+		rgba[base+3] = 255
+	}
+}
+
+func fillSolidMask(rgba []uint8, mask []uint8, color [3]uint8, excludeMask []uint8) {
+	if len(mask)*4 != len(rgba) {
+		return
+	}
+	for index, value := range mask {
+		if value == 0 {
+			continue
+		}
+		if len(excludeMask) == len(mask) && excludeMask[index] != 0 {
+			continue
+		}
+		base := index * 4
+		rgba[base+0] = color[0]
+		rgba[base+1] = color[1]
+		rgba[base+2] = color[2]
 		rgba[base+3] = 255
 	}
 }
