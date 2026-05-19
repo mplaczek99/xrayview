@@ -104,23 +104,6 @@ func readLearnedNode(reader io.Reader) (learnedNode, error) {
 	}, nil
 }
 
-func learnedToothMask(gray []uint8, normalized []uint8, width, height int) []uint8 {
-	scores := learnedToothScores(normalized, width, height)
-	mask := make([]uint8, len(gray))
-	for index, score := range scores {
-		if score >= learnedModelThreshold {
-			mask[index] = 1
-		}
-	}
-	return mask
-}
-
-func featureTableToothMask(normalized []uint8, width, height int) []uint8 {
-	mask := make([]uint8, len(normalized))
-	featureTableToothMaskInto(mask, normalized, width, height)
-	return mask
-}
-
 func featureTableToothMaskInto(mask []uint8, normalized []uint8, width, height int) {
 	clear(mask)
 	scores := learnedToothScores(normalized, width, height)

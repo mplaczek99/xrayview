@@ -33,7 +33,7 @@ export function createViewport(): ViewerViewport {
   };
 }
 
-export function clampZoom(zoom: number): number {
+function clampZoom(zoom: number): number {
   return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom));
 }
 
@@ -54,7 +54,7 @@ export function getViewerTransform(
   };
 }
 
-export function imageToScreen(
+function imageToScreen(
   point: AnnotationPoint,
   transform: ViewerTransform,
 ): AnnotationPoint {

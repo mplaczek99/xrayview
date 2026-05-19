@@ -29,7 +29,7 @@ export interface ProcessingSession {
   runStatus: ProcessingRunState;
 }
 
-export interface ViewerSession {
+interface ViewerSession {
   tool: ViewerTool;
   selectedAnnotationId: string | null;
   analysisOverlayMode: "outline" | "sections";

@@ -5,13 +5,13 @@ import { isPendingJobState, isTerminalJobState } from "./progressTiming";
 
 const FAST_TASK_MS = 1_000;
 
-export type ProgressDisplayMode =
+type ProgressDisplayMode =
   | "hidden"
   | "simple"
   | "detailed"
   | "indeterminate";
 
-export interface ProgressPresentation {
+interface ProgressPresentation {
   mode: ProgressDisplayMode;
   elapsedMs: number | null;
   remainingMs: number | null;
@@ -24,7 +24,7 @@ export interface ProgressPresentation {
   stalled: boolean;
 }
 
-export interface ProgressSnapshotLike {
+interface ProgressSnapshotLike {
   state: JobState;
   progress: JobProgress;
   timing: JobProgressTiming | null;

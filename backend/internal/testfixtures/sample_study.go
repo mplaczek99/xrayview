@@ -65,12 +65,6 @@ func WriteSampleDicom(t testing.TB) string {
 	return writeSecondaryCapture(t, SampleDicomName, SampleSourcePreview())
 }
 
-func WriteProcessedSampleDicom(t testing.TB) string {
-	t.Helper()
-
-	return writeSecondaryCapture(t, ProcessedSampleDicomName, SampleProcessedPreview())
-}
-
 func SampleSourcePreview() imaging.PreviewImage {
 	return imaging.GrayPreview(sampleWidth, sampleHeight, cloneBytes(sampleSourcePixels))
 }

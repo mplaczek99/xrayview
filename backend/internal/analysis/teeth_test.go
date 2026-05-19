@@ -4,7 +4,6 @@ import (
 	"image"
 	"image/color"
 	_ "image/png"
-	"math"
 	"math/rand"
 	"os"
 	"path/filepath"
@@ -637,71 +636,6 @@ func TestOverlayMasksDrawNaturalBoneOutlineOccludedByTeeth(t *testing.T) {
 	assertMasksEqual(t, gotGreen, wantGreen)
 }
 
-func TestSmoothClosedContourReducesHighFrequencyJitter(t *testing.T) {
-	points := make([]overlayPoint, 0, 48)
-	for y := 0; y <= 24; y += 2 {
-		x := 4.0
-		if y%4 == 0 {
-			x = 7.0
-		}
-		points = append(points, overlayPoint{x: x, y: float64(y)})
-	}
-	for y := 24; y >= 0; y -= 2 {
-		points = append(points, overlayPoint{x: 22, y: float64(y)})
-	}
-
-	before := contourJitterScore(points)
-	after := contourJitterScore(smoothClosedContour(
-		lowPassClosedContour(points, overlayContourLowPassIterations),
-		overlayContourSmoothingIterations,
-	))
-	if after >= before*0.18 {
-		t.Fatalf("contour jitter score after smoothing = %.3f, want < %.3f", after, before*0.18)
-	}
-}
-
-func TestSmoothClosedContourDoesNotCompoundPointCount(t *testing.T) {
-	points := benchmarkClosedContour(128)
-	smoothed := smoothClosedContour(points, overlayContourSmoothingIterations)
-	want := len(points) * 2
-	if len(smoothed) != want {
-		t.Fatalf("len(smoothClosedContour(points)) = %d, want %d", len(smoothed), want)
-	}
-}
-
-func TestStrokeSegmentCoverageMatchesDistanceReference(t *testing.T) {
-	const width = 32
-	const height = 28
-	const radius = 1.3
-
-	excludeMask := make([]uint8, width*height)
-	fillMaskRect(excludeMask, width, 12, 11, 5, 4)
-	segments := []struct {
-		name  string
-		start overlayPoint
-		end   overlayPoint
-	}{
-		{name: "horizontal", start: overlayPoint{x: 2.25, y: 5.5}, end: overlayPoint{x: 28.75, y: 5.5}},
-		{name: "diagonal", start: overlayPoint{x: 4.5, y: 3.25}, end: overlayPoint{x: 24.75, y: 22.5}},
-		{name: "outside_bounds", start: overlayPoint{x: -3.0, y: 8.0}, end: overlayPoint{x: 18.0, y: 30.0}},
-		{name: "zero_length", start: overlayPoint{x: 15.25, y: 14.75}, end: overlayPoint{x: 15.25, y: 14.75}},
-	}
-
-	for _, tt := range segments {
-		t.Run(tt.name, func(t *testing.T) {
-			got := make([]float64, width*height)
-			want := make([]float64, width*height)
-			addStrokeSegmentCoverage(got, width, height, tt.start, tt.end, radius, excludeMask)
-			referenceAddStrokeSegmentCoverage(want, width, height, tt.start, tt.end, radius, excludeMask)
-			for index := range got {
-				if math.Abs(got[index]-want[index]) > 1e-12 {
-					t.Fatalf("coverage[%d] = %.17f, want %.17f", index, got[index], want[index])
-				}
-			}
-		})
-	}
-}
-
 func TestGenerateToothOverlayDrawsInnerOutline(t *testing.T) {
 	preview := imaging.GrayPreview(32, 32, make([]uint8, 32*32))
 	result, err := GenerateToothOverlay(preview)
@@ -919,38 +853,6 @@ func TestRuntimeAnalysisDoesNotReadColoredFixtures(t *testing.T) {
 	}
 }
 
-func referenceAddStrokeSegmentCoverage(
-	coverage []float64,
-	width int,
-	height int,
-	start overlayPoint,
-	end overlayPoint,
-	radius float64,
-	excludeMask []uint8,
-) {
-	minX := clampInt(int(math.Floor(minFloat(start.x, end.x)-radius-1)), 0, width-1)
-	maxX := clampInt(int(math.Ceil(maxFloat(start.x, end.x)+radius+1)), 0, width-1)
-	minY := clampInt(int(math.Floor(minFloat(start.y, end.y)-radius-1)), 0, height-1)
-	maxY := clampInt(int(math.Ceil(maxFloat(start.y, end.y)+radius+1)), 0, height-1)
-
-	for y := minY; y <= maxY; y++ {
-		for x := minX; x <= maxX; x++ {
-			distance := distanceToSegment(float64(x)+0.5, float64(y)+0.5, start, end)
-			segmentCoverage := strokeCoverage(distance, radius)
-			if segmentCoverage <= 0 {
-				continue
-			}
-			index := y*width + x
-			if len(excludeMask) == len(coverage) && excludeMask[index] != 0 {
-				continue
-			}
-			if segmentCoverage > coverage[index] {
-				coverage[index] = segmentCoverage
-			}
-		}
-	}
-}
-
 func BenchmarkBinaryMorphology(b *testing.B) {
 	const width = 2048
 	const height = 1536
@@ -1049,13 +951,14 @@ func BenchmarkFeatureTableToothMask(b *testing.B) {
 	const height = 768
 
 	normalized := benchmarkGray(width, height)
-	_, _ = featureTableProbability(0)
+	mask := make([]uint8, len(normalized))
+	featureTable.Once.Do(loadFeatureTable)
 	b.SetBytes(int64(width * height))
 	b.ReportAllocs()
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		mask := featureTableToothMask(normalized, width, height)
+		featureTableToothMaskInto(mask, normalized, width, height)
 		if len(mask) != len(normalized) {
 			b.Fatalf("mask len = %d, want %d", len(mask), len(normalized))
 		}
@@ -1068,13 +971,14 @@ func BenchmarkBoneFeatureTableMask(b *testing.B) {
 
 	normalized := benchmarkGray(width, height)
 	gradient := gradientGray(normalized, width, height)
-	_, _ = boneFeatureTableProbability(0)
+	mask := make([]uint8, len(normalized))
+	boneFeatureTable.Once.Do(loadBoneFeatureTable)
 	b.SetBytes(int64(width * height))
 	b.ReportAllocs()
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		mask := boneFeatureTableMask(normalized, gradient, width, height)
+		boneFeatureTableMaskInto(mask, normalized, gradient, width, height)
 		if len(mask) != len(normalized) {
 			b.Fatalf("mask len = %d, want %d", len(mask), len(normalized))
 		}
@@ -1112,64 +1016,6 @@ func BenchmarkBoxBlurGray(b *testing.B) {
 		blurred := boxBlurGray(pixels, width, height, radius)
 		if len(blurred) != len(pixels) {
 			b.Fatalf("blurred len = %d, want %d", len(blurred), len(pixels))
-		}
-	}
-}
-
-func BenchmarkContourSmoothing(b *testing.B) {
-	points := benchmarkClosedContour(4096)
-	var scratch contourSmoothingScratch
-	lowPassed := lowPassClosedContourWithScratch(points, overlayContourLowPassIterations, &scratch)
-	smoothed := smoothClosedContourWithScratch(lowPassed, overlayContourSmoothingIterations, &scratch)
-	if len(smoothed) != len(points)*2 {
-		b.Fatalf("smoothed len = %d, want %d", len(smoothed), len(points)*2)
-	}
-
-	b.ReportAllocs()
-	b.ResetTimer()
-
-	for i := 0; i < b.N; i++ {
-		lowPassed := lowPassClosedContourWithScratch(points, overlayContourLowPassIterations, &scratch)
-		smoothed := smoothClosedContourWithScratch(lowPassed, overlayContourSmoothingIterations, &scratch)
-		if len(smoothed) != len(points)*2 {
-			b.Fatalf("smoothed len = %d, want %d", len(smoothed), len(points)*2)
-		}
-	}
-}
-
-func BenchmarkStrokeCoverage(b *testing.B) {
-	const width = 2048
-	const height = 1536
-
-	points := benchmarkClosedContour(4096)
-	coverage := make([]float64, width*height)
-	b.SetBytes(int64(len(points)))
-	b.ReportAllocs()
-	b.ResetTimer()
-
-	for i := 0; i < b.N; i++ {
-		clear(coverage)
-		addClosedStrokeCoverage(coverage, width, height, points, overlayStrokeWidthPixels, nil)
-		if coverage[300*width+50] == -1 {
-			b.Fatal("unreachable coverage sentinel")
-		}
-	}
-}
-
-func BenchmarkCompositeOverlayCoverage(b *testing.B) {
-	const width = 2048
-	const height = 1536
-
-	rgba := benchmarkRGBA(width, height)
-	coverage := benchmarkOverlayCoverage(width, height)
-	b.SetBytes(int64(width * height))
-	b.ReportAllocs()
-	b.ResetTimer()
-
-	for i := 0; i < b.N; i++ {
-		compositeOverlayCoverage(rgba, coverage, toothOverlayGreen)
-		if rgba[400*width*4+500*4] == 253 {
-			b.Fatal("unreachable rgba sentinel")
 		}
 	}
 }
@@ -1262,6 +1108,16 @@ func referenceBoxBlurGray(pixels []uint8, width, height, radius int) []uint8 {
 	return blurred
 }
 
+func clampInt(value, minValue, maxValue int) int {
+	if value < minValue {
+		return minValue
+	}
+	if value > maxValue {
+		return maxValue
+	}
+	return value
+}
+
 func assertMasksEqual(t *testing.T, got []uint8, want []uint8) {
 	t.Helper()
 
@@ -1307,46 +1163,6 @@ func benchmarkGray(width, height int) []uint8 {
 		pixels[index] = uint8((index*31 + rng.Intn(64)) & 0xff)
 	}
 	return pixels
-}
-
-func benchmarkRGBA(width, height int) []uint8 {
-	rng := rand.New(rand.NewSource(126))
-	pixels := make([]uint8, width*height*4)
-	for index := 0; index < len(pixels); index += 4 {
-		pixels[index+0] = uint8((index/4*17 + rng.Intn(64)) & 0xff)
-		pixels[index+1] = uint8((index/4*23 + rng.Intn(64)) & 0xff)
-		pixels[index+2] = uint8((index/4*29 + rng.Intn(64)) & 0xff)
-		pixels[index+3] = 255
-	}
-	return pixels
-}
-
-func benchmarkOverlayCoverage(width, height int) []float64 {
-	coverage := make([]float64, width*height)
-	for y := 0; y < height; y++ {
-		for x := 0; x < width; x++ {
-			index := y*width + x
-			if (x+y)%5 == 0 {
-				continue
-			}
-			value := float64((x*13 + y*7) % 256)
-			coverage[index] = value / 255
-		}
-	}
-	return coverage
-}
-
-func benchmarkClosedContour(pointCount int) []overlayPoint {
-	points := make([]overlayPoint, 0, pointCount)
-	for index := 0; index < pointCount; index++ {
-		angle := 2 * math.Pi * float64(index) / float64(pointCount)
-		radius := 250.0 + 18.0*math.Sin(angle*7) + 11.0*math.Cos(angle*13)
-		points = append(points, overlayPoint{
-			x: 300.0 + radius*math.Cos(angle),
-			y: 300.0 + radius*math.Sin(angle),
-		})
-	}
-	return points
 }
 
 func coloredFixtureNames(t *testing.T) []string {
@@ -1592,24 +1408,6 @@ func maskContainmentRatio(subject, allowed []uint8) float64 {
 		return 0
 	}
 	return float64(containedCount) / float64(subjectCount)
-}
-
-func contourJitterScore(points []overlayPoint) float64 {
-	if len(points) < 3 {
-		return 0
-	}
-
-	score := 0.0
-	for index, point := range points {
-		previous := points[(index+len(points)-1)%len(points)]
-		next := points[(index+1)%len(points)]
-		expected := overlayPoint{
-			x: (previous.x + next.x) / 2,
-			y: (previous.y + next.y) / 2,
-		}
-		score += math.Hypot(point.x-expected.x, point.y-expected.y)
-	}
-	return score / float64(len(points))
 }
 
 func diceCoefficient(left, right []uint8) float64 {

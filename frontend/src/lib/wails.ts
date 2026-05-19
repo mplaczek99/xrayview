@@ -13,7 +13,7 @@ import type {
   StartedJob,
 } from "./generated/contracts";
 
-export interface DesktopBindings {
+interface DesktopBindings {
   PickDicomFile(): Promise<string>;
   PickSaveDicomPath(defaultName?: string): Promise<string>;
   OpenStudy(command: OpenStudyCommand): Promise<OpenStudyCommandResult>;

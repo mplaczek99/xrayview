@@ -29,12 +29,6 @@ var boneFeatureTable = struct {
 	err           error
 }{}
 
-func boneFeatureTableMask(normalized []uint8, gradient []uint8, width, height int) []uint8 {
-	mask := make([]uint8, len(normalized))
-	boneFeatureTableMaskInto(mask, normalized, gradient, width, height)
-	return mask
-}
-
 func boneFeatureTableMaskInto(mask []uint8, normalized []uint8, gradient []uint8, width, height int) {
 	clear(mask)
 	boneFeatureTable.Once.Do(loadBoneFeatureTable)
@@ -49,11 +43,6 @@ func boneFeatureTableMaskInto(mask []uint8, normalized []uint8, gradient []uint8
 			}
 		}
 	})
-}
-
-func boneFeatureTableProbability(key uint32) (uint8, bool) {
-	boneFeatureTable.Once.Do(loadBoneFeatureTable)
-	return loadedBoneFeatureTableProbability(key)
 }
 
 func loadedBoneFeatureTableProbability(key uint32) (uint8, bool) {

@@ -10,7 +10,7 @@ import {
   formatSecondaryMeasurement,
 } from "../../features/annotations/tools";
 
-export interface ViewSidebarProps {
+interface ViewSidebarProps {
   selectedLine: LineAnnotation | null;
   annotations: AnnotationBundle;
   selectedAnnotationId: string | null;

@@ -55,14 +55,6 @@ func NotFound(message string) BackendError {
 	return NewBackendError(BackendErrorCodeNotFound, message)
 }
 
-func Cancelled(message string) BackendError {
-	return NewBackendError(BackendErrorCodeCancelled, message)
-}
-
-func Conflict(message string) BackendError {
-	return NewBackendError(BackendErrorCodeConflict, message)
-}
-
 func CacheCorrupted(message string) BackendError {
 	return NewBackendError(BackendErrorCodeCacheCorrupted, message)
 }

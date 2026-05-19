@@ -2,7 +2,7 @@ import { formatBackendError } from "../../lib/backendErrors";
 import type { JobSnapshot } from "../../features/jobs/model";
 import type { WorkbenchStudy } from "../../features/study/model";
 
-export function applyRenderJob(study: WorkbenchStudy, job: JobSnapshot): WorkbenchStudy {
+function applyRenderJob(study: WorkbenchStudy, job: JobSnapshot): WorkbenchStudy {
   switch (job.state) {
     case "queued":
     case "running":
@@ -41,7 +41,7 @@ export function applyRenderJob(study: WorkbenchStudy, job: JobSnapshot): Workben
   }
 }
 
-export function applyAnalyzeJob(study: WorkbenchStudy, job: JobSnapshot): WorkbenchStudy {
+function applyAnalyzeJob(study: WorkbenchStudy, job: JobSnapshot): WorkbenchStudy {
   switch (job.state) {
     case "queued":
     case "running":
@@ -85,7 +85,7 @@ export function applyAnalyzeJob(study: WorkbenchStudy, job: JobSnapshot): Workbe
   }
 }
 
-export function applyProcessJob(study: WorkbenchStudy, job: JobSnapshot): WorkbenchStudy {
+function applyProcessJob(study: WorkbenchStudy, job: JobSnapshot): WorkbenchStudy {
   switch (job.state) {
     case "queued":
     case "running":

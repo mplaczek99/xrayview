@@ -27,11 +27,6 @@ var featureTable = struct {
 	err           error
 }{}
 
-func featureTableProbability(key uint32) (uint8, bool) {
-	featureTable.Once.Do(loadFeatureTable)
-	return loadedFeatureTableProbability(key)
-}
-
 func loadedFeatureTableProbability(key uint32) (uint8, bool) {
 	if featureTable.err != nil {
 		return 0, false

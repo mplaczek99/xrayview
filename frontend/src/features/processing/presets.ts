@@ -9,8 +9,6 @@ interface ProcessingUiState {
   presets: ProcessingPresetOption[];
 }
 
-const CUSTOM_PRESET_LABEL = "Custom";
-
 const PRESET_COPY_BY_ID: Record<string, { label: string; description: string }> = {
   default: {
     label: "Neutral",
@@ -83,15 +81,4 @@ export function buildProcessingUiState(
         },
     presets,
   };
-}
-
-export function matchPreset(
-  controls: ProcessingControls,
-  presets: readonly ProcessingPresetOption[],
-): string {
-  const matched = presets.find((preset) =>
-    processingControlsEqual(preset.controls, controls),
-  );
-
-  return matched?.label ?? CUSTOM_PRESET_LABEL;
 }

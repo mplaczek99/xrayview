@@ -7,7 +7,7 @@ const MIN_PERCENT_DELTA = 0.5;
 const MIN_RATE_WINDOW_MS = 250;
 const RATE_EMA_ALPHA = 0.35;
 
-export interface ProgressSnapshotLike {
+interface ProgressSnapshotLike {
   state: JobState;
   progress: JobProgress;
   fromCache: boolean;

@@ -23,7 +23,6 @@ import type {
   OpenedStudy,
   PreviewResult,
   ProcessResult,
-  ProcessingRequest,
   RuntimeMode,
 } from "./types";
 

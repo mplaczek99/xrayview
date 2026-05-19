@@ -1505,45 +1505,6 @@ func grayFromRGB8(red uint8, green uint8, blue uint8) uint8 {
 	return uint8((19595*redValue + 38470*greenValue + 7471*blueValue + (1 << 15)) >> 24)
 }
 
-// decodeStoredPixelValue unpacks a raw pixel sample.
-//
-// DICOM packs BitsStored bits into a BitsAllocated slot, so the high bits
-// are padding and have to be masked off. For signed samples
-// (PixelRepresentation == 1) the sign bit is at position BitsStored-1; if
-// it's set, extend it through the upper padding bits before the int32 cast.
-func decodeStoredPixelValue(rawValue uint32, bitsStored uint16, pixelRepresentation uint16) int32 {
-	if bitsStored == 0 || bitsStored > 32 {
-		bitsStored = 32
-	}
-
-	masked := rawValue
-	if bitsStored < 32 {
-		mask := uint32(1<<bitsStored) - 1
-		masked = rawValue & mask
-	}
-
-	if pixelRepresentation == 0 || bitsStored == 32 {
-		return int32(masked)
-	}
-
-	signBit := uint32(1) << (bitsStored - 1)
-	if masked&signBit == 0 {
-		return int32(masked)
-	}
-
-	mask := uint32(1<<bitsStored) - 1
-	return int32(masked | ^mask)
-}
-
-// scaledStoredPixelValue applies the DICOM modality LUT: stored value ->
-// modality value via slope*stored + intercept. Hounsfield on CT, raw OD on
-// X-ray. Slope defaults to 1 and intercept to 0 when the source didn't ship
-// a rescale pair.
-func scaledStoredPixelValue(rawValue uint32, cfg sourceDecodeConfig) float32 {
-	return float32(decodeStoredPixelValue(rawValue, cfg.bitsStored, cfg.pixelRepresentation))*cfg.slope +
-		cfg.intercept
-}
-
 func parseStringValues(value []byte) []string {
 	raw := trimStringValue(value)
 	if raw == "" {

@@ -2,7 +2,7 @@ import type { RuntimeMode } from "./types";
 
 const BACKEND_RUNTIME_ENV_KEY = "VITE_XRAYVIEW_BACKEND_RUNTIME";
 
-export interface RuntimeConfiguration {
+interface RuntimeConfiguration {
   mode: RuntimeMode;
   selectionSource: "default" | "env";
   warnings: string[];

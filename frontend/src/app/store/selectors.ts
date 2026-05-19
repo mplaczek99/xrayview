@@ -10,7 +10,7 @@ type SelectorValues<T extends readonly StateSelector<unknown>[]> = {
 };
 
 // Memoize a derived value on one or more input slices using Object.is.
-export function createSelector<const Inputs extends readonly StateSelector<unknown>[], Result>(
+function createSelector<const Inputs extends readonly StateSelector<unknown>[], Result>(
   inputSelectors: Inputs,
   resultFn: (...inputs: SelectorValues<Inputs>) => Result,
 ): StateSelector<Result> {
@@ -49,7 +49,7 @@ export const selectActiveStudy = createSelector(
     activeStudyId ? studies[activeStudyId] ?? null : null,
 );
 
-export interface ProcessingTabStudyState {
+interface ProcessingTabStudyState {
   studyId: string;
   form: ProcessingForm;
   runStatus: ProcessingSession["runStatus"];

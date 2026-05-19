@@ -51,19 +51,6 @@ func NewService(cfg config.Config, logger *slog.Logger) (*App, error) {
 	return application, nil
 }
 
-// NewWithServices is the composition seam used by tests and by callers that
-// want to share a cache / registry / job service across App instances.
-// Anything passed as nil falls back to a default constructed from cfg.
-func NewWithServices(
-	cfg config.Config,
-	logger *slog.Logger,
-	cacheStore *cache.Store,
-	studyRegistry *studies.Registry,
-	jobService *jobs.Service,
-) (*App, error) {
-	return newApp(cfg, logger, cacheStore, studyRegistry, jobService, true)
-}
-
 func newApp(
 	cfg config.Config,
 	logger *slog.Logger,
