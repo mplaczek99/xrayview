@@ -1,6 +1,9 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -10,7 +13,7 @@ import (
 	"strings"
 	"testing"
 
-	backendapi "xrayview/backend"
+	backendapi "xrayview/contracts/contractv1"
 )
 
 var tinyPNG = []byte{
@@ -25,107 +28,26 @@ var tinyPNG = []byte{
 	0x44, 0xae, 0x42, 0x60, 0x82,
 }
 
-type stubBackendService struct {
-	openStudyFn             func(backendapi.OpenStudyCommand) (backendapi.OpenStudyCommandResult, error)
-	startRenderJobFn        func(backendapi.RenderStudyCommand) (backendapi.StartedJob, error)
-	startAnalyzeJobFn       func(backendapi.AnalyzeStudyCommand) (backendapi.StartedJob, error)
-	startProcessJobFn       func(backendapi.ProcessStudyCommand) (backendapi.StartedJob, error)
-	getJobFn                func(backendapi.JobCommand) (backendapi.JobSnapshot, error)
-	cancelJobFn             func(backendapi.JobCommand) (backendapi.JobSnapshot, error)
-	getProcessingManifestFn func() backendapi.ProcessingManifest
-	measureLineFn           func(
-		backendapi.MeasureLineAnnotationCommand,
-	) (backendapi.MeasureLineAnnotationCommandResult, error)
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (fn roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return fn(request)
 }
 
-func (service stubBackendService) OpenStudy(
-	command backendapi.OpenStudyCommand,
-) (backendapi.OpenStudyCommandResult, error) {
-	if service.openStudyFn != nil {
-		return service.openStudyFn(command)
+func jsonTestResponse(t *testing.T, request *http.Request, statusCode int, payload any) *http.Response {
+	t.Helper()
+
+	var body bytes.Buffer
+	if err := json.NewEncoder(&body).Encode(payload); err != nil {
+		t.Fatalf("Encode test response: %v", err)
 	}
 
-	return backendapi.OpenStudyCommandResult{}, nil
-}
-
-func (service stubBackendService) StartRenderJob(
-	command backendapi.RenderStudyCommand,
-) (backendapi.StartedJob, error) {
-	if service.startRenderJobFn != nil {
-		return service.startRenderJobFn(command)
+	return &http.Response{
+		StatusCode: statusCode,
+		Header:     http.Header{"content-type": []string{"application/json"}},
+		Body:       io.NopCloser(bytes.NewReader(body.Bytes())),
+		Request:    request,
 	}
-
-	return backendapi.StartedJob{}, nil
-}
-
-func (service stubBackendService) StartAnalyzeJob(
-	command backendapi.AnalyzeStudyCommand,
-) (backendapi.StartedJob, error) {
-	if service.startAnalyzeJobFn != nil {
-		return service.startAnalyzeJobFn(command)
-	}
-
-	return backendapi.StartedJob{}, nil
-}
-
-func (service stubBackendService) StartProcessJob(
-	command backendapi.ProcessStudyCommand,
-) (backendapi.StartedJob, error) {
-	if service.startProcessJobFn != nil {
-		return service.startProcessJobFn(command)
-	}
-
-	return backendapi.StartedJob{}, nil
-}
-
-func (service stubBackendService) GetJob(
-	command backendapi.JobCommand,
-) (backendapi.JobSnapshot, error) {
-	if service.getJobFn != nil {
-		return service.getJobFn(command)
-	}
-
-	return backendapi.JobSnapshot{}, nil
-}
-
-func (service stubBackendService) CancelJob(
-	command backendapi.JobCommand,
-) (backendapi.JobSnapshot, error) {
-	if service.cancelJobFn != nil {
-		return service.cancelJobFn(command)
-	}
-
-	return backendapi.JobSnapshot{}, nil
-}
-
-func (service stubBackendService) GetProcessingManifest() backendapi.ProcessingManifest {
-	if service.getProcessingManifestFn != nil {
-		return service.getProcessingManifestFn()
-	}
-
-	return backendapi.DefaultProcessingManifest()
-}
-
-func (service stubBackendService) MeasureLineAnnotation(
-	command backendapi.MeasureLineAnnotationCommand,
-) (backendapi.MeasureLineAnnotationCommandResult, error) {
-	if service.measureLineFn != nil {
-		return service.measureLineFn(command)
-	}
-
-	return backendapi.MeasureLineAnnotationCommandResult{}, nil
-}
-
-func (service stubBackendService) OnJobCompletion(callback func(backendapi.JobSnapshot)) {
-}
-
-func (service stubBackendService) OnJobUpdate(callback func(backendapi.JobSnapshot)) {
-}
-
-func (service stubBackendService) GetJobs(
-	command backendapi.GetJobsCommand,
-) ([]backendapi.JobSnapshot, error) {
-	return []backendapi.JobSnapshot{}, nil
 }
 
 func newPreviewAssetTestApp(t *testing.T) (*DesktopApp, string) {
@@ -282,45 +204,75 @@ func TestServeAssetRejectsSymlinkEscape(t *testing.T) {
 	}
 }
 
-func TestNewDesktopAppUsesInProcessBackendByDefault(t *testing.T) {
+func TestNewDesktopAppUsesRustSidecarByDefault(t *testing.T) {
 	t.Setenv(sidecarRuntimeEnvKey, "desktop")
 	t.Setenv(sidecarBaseURLEnvKey, "")
-	t.Setenv(legacySidecarBaseURLEnvKey, "")
 	t.Setenv(sidecarBaseDirEnvKey, t.TempDir())
-	t.Setenv(legacySidecarBaseDirEnvKey, "")
 
 	app, err := NewDesktopApp()
 	if err != nil {
 		t.Fatalf("NewDesktopApp() error = %v", err)
 	}
 
-	if app.backend == nil {
-		t.Fatal("NewDesktopApp() did not construct an embedded backend")
-	}
-
-	if app.sidecar != nil {
-		t.Fatal("NewDesktopApp() should not create a sidecar controller in default embedded mode")
+	if app.sidecar == nil || !app.sidecar.Enabled() {
+		t.Fatal("NewDesktopApp() did not create an enabled Rust sidecar controller")
 	}
 }
 
-func TestOpenStudyUsesEmbeddedBackend(t *testing.T) {
-	app := &DesktopApp{
-		backend: stubBackendService{
-			openStudyFn: func(
-				command backendapi.OpenStudyCommand,
-			) (backendapi.OpenStudyCommandResult, error) {
-				if command.InputPath != "/tmp/example.dcm" {
-					t.Fatalf("OpenStudy() inputPath = %q, want %q", command.InputPath, "/tmp/example.dcm")
-				}
+func TestOpenStudyInvokesSidecarHTTP(t *testing.T) {
+	cacheDir := t.TempDir()
+	baseURL := "http://127.0.0.1:38181"
+	probeClient := &http.Client{
+		Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+			if request.Method != http.MethodGet {
+				t.Fatalf("/healthz method = %s, want GET", request.Method)
+			}
+			if got, want := request.URL.String(), baseURL+"/healthz"; got != want {
+				t.Fatalf("probe URL = %s, want %s", got, want)
+			}
 
-				return backendapi.OpenStudyCommandResult{
-					Study: backendapi.StudyRecord{
-						StudyID:   "study-1",
-						InputPath: command.InputPath,
-						InputName: "example.dcm",
-					},
-				}, nil
-			},
+			return jsonTestResponse(t, request, http.StatusOK, backendHealth{
+				Status:    "ok",
+				Service:   expectedBackendService,
+				Transport: expectedTransportKind,
+				CacheDir:  cacheDir,
+			}), nil
+		}),
+	}
+	commandClient := &http.Client{
+		Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+			if request.Method != http.MethodPost {
+				t.Fatalf("open_study method = %s, want POST", request.Method)
+			}
+			if got, want := request.URL.String(), baseURL+commandsPath+"/open_study"; got != want {
+				t.Fatalf("command URL = %s, want %s", got, want)
+			}
+
+			var command backendapi.OpenStudyCommand
+			if err := json.NewDecoder(request.Body).Decode(&command); err != nil {
+				t.Fatalf("Decode open_study command: %v", err)
+			}
+			if command.InputPath != "/tmp/example.dcm" {
+				t.Fatalf("OpenStudy() inputPath = %q, want %q", command.InputPath, "/tmp/example.dcm")
+			}
+
+			return jsonTestResponse(t, request, http.StatusOK, backendapi.OpenStudyCommandResult{
+				Study: backendapi.StudyRecord{
+					StudyID:   "study-1",
+					InputPath: command.InputPath,
+					InputName: "example.dcm",
+				},
+			}), nil
+		}),
+	}
+
+	app := &DesktopApp{
+		sidecar: &SidecarController{
+			mode:        runtimeModeDesktop,
+			baseURL:     baseURL,
+			baseDir:     t.TempDir(),
+			probeClient: probeClient,
+			httpClient:  commandClient,
 		},
 	}
 

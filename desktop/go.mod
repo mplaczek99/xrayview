@@ -4,7 +4,7 @@ go 1.26.0
 
 require (
 	github.com/wailsapp/wails/v2 v2.11.0
-	xrayview/backend v0.0.0
+	xrayview/contracts v0.0.0
 )
 
 require (
@@ -36,10 +36,6 @@ require (
 	golang.org/x/net v0.35.0 // indirect
 	golang.org/x/sys v0.30.0 // indirect
 	golang.org/x/text v0.24.0 // indirect
-	xrayview/contracts v0.0.0 // indirect
 )
 
-replace (
-	xrayview/backend => ../backend
-	xrayview/contracts => ../contracts
-)
+replace xrayview/contracts => ../contracts

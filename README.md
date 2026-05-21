@@ -2,7 +2,7 @@
 
 <p align="center">
   A DICOM X-ray visualization workstation<br>
-  built with a <strong>Wails</strong> desktop shell, a <strong>React/TypeScript</strong> frontend, and a <strong>Go</strong> backend.
+  built with a <strong>Wails</strong> desktop shell, a <strong>React/TypeScript</strong> frontend, and a <strong>Rust</strong> backend.
 </p>
 
 > [!CAUTION]
@@ -33,12 +33,9 @@
 xrayview/
 ├── frontend/    React/TypeScript workstation UI (Vite, strict mode)
 ├── desktop/     Wails desktop shell (Go module)
-├── backend/     Go backend service & headless CLI (Go module)
-│   ├── cmd/xrayviewd       HTTP server entrypoint
-│   ├── cmd/xrayview-cli    headless CLI
-│   └── internal/           domain packages
+├── backend-rs/  Rust backend service sidecar
 ├── contracts/   shared JSON schema + generated TS & Go bindings (Go module)
-└── images/      sample DICOM assets for dev & smoke testing
+└── images/      sample image assets for dev & detector tuning
 ```
 
 ---
@@ -48,6 +45,7 @@ xrayview/
 ### Prerequisites
 
 - [Go](https://go.dev/) 1.22+
+- [Rust](https://www.rust-lang.org/tools/install) 1.85+
 - [Node.js](https://nodejs.org/) 18.18+ or 20+
 - Linux desktop builds require GTK/WebKit development packages
   On Debian/Ubuntu: `libgtk-3-dev` plus either `libwebkit2gtk-4.1-dev` or `libwebkit2gtk-4.0-dev`
@@ -71,7 +69,7 @@ npm run dev
 
 ### Desktop app
 
-Build and launch the Wails shell with the live Go backend:
+Build and launch the Wails shell with the live Rust backend:
 
 ```bash
 npm run wails:run          # dev launch
@@ -105,7 +103,7 @@ confirms the bundled sidecar starts up.
 | Mode | Default in | Description |
 |---|---|---|
 | `mock` | Browser / Vite | Synthetic data, no backend |
-| `desktop` | Wails shell | Live Go backend over loopback HTTP |
+| `desktop` | Wails shell | Live Rust backend over loopback HTTP |
 
 Override with environment variables:
 
@@ -116,11 +114,19 @@ XRAYVIEW_BACKEND_RUNTIME=desktop XRAYVIEW_BACKEND_URL=http://127.0.0.1:38181 npm
 
 ---
 
-## Go Backend
+## Rust Backend
 
 The backend sidecar binds to `127.0.0.1:38181` by default. The transport is
 **intentionally local-only** — it only binds to loopback and is never exposed
 in mock mode.
+
+The default backend scripts target `backend-rs/`:
+
+```bash
+npm run backend:build
+npm run backend:serve
+npm run backend:test
+```
 
 ### HTTP endpoints
 
@@ -139,7 +145,9 @@ in mock mode.
 | `open_study` | Open a DICOM study |
 | `start_render_job` | Render a preview |
 | `start_process_job` | Run processing pipeline |
+| `start_analyze_job` | Generate deterministic analysis overlays |
 | `get_job` | Poll job state |
+| `get_jobs` | List job state |
 | `cancel_job` | Cancel a running job |
 | `measure_line_annotation` | Calibration-aware line measurement |
 
@@ -147,43 +155,41 @@ in mock mode.
 
 ## CLI
 
-The headless CLI lives at `backend/cmd/xrayview-cli` and supports **utility
-subcommands** and **legacy workflow flags**.
+The headless CLI runs through the Rust backend binary.
 
 ### Utility subcommands
 
 ```bash
 # Info
-go -C backend run ./cmd/xrayview-cli print-config      # resolved config as JSON
-go -C backend run ./cmd/xrayview-cli version           # service + contract version
-go -C backend run ./cmd/xrayview-cli list-commands     # supported backend commands
+npm run backend:cli -- print-config      # resolved config as JSON
+npm run backend:cli -- version           # service + contract version
+npm run backend:cli -- list-commands     # supported backend commands
 
 # DICOM inspection
-go -C backend run ./cmd/xrayview-cli inspect-decode ../images/sample-dental-radiograph.dcm
-go -C backend run ./cmd/xrayview-cli decode-source  ../images/sample-dental-radiograph.dcm
+npm run backend:cli -- inspect-decode /path/to/study.dcm
+npm run backend:cli -- decode-source  /path/to/study.dcm
 
 # Render & process
-go -C backend run ./cmd/xrayview-cli render-preview ../images/sample-dental-radiograph.dcm /tmp/preview.png
-go -C backend run ./cmd/xrayview-cli render-preview --full-range ../images/sample-dental-radiograph.dcm /tmp/preview.png
-go -C backend run ./cmd/xrayview-cli process-preview --invert --equalize ../images/sample-dental-radiograph.dcm /tmp/processed.png
+npm run backend:cli -- render-preview /path/to/study.dcm /tmp/preview.png
+npm run backend:cli -- render-preview --full-range /path/to/study.dcm /tmp/preview.png
+npm run backend:cli -- process-preview --invert --equalize /path/to/study.dcm /tmp/processed.png
 
 # Export
-go -C backend run ./cmd/xrayview-cli export-secondary-capture --palette hot ../images/sample-dental-radiograph.dcm /tmp/export.dcm
+npm run backend:cli -- export-secondary-capture --palette hot /path/to/study.dcm /tmp/export.dcm
 ```
 
 <details>
 <summary>Legacy workflow flags</summary>
 
 ```bash
-go -C backend run ./cmd/xrayview-cli -- --describe-presets
-go -C backend run ./cmd/xrayview-cli -- --input ../images/sample-dental-radiograph.dcm --describe-study
-go -C backend run ./cmd/xrayview-cli -- --input ../images/sample-dental-radiograph.dcm --preview-output /tmp/preview.png
+npm run backend:cli -- --describe-presets
+npm run backend:cli -- --input /path/to/study.dcm --describe-study
+npm run backend:cli -- --input /path/to/study.dcm --preview-output /tmp/preview.png
 ```
 
 </details>
 
-> A public dental radiograph sample is included at
-> `images/sample-dental-radiograph.dcm`. See `images/README.md` for provenance.
+> See `images/README.md` for available sample assets and provenance.
 
 ---
 
@@ -205,21 +211,22 @@ Generated files (do not edit manually):
 
 ## Architecture
 
-The project is a monorepo with **three independent Go modules** and a
-React/TypeScript frontend. There is no Go workspace file; modules use `replace`
-directives for local dependencies.
+The project is a monorepo with a Rust backend sidecar, a React/TypeScript
+frontend, and independent Go modules for the Wails shell and shared Go contract
+bindings. There is no Go workspace file; Go modules use `replace` directives
+for local dependencies.
 
 | Module | Responsibility |
 |---|---|
 | `frontend/` | Workstation UI and mock-mode behavior |
 | `desktop/` | Native shell: window lifecycle, dialogs, preview serving, sidecar management |
-| `backend/` | DICOM decode, render, processing, annotations, export, jobs, cache, persistence |
+| `backend-rs/` | Rust sidecar: HTTP contract, DICOM decode, render, processing, annotations, jobs |
 | `contracts/` | Shared command payload shapes via JSON schema |
 
 ```
 ┌─────────────┐     Wails binding     ┌─────────────┐    loopback HTTP    ┌─────────────┐
-│  React UI   │ ◄──────────────────► │   Desktop   │ ◄──────────────────► │ Go Backend  │
-│  (frontend) │                       │   (desktop) │                      │  (backend)  │
+│  React UI   │ ◄──────────────────► │   Desktop   │ ◄──────────────────► │Rust Backend │
+│  (frontend) │                       │   (desktop) │                      │(backend-rs) │
 └─────────────┘                       └─────────────┘                      └─────────────┘
                                               ▲                                    ▲
                                               └────────── contracts ───────────────┘

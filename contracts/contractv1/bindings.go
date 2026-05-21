@@ -38,6 +38,7 @@ const BackendContractSchemaJSON = `{
     "JobProgress",
     "StartedJob",
     "JobCommand",
+    "GetJobsCommand",
     "OpenStudyCommand",
     "StudyRecord",
     "OpenStudyCommandResult",
@@ -256,6 +257,17 @@ const BackendContractSchemaJSON = `{
       },
       "required": ["jobId"]
     },
+    "GetJobsCommand": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "jobIds": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "required": ["jobIds"]
+    },
     "OpenStudyCommand": {
       "type": "object",
       "additionalProperties": false,
@@ -472,6 +484,237 @@ const BackendContractSchemaJSON = `{
   }
 }`
 
+type PaletteName string
+
+const (
+	PaletteNone PaletteName = "none"
+	PaletteHot PaletteName = "hot"
+	PaletteBone PaletteName = "bone"
+)
+
+type ProcessingControls struct {
+	Brightness int `json:"brightness"`
+	Contrast float64 `json:"contrast"`
+	Invert bool `json:"invert"`
+	Equalize bool `json:"equalize"`
+	Palette PaletteName `json:"palette"`
+}
+
+type ProcessingPreset struct {
+	ID string `json:"id"`
+	Controls ProcessingControls `json:"controls"`
+}
+
+type ProcessingManifest struct {
+	DefaultPresetID string `json:"defaultPresetId"`
+	Presets []ProcessingPreset `json:"presets"`
+}
+
+type MeasurementScale struct {
+	RowSpacingMM float64 `json:"rowSpacingMm"`
+	ColumnSpacingMM float64 `json:"columnSpacingMm"`
+	Source string `json:"source"`
+}
+
+type AnnotationSource string
+
+const (
+	AnnotationSourceManual AnnotationSource = "manual"
+)
+
+type AnnotationPoint struct {
+	X float64 `json:"x"`
+	Y float64 `json:"y"`
+}
+
+type LineMeasurement struct {
+	PixelLength float64 `json:"pixelLength"`
+	CalibratedLengthMM *float64 `json:"calibratedLengthMm,omitempty"`
+}
+
+type LineAnnotation struct {
+	ID string `json:"id"`
+	Label string `json:"label"`
+	Source AnnotationSource `json:"source"`
+	Start AnnotationPoint `json:"start"`
+	End AnnotationPoint `json:"end"`
+	Editable bool `json:"editable"`
+	Confidence *float64 `json:"confidence,omitempty"`
+	Measurement *LineMeasurement `json:"measurement,omitempty"`
+}
+
+type RectangleAnnotation struct {
+	ID string `json:"id"`
+	Label string `json:"label"`
+	Source AnnotationSource `json:"source"`
+	X float64 `json:"x"`
+	Y float64 `json:"y"`
+	Width float64 `json:"width"`
+	Height float64 `json:"height"`
+	Editable bool `json:"editable"`
+	Confidence *float64 `json:"confidence,omitempty"`
+}
+
+type PolylineAnnotation struct {
+	ID string `json:"id"`
+	Label string `json:"label"`
+	Source AnnotationSource `json:"source"`
+	Points []AnnotationPoint `json:"points"`
+	Closed bool `json:"closed"`
+	Editable bool `json:"editable"`
+	Confidence *float64 `json:"confidence,omitempty"`
+}
+
+type AnnotationBundle struct {
+	Lines []LineAnnotation `json:"lines"`
+	Rectangles []RectangleAnnotation `json:"rectangles"`
+	Polylines []PolylineAnnotation `json:"polylines"`
+}
+
+type BackendErrorCode string
+
+const (
+	BackendErrorCodeInvalidInput BackendErrorCode = "invalidInput"
+	BackendErrorCodeNotFound BackendErrorCode = "notFound"
+	BackendErrorCodeCancelled BackendErrorCode = "cancelled"
+	BackendErrorCodeConflict BackendErrorCode = "conflict"
+	BackendErrorCodeCacheCorrupted BackendErrorCode = "cacheCorrupted"
+	BackendErrorCodeInternal BackendErrorCode = "internal"
+)
+
+type BackendError struct {
+	Code BackendErrorCode `json:"code"`
+	Message string `json:"message"`
+	Details []string `json:"details,omitempty"`
+	Recoverable bool `json:"recoverable"`
+}
+
+type JobKind string
+
+const (
+	JobKindRenderStudy JobKind = "renderStudy"
+	JobKindAnalyzeStudy JobKind = "analyzeStudy"
+	JobKindProcessStudy JobKind = "processStudy"
+)
+
+type JobState string
+
+const (
+	JobStateQueued JobState = "queued"
+	JobStateRunning JobState = "running"
+	JobStateCancelling JobState = "cancelling"
+	JobStateCompleted JobState = "completed"
+	JobStateFailed JobState = "failed"
+	JobStateCancelled JobState = "cancelled"
+)
+
+type JobProgress struct {
+	Percent int `json:"percent"`
+	Stage string `json:"stage"`
+	Message string `json:"message"`
+}
+
+type StartedJob struct {
+	JobID string `json:"jobId"`
+}
+
+type JobCommand struct {
+	JobID string `json:"jobId"`
+}
+
+type GetJobsCommand struct {
+	JobIDs []string `json:"jobIds"`
+}
+
+type OpenStudyCommand struct {
+	InputPath string `json:"inputPath"`
+}
+
+type StudyRecord struct {
+	StudyID string `json:"studyId"`
+	InputPath string `json:"inputPath"`
+	InputName string `json:"inputName"`
+	MeasurementScale *MeasurementScale `json:"measurementScale,omitempty"`
+}
+
+type OpenStudyCommandResult struct {
+	Study StudyRecord `json:"study"`
+}
+
+type RenderStudyCommand struct {
+	StudyID string `json:"studyId"`
+}
+
+type RenderStudyCommandResult struct {
+	StudyID string `json:"studyId"`
+	PreviewPath string `json:"previewPath"`
+	LoadedWidth uint32 `json:"loadedWidth"`
+	LoadedHeight uint32 `json:"loadedHeight"`
+	MeasurementScale *MeasurementScale `json:"measurementScale,omitempty"`
+}
+
+type AnalyzeStudyCommand struct {
+	StudyID string `json:"studyId"`
+}
+
+type AnalyzeStudyCommandResult struct {
+	StudyID string `json:"studyId"`
+	PreviewPath string `json:"previewPath"`
+	FilledPreviewPath string `json:"filledPreviewPath"`
+	LoadedWidth uint32 `json:"loadedWidth"`
+	LoadedHeight uint32 `json:"loadedHeight"`
+	Mode string `json:"mode"`
+	MeasurementScale *MeasurementScale `json:"measurementScale,omitempty"`
+}
+
+type ProcessStudyCommand struct {
+	StudyID string `json:"studyId"`
+	OutputPath *string `json:"outputPath,omitempty"`
+	PresetID string `json:"presetId"`
+	Invert bool `json:"invert"`
+	Brightness *int `json:"brightness,omitempty"`
+	Contrast *float64 `json:"contrast,omitempty"`
+	Equalize bool `json:"equalize"`
+	Compare bool `json:"compare"`
+	Palette *PaletteName `json:"palette,omitempty"`
+}
+
+type ProcessStudyCommandResult struct {
+	StudyID string `json:"studyId"`
+	PreviewPath string `json:"previewPath"`
+	DicomPath string `json:"dicomPath"`
+	LoadedWidth uint32 `json:"loadedWidth"`
+	LoadedHeight uint32 `json:"loadedHeight"`
+	Mode string `json:"mode"`
+	MeasurementScale *MeasurementScale `json:"measurementScale,omitempty"`
+}
+
+type MeasureLineAnnotationCommand struct {
+	StudyID string `json:"studyId"`
+	Annotation LineAnnotation `json:"annotation"`
+}
+
+type MeasureLineAnnotationCommandResult struct {
+	StudyID string `json:"studyId"`
+	Annotation LineAnnotation `json:"annotation"`
+}
+
+type JobResult struct {
+	Kind    JobKind `json:"kind"`
+	Payload any     `json:"payload"`
+}
+
+type JobSnapshot struct {
+	JobID string `json:"jobId"`
+	JobKind JobKind `json:"jobKind"`
+	StudyID *string `json:"studyId,omitempty"`
+	State JobState `json:"state"`
+	Progress JobProgress `json:"progress"`
+	FromCache bool `json:"fromCache"`
+	Result *JobResult `json:"result,omitempty"`
+	Error *BackendError `json:"error,omitempty"`
+}
+
 var DefinitionRefs = map[string]string{
 	"PaletteName": "#/$defs/PaletteName",
 	"ProcessingControls": "#/$defs/ProcessingControls",
@@ -492,6 +735,7 @@ var DefinitionRefs = map[string]string{
 	"JobProgress": "#/$defs/JobProgress",
 	"StartedJob": "#/$defs/StartedJob",
 	"JobCommand": "#/$defs/JobCommand",
+	"GetJobsCommand": "#/$defs/GetJobsCommand",
 	"OpenStudyCommand": "#/$defs/OpenStudyCommand",
 	"StudyRecord": "#/$defs/StudyRecord",
 	"OpenStudyCommandResult": "#/$defs/OpenStudyCommandResult",

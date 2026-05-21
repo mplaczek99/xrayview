@@ -15,7 +15,7 @@ import (
 	"time"
 
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
-	backendapi "xrayview/backend"
+	backendapi "xrayview/contracts/contractv1"
 )
 
 const (
@@ -25,7 +25,6 @@ const (
 type DesktopApp struct {
 	ctx         context.Context
 	sidecar     *SidecarController
-	backend     backendapi.Service
 	previewRoot string
 }
 
@@ -35,35 +34,13 @@ func NewDesktopApp() (*DesktopApp, error) {
 		return &DesktopApp{}, nil
 	}
 
-	if hasExplicitBackendURL() {
-		return &DesktopApp{
-			sidecar: NewSidecarController(),
-		}, nil
-	}
-
-	baseDir := resolveSidecarBaseDir()
-	backend, err := backendapi.NewEmbeddedService(baseDir, nil)
-	if err != nil {
-		return nil, fmt.Errorf("construct in-process backend: %w", err)
-	}
-
 	return &DesktopApp{
-		backend:     backend,
-		previewRoot: filepath.Join(baseDir, "cache"),
+		sidecar: NewSidecarController(),
 	}, nil
 }
 
 func (app *DesktopApp) startup(ctx context.Context) {
 	app.ctx = ctx
-	if app.backend != nil {
-		// In-process: subscribe to ALL job transitions (progress + terminal).
-		app.backend.OnJobUpdate(func(snapshot backendapi.JobSnapshot) {
-			wailsruntime.EventsEmit(ctx, eventJobUpdate, snapshot)
-		})
-		wailsruntime.LogInfo(ctx, "xrayview shell running with in-process backend")
-		return
-	}
-
 	if app.sidecar == nil || !app.sidecar.Enabled() {
 		wailsruntime.LogInfo(ctx, "xrayview shell running in mock mode")
 		return
@@ -175,50 +152,46 @@ func (app *DesktopApp) PickSaveDicomPath(defaultName string) (string, error) {
 func (app *DesktopApp) OpenStudy(
 	command backendapi.OpenStudyCommand,
 ) (backendapi.OpenStudyCommandResult, error) {
-	return dispatch(app, backendapi.Service.OpenStudy, "open_study", command)
+	return invokeViaHTTP[backendapi.OpenStudyCommandResult](app, "open_study", command)
 }
 
 func (app *DesktopApp) StartRenderJob(
 	command backendapi.RenderStudyCommand,
 ) (backendapi.StartedJob, error) {
-	return dispatch(app, backendapi.Service.StartRenderJob, "start_render_job", command)
+	return invokeViaHTTP[backendapi.StartedJob](app, "start_render_job", command)
 }
 
 func (app *DesktopApp) StartAnalyzeJob(
 	command backendapi.AnalyzeStudyCommand,
 ) (backendapi.StartedJob, error) {
-	return dispatch(app, backendapi.Service.StartAnalyzeJob, "start_analyze_job", command)
+	return invokeViaHTTP[backendapi.StartedJob](app, "start_analyze_job", command)
 }
 
 func (app *DesktopApp) StartProcessJob(
 	command backendapi.ProcessStudyCommand,
 ) (backendapi.StartedJob, error) {
-	return dispatch(app, backendapi.Service.StartProcessJob, "start_process_job", command)
+	return invokeViaHTTP[backendapi.StartedJob](app, "start_process_job", command)
 }
 
 func (app *DesktopApp) GetJobSnapshot(
 	command backendapi.JobCommand,
 ) (backendapi.JobSnapshot, error) {
-	return dispatch(app, backendapi.Service.GetJob, "get_job", command)
+	return invokeViaHTTP[backendapi.JobSnapshot](app, "get_job", command)
 }
 
 func (app *DesktopApp) GetJobsSnapshot(
 	command backendapi.GetJobsCommand,
 ) ([]backendapi.JobSnapshot, error) {
-	return dispatch(app, backendapi.Service.GetJobs, "get_jobs", command)
+	return invokeViaHTTP[[]backendapi.JobSnapshot](app, "get_jobs", command)
 }
 
 func (app *DesktopApp) CancelJobByID(
 	command backendapi.JobCommand,
 ) (backendapi.JobSnapshot, error) {
-	return dispatch(app, backendapi.Service.CancelJob, "cancel_job", command)
+	return invokeViaHTTP[backendapi.JobSnapshot](app, "cancel_job", command)
 }
 
 func (app *DesktopApp) GetProcessingManifest() backendapi.ProcessingManifest {
-	if app.backend != nil {
-		return app.backend.GetProcessingManifest()
-	}
-
 	result, err := invokeViaHTTP[backendapi.ProcessingManifest](app, "get_processing_manifest", nil)
 	if err != nil {
 		return backendapi.DefaultProcessingManifest()
@@ -230,20 +203,11 @@ func (app *DesktopApp) GetProcessingManifest() backendapi.ProcessingManifest {
 func (app *DesktopApp) MeasureLineAnnotation(
 	command backendapi.MeasureLineAnnotationCommand,
 ) (backendapi.MeasureLineAnnotationCommandResult, error) {
-	return dispatch(app, backendapi.Service.MeasureLineAnnotation, "measure_line_annotation", command)
-}
-
-func dispatch[Cmd any, Result any](
-	app *DesktopApp,
-	embedded func(backendapi.Service, Cmd) (Result, error),
-	httpCommand string,
-	command Cmd,
-) (Result, error) {
-	if app.backend != nil {
-		return embedded(app.backend, command)
-	}
-
-	return invokeViaHTTP[Result](app, httpCommand, command)
+	return invokeViaHTTP[backendapi.MeasureLineAnnotationCommandResult](
+		app,
+		"measure_line_annotation",
+		command,
+	)
 }
 
 func (app *DesktopApp) ServeAsset(writer http.ResponseWriter, request *http.Request) {

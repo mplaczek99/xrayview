@@ -50,8 +50,8 @@ export function applyFrontendRuntimeEnv(env = process.env) {
 
   const rawUrl = pickEnvValue(
     env,
-    ["XRAYVIEW_BACKEND_URL", "XRAYVIEW_GO_BACKEND_URL"],
-    ["VITE_XRAYVIEW_BACKEND_URL", "VITE_XRAYVIEW_GO_BACKEND_URL"],
+    "XRAYVIEW_BACKEND_URL",
+    "VITE_XRAYVIEW_BACKEND_URL",
   );
 
   if (rawUrl) {
@@ -89,9 +89,7 @@ export function applyFrontendRuntimeEnv(env = process.env) {
 
     const normalizedUrl = rawUrl.replace(/\/+$/, "");
     nextEnv.XRAYVIEW_BACKEND_URL = normalizedUrl;
-    nextEnv.XRAYVIEW_GO_BACKEND_URL = normalizedUrl;
     nextEnv.VITE_XRAYVIEW_BACKEND_URL = normalizedUrl;
-    nextEnv.VITE_XRAYVIEW_GO_BACKEND_URL = normalizedUrl;
   }
 
   return nextEnv;

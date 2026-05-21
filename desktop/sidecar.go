@@ -22,18 +22,12 @@ const (
 	previewEndpointPath        = "/preview"
 	commandsPath               = "/api/v1/commands"
 	sidecarBinaryEnvKey        = "XRAYVIEW_WAILS_BACKEND_BINARY"
-	legacySidecarBinaryEnvKey  = "XRAYVIEW_WAILS_GO_BACKEND_BINARY"
 	sidecarBaseURLEnvKey       = "XRAYVIEW_BACKEND_URL"
-	legacySidecarBaseURLEnvKey = "XRAYVIEW_GO_BACKEND_URL"
 	sidecarBaseDirEnvKey       = "XRAYVIEW_WAILS_BACKEND_BASE_DIR"
-	legacySidecarBaseDirEnvKey = "XRAYVIEW_WAILS_GO_BACKEND_BASE_DIR"
 	sidecarRuntimeEnvKey       = "XRAYVIEW_BACKEND_RUNTIME"
 	backendHostEnvKey          = "XRAYVIEW_BACKEND_HOST"
-	legacyBackendHostEnvKey    = "XRAYVIEW_GO_BACKEND_HOST"
 	backendPortEnvKey          = "XRAYVIEW_BACKEND_PORT"
-	legacyBackendPortEnvKey    = "XRAYVIEW_GO_BACKEND_PORT"
 	backendBaseDirEnvKey       = "XRAYVIEW_BACKEND_BASE_DIR"
-	legacyBackendBaseDirEnvKey = "XRAYVIEW_GO_BACKEND_BASE_DIR"
 	expectedBackendService     = "xrayview-backend"
 	expectedTransportKind      = "local-http-json"
 	sidecarStartupTimeout      = 10 * time.Second
@@ -103,12 +97,8 @@ func NewSidecarController() *SidecarController {
 	}
 }
 
-func hasExplicitBackendURL() bool {
-	return firstEnv(sidecarBaseURLEnvKey, legacySidecarBaseURLEnvKey) != ""
-}
-
 func resolveSidecarBaseURL() string {
-	baseURL := firstEnv(sidecarBaseURLEnvKey, legacySidecarBaseURLEnvKey)
+	baseURL := strings.TrimSpace(os.Getenv(sidecarBaseURLEnvKey))
 	if baseURL == "" {
 		baseURL = defaultBackendBaseURL
 	}
@@ -117,7 +107,7 @@ func resolveSidecarBaseURL() string {
 }
 
 func resolveSidecarBaseDir() string {
-	baseDir := firstEnv(sidecarBaseDirEnvKey, legacySidecarBaseDirEnvKey)
+	baseDir := strings.TrimSpace(os.Getenv(sidecarBaseDirEnvKey))
 	if baseDir == "" {
 		baseDir = filepath.Join(os.TempDir(), "xrayview", "desktop")
 	}
@@ -155,7 +145,7 @@ func (controller *SidecarController) CacheDir() (string, error) {
 }
 
 func (controller *SidecarController) BinaryPath() string {
-	if override := firstEnv(sidecarBinaryEnvKey, legacySidecarBinaryEnvKey); override != "" {
+	if override := strings.TrimSpace(os.Getenv(sidecarBinaryEnvKey)); override != "" {
 		return override
 	}
 
@@ -242,11 +232,8 @@ func (controller *SidecarController) EnsureStarted() (err error) {
 	command.Env = append(
 		os.Environ(),
 		backendHostEnvKey+"="+host,
-		legacyBackendHostEnvKey+"="+host,
 		backendPortEnvKey+"="+port,
-		legacyBackendPortEnvKey+"="+port,
 		backendBaseDirEnvKey+"="+controller.baseDir,
-		legacyBackendBaseDirEnvKey+"="+controller.baseDir,
 	)
 
 	if err := command.Start(); err != nil {
@@ -377,16 +364,6 @@ func resolveRuntimeMode() runtimeMode {
 
 func sidecarStartupBenchmarkEnabled() bool {
 	return strings.TrimSpace(os.Getenv(sidecarStartupBenchmarkEnv)) != ""
-}
-
-func firstEnv(keys ...string) string {
-	for _, key := range keys {
-		if value := strings.TrimSpace(os.Getenv(key)); value != "" {
-			return value
-		}
-	}
-
-	return ""
 }
 
 func resolveExecutableDir() (string, error) {

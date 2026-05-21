@@ -108,6 +108,10 @@ export interface JobCommand {
   jobId: string;
 }
 
+export interface GetJobsCommand {
+  jobIds: string[];
+}
+
 export interface OpenStudyCommand {
   inputPath: string;
 }

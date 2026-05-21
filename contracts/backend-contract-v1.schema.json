@@ -29,6 +29,7 @@
     "JobProgress",
     "StartedJob",
     "JobCommand",
+    "GetJobsCommand",
     "OpenStudyCommand",
     "StudyRecord",
     "OpenStudyCommandResult",
@@ -246,6 +247,17 @@
         "jobId": { "type": "string" }
       },
       "required": ["jobId"]
+    },
+    "GetJobsCommand": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "jobIds": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "required": ["jobIds"]
     },
     "OpenStudyCommand": {
       "type": "object",

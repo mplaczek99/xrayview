@@ -14,7 +14,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	backendapi "xrayview/backend"
+	backendapi "xrayview/contracts/contractv1"
 )
 
 const serveAssetBenchmarkPayloadSize = 512 * 1024

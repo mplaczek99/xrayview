@@ -51,11 +51,7 @@ async function main() {
   fs.mkdirSync(goBuildCacheDir, { recursive: true });
   fs.mkdirSync(goTmpDir, { recursive: true });
   fs.mkdirSync(goPathDir, { recursive: true });
-  run("npm", ["run", "backend:test"], workspaceRoot, {
-    GOCACHE: process.env.GOCACHE ?? goBuildCacheDir,
-    GOTMPDIR: process.env.GOTMPDIR ?? goTmpDir,
-    GOPATH: process.env.GOPATH ?? goPathDir,
-  });
+  run("npm", ["run", "backend:test"], workspaceRoot);
   run("npm", ["run", "build"], frontendRoot);
   run("npm", ["run", "wails:build"], workspaceRoot, {
     GOCACHE: process.env.GOCACHE ?? goBuildCacheDir,

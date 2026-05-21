@@ -9,6 +9,7 @@ frontend/vite.config.d.ts
 desktop/build/
 desktop/frontend/dist/
 wails-prototype/frontend/dist/
+target/
 
 # Local agent/editor/system files
 .codex
@@ -23,6 +24,3 @@ CLAUDE.md
 images/BMP/
 images/PNG/
 images/TIF/
-
-# Local analysis debug artifacts
-backend/internal/analysis/_debug/

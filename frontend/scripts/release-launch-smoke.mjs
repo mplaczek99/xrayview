@@ -106,8 +106,8 @@ export function resolveDesktopRuntimeConfig(env = process.env) {
 
   const rawUrl = pickEnvValue(
     normalizedEnv,
-    ["XRAYVIEW_BACKEND_URL", "XRAYVIEW_GO_BACKEND_URL"],
-    ["VITE_XRAYVIEW_BACKEND_URL", "VITE_XRAYVIEW_GO_BACKEND_URL"],
+    "XRAYVIEW_BACKEND_URL",
+    "VITE_XRAYVIEW_BACKEND_URL",
   );
 
   return {

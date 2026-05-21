@@ -1,4 +1,4 @@
-import { mkdirSync } from "node:fs";
+import { chmodSync, copyFileSync, mkdirSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
@@ -100,14 +100,25 @@ if (buildEnv.GOMODCACHE) {
 mkdirSync(buildEnv.GOTMPDIR, { recursive: true });
 
 run("npm", ["--prefix", "frontend", "run", "wails:build"]);
-run("go", [
-  "-C",
-  path.join(repoRoot, "backend"),
+run("cargo", [
   "build",
-  "-o",
-  path.join(buildBinDir, binaryName("xrayview-backend")),
-  "./cmd/xrayviewd",
+  "--manifest-path",
+  path.join(repoRoot, "backend-rs", "Cargo.toml"),
+  "--release",
 ]);
+copyFileSync(
+  path.join(
+    repoRoot,
+    "backend-rs",
+    "target",
+    "release",
+    binaryName("xrayview-backend-rs"),
+  ),
+  path.join(buildBinDir, binaryName("xrayview-backend")),
+);
+if (process.platform !== "win32") {
+  chmodSync(path.join(buildBinDir, binaryName("xrayview-backend")), 0o755);
+}
 ensureLinuxDesktopPrereqs();
 run("go", [
   "-C",

@@ -7,8 +7,8 @@ Responsibilities:
 - launch the React workstation frontend inside Wails
 - expose native open/save dialogs through Wails bindings
 - serve local preview artifacts back into the webview at `/preview`
-- manage the Go backend sidecar lifecycle for live desktop mode
-- forward frontend commands to the Go backend over the local HTTP contract
+- manage the Rust backend sidecar lifecycle for live desktop mode
+- forward frontend commands to the Rust backend over the local HTTP contract
 
 ## Commands
 
@@ -38,5 +38,5 @@ Build outputs:
 
 Supported runtime modes for shell launches:
 
-- `desktop` - start or attach to the local Go backend sidecar
+- `desktop` - start or attach to the local Rust backend sidecar
 - `mock` - skip the live backend and keep the UI in browser-like mock mode
