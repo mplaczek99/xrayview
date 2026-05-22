@@ -56,6 +56,6 @@ export type ProcessingRunState =
       progress: JobProgress;
       timing: JobProgressTiming | null;
     }
-  | { state: "success"; jobId: string; outputPath: string; fromCache: boolean }
+  | { state: "success"; jobId: string; fromCache: boolean }
   | { state: "error"; jobId: string; error: BackendError }
   | { state: "cancelled"; jobId: string };

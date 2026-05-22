@@ -165,7 +165,7 @@ test("BEFORE selectActiveStudy: lookup runs on every call (same inputs)", () => 
     return s.activeStudyId ? s.studies[s.activeStudyId] ?? null : null;
   };
 
-  const study = { studyId: "s1", inputName: "scan.dcm" };
+  const study = { studyId: "s1", inputName: "scan.bmp" };
   const state = makeState({ activeStudyId: "s1", studies: { s1: study } });
 
   for (let i = 0; i < 5; i++) selectActiveStudy_traced(state);

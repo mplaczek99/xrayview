@@ -1,22 +1,15 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
 import {
   isTauriRuntime,
-  pickTauriDicomFile,
-  pickTauriSaveDicomPath,
+  pickTauriBmpFile,
 } from "./tauri";
 
 export function isDesktopRuntime(): boolean {
   return isTauriRuntime();
 }
 
-export async function pickDesktopDicomFile(): Promise<string | null> {
-  return pickTauriDicomFile();
-}
-
-export async function pickDesktopSaveDicomPath(
-  defaultName?: string,
-): Promise<string | null> {
-  return pickTauriSaveDicomPath(defaultName);
+export async function pickDesktopBmpFile(): Promise<string | null> {
+  return pickTauriBmpFile();
 }
 
 export function buildDesktopPreviewUrl(previewPath: string): string {

@@ -131,7 +131,6 @@ function applyProcessJob(study: WorkbenchStudy, job: JobSnapshot): WorkbenchStud
           runStatus: {
             state: "success",
             jobId: job.jobId,
-            outputPath: job.result.payload.previewUrl,
             fromCache: job.fromCache,
           },
         },

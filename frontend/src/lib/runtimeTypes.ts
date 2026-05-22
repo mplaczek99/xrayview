@@ -13,8 +13,7 @@ import type {
 } from "./types";
 
 export interface ShellAPI {
-  pickDicomFile(): Promise<string | null>;
-  pickSaveDicomPath(defaultName: string): Promise<string | null>;
+  pickBmpFile(): Promise<string | null>;
 }
 
 export interface BackendAPI {
@@ -41,8 +40,7 @@ export interface RuntimeAdapter {
   shell: ShellAPI;
   backend: BackendAPI;
   loadProcessingManifest(): Promise<ProcessingManifest>;
-  pickDicomFile(): Promise<string | null>;
-  pickSaveDicomPath(defaultName: string): Promise<string | null>;
+  pickBmpFile(): Promise<string | null>;
   openStudy(inputPath: string): Promise<OpenedStudy>;
   startRenderStudyJob(studyId: string): Promise<StartedJob>;
   startAnalyzeStudyJob(studyId: string): Promise<StartedJob>;

@@ -1,7 +1,5 @@
 import {
   FALLBACK_PROCESSING_MANIFEST,
-  buildOutputName,
-  ensureDicomExtension,
   getRuntimeAdapter,
 } from "../../lib/runtime";
 import { formatBackendError } from "../../lib/backendErrors";
@@ -41,7 +39,7 @@ const INITIAL_STATE: WorkbenchState = {
   jobOrder: [],
   pendingJobIds: new Set<string>(),
   isOpeningStudy: false,
-  workbenchStatus: "Open a DICOM study or BMP/TIFF image to begin.",
+  workbenchStatus: "Open a bitewing X-ray (BMP) to begin.",
 };
 
 type Listener = () => void;
@@ -161,7 +159,6 @@ function processingRequestForStudy(
   return {
     controls: { ...form.controls },
     compare: form.compare,
-    outputPath: form.outputPath,
     presetId: baselinePreset.id,
     presetControls: { ...baselinePreset.controls },
   };
@@ -224,7 +221,7 @@ class WorkbenchStore {
     }
 
     try {
-      const selectedPath = await runtime.pickDicomFile();
+      const selectedPath = await runtime.pickBmpFile();
       if (!selectedPath) {
         return;
       }
@@ -470,55 +467,6 @@ class WorkbenchStore {
         },
       },
     }));
-  }
-
-  setProcessingOutputPath(outputPath: string | null) {
-    const study = this.activeStudy();
-    if (!study) {
-      return;
-    }
-
-    this.setStudyState(study.studyId, (current) => ({
-      ...current,
-      processing: {
-        ...current.processing,
-        form: {
-          ...current.processing.form,
-          outputPath,
-        },
-      },
-    }));
-  }
-
-  async pickProcessingOutputPath() {
-    const study = this.activeStudy();
-    if (!study) {
-      return;
-    }
-
-    try {
-      const selectedPath = await runtime.pickSaveDicomPath(buildOutputName(study.inputPath));
-      if (!selectedPath) {
-        return;
-      }
-
-      const outputPath = ensureDicomExtension(selectedPath);
-      this.setStudyState(study.studyId, (current) => ({
-        ...current,
-        processing: {
-          ...current.processing,
-          form: {
-            ...current.processing.form,
-            outputPath,
-          },
-        },
-      }));
-    } catch (error) {
-      this.setStudyState(study.studyId, (current) => ({
-        ...current,
-        status: formatBackendError(error, "Choosing the save location failed."),
-      }));
-    }
   }
 
   async runActiveStudyProcessing() {

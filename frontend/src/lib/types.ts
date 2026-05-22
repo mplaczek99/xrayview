@@ -26,7 +26,6 @@ export interface OpenedStudy {
 export interface ProcessingRequest {
   controls: ProcessingControls;
   compare: boolean;
-  outputPath: string | null;
   presetId: string;
   presetControls: ProcessingControls;
 }

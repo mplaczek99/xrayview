@@ -197,12 +197,6 @@ class HtmxWorkbenchApp {
       case "set-compare-view":
         this.setCompareView(actionElement.dataset.compareView);
         break;
-      case "choose-output-path":
-        void workbenchActions.pickProcessingOutputPath();
-        break;
-      case "clear-output-path":
-        workbenchActions.setProcessingOutputPath(null);
-        break;
       case "run-processing":
         void workbenchActions.runActiveStudyProcessing();
         break;

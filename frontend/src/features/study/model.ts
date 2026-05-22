@@ -19,7 +19,6 @@ import {
 
 export interface ProcessingForm {
   controls: ProcessingControls;
-  outputPath: string | null;
   compare: boolean;
 }
 
@@ -69,7 +68,6 @@ export function createProcessingForm(
 ): ProcessingForm {
   return {
     controls: { ...defaultControls },
-    outputPath: null,
     compare: false,
   };
 }

@@ -167,7 +167,7 @@ function renderEmptyView(isOpeningStudy: boolean): string {
           </svg>
           <h3 class="empty-state__title">No study loaded</h3>
           <p class="empty-state__copy">
-            Open a DICOM study or BMP/TIFF image to inspect it, pan and zoom,
+            Open a bitewing X-ray (BMP) to inspect it, pan and zoom,
             and draw manual line measurements.
           </p>
           <button
@@ -189,7 +189,7 @@ function renderViewerStage(model: ViewerRenderModel): string {
         <div class="viewer-placeholder">
           <div class="viewer-placeholder__title">No study loaded</div>
           <p class="viewer-placeholder__copy">
-            Open a DICOM study or BMP/TIFF image to inspect it, pan and zoom,
+            Open a bitewing X-ray (BMP) to inspect it, pan and zoom,
             or draw a manual line measurement.
           </p>
         </div>
@@ -212,7 +212,7 @@ function renderViewerStage(model: ViewerRenderModel): string {
         <img
           class="viewer-canvas__image"
           src="${attr(model.previewUrl)}"
-          alt="DICOM preview"
+          alt="X-ray preview"
           draggable="false"
           data-viewer-image
         />
@@ -431,10 +431,10 @@ function renderViewTab(state: WorkbenchState): string {
   `;
 }
 
-function renderDicomViewer(
+function renderXrayViewer(
   previewUrl: string | null,
   emptyTitle = "No image loaded",
-  emptyDescription = "Open a DICOM study or BMP/TIFF image to view it here.",
+  emptyDescription = "Open a bitewing X-ray (BMP) to view it here.",
 ): string {
   return `
     <div class="viewer-stage">
@@ -443,7 +443,7 @@ function renderDicomViewer(
           <img
             class="viewer-stage__image"
             src="${attr(previewUrl)}"
-            alt="DICOM preview"
+            alt="X-ray preview"
             draggable="false"
           />
         </div>
@@ -594,46 +594,22 @@ function renderProcessingTab(state: WorkbenchState, ui: HtmxUiState, nowMs: numb
             <div class="compare-split">
               <div class="compare-split__pane">
                 <div class="compare-split__label">Original</div>
-                ${renderDicomViewer(previewUrl)}
+                ${renderXrayViewer(previewUrl)}
               </div>
               <div class="compare-split__pane">
                 <div class="compare-split__label">Processed</div>
-                ${renderDicomViewer(processedPreviewUrl)}
+                ${renderXrayViewer(processedPreviewUrl)}
               </div>
             </div>
-          ` : renderDicomViewer(ui.compareView === "processed" ? processedPreviewUrl : previewUrl)}
-        ` : renderDicomViewer(
+          ` : renderXrayViewer(ui.compareView === "processed" ? processedPreviewUrl : previewUrl)}
+        ` : renderXrayViewer(
           previewUrl,
           "No image loaded",
-          "Load a DICOM study or BMP/TIFF image in the View tab first.",
+          "Load a bitewing X-ray (BMP) in the View tab first.",
         )}
       </div>
 
       <div class="processing-tab__form">
-        <section class="form-section">
-          <label class="form-label">Save Destination</label>
-          <p class="form-hint u-mono">
-            ${escapeHtml(form.outputPath ?? "No save destination selected. Processing will keep the DICOM in an app-managed temp path until you choose one.")}
-          </p>
-          <div class="form-field">
-            <button
-              class="button button--ghost"
-              type="button"
-              data-testid="action-choose-output-path"
-              data-action="choose-output-path"
-              ${disabled(!activeStudy || busy)}
-            >${form.outputPath ? "Change Save Location" : "Choose Save Location"}</button>
-            ${form.outputPath ? `
-              <button
-                class="button button--ghost"
-                type="button"
-                data-action="clear-output-path"
-                ${disabled(busy)}
-              >Clear</button>
-            ` : ""}
-          </div>
-        </section>
-
         <section class="form-section">
           <label class="form-label" for="proc-preset">Preset</label>
           <select
@@ -685,7 +661,7 @@ function renderProcessingTab(state: WorkbenchState, ui: HtmxUiState, nowMs: numb
             />
             <span>Compare</span>
           </label>
-          <p class="form-hint">Write side-by-side comparison output into the processed DICOM.</p>
+          <p class="form-hint">Generate a side-by-side comparison preview.</p>
         </section>
 
         <div class="processing-tab__actions">
@@ -734,12 +710,6 @@ function renderProcessingTab(state: WorkbenchState, ui: HtmxUiState, nowMs: numb
             </div>
           ` : ""}
         </div>
-
-        ${runStatus.state === "success" && runStatus.outputPath ? `
-          <div class="processing-tab__output">
-            <p class="processing-tab__output-path u-mono">${escapeHtml(runStatus.outputPath)}</p>
-          </div>
-        ` : ""}
       </div>
     </div>
   `;

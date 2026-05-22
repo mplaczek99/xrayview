@@ -1,8 +1,4 @@
 import type { JobResultPayload, JobSnapshot } from "../features/jobs/model";
-import {
-  buildOutputName,
-  ensureDicomExtension,
-} from "./backendUtils";
 import { createDesktopBackendAPI } from "./desktopBackend";
 import { buildDesktopPreviewUrl, isDesktopRuntime } from "./desktop";
 import type {
@@ -152,8 +148,7 @@ function createRuntimeAdapter(
     shell,
     backend,
     loadProcessingManifest: () => backend.loadProcessingManifest(),
-    pickDicomFile: () => shell.pickDicomFile(),
-    pickSaveDicomPath: (defaultName) => shell.pickSaveDicomPath(defaultName),
+    pickBmpFile: () => shell.pickBmpFile(),
     openStudy: async (inputPath) =>
       asOpenedStudy(await backend.openStudy(inputPath), mode),
     startRenderStudyJob: (studyId) => backend.startRenderStudyJob(studyId),
@@ -205,5 +200,3 @@ export function getRuntimeAdapter(): RuntimeAdapter {
 
   return activeRuntime;
 }
-
-export { buildOutputName, ensureDicomExtension };
