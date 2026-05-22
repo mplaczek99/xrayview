@@ -40,6 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- DICOM and TIFF input/output support has been removed in favor of a single BMP bitewing workflow, reducing maintenance and parser surface; see `REMOVAL_PLAN.md`.
 - Viewer hover coordinate readout from `ViewerCanvas` and `usePointerInteractions`
 
 ### Security

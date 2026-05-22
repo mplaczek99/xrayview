@@ -1,7 +1,7 @@
 <h1 align="center">xrayview</h1>
 
 <p align="center">
-  A DICOM X-ray visualization workstation<br>
+  A BMP bitewing X-ray visualization workstation<br>
   built with a <strong>Tauri</strong> desktop shell, an <strong>HTMX/TypeScript</strong> frontend, and a <strong>Rust</strong> backend (in-process).
 </p>
 
@@ -14,16 +14,14 @@
 
 ## Features
 
-- Open local DICOM studies (`.dcm`, `.dicom`) plus BMP/TIFF source images
+- Open local bitewing X-rays in BMP format
 - Render PNG previews for the workstation viewer
 - Apply grayscale processing, palettes, and side-by-side comparison
-- Export processed results as DICOM Secondary Capture files
 - Run background render and process jobs with cancellation
-- Measure line annotations with calibration-aware distances when pixel spacing metadata is available
+- Measure line annotations
 - Persist a recent-studies catalog
 
-> The user-facing workflow is **DICOM in, DICOM out**. PNG previews are an
-> internal display artifact for the desktop UI.
+> The user-facing workflow is **BMP in, PNG previews for display and processing**.
 
 ---
 
@@ -132,7 +130,7 @@ npm run backend:test
 | Command | Purpose |
 |---|---|
 | `get_processing_manifest` | Available processing presets |
-| `open_study` | Open a DICOM / BMP / TIFF study |
+| `open_study` | Open a BMP bitewing X-ray |
 | `start_render_job` | Render a preview |
 | `start_process_job` | Run processing pipeline |
 | `start_analyze_job` | Generate deterministic analysis overlays |
@@ -159,17 +157,14 @@ npm run backend:cli -- print-config      # resolved config as JSON
 npm run backend:cli -- version           # service + contract version
 npm run backend:cli -- list-commands     # supported backend commands
 
-# DICOM inspection
-npm run backend:cli -- inspect-decode /path/to/study.dcm
-npm run backend:cli -- decode-source  /path/to/study.dcm
+# BMP inspection
+npm run backend:cli -- decode-source /path/to/image.bmp
 
 # Render & process
-npm run backend:cli -- render-preview /path/to/study.dcm /tmp/preview.png
-npm run backend:cli -- render-preview --full-range /path/to/study.dcm /tmp/preview.png
-npm run backend:cli -- process-preview --invert --equalize /path/to/study.dcm /tmp/processed.png
-
-# Export
-npm run backend:cli -- export-secondary-capture --palette hot /path/to/study.dcm /tmp/export.dcm
+npm run backend:cli -- render-preview /path/to/image.bmp /tmp/preview.png
+npm run backend:cli -- render-preview --full-range /path/to/image.bmp /tmp/preview.png
+npm run backend:cli -- process-preview --invert --equalize /path/to/image.bmp /tmp/processed.png
+npm run backend:cli -- analyze-preview /path/to/image.bmp /tmp/analyze.png
 ```
 
 <details>
@@ -177,8 +172,8 @@ npm run backend:cli -- export-secondary-capture --palette hot /path/to/study.dcm
 
 ```bash
 npm run backend:cli -- --describe-presets
-npm run backend:cli -- --input /path/to/study.dcm --describe-study
-npm run backend:cli -- --input /path/to/study.dcm --preview-output /tmp/preview.png
+npm run backend:cli -- --input /path/to/image.bmp --describe-study
+npm run backend:cli -- --input /path/to/image.bmp --preview-output /tmp/preview.png
 ```
 
 </details>
@@ -214,7 +209,7 @@ shell that links it in-process.
 |---|---|
 | `frontend/` | Workstation UI and mock-mode behavior |
 | `desktop-tauri/` | Tauri shell: window lifecycle, file dialogs, IPC command wrappers, job-event forwarding |
-| `backend-rs/` | Rust library: DICOM decode, render, processing, annotations, jobs. Also ships a standalone HTTP/CLI binary |
+| `backend-rs/` | Rust library: BMP decode, render, processing, annotations, jobs. Also ships a standalone HTTP/CLI binary |
 | `contracts/` | Shared command payload shapes via JSON schema |
 
 ```
