@@ -316,6 +316,17 @@ The ~12 frontend files identified by grep (`src/**` plus `scripts/`) fall into t
    ```
    Expect empty output. If anything remains, it's either a missed reference or a deliberate one — review case-by-case.
 
+**Phase 6 verification results (2026-05-22):**
+- Rust/frontend gates passed: backend clippy, desktop clippy, frontend build, backend tests, Playwright install, Playwright e2e, Tauri `--no-bundle` build, and full `npm run release:smoke`.
+- Added committed Playwright coverage for the BMP-only mock workflow: open `images/BMP/1.bmp`, render preview, run processing, and assert no legacy output controls are present.
+- Tauri shell launch smoke passed: `npm run tauri:dev` reached `target/debug/xrayview` against the local Vite server, then was stopped cleanly.
+- Legacy CLI BMP path passed: `cargo run --manifest-path backend-rs/Cargo.toml -- --input images/BMP/1.bmp` loaded the BMP and wrote a PNG preview only.
+- Contract version checks passed: CLI `version` prints `xrayview-backend contract-v2`; HTTP `/healthz` reports `backendContractVersion: 2`.
+- Release binary size: Phase 0 baseline `72ba543` built to 32,084,432 bytes; current build is 31,703,024 bytes; delta is -381,408 bytes (-372.5 KiB, -1.19%).
+- Module line-count delta: `backend-rs/src/dicom.rs` at Phase 0 was 3,860 lines; `backend-rs/src/bmp.rs` is 564 lines; delta is -3,296 lines.
+- Final tracked-text grep passed with `git grep -niIE ...`. The exact binary-inclusive `git grep -niE ...` reports `backend-rs/assets/analysis/feature_table_model.bin.gz`; decompressing and scanning strings found no textual DICOM/TIFF reference, so this is a reviewed binary false positive.
+- File sweep found no `.dcm`, `.dicom`, `.tif`, or `.tiff` files outside ignored dependency/build directories.
+
 ---
 
 ## 5. File-by-file change matrix
