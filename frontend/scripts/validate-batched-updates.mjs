@@ -2,8 +2,8 @@
 // Runs with: node frontend/scripts/validate-batched-updates.mjs
 //
 // Tests that multiple synchronous setState calls within the same microtask
-// are coalesced into a single listener notification, reducing React reconciliation
-// work when several rapid state changes occur together.
+// are coalesced into a single listener notification, reducing UI work when
+// several rapid state changes occur together.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -127,7 +127,7 @@ test("AFTER: no-op setState does not queue notification", async () => {
 test("AFTER: state is updated synchronously even before flush", () => {
   const store = makeStore_AFTER();
   store.setState((s) => ({ ...s, counter: 42 }));
-  // State must be readable immediately — useSyncExternalStore depends on this.
+  // State must be readable immediately by the HTMX shell after an action.
   assert.equal(store.getState().counter, 42, "AFTER: state updated sync, readable before listener fires");
 });
 

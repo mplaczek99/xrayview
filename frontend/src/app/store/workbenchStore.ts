@@ -1,4 +1,3 @@
-import { useSyncExternalStore } from "react";
 import {
   FALLBACK_PROCESSING_MANIFEST,
   buildOutputName,
@@ -93,7 +92,7 @@ function nextPendingJobIds(
 //
 // Note: `timing` is intentionally excluded — it is computed locally, not from
 // the backend. Stall detection uses `lastProgressAtMs` (advanced only when
-// percent changes) and `useProgressClock` (setInterval) for re-rendering, so
+// percent changes) and the HTMX shell's interval render for ETA display, so
 // skipping timing-only writes has no visible effect on the ETA display.
 function jobSnapshotEqual(prev: JobSnapshot, next: JobSnapshot): boolean {
   return (
@@ -592,7 +591,7 @@ class WorkbenchStore {
       // Skip when the polled snapshot carries no new information — same state,
       // progress, and terminal flags. Returning `current` triggers the
       // `nextState === this.state` guard in setState, preventing listener
-      // notifications and React reconciliation for no-op polls.
+      // notifications and unnecessary HTMX shell swaps for no-op polls.
       if (previous && jobSnapshotEqual(previous, job)) {
         return current;
       }
@@ -723,10 +722,5 @@ class WorkbenchStore {
 
 export const workbenchActions = new WorkbenchStore();
 
-export function useWorkbenchStore<T>(selector: (state: WorkbenchState) => T): T {
-  return useSyncExternalStore(
-    workbenchActions.subscribe,
-    () => selector(workbenchActions.getState()),
-    () => selector(workbenchActions.getState()),
-  );
-}
+export const subscribeWorkbenchStore = workbenchActions.subscribe;
+export const getWorkbenchState = workbenchActions.getState;

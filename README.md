@@ -2,7 +2,7 @@
 
 <p align="center">
   A DICOM X-ray visualization workstation<br>
-  built with a <strong>Tauri</strong> desktop shell, a <strong>React/TypeScript</strong> frontend, and a <strong>Rust</strong> backend (in-process).
+  built with a <strong>Tauri</strong> desktop shell, an <strong>HTMX/TypeScript</strong> frontend, and a <strong>Rust</strong> backend (in-process).
 </p>
 
 > [!CAUTION]
@@ -31,7 +31,7 @@
 
 ```
 xrayview/
-├── frontend/        React/TypeScript workstation UI (Vite, strict mode)
+├── frontend/        HTMX/TypeScript workstation UI (Vite)
 ├── desktop-tauri/   Tauri 2 desktop shell (Rust crate; links backend-rs as a library)
 ├── backend-rs/      Rust backend library + standalone HTTP/CLI binary
 ├── contracts/       shared JSON schema + generated TypeScript bindings
@@ -60,7 +60,7 @@ npm run backend:test
 
 ### Browser mock mode
 
-Run the React UI with synthetic data — no backend needed:
+Run the HTMX UI with synthetic data - no backend needed:
 
 ```bash
 npm run dev
@@ -219,7 +219,7 @@ shell that links it in-process.
 
 ```
 ┌─────────────┐    Tauri IPC    ┌──────────────────────────────────────┐
-│  React UI   │ ◄─────────────► │ desktop-tauri (Rust shell)           │
+│  HTMX UI    │ ◄─────────────► │ desktop-tauri (Rust shell)           │
 │  (frontend) │                  │   ↳ backend-rs::App (in-process)     │
 └─────────────┘                  └──────────────────────────────────────┘
         ▲                                            ▲

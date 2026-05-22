@@ -6,7 +6,7 @@ in-process — there is no separate backend sidecar.
 
 Responsibilities:
 
-- launch the React workstation frontend inside a Tauri WebView
+- launch the HTMX workstation frontend inside a Tauri WebView
 - expose native open/save dialogs through `@tauri-apps/plugin-dialog`
 - own the `xrayview_backend_rs::app::App` and bridge its commands to the
   frontend via `#[tauri::command]` IPC handlers
@@ -38,7 +38,7 @@ Build outputs:
 ## Architecture
 
 ```
-React UI (frontend) ─── Tauri IPC ───▶ desktop-tauri (Rust shell)
+HTMX UI (frontend) ─── Tauri IPC ───▶ desktop-tauri (Rust shell)
                                           │
                                           ▼
                                  xrayview_backend_rs::App (in-process)

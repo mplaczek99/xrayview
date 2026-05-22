@@ -1,10 +1,8 @@
 import { defineConfig } from "vite";
-import react from "@vitejs/plugin-react";
 
 // The browser/mock workflow uses a fixed port so desktop-facing dev helpers can
 // target it deterministically when needed.
 export default defineConfig({
-  plugins: [react()],
   clearScreen: false,
   server: {
     host: "127.0.0.1",
@@ -18,7 +16,7 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks(id) {
-          if (id.includes("node_modules/react") || id.includes("node_modules/react-dom")) {
+          if (id.includes("node_modules/htmx.org")) {
             return "vendor";
           }
         },

@@ -2,8 +2,8 @@
 // Runs with: node frontend/scripts/validate-debounce-controls.mjs
 //
 // Tests that rapid slider events (brightness, contrast) are coalesced into one
-// state update per animation frame, reducing React reconciliation from ~60/s
-// to 1/frame during slider drags.
+// state update per animation frame, reducing UI notifications from ~60/s to
+// 1/frame during slider drags.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";

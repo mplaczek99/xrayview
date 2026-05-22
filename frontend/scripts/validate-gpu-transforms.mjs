@@ -1,7 +1,7 @@
 // Validation test for step 9.5: GPU-Accelerated CSS Transforms for Image Positioning
 // Runs with: node frontend/scripts/validate-gpu-transforms.mjs
 //
-// Tests the style computation logic in isolation (no React compile needed):
+// Tests the style computation logic in isolation:
 //   BEFORE: left/top/width/height inline styles → triggers layout on every change
 //   AFTER:  transform: translate+scale with fixed natural dimensions → compositor only
 
