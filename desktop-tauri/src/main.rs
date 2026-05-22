@@ -12,6 +12,8 @@ pub struct AppState {
 }
 
 fn main() {
+    apply_linux_webkit_workarounds();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .setup(|tauri_app| {
@@ -52,3 +54,20 @@ fn main() {
         .run(tauri::generate_context!())
         .expect("error while running xrayview tauri shell");
 }
+
+#[cfg(target_os = "linux")]
+fn apply_linux_webkit_workarounds() {
+    let is_wayland = std::env::var_os("WAYLAND_DISPLAY").is_some()
+        || std::env::var("XDG_SESSION_TYPE")
+            .is_ok_and(|session_type| session_type.eq_ignore_ascii_case("wayland"));
+
+    if is_wayland && std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
+        // SAFETY: called before Tauri initializes GTK/WebKit or spawns threads.
+        unsafe {
+            std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+        }
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn apply_linux_webkit_workarounds() {}
