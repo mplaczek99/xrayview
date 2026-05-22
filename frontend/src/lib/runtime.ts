@@ -71,7 +71,6 @@ function asProcessResult(
 ): ProcessResult {
   return {
     ...asPreviewResult(payload, runtime),
-    dicomPath: payload.dicomPath,
     mode: payload.mode,
   };
 }

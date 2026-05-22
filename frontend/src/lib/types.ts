@@ -40,7 +40,6 @@ export interface PreviewResult {
 }
 
 export interface ProcessResult extends PreviewResult {
-  dicomPath: string;
   mode: string;
 }
 

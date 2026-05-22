@@ -10,7 +10,6 @@ import type {
 import { normalizeBackendError } from "./backendErrors";
 import { uniqueJobIds } from "./jobIds";
 import { MOCK_PROCESSING_MANIFEST } from "./mockProcessingManifest";
-import { MOCK_PROCESSED_DICOM_PATH } from "./mockRuntime";
 import {
   createMockPreview,
   measureMockLineAnnotation,
@@ -183,7 +182,6 @@ export function createMockBackendAPI(): BackendAPI {
         payload: {
           studyId,
           previewPath: createMockPreview(true, request.controls.palette),
-          dicomPath: request.outputPath ?? MOCK_PROCESSED_DICOM_PATH,
           loadedWidth: 1200,
           loadedHeight: 820,
           mode: request.compare ? "comparison output" : "processed preview",

@@ -7,7 +7,6 @@ export function buildProcessStudyCommand(
 ): ProcessStudyCommand {
   return {
     studyId,
-    outputPath: request.outputPath,
     presetId: request.presetId,
     invert: request.controls.invert,
     brightness:
