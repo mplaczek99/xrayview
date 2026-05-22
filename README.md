@@ -2,7 +2,7 @@
 
 <p align="center">
   A DICOM X-ray visualization workstation<br>
-  built with a <strong>Wails</strong> desktop shell, a <strong>React/TypeScript</strong> frontend, and a <strong>Rust</strong> backend.
+  built with a <strong>Tauri</strong> desktop shell, a <strong>React/TypeScript</strong> frontend, and a <strong>Rust</strong> backend (in-process).
 </p>
 
 > [!CAUTION]
@@ -14,7 +14,7 @@
 
 ## Features
 
-- Open local DICOM studies (`.dcm`, `.dicom`)
+- Open local DICOM studies (`.dcm`, `.dicom`) plus BMP/TIFF source images
 - Render PNG previews for the workstation viewer
 - Apply grayscale processing, palettes, and side-by-side comparison
 - Export processed results as DICOM Secondary Capture files
@@ -31,11 +31,11 @@
 
 ```
 xrayview/
-├── frontend/    React/TypeScript workstation UI (Vite, strict mode)
-├── desktop/     Wails desktop shell (Go module)
-├── backend-rs/  Rust backend service sidecar
-├── contracts/   shared JSON schema + generated TS & Go bindings (Go module)
-└── images/      sample image assets for dev & detector tuning
+├── frontend/        React/TypeScript workstation UI (Vite, strict mode)
+├── desktop-tauri/   Tauri 2 desktop shell (Rust crate; links backend-rs as a library)
+├── backend-rs/      Rust backend library + standalone HTTP/CLI binary
+├── contracts/       shared JSON schema + generated TypeScript bindings
+└── images/          sample image assets for dev & detector tuning
 ```
 
 ---
@@ -44,11 +44,11 @@ xrayview/
 
 ### Prerequisites
 
-- [Go](https://go.dev/) 1.22+
-- [Rust](https://www.rust-lang.org/tools/install) 1.85+
+- [Rust](https://www.rust-lang.org/tools/install) 1.77+
 - [Node.js](https://nodejs.org/) 18.18+ or 20+
 - Linux desktop builds require GTK/WebKit development packages
-  On Debian/Ubuntu: `libgtk-3-dev` plus either `libwebkit2gtk-4.1-dev` or `libwebkit2gtk-4.0-dev`
+  On Debian/Ubuntu: `libgtk-3-dev`, `libwebkit2gtk-4.1-dev`, `librsvg2-dev`
+- Windows desktop builds use WebView2 (auto-installed by the Tauri bundler)
 
 ### Install & verify
 
@@ -56,7 +56,6 @@ xrayview/
 npm install
 npm run contracts:check
 npm run backend:test
-go -C desktop test ./...
 ```
 
 ### Browser mock mode
@@ -69,11 +68,12 @@ npm run dev
 
 ### Desktop app
 
-Build and launch the Wails shell with the live Rust backend:
+Build and launch the Tauri shell with the in-process Rust backend:
 
 ```bash
-npm run wails:run          # dev launch
-npm run wails:build        # release-style binaries
+npm run tauri:dev               # dev launch
+npm run tauri:build             # release binary + installer bundles
+npm run tauri:build -- --no-bundle   # release binary only
 ```
 
 <details>
@@ -81,9 +81,9 @@ npm run wails:build        # release-style binaries
 
 | Artifact | Path |
 |---|---|
-| Frontend assets | `desktop/build/frontend/dist/` |
-| Desktop shell binary | `desktop/build/bin/xrayview` |
-| Backend sidecar | `desktop/build/bin/xrayview-backend` |
+| Frontend assets | `frontend/dist/` (bundled into the Tauri binary) |
+| Desktop binary | `desktop-tauri/target/release/xrayview` |
+| Installer bundles | `desktop-tauri/target/release/bundle/<format>/...` |
 
 </details>
 
@@ -93,8 +93,9 @@ npm run wails:build        # release-style binaries
 npm run release:smoke
 ```
 
-Checks contract drift, runs backend tests, builds frontend + Wails shell, and
-confirms the bundled sidecar starts up.
+Checks contract drift, runs backend tests, builds the frontend, then runs
+`tauri build --no-bundle`. Pass `release:smoke:bundle` to include installer
+bundles.
 
 ---
 
@@ -103,24 +104,22 @@ confirms the bundled sidecar starts up.
 | Mode | Default in | Description |
 |---|---|---|
 | `mock` | Browser / Vite | Synthetic data, no backend |
-| `desktop` | Wails shell | Live Rust backend over loopback HTTP |
+| `desktop` | Tauri shell | Live Rust backend in-process via Tauri IPC |
 
-Override with environment variables:
+The runtime is normally auto-detected (`window.__TAURI_INTERNALS__` is injected
+by the WebView). To override:
 
 ```bash
 XRAYVIEW_BACKEND_RUNTIME=mock npm run dev
-XRAYVIEW_BACKEND_RUNTIME=desktop XRAYVIEW_BACKEND_URL=http://127.0.0.1:38181 npm run wails:run
 ```
 
 ---
 
 ## Rust Backend
 
-The backend sidecar binds to `127.0.0.1:38181` by default. The transport is
-**intentionally local-only** — it only binds to loopback and is never exposed
-in mock mode.
-
-The default backend scripts target `backend-rs/`:
+`backend-rs/` is a library used in-process by the desktop shell and also ships
+a standalone HTTP binary (`xrayview-backend-rs`) for CLI/tests. The standalone
+binary binds `127.0.0.1:38181` by default and is loopback-only.
 
 ```bash
 npm run backend:build
@@ -128,21 +127,12 @@ npm run backend:serve
 npm run backend:test
 ```
 
-### HTTP endpoints
-
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/healthz` | Health check |
-| `GET` | `/api/v1/runtime` | Runtime info & supported commands |
-| `GET` | `/api/v1/commands` | List available commands |
-| `POST` | `/api/v1/commands/{command}` | Execute a command |
-
-### Command surface
+### Command surface (Tauri IPC + standalone HTTP)
 
 | Command | Purpose |
 |---|---|
 | `get_processing_manifest` | Available processing presets |
-| `open_study` | Open a DICOM study |
+| `open_study` | Open a DICOM / BMP / TIFF study |
 | `start_render_job` | Render a preview |
 | `start_process_job` | Run processing pipeline |
 | `start_analyze_job` | Generate deterministic analysis overlays |
@@ -151,11 +141,15 @@ npm run backend:test
 | `cancel_job` | Cancel a running job |
 | `measure_line_annotation` | Calibration-aware line measurement |
 
+In the desktop shell each command is reached via `invoke("<command>", { command: <payload> })`
+from the frontend; the standalone HTTP binary exposes them under
+`POST /api/v1/commands/{command}`.
+
 ---
 
 ## CLI
 
-The headless CLI runs through the Rust backend binary.
+The headless CLI runs through the standalone backend binary.
 
 ### Utility subcommands
 
@@ -198,36 +192,36 @@ npm run backend:cli -- --input /path/to/study.dcm --preview-output /tmp/preview.
 The single source of truth is `contracts/backend-contract-v1.schema.json`.
 
 ```bash
-npm run contracts:generate    # regenerate bindings
+npm run contracts:generate    # regenerate TS bindings
 npm run contracts:check       # verify bindings are up to date
 ```
 
-Generated files (do not edit manually):
+Generated file (do not edit manually):
 
 - `frontend/src/lib/generated/contracts.ts`
-- `contracts/contractv1/bindings.go`
+
+Rust types in `backend-rs/src/contracts.rs` are the matching source on the Rust
+side (manually kept in sync; not generated).
 
 ---
 
 ## Architecture
 
-The project is a monorepo with a Rust backend sidecar, a React/TypeScript
-frontend, and independent Go modules for the Wails shell and shared Go contract
-bindings. There is no Go workspace file; Go modules use `replace` directives
-for local dependencies.
+The project is a monorepo with a Rust backend library and a Tauri 2 desktop
+shell that links it in-process.
 
 | Module | Responsibility |
 |---|---|
 | `frontend/` | Workstation UI and mock-mode behavior |
-| `desktop/` | Native shell: window lifecycle, dialogs, preview serving, sidecar management |
-| `backend-rs/` | Rust sidecar: HTTP contract, DICOM decode, render, processing, annotations, jobs |
+| `desktop-tauri/` | Tauri shell: window lifecycle, file dialogs, IPC command wrappers, job-event forwarding |
+| `backend-rs/` | Rust library: DICOM decode, render, processing, annotations, jobs. Also ships a standalone HTTP/CLI binary |
 | `contracts/` | Shared command payload shapes via JSON schema |
 
 ```
-┌─────────────┐     Wails binding     ┌─────────────┐    loopback HTTP    ┌─────────────┐
-│  React UI   │ ◄──────────────────► │   Desktop   │ ◄──────────────────► │Rust Backend │
-│  (frontend) │                       │   (desktop) │                      │(backend-rs) │
-└─────────────┘                       └─────────────┘                      └─────────────┘
-                                              ▲                                    ▲
-                                              └────────── contracts ───────────────┘
+┌─────────────┐    Tauri IPC    ┌──────────────────────────────────────┐
+│  React UI   │ ◄─────────────► │ desktop-tauri (Rust shell)           │
+│  (frontend) │                  │   ↳ backend-rs::App (in-process)     │
+└─────────────┘                  └──────────────────────────────────────┘
+        ▲                                            ▲
+        └───────────────── contracts ────────────────┘
 ```

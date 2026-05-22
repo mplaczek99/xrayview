@@ -4,10 +4,8 @@
   "title": "XRayView Backend Contract v1",
   "description": "Language-neutral schema for the xrayview desktop/backend contract.",
   "x-contract-version": 1,
-  "x-go-package": "contractv1",
   "x-generated-targets": {
-    "typescript": "frontend/src/lib/generated/contracts.ts",
-    "goValidationBindings": "contracts/contractv1/bindings.go"
+    "typescript": "frontend/src/lib/generated/contracts.ts"
   },
   "x-export-order": [
     "PaletteName",

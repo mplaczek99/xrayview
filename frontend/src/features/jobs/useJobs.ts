@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { JobSnapshot as ContractJobSnapshot } from "../../lib/generated/contracts";
 import { getRuntimeAdapter, normalizeJobSnapshot } from "../../lib/runtime";
 import { useWorkbenchStore, workbenchActions } from "../../app/store/workbenchStore";
@@ -13,23 +14,11 @@ const RECENT_TRANSITION_POLL_MS = 200;
 const QUEUED_POLL_MS = 1000;
 const MAX_POLL_MS = 2000;
 const IDLE_POLL_MS = 0;
-// When SSE events are active, skip HTTP polling and re-check after this delay.
+// When Tauri job-update events are active, skip HTTP polling and re-check after this delay.
 // Falls back to normal polling if no event arrives within EVENT_STALE_MS.
 const EVENT_HEARTBEAT_MS = 10_000;
 const EVENT_STALE_MS = 10_000;
-const JOB_UPDATE_EVENT = "xrayview:job-update";
 const runtime = getRuntimeAdapter();
-
-declare global {
-  interface Window {
-    runtime?: {
-      EventsOn?: (
-        eventName: string,
-        callback: (...args: unknown[]) => void,
-      ) => (() => void) | void;
-    };
-  }
-}
 
 export function useJobs() {
   const pendingJobCount = useWorkbenchStore(selectPendingJobCount);
@@ -37,9 +26,10 @@ export function useJobs() {
   useEffect(() => {
     let cancelled = false;
     let timer: number | undefined;
-    let unsubscribeEvent: (() => void) | undefined;
+    let unlistenJobUpdate: UnlistenFn | undefined;
+    let eventsSubscribed = false;
     let currentIntervalMs = ACTIVE_POLL_MS;
-    // Tracks the last time a job-update event was received via Wails/SSE.
+    // Tracks the last time a job-update event was received over the Tauri event bus.
     // When fresh (< EVENT_STALE_MS ago), HTTP polling is suppressed entirely.
     let lastEventAtMs = 0;
 
@@ -52,27 +42,21 @@ export function useJobs() {
       }
     }
 
-    const eventsOn = runtime.mode === "desktop" ? window.runtime?.EventsOn : undefined;
-    if (eventsOn) {
-      const unsubscribe = eventsOn(
-        JOB_UPDATE_EVENT,
-        (...args: unknown[]) => {
-          if (cancelled) {
-            return;
-          }
-
-          const [snapshot] = args as [ContractJobSnapshot | undefined];
-          if (!snapshot) {
-            return;
-          }
-
-          lastEventAtMs = Date.now();
-          applyJobUpdate(normalizeJobSnapshot(snapshot, runtime.mode));
-        },
-      );
-      if (typeof unsubscribe === "function") {
-        unsubscribeEvent = unsubscribe;
-      }
+    if (runtime.mode === "desktop") {
+      eventsSubscribed = true;
+      void listen<ContractJobSnapshot>("job-update", (event) => {
+        if (cancelled) {
+          return;
+        }
+        lastEventAtMs = Date.now();
+        applyJobUpdate(normalizeJobSnapshot(event.payload, runtime.mode));
+      }).then((unlisten) => {
+        if (cancelled) {
+          unlisten();
+          return;
+        }
+        unlistenJobUpdate = unlisten;
+      });
     }
 
     async function pollPendingJobs() {
@@ -84,9 +68,9 @@ export function useJobs() {
         return;
       }
 
-      // When SSE/Wails events are actively delivering updates, skip HTTP
-      // polling entirely and schedule a heartbeat in case events go stale.
-      if (eventsOn && Date.now() - lastEventAtMs < EVENT_STALE_MS) {
+      // When job-update events are actively delivering updates, skip HTTP polling
+      // entirely and schedule a heartbeat in case the stream goes stale.
+      if (eventsSubscribed && Date.now() - lastEventAtMs < EVENT_STALE_MS) {
         scheduleNext(EVENT_HEARTBEAT_MS);
         return;
       }
@@ -202,7 +186,7 @@ export function useJobs() {
       if (timer !== undefined) {
         window.clearTimeout(timer);
       }
-      unsubscribeEvent?.();
+      unlistenJobUpdate?.();
     };
   }, [pendingJobCount]);
 }

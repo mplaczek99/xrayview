@@ -6,10 +6,8 @@ frontend/.vite/
 frontend/*.tsbuildinfo
 frontend/vite.config.js
 frontend/vite.config.d.ts
-desktop/build/
-desktop/frontend/dist/
-wails-prototype/frontend/dist/
 target/
+desktop-tauri/gen/
 
 # Local agent/editor/system files
 .codex

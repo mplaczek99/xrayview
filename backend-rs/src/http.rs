@@ -9,7 +9,7 @@ use std::{
         mpsc::{Receiver, RecvTimeoutError},
     },
     thread,
-    time::Duration,
+    time::{Duration, UNIX_EPOCH},
 };
 
 use chrono::SecondsFormat;
@@ -170,7 +170,7 @@ impl Router {
                     backend_contract_version: contracts::BACKEND_CONTRACT_VERSION,
                 },
             ),
-            ("GET", PREVIEW_PATH) => self.handle_preview(query),
+            ("GET", PREVIEW_PATH) => self.handle_preview(query, request.header("If-None-Match")),
             ("GET", EVENTS_PATH) => Response::text(500, "streaming not supported\n"),
             (_, path) if path.starts_with(&format!("{COMMANDS_PATH}/")) => {
                 self.handle_command(&request)
@@ -264,7 +264,7 @@ impl Router {
         }
     }
 
-    fn handle_preview(&self, query: Option<&str>) -> Response {
+    fn handle_preview(&self, query: Option<&str>, if_none_match: Option<&str>) -> Response {
         let Some(raw_path) = query_parameter(query, "path") else {
             return Response::text(400, "preview path is required\n");
         };
@@ -314,12 +314,31 @@ impl Router {
             return Response::text(403, "preview path is a directory\n");
         }
 
+        let etag = preview_etag(&metadata);
+        if if_none_match.is_some_and(|value| value == etag) {
+            let mut response = Response::empty(304);
+            response
+                .headers
+                .insert("etag".to_string(), etag);
+            response
+                .headers
+                .insert("cache-control".to_string(), "public, max-age=3600".to_string());
+            return response;
+        }
+
         match fs::read(&resolved_target) {
             Ok(body) => {
                 let mut response = Response::empty(200);
                 response.headers.insert(
                     "content-type".to_string(),
                     content_type_for_path(&resolved_target).to_string(),
+                );
+                response
+                    .headers
+                    .insert("etag".to_string(), etag);
+                response.headers.insert(
+                    "cache-control".to_string(),
+                    "public, max-age=3600".to_string(),
                 );
                 response.body = body;
                 response
@@ -404,6 +423,9 @@ impl Router {
             apply_cors_headers(&mut headers, origin);
         }
         write_http_headers(stream, 200, headers)?;
+        // Hint browsers to reconnect quickly after a transient drop. The polling fallback in
+        // useJobs.ts still kicks in after EVENT_STALE_MS, but a 1s retry keeps the gap small.
+        stream.write_all(b"retry: 1000\n\n")?;
         stream.flush()?;
 
         let result = stream_job_updates_tcp(stream, subscription.receiver);
@@ -641,7 +663,7 @@ fn is_allowed_origin(origin: &str) -> bool {
     let Some(host) = parsed.host_str() else {
         return false;
     };
-    if host == "localhost" {
+    if host == "localhost" || host.ends_with(".localhost") {
         return true;
     }
 
@@ -694,6 +716,16 @@ fn path_is_inside(root: &Path, target: &Path) -> bool {
     target == root || target.starts_with(root)
 }
 
+fn preview_etag(metadata: &fs::Metadata) -> String {
+    let modified_nanos = metadata
+        .modified()
+        .ok()
+        .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0);
+    format!("\"{modified_nanos:x}-{:x}\"", metadata.len())
+}
+
 fn content_type_for_path(path: &Path) -> &'static str {
     match path.extension().and_then(|extension| extension.to_str()) {
         Some(extension) if extension.eq_ignore_ascii_case("png") => "image/png",
@@ -708,6 +740,7 @@ fn reason_phrase(status: u16) -> &'static str {
     match status {
         200 => "OK",
         204 => "No Content",
+        304 => "Not Modified",
         400 => "Bad Request",
         403 => "Forbidden",
         404 => "Not Found",
@@ -906,6 +939,14 @@ mod tests {
             }
         }
         assert!(content_type_seen);
+
+        // The stream begins with `retry: 1000\n\n` as a reconnect hint before any data frames.
+        let mut retry_line = String::new();
+        reader.read_line(&mut retry_line).unwrap();
+        assert_eq!(retry_line, "retry: 1000\n");
+        let mut blank_line = String::new();
+        reader.read_line(&mut blank_line).unwrap();
+        assert_eq!(blank_line, "\n");
 
         let study = app
             .register_study(input_path.display().to_string(), None)
@@ -1293,6 +1334,29 @@ mod tests {
     }
 
     #[test]
+    fn localhost_subdomain_origin_is_accepted() {
+        let response = test_router()
+            .handle(Request::new("GET", "/healthz").with_header("Origin", "http://tauri.localhost"));
+
+        assert_eq!(response.status, 200);
+        assert_eq!(
+            response.headers.get("access-control-allow-origin"),
+            Some(&"http://tauri.localhost".to_string())
+        );
+    }
+
+    #[test]
+    fn localhost_lookalike_subdomain_is_rejected() {
+        // `evil.localhost.attacker.com` ends in `.com`, not `.localhost` — must be rejected.
+        let response = test_router().handle(
+            Request::new("GET", "/healthz")
+                .with_header("Origin", "http://evil.localhost.attacker.com"),
+        );
+
+        assert_eq!(response.status, 403);
+    }
+
+    #[test]
     fn preview_serves_artifact_inside_cache_root() {
         let temp_dir =
             std::env::temp_dir().join(format!("xrayview-rs-preview-{}", std::process::id()));
@@ -1323,6 +1387,52 @@ mod tests {
             response.headers.get("content-type"),
             Some(&"image/png".to_string())
         );
+
+        let _ = fs::remove_file(artifact_path);
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn preview_sets_cache_control_and_etag_and_returns_304_on_match() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "xrayview-rs-preview-etag-{}",
+            std::process::id()
+        ));
+        let cache_dir = temp_dir.join("cache");
+        fs::create_dir_all(&cache_dir).unwrap();
+        let artifact_path = cache_dir.join("preview.png");
+        fs::write(&artifact_path, b"png-bytes").unwrap();
+
+        let mut config = Config::default();
+        config.paths.cache_dir = cache_dir;
+        let router = Router::new(Arc::new(App::new(config).unwrap()));
+        let url = format!(
+            "{PREVIEW_PATH}?path={}",
+            url::form_urlencoded::byte_serialize(artifact_path.to_string_lossy().as_bytes())
+                .collect::<String>()
+        );
+
+        let cold = router.handle(Request::new("GET", &url));
+        assert_eq!(cold.status, 200);
+        assert_eq!(
+            cold.headers.get("cache-control"),
+            Some(&"public, max-age=3600".to_string())
+        );
+        let etag = cold
+            .headers
+            .get("etag")
+            .cloned()
+            .expect("cold response missing ETag");
+
+        let warm = router.handle(Request::new("GET", &url).with_header("If-None-Match", &etag));
+        assert_eq!(warm.status, 304);
+        assert!(warm.body.is_empty());
+        assert_eq!(warm.headers.get("etag"), Some(&etag));
+
+        let stale = router
+            .handle(Request::new("GET", &url).with_header("If-None-Match", "\"stale-etag\""));
+        assert_eq!(stale.status, 200);
+        assert_eq!(stale.body, b"png-bytes");
 
         let _ = fs::remove_file(artifact_path);
         let _ = fs::remove_dir_all(temp_dir);

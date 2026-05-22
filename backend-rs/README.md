@@ -1,6 +1,9 @@
 # XRayView Backend
 
-This crate is the Rust backend used by the desktop shell and backend scripts.
+This crate is the Rust backend library. The Tauri desktop shell
+(`desktop-tauri/`) links it as a path dependency and hosts `App` in-process;
+the same crate also produces a standalone HTTP binary used by the CLI and
+tests.
 
 Current Rust-owned surface:
 
@@ -23,5 +26,6 @@ Current Rust-owned surface:
 - legacy workflow CLI flags for preset description, study description, preview output,
   processing output, and default processed-DICOM naming
 
-The Rust sidecar is the default `backend:*` script target and the bundled
-desktop backend sidecar.
+The `backend:*` npm scripts target the standalone binary
+(`xrayview-backend-rs`); the desktop shell consumes the library directly via
+Tauri IPC commands.

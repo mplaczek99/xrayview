@@ -10,12 +10,13 @@
     "generate:contracts": "npm --prefix .. run contracts:generate --",
     "dev": "npm run generate:contracts && node ./scripts/vite-dev.mjs",
     "build": "npm run generate:contracts && node ./scripts/parallel-build.mjs",
-    "wails:build": "npm run generate:contracts && node ./scripts/parallel-build.mjs --config vite.wails.config.ts",
     "preview": "vite preview",
     "release:smoke": "node ./scripts/release-smoke-test.mjs",
     "release:smoke:bundle": "node ./scripts/release-smoke-test.mjs --bundle"
   },
   "dependencies": {
+    "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-dialog": "^2",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },

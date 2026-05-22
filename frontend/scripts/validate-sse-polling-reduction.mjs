@@ -1,8 +1,9 @@
 // Validation test for step 10.2: SSE-based job updates replacing HTTP polling.
 // Runs with: node frontend/scripts/validate-sse-polling-reduction.mjs
 //
-// Measures the reduction in HTTP get_job poll requests when SSE events are
-// actively delivering job updates (desktop mode with Wails EventsOn active).
+// Measures the reduction in HTTP get_job poll requests when Tauri job-update
+// events are actively delivering job updates (desktop mode with the listener
+// attached).
 //
 // BEFORE: frontend polls /commands/get_job every 200ms while jobs are pending.
 // AFTER:  frontend skips polling when events fired within the last 10s.
@@ -134,7 +135,7 @@ function makePoller_AFTER_with_sse(getJobs, notifyFetch, getLastEventAtMs, getNo
   let cancelled = false;
   let timer;
   let currentIntervalMs = FAST_POLL_MS;
-  const eventsOn = true; // desktop mode: Wails EventsOn is available
+  const eventsOn = true; // desktop mode: Tauri job-update listener is attached
 
   function scheduleNext(intervalMs) {
     if (cancelled) return;
@@ -378,7 +379,7 @@ test("AFTER (SSE active): 30s job with events every 5s → ≥80% fewer requests
 });
 
 test("AFTER: no SSE events → falls back to normal polling after 10s stale window", () => {
-  // Simulate a job with NO SSE events (sidecar SSE bridge disconnected).
+  // Simulate a job with NO job-update events (Tauri event bus quiet).
   // The first poll fires immediately (lastEventAtMs starts at -infinity, stale).
   // After each poll, if still no events, the exponential backoff drives future polls.
   resetTimers();

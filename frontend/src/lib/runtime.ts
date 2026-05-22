@@ -28,10 +28,7 @@ import type {
 
 export const FALLBACK_PROCESSING_MANIFEST = MOCK_PROCESSING_MANIFEST;
 
-function resolvePreviewUrl(
-  previewPath: string,
-  runtime: RuntimeMode,
-): string {
+function resolvePreviewUrl(previewPath: string, runtime: RuntimeMode): string {
   if (runtime === "desktop") {
     return buildDesktopPreviewUrl(previewPath);
   }
