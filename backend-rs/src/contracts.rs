@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 pub const SERVICE_NAME: &str = "xrayview-backend";
-pub const BACKEND_CONTRACT_VERSION: u32 = 1;
+pub const BACKEND_CONTRACT_VERSION: u32 = 2;
 pub const BACKEND_CONTRACT_SCHEMA_ID: &str =
     "https://xrayview.local/contracts/backend-contract-v1.schema.json";
 
@@ -305,8 +305,6 @@ pub struct AnalyzeStudyCommandResult {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ProcessStudyCommand {
     pub study_id: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub output_path: Option<String>,
     pub preset_id: String,
     pub invert: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -324,7 +322,6 @@ pub struct ProcessStudyCommand {
 pub struct ProcessStudyCommandResult {
     pub study_id: String,
     pub preview_path: String,
-    pub dicom_path: String,
     pub loaded_width: u32,
     pub loaded_height: u32,
     pub mode: String,

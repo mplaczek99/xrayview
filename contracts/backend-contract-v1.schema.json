@@ -3,7 +3,7 @@
   "$id": "https://xrayview.local/contracts/backend-contract-v1.schema.json",
   "title": "XRayView Backend Contract v1",
   "description": "Language-neutral schema for the xrayview desktop/backend contract.",
-  "x-contract-version": 1,
+  "x-contract-version": 2,
   "x-generated-targets": {
     "typescript": "frontend/src/lib/generated/contracts.ts"
   },
@@ -346,9 +346,6 @@
       "additionalProperties": false,
       "properties": {
         "studyId": { "type": "string" },
-        "outputPath": {
-          "type": ["string", "null"]
-        },
         "presetId": { "type": "string" },
         "invert": { "type": "boolean" },
         "brightness": {
@@ -374,7 +371,6 @@
       "properties": {
         "studyId": { "type": "string" },
         "previewPath": { "type": "string" },
-        "dicomPath": { "type": "string" },
         "loadedWidth": { "type": "number" },
         "loadedHeight": { "type": "number" },
         "mode": { "type": "string" },
@@ -388,7 +384,6 @@
       "required": [
         "studyId",
         "previewPath",
-        "dicomPath",
         "loadedWidth",
         "loadedHeight",
         "mode"
