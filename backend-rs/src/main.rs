@@ -45,8 +45,5 @@ fn main() {
 }
 
 fn should_serve(args: &[String]) -> bool {
-    match args.first().map(String::as_str) {
-        None | Some("serve") => true,
-        _ => false,
-    }
+    matches!(args.first().map(String::as_str), None | Some("serve"))
 }

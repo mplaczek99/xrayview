@@ -1,4 +1,4 @@
-use std::{collections::BTreeSet, fs, io::Write, path::PathBuf};
+use std::{fs, io::Write, path::PathBuf};
 
 use serde::Serialize;
 use serde_json::json;
@@ -10,15 +10,11 @@ use crate::{
         BACKEND_CONTRACT_VERSION, MeasurementScale, PaletteName, ProcessStudyCommand, SERVICE_NAME,
         SUPPORTED_COMMANDS, default_processing_manifest,
     },
-    dicom::{self, Metadata, RenderWindowMode, RenderedPreview},
+    bmp::{self, Metadata, RenderWindowMode, RenderedPreview},
     processing::{self, GrayscaleControls},
     render::{self, PreviewImage},
 };
 
-const IMPLICIT_LITTLE_ENDIAN_TRANSFER_SYNTAX: &str = "1.2.840.10008.1.2";
-const EXPLICIT_LITTLE_ENDIAN_TRANSFER_SYNTAX: &str = "1.2.840.10008.1.2.1";
-const EXPLICIT_BIG_ENDIAN_TRANSFER_SYNTAX: &str = "1.2.840.10008.1.2.2";
-const DEFLATED_TRANSFER_SYNTAX: &str = "1.2.840.10008.1.2.1.99";
 const LEGACY_HELP_SENTINEL: &str = "__xrayview_legacy_help__";
 
 pub fn run(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn Write) -> Result<(), String> {
@@ -38,12 +34,10 @@ fn run_args(args: &[&str], stdout: &mut dyn Write, stderr: &mut dyn Write) -> Re
 
     match args[0] {
         "print-config" => print_config(stdout),
-        "inspect-decode" => inspect_decode(&args[1..], stdout),
         "decode-source" => decode_source(&args[1..], stdout),
         "render-preview" => render_preview(&args[1..], stdout),
         "process-preview" => process_preview(&args[1..], stdout),
         "analyze-preview" => analyze_preview(&args[1..], stdout),
-        "export-secondary-capture" => export_secondary_capture(&args[1..], stdout),
         "list-commands" => list_commands(stdout),
         "version" => writeln!(
             stdout,
@@ -92,10 +86,6 @@ fn parse_legacy_args(args: &[&str], stderr: &mut dyn Write) -> Result<LegacyOpti
         match flag.as_str() {
             "--input" => {
                 options.input =
-                    required_flag_value(args, &mut index, &flag, inline_value)?.to_string()
-            }
-            "--output" => {
-                options.output =
                     required_flag_value(args, &mut index, &flag, inline_value)?.to_string()
             }
             "--preview-output" => {
@@ -159,7 +149,7 @@ fn execute_legacy(options: LegacyOptions, stdout: &mut dyn Write) -> Result<(), 
 
     let input_path = required_input_path(&options)?;
     if options.describe_study {
-        let metadata = dicom::read_file(&input_path)?;
+        let metadata = bmp::read_file(&input_path)?;
         return write_json_compact(
             stdout,
             &LegacyStudyDescription {
@@ -172,13 +162,12 @@ fn execute_legacy(options: LegacyOptions, stdout: &mut dyn Write) -> Result<(), 
         return render_legacy_preview(&input_path, options.preview_output.trim(), stdout);
     }
 
-    let mut output_path = options.output.trim().to_string();
-    let preview_output = options.preview_output.trim().to_string();
-    if output_path.is_empty() && preview_output.is_empty() {
-        output_path = default_legacy_output_path(&input_path);
+    let mut preview_output = options.preview_output.trim().to_string();
+    if preview_output.is_empty() {
+        preview_output = default_legacy_preview_output_path(&input_path);
     }
 
-    process_legacy_study(&input_path, &output_path, &preview_output, &options, stdout)
+    process_legacy_study(&input_path, &preview_output, &options, stdout)
 }
 
 fn validate_legacy_mode_selection(options: &LegacyOptions) -> Result<(), String> {
@@ -222,7 +211,7 @@ fn render_legacy_preview(
     preview_output: &str,
     stdout: &mut dyn Write,
 ) -> Result<(), String> {
-    let rendered = dicom::render_grayscale_preview_file(input_path)?;
+    let rendered = bmp::render_grayscale_preview_file(input_path)?;
     render::save_gray_png(
         preview_output,
         rendered.width,
@@ -231,7 +220,7 @@ fn render_legacy_preview(
     )?;
     writeln!(
         stdout,
-        "loaded dicom image: {}x{}",
+        "loaded BMP image: {}x{}",
         rendered.width, rendered.height
     )
     .map_err(|error| error.to_string())?;
@@ -241,12 +230,11 @@ fn render_legacy_preview(
 
 fn process_legacy_study(
     input_path: &str,
-    output_path: &str,
     preview_output: &str,
     options: &LegacyOptions,
     stdout: &mut dyn Write,
 ) -> Result<(), String> {
-    let rendered = dicom::render_grayscale_preview_file(input_path)?;
+    let rendered = bmp::render_grayscale_preview_file(input_path)?;
     let command = legacy_process_command(options)?;
     let resolved =
         processing::resolve_process_study_command(&command).map_err(|error| error.message)?;
@@ -258,48 +246,26 @@ fn process_legacy_study(
         resolved.compare,
     )?;
 
-    if !preview_output.is_empty() {
-        render::save_preview_png(preview_output, &processed.preview)?;
-    }
-    if !output_path.is_empty() {
-        let secondary_capture_options =
-            secondary_capture_options_for_input(input_path, rendered.measurement_scale.as_ref());
-        dicom::write_secondary_capture_file_with_options(
-            output_path,
-            &processed.preview,
-            &secondary_capture_options,
-        )?;
-    }
+    render::save_preview_png(preview_output, &processed.preview)?;
 
     writeln!(
         stdout,
-        "loaded dicom image: {}x{}",
+        "loaded BMP image: {}x{}",
         rendered.width, rendered.height
     )
     .map_err(|error| error.to_string())?;
-    if !preview_output.is_empty() {
-        writeln!(
-            stdout,
-            "saved {} preview image: {}",
-            processed.mode, preview_output
-        )
-        .map_err(|error| error.to_string())?;
-    }
-    if !output_path.is_empty() {
-        writeln!(
-            stdout,
-            "saved {} dicom image: {}",
-            processed.mode, output_path
-        )
-        .map_err(|error| error.to_string())?;
-    }
+    writeln!(
+        stdout,
+        "saved {} preview image: {}",
+        processed.mode, preview_output
+    )
+    .map_err(|error| error.to_string())?;
     Ok(())
 }
 
 fn legacy_process_command(options: &LegacyOptions) -> Result<ProcessStudyCommand, String> {
     let mut command = ProcessStudyCommand {
         study_id: String::new(),
-        output_path: None,
         preset_id: options.preset.clone(),
         invert: false,
         brightness: options.brightness.value,
@@ -342,7 +308,6 @@ fn parse_palette_name(value: &str) -> Result<Option<PaletteName>, String> {
 
 fn is_plain_preview_request(options: &LegacyOptions) -> bool {
     !options.preview_output.trim().is_empty()
-        && options.output.trim().is_empty()
         && options.preset.trim().eq_ignore_ascii_case("default")
         && options.invert.value.is_none()
         && options.brightness.value.is_none()
@@ -352,17 +317,17 @@ fn is_plain_preview_request(options: &LegacyOptions) -> bool {
         && options.palette.trim().is_empty()
 }
 
-fn default_legacy_output_path(input_path: &str) -> String {
+fn default_legacy_preview_output_path(input_path: &str) -> String {
     let path = std::path::Path::new(input_path);
     let stem = path
         .file_stem()
         .filter(|stem| !stem.is_empty())
         .or_else(|| path.file_name())
         .map(|stem| stem.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "study".to_string());
+        .unwrap_or_else(|| "image".to_string());
     path.parent()
         .unwrap_or_else(|| std::path::Path::new(""))
-        .join(format!("{stem}_processed.dcm"))
+        .join(format!("{stem}_processed.png"))
         .display()
         .to_string()
 }
@@ -439,28 +404,13 @@ fn print_config(stdout: &mut dyn Write) -> Result<(), String> {
     )
 }
 
-fn inspect_decode(args: &[&str], stdout: &mut dyn Write) -> Result<(), String> {
-    if args.is_empty() {
-        return Err("inspect-decode requires at least one DICOM path".to_string());
-    }
-
-    let mut studies = Vec::with_capacity(args.len());
-    for path in args {
-        let metadata = dicom::read_file(path)?;
-        studies.push(DecodeProfile::from_metadata(path, &metadata));
-    }
-
-    let summary = DecodeCorpusSummary::from_profiles(&studies);
-    write_json(stdout, &DecodeInspectionReport { studies, summary })
-}
-
 fn decode_source(args: &[&str], stdout: &mut dyn Write) -> Result<(), String> {
     if args.len() != 1 {
-        return Err("decode-source requires exactly one DICOM path".to_string());
+        return Err("decode-source requires exactly one BMP path".to_string());
     }
 
-    let metadata = dicom::read_file(args[0])?;
-    let rendered = dicom::render_grayscale_preview_file(args[0])?;
+    let metadata = bmp::read_file(args[0])?;
+    let rendered = bmp::render_grayscale_preview_file(args[0])?;
     write_json(
         stdout,
         &DecodeSourceSummary::from_rendered_and_metadata(rendered, &metadata),
@@ -469,7 +419,7 @@ fn decode_source(args: &[&str], stdout: &mut dyn Write) -> Result<(), String> {
 
 fn render_preview(args: &[&str], stdout: &mut dyn Write) -> Result<(), String> {
     let options = parse_render_preview_args(args)?;
-    let rendered = dicom::render_grayscale_preview_file_with_window_mode(
+    let rendered = bmp::render_grayscale_preview_file_with_window_mode(
         &options.input_path,
         render_window_mode(options.full_range),
     )?;
@@ -499,7 +449,7 @@ fn render_preview(args: &[&str], stdout: &mut dyn Write) -> Result<(), String> {
 
 fn process_preview(args: &[&str], stdout: &mut dyn Write) -> Result<(), String> {
     let options = parse_process_preview_args(args)?;
-    let rendered = dicom::render_grayscale_preview_file_with_window_mode(
+    let rendered = bmp::render_grayscale_preview_file_with_window_mode(
         &options.input_path,
         render_window_mode(options.full_range),
     )?;
@@ -532,52 +482,9 @@ fn process_preview(args: &[&str], stdout: &mut dyn Write) -> Result<(), String> 
     )
 }
 
-fn export_secondary_capture(args: &[&str], stdout: &mut dyn Write) -> Result<(), String> {
-    let options = parse_process_preview_args(args)?;
-    let rendered = dicom::render_grayscale_preview_file_with_window_mode(
-        &options.input_path,
-        render_window_mode(options.full_range),
-    )?;
-    let source = rendered_preview_image(&rendered);
-    let processed = processing::process_rendered_preview(
-        &source,
-        options.controls,
-        &options.palette,
-        options.compare,
-    )?;
-    let secondary_capture_options = secondary_capture_options_for_input(
-        &options.input_path,
-        rendered.measurement_scale.as_ref(),
-    );
-    dicom::write_secondary_capture_file_with_options(
-        &options.output_path,
-        &processed.preview,
-        &secondary_capture_options,
-    )?;
-
-    write_json(
-        stdout,
-        &ExportSecondaryCaptureSummary {
-            dicom_output: options.output_path.display().to_string(),
-            loaded_width: rendered.width,
-            loaded_height: rendered.height,
-            window_mode: if options.full_range {
-                "full-range"
-            } else {
-                "default"
-            },
-            mode: processed.mode,
-            palette: options.palette,
-            compare: options.compare,
-            measurement_scale: rendered.measurement_scale,
-            rendered_byte_count: processed.preview.pixels.len(),
-        },
-    )
-}
-
 fn analyze_preview(args: &[&str], stdout: &mut dyn Write) -> Result<(), String> {
     let options = parse_analyze_preview_args(args)?;
-    let rendered = dicom::render_grayscale_preview_file_for_tooth_analysis(&options.input_path)?;
+    let rendered = bmp::render_grayscale_preview_file_for_tooth_analysis(&options.input_path)?;
     let source = rendered_preview_image(&rendered);
     let result = analysis::generate_tooth_overlay(&source)?;
     let preview = if options.filled {
@@ -625,7 +532,7 @@ fn parse_render_preview_args(args: &[&str]) -> Result<RenderPreviewOptions, Stri
 
     if positional.len() != 2 {
         return Err(
-            "render-preview requires INPUT_DCM OUTPUT_PNG and accepts optional --full-range"
+            "render-preview requires INPUT_BMP OUTPUT_PNG and accepts optional --full-range"
                 .to_string(),
         );
     }
@@ -698,7 +605,7 @@ fn parse_process_preview_args(args: &[&str]) -> Result<ProcessPreviewOptions, St
     }
 
     if positional.len() != 2 {
-        return Err("process-preview requires INPUT_DCM OUTPUT_PNG and accepts optional --full-range, --invert, --brightness, --contrast, --equalize, --palette, and --compare".to_string());
+        return Err("process-preview requires INPUT_BMP OUTPUT_PNG and accepts optional --full-range, --invert, --brightness, --contrast, --equalize, --palette, and --compare".to_string());
     }
     if !(-256..=256).contains(&options.controls.brightness) {
         return Err(format!(
@@ -726,7 +633,7 @@ fn parse_analyze_preview_args(args: &[&str]) -> Result<AnalyzePreviewOptions, St
     }
     if positional.len() != 2 {
         return Err(
-            "analyze-preview requires INPUT_DCM OUTPUT_PNG and accepts optional --filled"
+            "analyze-preview requires INPUT_BMP OUTPUT_PNG and accepts optional --filled"
                 .to_string(),
         );
     }
@@ -749,23 +656,6 @@ fn rendered_preview_image(rendered: &RenderedPreview) -> PreviewImage {
     PreviewImage::gray(rendered.width, rendered.height, rendered.pixels.clone())
 }
 
-fn secondary_capture_options_for_input(
-    input_path: impl AsRef<std::path::Path>,
-    measurement_scale: Option<&MeasurementScale>,
-) -> dicom::SecondaryCaptureOptions {
-    let mut options = dicom::SecondaryCaptureOptions::new(measurement_scale);
-    if let Some(input_path) = input_path.as_ref().to_str() {
-        if let Ok(metadata) = dicom::read_file(input_path) {
-            let uid = metadata.study_instance_uid.trim();
-            if !uid.is_empty() {
-                options.study_instance_uid = Some(uid.to_string());
-            }
-            options.preserved_elements = metadata.preserved_elements;
-        }
-    }
-    options
-}
-
 fn write_json(stdout: &mut dyn Write, value: &impl Serialize) -> Result<(), String> {
     serde_json::to_writer_pretty(&mut *stdout, value).map_err(|error| error.to_string())?;
     writeln!(stdout).map_err(|error| error.to_string())
@@ -781,7 +671,7 @@ fn print_usage(stream: &mut dyn Write) -> Result<(), String> {
         .map_err(|error| error.to_string())?;
     writeln!(stream, "       xrayview-backend-rs [workflow flags]")
         .map_err(|error| error.to_string())?;
-    writeln!(stream, "").map_err(|error| error.to_string())?;
+    writeln!(stream).map_err(|error| error.to_string())?;
     writeln!(stream, "workflow flags:").map_err(|error| error.to_string())?;
     writeln!(
         stream,
@@ -790,20 +680,20 @@ fn print_usage(stream: &mut dyn Write) -> Result<(), String> {
     .map_err(|error| error.to_string())?;
     writeln!(
         stream,
-        "  --input <study.dcm> --describe-study       print study metadata as JSON"
+        "  --input <image.bmp> --describe-study       print image metadata as JSON"
     )
     .map_err(|error| error.to_string())?;
     writeln!(
         stream,
-        "  --input <study.dcm> --preview-output <png> render a grayscale preview PNG"
+        "  --input <image.bmp> --preview-output <png> render a grayscale preview PNG"
     )
     .map_err(|error| error.to_string())?;
     writeln!(
         stream,
-        "  --input <study.dcm> [processing flags]     write processed preview/DICOM output"
+        "  --input <image.bmp> [processing flags]     write processed preview PNG"
     )
     .map_err(|error| error.to_string())?;
-    writeln!(stream, "").map_err(|error| error.to_string())?;
+    writeln!(stream).map_err(|error| error.to_string())?;
     writeln!(stream, "utility subcommands:").map_err(|error| error.to_string())?;
     writeln!(
         stream,
@@ -813,11 +703,6 @@ fn print_usage(stream: &mut dyn Write) -> Result<(), String> {
     writeln!(
         stream,
         "  print-config             print resolved backend configuration as JSON"
-    )
-    .map_err(|error| error.to_string())?;
-    writeln!(
-        stream,
-        "  inspect-decode           inspect decode-relevant DICOM metadata as JSON"
     )
     .map_err(|error| error.to_string())?;
     writeln!(
@@ -842,11 +727,6 @@ fn print_usage(stream: &mut dyn Write) -> Result<(), String> {
     .map_err(|error| error.to_string())?;
     writeln!(
         stream,
-        "  export-secondary-capture render, process, and write a DICOM export"
-    )
-    .map_err(|error| error.to_string())?;
-    writeln!(
-        stream,
         "  list-commands            print supported command names"
     )
     .map_err(|error| error.to_string())?;
@@ -860,21 +740,19 @@ fn print_usage(stream: &mut dyn Write) -> Result<(), String> {
 fn print_legacy_usage(stream: &mut dyn Write) -> Result<(), String> {
     writeln!(stream, "usage: xrayview-backend-rs [workflow flags]")
         .map_err(|error| error.to_string())?;
-    writeln!(stream, "").map_err(|error| error.to_string())?;
+    writeln!(stream).map_err(|error| error.to_string())?;
     writeln!(stream, "input / output:").map_err(|error| error.to_string())?;
     writeln!(
         stream,
-        "  --input <study.dcm>           path to the source DICOM study"
+        "  --input <image.bmp>           path to the source BMP image"
     )
     .map_err(|error| error.to_string())?;
-    writeln!(stream, "  --output <study.dcm>          output DICOM path")
-        .map_err(|error| error.to_string())?;
     writeln!(
         stream,
         "  --preview-output <image.png>  PNG preview output path"
     )
     .map_err(|error| error.to_string())?;
-    writeln!(stream, "").map_err(|error| error.to_string())?;
+    writeln!(stream).map_err(|error| error.to_string())?;
     writeln!(stream, "metadata:").map_err(|error| error.to_string())?;
     writeln!(
         stream,
@@ -886,7 +764,7 @@ fn print_legacy_usage(stream: &mut dyn Write) -> Result<(), String> {
         "  --describe-study              print study measurement metadata as JSON"
     )
     .map_err(|error| error.to_string())?;
-    writeln!(stream, "").map_err(|error| error.to_string())?;
+    writeln!(stream).map_err(|error| error.to_string())?;
     writeln!(stream, "processing:").map_err(|error| error.to_string())?;
     writeln!(
         stream,
@@ -920,150 +798,10 @@ fn print_legacy_usage(stream: &mut dyn Write) -> Result<(), String> {
 }
 
 fn format_duration(duration: std::time::Duration) -> String {
-    if duration.as_millis() % 1000 == 0 {
+    if duration.as_millis().is_multiple_of(1000) {
         format!("{}s", duration.as_secs())
     } else {
         format!("{}ms", duration.as_millis())
-    }
-}
-
-fn is_uncompressed_transfer_syntax(uid: &str) -> bool {
-    matches!(
-        uid,
-        "" | IMPLICIT_LITTLE_ENDIAN_TRANSFER_SYNTAX
-            | EXPLICIT_LITTLE_ENDIAN_TRANSFER_SYNTAX
-            | EXPLICIT_BIG_ENDIAN_TRANSFER_SYNTAX
-            | DEFLATED_TRANSFER_SYNTAX
-    )
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct DecodeInspectionReport {
-    studies: Vec<DecodeProfile>,
-    summary: DecodeCorpusSummary,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct DecodeProfile {
-    path: String,
-    rows: u16,
-    columns: u16,
-    samples_per_pixel: u16,
-    bits_allocated: u16,
-    bits_stored: u16,
-    pixel_representation: u16,
-    planar_configuration: u16,
-    number_of_frames: u32,
-    pixel_data_encoding: String,
-    photometric_interpretation: String,
-    transfer_syntax_uid: String,
-}
-
-impl DecodeProfile {
-    fn from_metadata(path: &str, metadata: &Metadata) -> Self {
-        Self {
-            path: path.to_string(),
-            rows: metadata.rows,
-            columns: metadata.columns,
-            samples_per_pixel: metadata.samples_per_pixel,
-            bits_allocated: metadata.bits_allocated,
-            bits_stored: metadata.bits_stored,
-            pixel_representation: metadata.pixel_representation,
-            planar_configuration: metadata.planar_configuration,
-            number_of_frames: metadata.number_of_frames,
-            pixel_data_encoding: metadata.pixel_data_encoding.clone(),
-            photometric_interpretation: metadata.photometric_interpretation.clone(),
-            transfer_syntax_uid: metadata.transfer_syntax_uid.clone(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct DecodeCorpusSummary {
-    study_count: usize,
-    transfer_syntax_uids: Vec<String>,
-    pixel_data_encodings: Vec<String>,
-    photometric_interpretations: Vec<String>,
-    samples_per_pixel_values: Vec<u16>,
-    bits_allocated_values: Vec<u16>,
-    number_of_frames_values: Vec<u32>,
-    encapsulated_study_count: usize,
-    compressed_transfer_syntax_study_count: usize,
-    color_study_count: usize,
-    multi_frame_study_count: usize,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    warnings: Vec<String>,
-}
-
-impl DecodeCorpusSummary {
-    fn from_profiles(profiles: &[DecodeProfile]) -> Self {
-        let mut transfer_syntax_uids = BTreeSet::new();
-        let mut pixel_data_encodings = BTreeSet::new();
-        let mut photometric_interpretations = BTreeSet::new();
-        let mut samples_per_pixel_values = BTreeSet::new();
-        let mut bits_allocated_values = BTreeSet::new();
-        let mut number_of_frames_values = BTreeSet::new();
-        let mut encapsulated_study_count = 0;
-        let mut compressed_transfer_syntax_study_count = 0;
-        let mut color_study_count = 0;
-        let mut multi_frame_study_count = 0;
-
-        for profile in profiles {
-            transfer_syntax_uids.insert(profile.transfer_syntax_uid.clone());
-            pixel_data_encodings.insert(profile.pixel_data_encoding.clone());
-            photometric_interpretations.insert(profile.photometric_interpretation.clone());
-            samples_per_pixel_values.insert(profile.samples_per_pixel);
-            bits_allocated_values.insert(profile.bits_allocated);
-            number_of_frames_values.insert(profile.number_of_frames);
-            if profile.pixel_data_encoding == dicom::PIXEL_DATA_ENCODING_ENCAPSULATED {
-                encapsulated_study_count += 1;
-            }
-            if !is_uncompressed_transfer_syntax(&profile.transfer_syntax_uid) {
-                compressed_transfer_syntax_study_count += 1;
-            }
-            if profile.samples_per_pixel > 1 {
-                color_study_count += 1;
-            }
-            if profile.number_of_frames > 1 {
-                multi_frame_study_count += 1;
-            }
-        }
-
-        let mut warnings = Vec::new();
-        if profiles.is_empty() {
-            warnings.push("no studies inspected".to_string());
-        } else {
-            if transfer_syntax_uids.len() == 1 {
-                warnings.push("sample set contains one transfer syntax".to_string());
-            }
-            if encapsulated_study_count == 0 {
-                warnings.push("sample set contains no encapsulated pixel data".to_string());
-            }
-            if compressed_transfer_syntax_study_count == 0 {
-                warnings.push("sample set contains no compressed transfer syntaxes".to_string());
-            }
-            if multi_frame_study_count == 0 {
-                warnings.push("sample set contains no multi-frame studies".to_string());
-            }
-        }
-
-        Self {
-            study_count: profiles.len(),
-            transfer_syntax_uids: transfer_syntax_uids.into_iter().collect(),
-            pixel_data_encodings: pixel_data_encodings.into_iter().collect(),
-            photometric_interpretations: photometric_interpretations.into_iter().collect(),
-            samples_per_pixel_values: samples_per_pixel_values.into_iter().collect(),
-            bits_allocated_values: bits_allocated_values.into_iter().collect(),
-            number_of_frames_values: number_of_frames_values.into_iter().collect(),
-            encapsulated_study_count,
-            compressed_transfer_syntax_study_count,
-            color_study_count,
-            multi_frame_study_count,
-            warnings,
-        }
     }
 }
 
@@ -1076,26 +814,16 @@ struct DecodeSourceSummary {
     pixel_count: usize,
     min_value: u8,
     max_value: u8,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    default_window: Option<WindowLevelSummary>,
     invert: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     measurement_scale: Option<MeasurementScale>,
-    study_instance_uid: String,
-    preserved_element_count: usize,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct WindowLevelSummary {
-    center: f64,
-    width: f64,
 }
 
 impl DecodeSourceSummary {
     fn from_rendered_and_metadata(rendered: RenderedPreview, metadata: &Metadata) -> Self {
         let min_value = rendered.pixels.iter().copied().min().unwrap_or_default();
         let max_value = rendered.pixels.iter().copied().max().unwrap_or_default();
+        let measurement_scale = rendered.measurement_scale.or_else(|| metadata.measurement_scale());
         Self {
             width: rendered.width,
             height: rendered.height,
@@ -1103,14 +831,8 @@ impl DecodeSourceSummary {
             pixel_count: rendered.pixels.len(),
             min_value,
             max_value,
-            default_window: metadata
-                .window_center
-                .zip(metadata.window_width)
-                .map(|(center, width)| WindowLevelSummary { center, width }),
             invert: false,
-            measurement_scale: rendered.measurement_scale,
-            study_instance_uid: metadata.study_instance_uid.clone(),
-            preserved_element_count: metadata.preserved_elements.len(),
+            measurement_scale,
         }
     }
 }
@@ -1118,7 +840,6 @@ impl DecodeSourceSummary {
 #[derive(Debug, Clone, Default, PartialEq)]
 struct LegacyOptions {
     input: String,
-    output: String,
     preview_output: String,
     describe_presets: bool,
     describe_study: bool,
@@ -1221,21 +942,6 @@ struct ProcessPreviewSummary {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct ExportSecondaryCaptureSummary {
-    dicom_output: String,
-    loaded_width: u32,
-    loaded_height: u32,
-    window_mode: &'static str,
-    mode: String,
-    palette: String,
-    compare: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    measurement_scale: Option<MeasurementScale>,
-    rendered_byte_count: usize,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
 struct AnalyzePreviewSummary {
     preview_output: String,
     loaded_width: u32,
@@ -1266,7 +972,7 @@ mod tests {
 
         assert_eq!(
             String::from_utf8(stdout).unwrap(),
-            "xrayview-backend contract-v1\n"
+            "xrayview-backend contract-v2\n"
         );
         assert!(stderr.is_empty());
     }
@@ -1284,7 +990,7 @@ mod tests {
             "--palette",
             "BONE",
             "--compare",
-            "input.dcm",
+            "input.bmp",
             "output.png",
         ])
         .unwrap();
@@ -1296,7 +1002,7 @@ mod tests {
         assert_eq!(options.controls.contrast, 1.4);
         assert_eq!(options.palette, "bone");
         assert!(options.compare);
-        assert_eq!(options.input_path, Path::new("input.dcm"));
+        assert_eq!(options.input_path, Path::new("input.bmp"));
         assert_eq!(options.output_path, Path::new("output.png"));
     }
 
@@ -1304,14 +1010,10 @@ mod tests {
     fn render_and_process_preview_write_pngs() {
         let root = unique_temp_dir("preview");
         fs::create_dir_all(&root).unwrap();
-        let input = root.join("study.dcm");
+        let input = root.join("study.bmp");
         let render_output = root.join("render.png");
         let process_output = root.join("process.png");
-        fs::write(
-            &input,
-            dicom::tests::build_renderable_test_dicom(Some("0.20\\0.30")),
-        )
-        .unwrap();
+        fs::write(&input, build_renderable_test_bmp()).unwrap();
 
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
@@ -1349,96 +1051,11 @@ mod tests {
     }
 
     #[test]
-    fn render_preview_full_range_ignores_embedded_window() {
-        let root = unique_temp_dir("preview-full-range");
-        fs::create_dir_all(&root).unwrap();
-        let input = root.join("study.dcm");
-        let default_output = root.join("default.png");
-        let full_range_output = root.join("full-range.png");
-        fs::write(
-            &input,
-            dicom::tests::build_windowed_renderable_test_dicom(b"\x00\x40\x80"),
-        )
-        .unwrap();
-
-        let mut stdout = Vec::new();
-        let mut stderr = Vec::new();
-        run_args(
-            &[
-                "render-preview",
-                input.to_str().unwrap(),
-                default_output.to_str().unwrap(),
-            ],
-            &mut stdout,
-            &mut stderr,
-        )
-        .unwrap();
-
-        stdout.clear();
-        run_args(
-            &[
-                "render-preview",
-                "--full-range",
-                input.to_str().unwrap(),
-                full_range_output.to_str().unwrap(),
-            ],
-            &mut stdout,
-            &mut stderr,
-        )
-        .unwrap();
-
-        let default_png = fs::read(&default_output).unwrap();
-        let full_range_png = fs::read(&full_range_output).unwrap();
-        assert!(default_png.starts_with(b"\x89PNG"));
-        assert!(full_range_png.starts_with(b"\x89PNG"));
-        assert_ne!(default_png, full_range_png);
-
-        let summary: serde_json::Value = serde_json::from_slice(&stdout).unwrap();
-        assert_eq!(summary["windowMode"], "full-range");
-        let _ = fs::remove_dir_all(root);
-    }
-
-    #[test]
-    fn inspect_decode_reports_summary() {
-        let root = unique_temp_dir("inspect");
-        fs::create_dir_all(&root).unwrap();
-        let input = root.join("study.dcm");
-        fs::write(
-            &input,
-            dicom::tests::build_renderable_test_dicom(Some("0.20\\0.30")),
-        )
-        .unwrap();
-        let mut stdout = Vec::new();
-        let mut stderr = Vec::new();
-
-        run_args(
-            &["inspect-decode", input.to_str().unwrap()],
-            &mut stdout,
-            &mut stderr,
-        )
-        .unwrap();
-
-        let report: serde_json::Value = serde_json::from_slice(&stdout).unwrap();
-        assert_eq!(report["studies"][0]["rows"], 2);
-        assert_eq!(report["studies"][0]["columns"], 4);
-        assert_eq!(report["summary"]["studyCount"], 1);
-        let _ = fs::remove_dir_all(root);
-    }
-
-    #[test]
-    fn decode_source_reports_source_identity_metadata() {
+    fn decode_source_reports_bmp_metadata() {
         let root = unique_temp_dir("decode-source");
         fs::create_dir_all(&root).unwrap();
-        let input = root.join("study.dcm");
-        fs::write(
-            &input,
-            dicom::tests::build_renderable_test_dicom_with_source_metadata(
-                Some("0.20\\0.30"),
-                "1.2.3.4.5",
-                "Test^Patient",
-            ),
-        )
-        .unwrap();
+        let input = root.join("study.bmp");
+        fs::write(&input, build_renderable_test_bmp()).unwrap();
 
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
@@ -1450,10 +1067,9 @@ mod tests {
         .unwrap();
 
         let summary: serde_json::Value = serde_json::from_slice(&stdout).unwrap();
-        assert_eq!(summary["studyInstanceUid"], "1.2.3.4.5");
-        assert_eq!(summary["preservedElementCount"], 2);
-        assert_eq!(summary["measurementScale"]["rowSpacingMm"], 0.2);
-        assert_eq!(summary["measurementScale"]["columnSpacingMm"], 0.3);
+        assert_eq!(summary["width"], 4);
+        assert_eq!(summary["height"], 2);
+        assert!(summary.get("measurementScale").is_none());
         let _ = fs::remove_dir_all(root);
     }
 
@@ -1461,12 +1077,8 @@ mod tests {
     fn legacy_describe_commands_return_compact_json() {
         let root = unique_temp_dir("legacy-describe");
         fs::create_dir_all(&root).unwrap();
-        let input = root.join("study.dcm");
-        fs::write(
-            &input,
-            dicom::tests::build_renderable_test_dicom(Some("0.20\\0.30")),
-        )
-        .unwrap();
+        let input = root.join("study.bmp");
+        fs::write(&input, build_renderable_test_bmp()).unwrap();
 
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
@@ -1485,8 +1097,7 @@ mod tests {
         )
         .unwrap();
         let study: serde_json::Value = serde_json::from_slice(&stdout).unwrap();
-        assert_eq!(study["measurementScale"]["rowSpacingMm"], 0.2);
-        assert_eq!(study["measurementScale"]["columnSpacingMm"], 0.3);
+        assert!(study.get("measurementScale").is_none());
         let _ = fs::remove_dir_all(root);
     }
 
@@ -1494,15 +1105,10 @@ mod tests {
     fn legacy_preview_and_process_write_expected_artifacts() {
         let root = unique_temp_dir("legacy-artifacts");
         fs::create_dir_all(&root).unwrap();
-        let input = root.join("study.dcm");
+        let input = root.join("study.bmp");
         let preview_output = root.join("preview.png");
         let processed_preview_output = root.join("processed-preview.png");
-        let dicom_output = root.join("processed.dcm");
-        fs::write(
-            &input,
-            dicom::tests::build_renderable_test_dicom(Some("0.20\\0.30")),
-        )
-        .unwrap();
+        fs::write(&input, build_renderable_test_bmp()).unwrap();
 
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
@@ -1519,7 +1125,7 @@ mod tests {
         .unwrap();
         let preview_stdout = String::from_utf8(stdout.clone()).unwrap();
         assert!(fs::read(&preview_output).unwrap().starts_with(b"\x89PNG"));
-        assert!(preview_stdout.contains("loaded dicom image: 4x2"));
+        assert!(preview_stdout.contains("loaded BMP image: 4x2"));
         assert!(preview_stdout.contains("saved grayscale preview image:"));
 
         stdout.clear();
@@ -1529,8 +1135,6 @@ mod tests {
                 input.to_str().unwrap(),
                 "--preview-output",
                 processed_preview_output.to_str().unwrap(),
-                "--output",
-                dicom_output.to_str().unwrap(),
                 "--preset",
                 "xray",
                 "--invert=false",
@@ -1545,24 +1149,18 @@ mod tests {
                 .unwrap()
                 .starts_with(b"\x89PNG")
         );
-        assert!(fs::read(&dicom_output).unwrap().starts_with(&[0; 4]));
-        assert!(process_stdout.contains("loaded dicom image: 4x2"));
+        assert!(process_stdout.contains("loaded BMP image: 4x2"));
         assert!(process_stdout.contains("preview image:"));
-        assert!(process_stdout.contains("dicom image:"));
         let _ = fs::remove_dir_all(root);
     }
 
     #[test]
-    fn legacy_process_uses_default_output_path_when_no_outputs_are_given() {
+    fn legacy_process_uses_default_preview_path_when_no_outputs_are_given() {
         let root = unique_temp_dir("legacy-default-output");
         fs::create_dir_all(&root).unwrap();
-        let input = root.join("study.dcm");
-        let output = root.join("study_processed.dcm");
-        fs::write(
-            &input,
-            dicom::tests::build_renderable_test_dicom(Some("0.20\\0.30")),
-        )
-        .unwrap();
+        let input = root.join("study.bmp");
+        let output = root.join("study_processed.png");
+        fs::write(&input, build_renderable_test_bmp()).unwrap();
 
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
@@ -1612,5 +1210,22 @@ mod tests {
             "xrayview-rs-cli-{name}-{}-{nanos}",
             std::process::id()
         ))
+    }
+
+    fn build_renderable_test_bmp() -> Vec<u8> {
+        crate::bmp::tests::build_bmp_32(
+            4,
+            2,
+            &[
+                (0, 0, 0),
+                (36, 36, 36),
+                (72, 72, 72),
+                (108, 108, 108),
+                (144, 144, 144),
+                (180, 180, 180),
+                (216, 216, 216),
+                (255, 255, 255),
+            ],
+        )
     }
 }

@@ -127,16 +127,16 @@ impl Router {
             .header("Origin")
             .filter(|origin| !origin.is_empty())
             .map(str::to_string);
-        if let Some(origin) = origin.as_deref() {
-            if !is_allowed_origin(origin) {
-                return Response::json(
-                    403,
-                    &BackendError::invalid_input(
-                        "request origin is not allowed for the local backend transport",
-                    )
-                    .with_details([origin.to_string()]),
-                );
-            }
+        if let Some(origin) = origin.as_deref()
+            && !is_allowed_origin(origin)
+        {
+            return Response::json(
+                403,
+                &BackendError::invalid_input(
+                    "request origin is not allowed for the local backend transport",
+                )
+                .with_details([origin.to_string()]),
+            );
         }
 
         if request.method == "OPTIONS" {
@@ -398,19 +398,19 @@ impl Router {
             .header("Origin")
             .filter(|origin| !origin.is_empty())
             .map(str::to_string);
-        if let Some(origin) = origin.as_deref() {
-            if !is_allowed_origin(origin) {
-                return write_http_response(
-                    stream,
-                    Response::json(
-                        403,
-                        &BackendError::invalid_input(
-                            "request origin is not allowed for the local backend transport",
-                        )
-                        .with_details([origin.to_string()]),
-                    ),
-                );
-            }
+        if let Some(origin) = origin.as_deref()
+            && !is_allowed_origin(origin)
+        {
+            return write_http_response(
+                stream,
+                Response::json(
+                    403,
+                    &BackendError::invalid_input(
+                        "request origin is not allowed for the local backend transport",
+                    )
+                    .with_details([origin.to_string()]),
+                ),
+            );
         }
 
         let subscription = self.app.subscribe_job_updates();
@@ -886,12 +886,8 @@ mod tests {
         let cache_dir = temp_dir.join("cache");
         let state_dir = temp_dir.join("state");
         fs::create_dir_all(&temp_dir).unwrap();
-        let input_path = temp_dir.join("sample.dcm");
-        fs::write(
-            &input_path,
-            crate::dicom::tests::build_renderable_test_dicom(Some("0.20\\0.30")),
-        )
-        .unwrap();
+        let input_path = temp_dir.join("sample.bmp");
+        fs::write(&input_path, build_renderable_test_bmp()).unwrap();
 
         let mut config = Config::default();
         config.paths.cache_dir = cache_dir;
@@ -996,7 +992,7 @@ mod tests {
     fn command_endpoint_rejects_trailing_json_content() {
         let response = test_router().handle(
             Request::new("POST", format!("{COMMANDS_PATH}/open_study"))
-                .with_body(br#"{"inputPath":"/tmp/missing.dcm"} true"#.to_vec()),
+                .with_body(br#"{"inputPath":"/tmp/missing.bmp"} true"#.to_vec()),
         );
         let payload: serde_json::Value = serde_json::from_slice(&response.body).unwrap();
 
@@ -1009,7 +1005,7 @@ mod tests {
     fn measure_line_annotation_returns_measured_pixels() {
         let app = Arc::new(App::new(Config::default()).unwrap());
         let study = app
-            .register_study("/tmp/manual-measurement.dcm", None)
+            .register_study("/tmp/manual-measurement.bmp", None)
             .unwrap();
         let router = Router::new(app);
         let body = serde_json::json!({
@@ -1066,12 +1062,8 @@ mod tests {
         let cache_dir = temp_dir.join("cache");
         let state_dir = temp_dir.join("state");
         fs::create_dir_all(&temp_dir).unwrap();
-        let input_path = temp_dir.join("sample.dcm");
-        fs::write(
-            &input_path,
-            crate::dicom::tests::build_renderable_test_dicom(Some("0.20\\0.30")),
-        )
-        .unwrap();
+        let input_path = temp_dir.join("sample.bmp");
+        fs::write(&input_path, build_renderable_test_bmp()).unwrap();
 
         let mut config = Config::default();
         config.paths.cache_dir = cache_dir;
@@ -1119,18 +1111,14 @@ mod tests {
     }
 
     #[test]
-    fn process_job_commands_complete_preview_and_dicom_over_http() {
+    fn process_job_commands_complete_preview_over_http() {
         let temp_dir =
             std::env::temp_dir().join(format!("xrayview-rs-http-process-{}", std::process::id()));
         let cache_dir = temp_dir.join("cache");
         let state_dir = temp_dir.join("state");
         fs::create_dir_all(&temp_dir).unwrap();
-        let input_path = temp_dir.join("sample.dcm");
-        fs::write(
-            &input_path,
-            crate::dicom::tests::build_renderable_test_dicom(Some("0.20\\0.30")),
-        )
-        .unwrap();
+        let input_path = temp_dir.join("sample.bmp");
+        fs::write(&input_path, build_renderable_test_bmp()).unwrap();
 
         let mut config = Config::default();
         config.paths.cache_dir = cache_dir;
@@ -1183,12 +1171,6 @@ mod tests {
             .unwrap()
             .is_file()
         );
-        assert!(
-            fs::metadata(snapshot["result"]["payload"]["dicomPath"].as_str().unwrap())
-                .unwrap()
-                .is_file()
-        );
-
         let _ = fs::remove_file(input_path);
         let _ = fs::remove_dir_all(temp_dir);
     }
@@ -1200,17 +1182,8 @@ mod tests {
         let cache_dir = temp_dir.join("cache");
         let state_dir = temp_dir.join("state");
         fs::create_dir_all(&temp_dir).unwrap();
-        let input_path = temp_dir.join("sample.dcm");
-        fs::write(
-            &input_path,
-            crate::dicom::tests::build_renderable_test_dicom_with_pixels(
-                20,
-                20,
-                Some("0.20\\0.30"),
-                analyze_fixture_pixels(),
-            ),
-        )
-        .unwrap();
+        let input_path = temp_dir.join("sample.bmp");
+        fs::write(&input_path, build_analysis_test_bmp()).unwrap();
 
         let mut config = Config::default();
         config.paths.cache_dir = cache_dir;
@@ -1286,6 +1259,31 @@ mod tests {
             pixels
         };
         &PIXELS
+    }
+
+    fn build_renderable_test_bmp() -> Vec<u8> {
+        crate::bmp::tests::build_bmp_32(
+            4,
+            2,
+            &[
+                (0, 0, 0),
+                (36, 36, 36),
+                (72, 72, 72),
+                (108, 108, 108),
+                (144, 144, 144),
+                (180, 180, 180),
+                (216, 216, 216),
+                (255, 255, 255),
+            ],
+        )
+    }
+
+    fn build_analysis_test_bmp() -> Vec<u8> {
+        let pixels = analyze_fixture_pixels()
+            .iter()
+            .map(|value| (*value, *value, *value))
+            .collect::<Vec<_>>();
+        crate::bmp::tests::build_bmp_32(20, 20, &pixels)
     }
 
     #[test]

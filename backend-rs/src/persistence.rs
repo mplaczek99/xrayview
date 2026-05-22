@@ -255,16 +255,16 @@ mod tests {
         });
 
         catalog
-            .record_opened_study(&study("/tmp/one.dcm", "one.dcm"))
+            .record_opened_study(&study("/tmp/one.bmp", "one.bmp"))
             .unwrap();
         catalog
-            .record_opened_study(&study("/tmp/two.dcm", "two.dcm"))
+            .record_opened_study(&study("/tmp/two.bmp", "two.bmp"))
             .unwrap();
 
         let value = catalog.load().unwrap();
         assert_eq!(value.recent_studies.len(), 2);
-        assert_eq!(value.recent_studies[0].input_name, "two.dcm");
-        assert_eq!(value.recent_studies[1].input_name, "one.dcm");
+        assert_eq!(value.recent_studies[0].input_name, "two.bmp");
+        assert_eq!(value.recent_studies[1].input_name, "one.bmp");
 
         let _ = fs::remove_dir_all(root);
     }
@@ -319,8 +319,8 @@ mod tests {
             br#"{
               "recentStudies": [
                 {
-                  "inputPath": "/tmp/one.dcm",
-                  "inputName": "one.dcm",
+                  "inputPath": "/tmp/one.bmp",
+                  "inputName": "one.bmp",
                   "extra": true
                 }
               ],
@@ -333,8 +333,8 @@ mod tests {
         let value = catalog.load().unwrap();
 
         assert_eq!(value.recent_studies.len(), 1);
-        assert_eq!(value.recent_studies[0].input_path, "/tmp/one.dcm");
-        assert_eq!(value.recent_studies[0].input_name, "one.dcm");
+        assert_eq!(value.recent_studies[0].input_path, "/tmp/one.bmp");
+        assert_eq!(value.recent_studies[0].input_name, "one.bmp");
         assert_eq!(value.recent_studies[0].measurement_scale, None);
         assert_eq!(value.recent_studies[0].last_opened_at, "");
         let _ = fs::remove_dir_all(root);
@@ -352,12 +352,12 @@ mod tests {
         let catalog = Catalog::new(&root);
 
         catalog
-            .record_opened_study(&study("/tmp/recovered.dcm", "recovered.dcm"))
+            .record_opened_study(&study("/tmp/recovered.bmp", "recovered.bmp"))
             .unwrap();
         let value = catalog.load().unwrap();
 
         assert_eq!(value.recent_studies.len(), 1);
-        assert_eq!(value.recent_studies[0].input_name, "recovered.dcm");
+        assert_eq!(value.recent_studies[0].input_name, "recovered.bmp");
         assert!(
             fs::metadata(root.join("catalog.corrupt.json"))
                 .unwrap()
@@ -374,19 +374,19 @@ mod tests {
         let catalog = Catalog::new(&root);
 
         catalog
-            .record_opened_study(&study("/tmp/one.dcm", "one.dcm"))
+            .record_opened_study(&study("/tmp/one.bmp", "one.bmp"))
             .unwrap();
         catalog
-            .record_opened_study(&study("/tmp/two.dcm", "two.dcm"))
+            .record_opened_study(&study("/tmp/two.bmp", "two.bmp"))
             .unwrap();
         catalog
-            .record_opened_study(&study("/tmp/one.dcm", "one.dcm"))
+            .record_opened_study(&study("/tmp/one.bmp", "one.bmp"))
             .unwrap();
         let value = catalog.load().unwrap();
 
         assert_eq!(value.recent_studies.len(), 2);
-        assert_eq!(value.recent_studies[0].input_path, "/tmp/one.dcm");
-        assert_eq!(value.recent_studies[1].input_path, "/tmp/two.dcm");
+        assert_eq!(value.recent_studies[0].input_path, "/tmp/one.bmp");
+        assert_eq!(value.recent_studies[1].input_path, "/tmp/two.bmp");
         let _ = fs::remove_dir_all(root);
     }
 
@@ -398,7 +398,7 @@ mod tests {
         let catalog = Catalog::new(&root);
 
         for index in 0..12 {
-            let input_name = format!("study-{index:02}.dcm");
+            let input_name = format!("study-{index:02}.bmp");
             catalog
                 .record_opened_study(&study(format!("/tmp/{input_name}"), input_name))
                 .unwrap();
@@ -406,10 +406,10 @@ mod tests {
         let value = catalog.load().unwrap();
 
         assert_eq!(value.recent_studies.len(), RECENT_STUDY_LIMIT);
-        assert_eq!(value.recent_studies[0].input_name, "study-11.dcm");
+        assert_eq!(value.recent_studies[0].input_name, "study-11.bmp");
         assert_eq!(
             value.recent_studies[RECENT_STUDY_LIMIT - 1].input_name,
-            "study-02.dcm"
+            "study-02.bmp"
         );
         let _ = fs::remove_dir_all(root);
     }
@@ -425,7 +425,7 @@ mod tests {
                 .unwrap()
                 .into()
         });
-        let mut opened = study("/tmp/scaled.dcm", "scaled.dcm");
+        let mut opened = study("/tmp/scaled.bmp", "scaled.bmp");
         opened.measurement_scale = Some(MeasurementScale {
             row_spacing_mm: 0.2,
             column_spacing_mm: 0.3,

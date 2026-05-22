@@ -7,7 +7,7 @@ use std::{
 };
 
 use crate::contracts::BackendError;
-use crate::dicom::RenderedPreview;
+use crate::bmp::RenderedPreview;
 
 pub const DEFAULT_ROOT_DIR_NAME: &str = "xrayview";
 pub const CACHE_DIR_NAME: &str = "cache";

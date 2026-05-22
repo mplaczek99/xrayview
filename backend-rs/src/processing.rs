@@ -45,20 +45,20 @@ pub fn resolve_process_study_command(
             ))
         })?;
 
-    if let Some(brightness) = command.brightness {
-        if !(-256..=256).contains(&brightness) {
-            return Err(BackendError::invalid_input(format!(
-                "brightness must be between -256 and 256, got {brightness}"
-            )));
-        }
+    if let Some(brightness) = command.brightness
+        && !(-256..=256).contains(&brightness)
+    {
+        return Err(BackendError::invalid_input(format!(
+            "brightness must be between -256 and 256, got {brightness}"
+        )));
     }
 
-    if let Some(contrast) = command.contrast {
-        if !contrast.is_finite() || contrast < 0.0 {
-            return Err(BackendError::invalid_input(format!(
-                "contrast must be >= 0.0, got {contrast}"
-            )));
-        }
+    if let Some(contrast) = command.contrast
+        && (!contrast.is_finite() || contrast < 0.0)
+    {
+        return Err(BackendError::invalid_input(format!(
+            "contrast must be >= 0.0, got {contrast}"
+        )));
     }
 
     let palette = command
@@ -376,7 +376,6 @@ mod tests {
     fn resolve_process_study_command_uses_preset_defaults() {
         let resolved = resolve_process_study_command(&ProcessStudyCommand {
             study_id: "study-1".to_string(),
-            output_path: None,
             preset_id: "xray".to_string(),
             invert: false,
             brightness: None,

@@ -414,7 +414,7 @@ fn bone_tooth_cutout_bridge_radius(width: usize, height: usize) -> usize {
 }
 
 fn minimum_bone_outline_area_pixels(width: usize, height: usize) -> usize {
-    (width * height / 1000).max(16).min(128)
+    (width * height / 1000).clamp(16, 128)
 }
 
 fn inner_outline_mask(mask: &[bool], width: usize, height: usize, thickness: usize) -> Vec<bool> {
@@ -1051,6 +1051,7 @@ fn decode_learned_model(data: &[u8]) -> Result<Vec<Vec<LearnedNode>>, String> {
     Ok(trees)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn learned_features(
     x: usize,
     y: usize,

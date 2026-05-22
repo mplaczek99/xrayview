@@ -5,7 +5,7 @@ pub mod cache;
 pub mod cli;
 pub mod config;
 pub mod contracts;
-pub mod dicom;
+pub mod bmp;
 pub mod http;
 pub mod persistence;
 pub mod processing;

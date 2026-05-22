@@ -20,6 +20,7 @@ use serde::Serialize;
 
 use crate::{
     analysis, annotations,
+    bmp,
     cache::{SourcePreviewCache, Store},
     config::Config,
     contracts::{
@@ -30,7 +31,7 @@ use crate::{
         RenderStudyCommand, RenderStudyCommandResult, StartedJob, StudyRecord,
         default_processing_manifest,
     },
-    dicom, persistence, processing, render,
+    persistence, processing, render,
 };
 
 pub struct App {
@@ -493,7 +494,7 @@ impl App {
             )));
         }
 
-        let metadata = dicom::read_file(&command.input_path).map_err(|error| {
+        let metadata = bmp::read_file(&command.input_path).map_err(|error| {
             BackendError::invalid_input(format!("failed to read study metadata: {error}"))
         })?;
 
@@ -618,30 +619,13 @@ impl App {
         .map_err(|error| BackendError::internal(format!("process source preview: {error}")))?;
 
         let preview_path = self.cache.artifact_path("process", fingerprint, "png")?;
-        let dicom_path =
-            self.resolve_process_output_path(command.output_path.as_deref(), fingerprint)?;
 
         render::save_preview_png(&preview_path, &output.preview).map_err(BackendError::internal)?;
         self.track_artifact_bytes(&preview_path);
-        let secondary_capture_options = self.secondary_capture_options(
-            study,
-            source
-                .measurement_scale
-                .as_ref()
-                .or(study.measurement_scale.as_ref()),
-        );
-        dicom::write_secondary_capture_file_with_options(
-            &dicom_path,
-            &output.preview,
-            &secondary_capture_options,
-        )
-        .map_err(BackendError::internal)?;
-        self.track_artifact_bytes(&dicom_path);
 
         let result = ProcessStudyCommandResult {
             study_id: study.study_id.clone(),
             preview_path: preview_path.display().to_string(),
-            dicom_path: dicom_path.display().to_string(),
             loaded_width: source.width,
             loaded_height: source.height,
             mode: output.mode,
@@ -710,52 +694,6 @@ impl App {
         ))
     }
 
-    fn resolve_process_output_path(
-        &self,
-        output_path: Option<&str>,
-        fingerprint: &str,
-    ) -> Result<std::path::PathBuf, BackendError> {
-        let Some(output_path) = output_path else {
-            return self.cache.artifact_path("process", fingerprint, "dcm");
-        };
-
-        let trimmed = output_path.trim();
-        if trimmed.is_empty() {
-            return Err(BackendError::invalid_input(
-                "outputPath is required when provided",
-            ));
-        }
-        let path = Path::new(trimmed);
-        if fs::metadata(path).is_ok_and(|metadata| metadata.is_dir()) {
-            return Err(BackendError::invalid_input(format!(
-                "output path must be a file: {}",
-                path.display()
-            )));
-        }
-
-        let parent = path.parent().unwrap_or_else(|| Path::new("."));
-        let metadata = fs::metadata(parent).map_err(|error| {
-            if error.kind() == std::io::ErrorKind::NotFound {
-                BackendError::not_found(format!(
-                    "output directory does not exist: {}",
-                    parent.display()
-                ))
-            } else {
-                BackendError::internal(format!(
-                    "inspect output directory {}: {error}",
-                    parent.display()
-                ))
-            }
-        })?;
-        if !metadata.is_dir() {
-            return Err(BackendError::invalid_input(format!(
-                "output directory must be a directory: {}",
-                parent.display()
-            )));
-        }
-        Ok(path.to_path_buf())
-    }
-
     fn publish_job_update(&self, snapshot: &JobSnapshot) {
         let mut subscribers = self
             .job_update_subscribers
@@ -770,11 +708,11 @@ impl App {
     fn load_source_preview(
         &self,
         study: &StudyRecord,
-    ) -> Result<dicom::RenderedPreview, BackendError> {
+    ) -> Result<bmp::RenderedPreview, BackendError> {
         let cache_key = input_cache_key(&study.input_path);
         self.source_preview_cache
             .get_or_try_insert_with(cache_key, || {
-                dicom::render_grayscale_preview_file(&study.input_path).map_err(|error| {
+                bmp::render_grayscale_preview_file(&study.input_path).map_err(|error| {
                     BackendError::invalid_input(format!("failed to render study: {error}"))
                 })
             })
@@ -783,30 +721,14 @@ impl App {
     fn load_analysis_preview(
         &self,
         study: &StudyRecord,
-    ) -> Result<dicom::RenderedPreview, BackendError> {
+    ) -> Result<bmp::RenderedPreview, BackendError> {
         let cache_key = format!("analysis\0{}", input_cache_key(&study.input_path));
         self.source_preview_cache
             .get_or_try_insert_with(cache_key, || {
-                dicom::render_grayscale_preview_file_for_tooth_analysis(&study.input_path).map_err(
+                bmp::render_grayscale_preview_file_for_tooth_analysis(&study.input_path).map_err(
                     |error| BackendError::invalid_input(format!("failed to render study: {error}")),
                 )
             })
-    }
-
-    fn secondary_capture_options(
-        &self,
-        study: &StudyRecord,
-        measurement_scale: Option<&MeasurementScale>,
-    ) -> dicom::SecondaryCaptureOptions {
-        let mut options = dicom::SecondaryCaptureOptions::new(measurement_scale);
-        if let Ok(metadata) = dicom::read_file(&study.input_path) {
-            let uid = metadata.study_instance_uid.trim();
-            if !uid.is_empty() {
-                options.study_instance_uid = Some(uid.to_string());
-            }
-            options.preserved_elements = metadata.preserved_elements;
-        }
-        options
     }
 
     fn render_fingerprint(&self, study: &StudyRecord) -> Result<String, BackendError> {
@@ -838,7 +760,6 @@ impl App {
             "sessionId": self.cache_session_id,
             "inputPath": study.input_path,
             "inputIdentity": current_input_file_identity(&study.input_path),
-            "outputPath": fingerprint_output_path(command.output_path.as_deref()),
             "presetId": command.preset_id,
             "invert": command.invert,
             "brightness": command.brightness,
@@ -1100,9 +1021,7 @@ impl App {
                 validate_input_file(&study.input_path)?;
                 let resolved = processing::resolve_process_study_command(&command)?;
                 let preview_path = self.cache.artifact_path("process", &fingerprint, "png")?;
-                let dicom_path =
-                    self.resolve_process_output_path(command.output_path.as_deref(), &fingerprint)?;
-                Ok((resolved, preview_path, dicom_path))
+                Ok((resolved, preview_path))
             },
         ) {
             Some(Ok(prepared)) => prepared,
@@ -1121,7 +1040,7 @@ impl App {
             }
             None => return,
         };
-        let (resolved, preview_path, dicom_path) = prepared;
+        let (resolved, preview_path) = prepared;
 
         let source = match self.run_job_stage(
             &job_id,
@@ -1204,51 +1123,7 @@ impl App {
         match written_preview {
             Some(Ok(())) => {}
             Some(Err(error)) => {
-                cleanup_files(&[preview_path.as_path(), dicom_path.as_path()]);
-                self.finish_async_job(
-                    &job_id,
-                    &fingerprint,
-                    failed_job_snapshot(
-                        job_id.clone(),
-                        JobKind::ProcessStudy,
-                        Some(study.study_id.clone()),
-                        error,
-                    ),
-                );
-                return;
-            }
-            None => return,
-        }
-
-        let written_dicom = self.run_job_stage(
-            &job_id,
-            &fingerprint,
-            95,
-            "writingDicom",
-            "Writing processed DICOM",
-            &[preview_path.as_path(), dicom_path.as_path()],
-            || {
-                let secondary_capture_options = self.secondary_capture_options(
-                    &study,
-                    source
-                        .measurement_scale
-                        .as_ref()
-                        .or(study.measurement_scale.as_ref()),
-                );
-                dicom::write_secondary_capture_file_with_options(
-                    &dicom_path,
-                    &output.preview,
-                    &secondary_capture_options,
-                )
-                .map_err(BackendError::internal)?;
-                self.track_artifact_bytes(&dicom_path);
-                Ok(())
-            },
-        );
-        match written_dicom {
-            Some(Ok(())) => {}
-            Some(Err(error)) => {
-                cleanup_files(&[preview_path.as_path(), dicom_path.as_path()]);
+                cleanup_file(&preview_path);
                 self.finish_async_job(
                     &job_id,
                     &fingerprint,
@@ -1267,7 +1142,6 @@ impl App {
         let result = ProcessStudyCommandResult {
             study_id: study.study_id.clone(),
             preview_path: preview_path.display().to_string(),
-            dicom_path: dicom_path.display().to_string(),
             loaded_width: source.width,
             loaded_height: source.height,
             mode: output.mode,
@@ -1506,6 +1380,7 @@ impl App {
         self.publish_job_update(&snapshot);
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn run_job_stage<T>(
         &self,
         job_id: &str,
@@ -1703,14 +1578,6 @@ fn file_mode(_metadata: &fs::Metadata) -> u32 {
     0
 }
 
-fn fingerprint_output_path(output_path: Option<&str>) -> Option<String> {
-    let output_path = output_path?.trim();
-    if output_path.is_empty() {
-        return Some(String::new());
-    }
-    Some(Path::new(output_path).to_string_lossy().to_string())
-}
-
 fn fingerprint_json<T: Serialize>(value: &T) -> Result<String, BackendError> {
     let payload = serde_json::to_vec(value)
         .map_err(|error| BackendError::internal(format!("serialize job fingerprint: {error}")))?;
@@ -1741,9 +1608,7 @@ fn result_artifacts_exist(result: &JobResult) -> bool {
         JobKind::ProcessStudy => serde_json::from_value::<ProcessStudyCommandResult>(
             result.payload.clone(),
         )
-        .is_ok_and(|payload| {
-            artifact_exists(&payload.preview_path) && artifact_exists(&payload.dicom_path)
-        }),
+        .is_ok_and(|payload| artifact_exists(&payload.preview_path)),
     }
 }
 
@@ -1882,7 +1747,6 @@ fn cleanup_result_artifacts(result: &JobResult) {
                 serde_json::from_value::<ProcessStudyCommandResult>(result.payload.clone())
             {
                 cleanup_path(&payload.preview_path);
-                cleanup_path(&payload.dicom_path);
             }
         }
     }
@@ -1934,12 +1798,8 @@ mod tests {
         let temp_dir =
             std::env::temp_dir().join(format!("xrayview-rs-open-study-{}", std::process::id()));
         fs::create_dir_all(&temp_dir).unwrap();
-        let input_path = temp_dir.join("sample.dcm");
-        fs::write(
-            &input_path,
-            dicom::tests::build_test_dicom(Some("0.20\\0.30")),
-        )
-        .unwrap();
+        let input_path = temp_dir.join("sample.bmp");
+        fs::write(&input_path, build_renderable_test_bmp()).unwrap();
 
         let app = App::new(Config::default()).unwrap();
         let result = app
@@ -1949,15 +1809,8 @@ mod tests {
             .unwrap();
 
         assert!(!result.study.study_id.is_empty());
-        assert_eq!(result.study.input_name, "sample.dcm");
-        assert_eq!(
-            result.study.measurement_scale,
-            Some(MeasurementScale {
-                row_spacing_mm: 0.20,
-                column_spacing_mm: 0.30,
-                source: "PixelSpacing".to_string(),
-            })
-        );
+        assert_eq!(result.study.input_name, "sample.bmp");
+        assert_eq!(result.study.measurement_scale, None);
         assert_eq!(app.study_count(), 1);
 
         let _ = fs::remove_file(input_path);
@@ -1973,12 +1826,8 @@ mod tests {
         let cache_dir = temp_dir.join("cache");
         let state_dir = temp_dir.join("state");
         fs::create_dir_all(&temp_dir).unwrap();
-        let input_path = temp_dir.join("sample.dcm");
-        fs::write(
-            &input_path,
-            dicom::tests::build_test_dicom(Some("0.20\\0.30")),
-        )
-        .unwrap();
+        let input_path = temp_dir.join("sample.bmp");
+        fs::write(&input_path, build_renderable_test_bmp()).unwrap();
 
         let mut config = Config::default();
         config.paths.cache_dir = cache_dir;
@@ -1995,7 +1844,7 @@ mod tests {
 
         assert_eq!(catalog.recent_studies.len(), 1);
         assert_eq!(catalog.recent_studies[0].input_path, opened.input_path);
-        assert_eq!(catalog.recent_studies[0].input_name, "sample.dcm");
+        assert_eq!(catalog.recent_studies[0].input_name, "sample.bmp");
         assert_eq!(
             catalog.recent_studies[0].measurement_scale,
             opened.measurement_scale
@@ -2010,7 +1859,7 @@ mod tests {
         let app = App::new(Config::default()).unwrap();
         let study = app
             .register_study(
-                "/tmp/calibrated-measurement.dcm",
+                "/tmp/calibrated-measurement.bmp",
                 Some(MeasurementScale {
                     row_spacing_mm: 0.2,
                     column_spacing_mm: 0.3,
@@ -2047,12 +1896,8 @@ mod tests {
         let cache_dir = temp_dir.join("cache");
         let state_dir = temp_dir.join("state");
         fs::create_dir_all(&temp_dir).unwrap();
-        let input_path = temp_dir.join("sample.dcm");
-        fs::write(
-            &input_path,
-            dicom::tests::build_renderable_test_dicom(Some("0.20\\0.30")),
-        )
-        .unwrap();
+        let input_path = temp_dir.join("sample.bmp");
+        fs::write(&input_path, build_renderable_test_bmp()).unwrap();
 
         let mut config = Config::default();
         config.paths.cache_dir = cache_dir;
@@ -2085,14 +1930,7 @@ mod tests {
         assert_eq!(payload.loaded_width, 4);
         assert_eq!(payload.loaded_height, 2);
         assert!(fs::metadata(&payload.preview_path).unwrap().is_file());
-        assert_eq!(
-            payload.measurement_scale,
-            Some(MeasurementScale {
-                row_spacing_mm: 0.20,
-                column_spacing_mm: 0.30,
-                source: "PixelSpacing".to_string(),
-            })
-        );
+        assert_eq!(payload.measurement_scale, None);
 
         let _ = fs::remove_file(input_path);
         let _ = fs::remove_dir_all(temp_dir);
@@ -2105,12 +1943,8 @@ mod tests {
         let cache_dir = temp_dir.join("cache");
         let state_dir = temp_dir.join("state");
         fs::create_dir_all(&temp_dir).unwrap();
-        let input_path = temp_dir.join("sample.dcm");
-        fs::write(
-            &input_path,
-            dicom::tests::build_renderable_test_dicom(Some("0.20\\0.30")),
-        )
-        .unwrap();
+        let input_path = temp_dir.join("sample.bmp");
+        fs::write(&input_path, build_renderable_test_bmp()).unwrap();
 
         let mut config = Config::default();
         config.paths.cache_dir = cache_dir;
@@ -2148,7 +1982,7 @@ mod tests {
     fn start_render_job_async_publishes_contract_compatible_stage_updates() {
         let (temp_dir, app, study) = app_with_renderable_study(
             "render-async-stage-updates",
-            dicom::tests::build_renderable_test_dicom(Some("0.20\\0.30")),
+            build_renderable_test_bmp(),
         );
         let app = std::sync::Arc::new(app);
         let subscription = app.subscribe_job_updates();
@@ -2195,7 +2029,7 @@ mod tests {
     fn start_render_job_reuses_in_session_cached_result_for_same_input() {
         let (temp_dir, app, first_study) = app_with_renderable_study(
             "render-cache-hit",
-            dicom::tests::build_renderable_test_dicom(Some("0.20\\0.30")),
+            build_renderable_test_bmp(),
         );
         let first_started = app
             .start_render_job(RenderStudyCommand {
@@ -2243,7 +2077,7 @@ mod tests {
     fn render_cache_misses_when_cached_artifact_was_deleted() {
         let (temp_dir, app, study) = app_with_renderable_study(
             "render-cache-deleted-artifact",
-            dicom::tests::build_renderable_test_dicom(Some("0.20\\0.30")),
+            build_renderable_test_bmp(),
         );
         let first_started = app
             .start_render_job(RenderStudyCommand {
@@ -2496,22 +2330,14 @@ mod tests {
     }
 
     #[test]
-    fn start_process_job_writes_preview_and_dicom_snapshot() {
+    fn start_process_job_writes_preview_snapshot() {
         let temp_dir =
             std::env::temp_dir().join(format!("xrayview-rs-process-job-{}", std::process::id()));
         let cache_dir = temp_dir.join("cache");
         let state_dir = temp_dir.join("state");
         fs::create_dir_all(&temp_dir).unwrap();
-        let input_path = temp_dir.join("sample.dcm");
-        fs::write(
-            &input_path,
-            dicom::tests::build_renderable_test_dicom_with_source_metadata(
-                Some("0.20\\0.30"),
-                "1.2.3.4.5",
-                "Test^Patient",
-            ),
-        )
-        .unwrap();
+        let input_path = temp_dir.join("sample.bmp");
+        fs::write(&input_path, build_renderable_test_bmp()).unwrap();
 
         let mut config = Config::default();
         config.paths.cache_dir = cache_dir;
@@ -2527,7 +2353,6 @@ mod tests {
         let started = app
             .start_process_job(ProcessStudyCommand {
                 study_id: study.study_id.clone(),
-                output_path: None,
                 preset_id: "default".to_string(),
                 invert: true,
                 brightness: Some(10),
@@ -2553,29 +2378,7 @@ mod tests {
         assert_eq!(payload.loaded_height, 2);
         assert_eq!(payload.mode, "inverted grayscale with brightness +10");
         assert!(fs::metadata(&payload.preview_path).unwrap().is_file());
-        assert!(fs::metadata(&payload.dicom_path).unwrap().is_file());
-        let output_metadata = dicom::read_file(&payload.dicom_path).unwrap();
-        assert_eq!(output_metadata.rows, 2);
-        assert_eq!(output_metadata.columns, 4);
-        assert_eq!(output_metadata.study_instance_uid, "1.2.3.4.5");
-        assert!(
-            output_metadata
-                .preserved_elements
-                .iter()
-                .any(|element| element.tag_group == 0x0010
-                    && element.tag_element == 0x0010
-                    && element.vr == "PN"
-                    && element.values.len() == 1
-                    && element.values[0] == "Test^Patient")
-        );
-        assert_eq!(
-            output_metadata.measurement_scale(),
-            Some(MeasurementScale {
-                row_spacing_mm: 0.20,
-                column_spacing_mm: 0.30,
-                source: "PixelSpacing".to_string(),
-            })
-        );
+        assert_eq!(payload.measurement_scale, None);
 
         let _ = fs::remove_file(input_path);
         let _ = fs::remove_dir_all(temp_dir);
@@ -2585,11 +2388,10 @@ mod tests {
     fn start_process_job_reuses_in_session_cached_result_for_same_controls() {
         let (temp_dir, app, study) = app_with_renderable_study(
             "process-cache-hit",
-            dicom::tests::build_renderable_test_dicom(Some("0.20\\0.30")),
+            build_renderable_test_bmp(),
         );
         let command = ProcessStudyCommand {
             study_id: study.study_id.clone(),
-            output_path: None,
             preset_id: "xray".to_string(),
             invert: false,
             brightness: None,
@@ -2619,7 +2421,6 @@ mod tests {
         assert!(!first_snapshot.from_cache);
         assert!(second_snapshot.from_cache);
         assert_eq!(second_payload.preview_path, first_payload.preview_path);
-        assert_eq!(second_payload.dicom_path, first_payload.dicom_path);
 
         let _ = fs::remove_dir_all(temp_dir);
     }
@@ -2628,11 +2429,10 @@ mod tests {
     fn source_preview_cache_reuses_decode_for_different_process_jobs() {
         let (temp_dir, app, study) = app_with_renderable_study(
             "source-preview-cache-hit",
-            dicom::tests::build_renderable_test_dicom(Some("0.20\\0.30")),
+            build_renderable_test_bmp(),
         );
         let first = ProcessStudyCommand {
             study_id: study.study_id.clone(),
-            output_path: None,
             preset_id: "default".to_string(),
             invert: false,
             brightness: Some(5),
@@ -2680,17 +2480,8 @@ mod tests {
         let cache_dir = temp_dir.join("cache");
         let state_dir = temp_dir.join("state");
         fs::create_dir_all(&temp_dir).unwrap();
-        let input_path = temp_dir.join("sample.dcm");
-        fs::write(
-            &input_path,
-            dicom::tests::build_renderable_test_dicom_with_pixels(
-                20,
-                20,
-                Some("0.20\\0.30"),
-                analyze_fixture_pixels(),
-            ),
-        )
-        .unwrap();
+        let input_path = temp_dir.join("sample.bmp");
+        fs::write(&input_path, build_analysis_test_bmp()).unwrap();
 
         let mut config = Config::default();
         config.paths.cache_dir = cache_dir;
@@ -2733,14 +2524,7 @@ mod tests {
                 .unwrap()
                 .is_file()
         );
-        assert_eq!(
-            payload.measurement_scale,
-            Some(MeasurementScale {
-                row_spacing_mm: 0.20,
-                column_spacing_mm: 0.30,
-                source: "PixelSpacing".to_string(),
-            })
-        );
+        assert_eq!(payload.measurement_scale, None);
 
         let _ = fs::remove_file(input_path);
         let _ = fs::remove_dir_all(temp_dir);
@@ -2750,12 +2534,7 @@ mod tests {
     fn start_analyze_job_reuses_in_session_cached_result() {
         let (temp_dir, app, study) = app_with_renderable_study(
             "analyze-cache-hit",
-            dicom::tests::build_renderable_test_dicom_with_pixels(
-                20,
-                20,
-                Some("0.20\\0.30"),
-                analyze_fixture_pixels(),
-            ),
+            build_analysis_test_bmp(),
         );
 
         let first_started = app
@@ -2809,7 +2588,7 @@ mod tests {
         let cache_dir = temp_dir.join("cache");
         let state_dir = temp_dir.join("state");
         fs::create_dir_all(&temp_dir).unwrap();
-        let input_path = temp_dir.join("sample.dcm");
+        let input_path = temp_dir.join("sample.bmp");
         fs::write(&input_path, bytes).unwrap();
 
         let mut config = Config::default();
@@ -2824,6 +2603,31 @@ mod tests {
             .study;
 
         (temp_dir, app, study)
+    }
+
+    fn build_renderable_test_bmp() -> Vec<u8> {
+        bmp::tests::build_bmp_32(
+            4,
+            2,
+            &[
+                (0, 0, 0),
+                (36, 36, 36),
+                (72, 72, 72),
+                (108, 108, 108),
+                (144, 144, 144),
+                (180, 180, 180),
+                (216, 216, 216),
+                (255, 255, 255),
+            ],
+        )
+    }
+
+    fn build_analysis_test_bmp() -> Vec<u8> {
+        let pixels = analyze_fixture_pixels()
+            .iter()
+            .map(|value| (*value, *value, *value))
+            .collect::<Vec<_>>();
+        bmp::tests::build_bmp_32(20, 20, &pixels)
     }
 
     fn analyze_fixture_pixels() -> &'static [u8] {
