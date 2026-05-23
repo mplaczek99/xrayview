@@ -1,8 +1,4 @@
-import type {
-  MeasurementScale,
-  PaletteName,
-  ProcessingControls,
-} from "./generated/contracts";
+import type { MeasurementScale, PaletteName, ProcessingControls } from "./generated/contracts";
 
 export type Palette = PaletteName;
 export type RuntimeMode = "mock" | "desktop";

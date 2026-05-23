@@ -1,7 +1,4 @@
-import type {
-  ProcessingControls,
-  ProcessingManifest,
-} from "../../lib/generated/contracts";
+import type { ProcessingControls, ProcessingManifest } from "../../lib/generated/contracts";
 import type { ProcessingPresetOption } from "../../lib/types";
 
 interface ProcessingUiState {
@@ -56,9 +53,7 @@ export function processingControlsEqual(
   );
 }
 
-export function buildProcessingUiState(
-  manifest: ProcessingManifest,
-): ProcessingUiState {
+export function buildProcessingUiState(manifest: ProcessingManifest): ProcessingUiState {
   const presets = manifest.presets.map((preset) => ({
     id: preset.id,
     controls: { ...preset.controls },

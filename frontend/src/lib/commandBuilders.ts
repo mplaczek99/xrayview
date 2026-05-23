@@ -20,8 +20,6 @@ export function buildProcessStudyCommand(
     equalize: request.controls.equalize,
     compare: request.compare,
     palette:
-      request.controls.palette !== request.presetControls.palette
-        ? request.controls.palette
-        : null,
+      request.controls.palette !== request.presetControls.palette ? request.controls.palette : null,
   };
 }

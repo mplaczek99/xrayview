@@ -22,7 +22,10 @@ test("opens and processes a BMP without legacy output UI", async ({ page }) => {
 
   await expect(page.locator(".run-status--success")).toContainText("Processing complete.");
 
-  const legacyPattern = new RegExp(["di" + "com", "ti" + "ff", "\\.d" + "cm\\b", "\\.t" + "if\\b"].join("|"), "i");
+  const legacyPattern = new RegExp(
+    ["di" + "com", "ti" + "ff", "\\.d" + "cm\\b", "\\.t" + "if\\b"].join("|"),
+    "i",
+  );
   const bodyText = await page.locator("body").textContent();
   expect(bodyText ?? "").not.toMatch(legacyPattern);
   await expect(

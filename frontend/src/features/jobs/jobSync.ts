@@ -2,10 +2,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { workbenchActions } from "../../app/store/workbenchStore";
 import type { JobSnapshot as ContractJobSnapshot } from "../../lib/generated/contracts";
 import { getRuntimeAdapter, normalizeJobSnapshot } from "../../lib/runtime";
-import {
-  clearJobSubmitTiming,
-  logCompletedJobVisibleTiming,
-} from "./benchmarks";
+import { clearJobSubmitTiming, logCompletedJobVisibleTiming } from "./benchmarks";
 
 const ACTIVE_POLL_MS = 500;
 const RECENT_TRANSITION_POLL_MS = 200;

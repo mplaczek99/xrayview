@@ -16,9 +16,7 @@ function normalizeRuntimeMode(value: string): RuntimeMode | null {
   return isRuntimeMode(value) ? value : null;
 }
 
-export function resolveRuntimeConfiguration(
-  isDesktopRuntime: boolean,
-): RuntimeConfiguration {
+export function resolveRuntimeConfiguration(isDesktopRuntime: boolean): RuntimeConfiguration {
   const warnings: string[] = [];
   const defaultMode: RuntimeMode = isDesktopRuntime ? "desktop" : "mock";
   const rawMode =

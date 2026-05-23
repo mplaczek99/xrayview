@@ -5,8 +5,8 @@
 // state update per animation frame, reducing UI notifications from ~60/s to
 // 1/frame during slider drags.
 
-import { test } from "node:test";
 import assert from "node:assert/strict";
+import { test } from "node:test";
 
 // ---------------------------------------------------------------------------
 // Mock requestAnimationFrame (not available in Node.js)
@@ -82,7 +82,7 @@ function makeStore_BEFORE() {
   }
 
   function activeStudy() {
-    return state.activeStudyId ? state.studies[state.activeStudyId] ?? null : null;
+    return state.activeStudyId ? (state.studies[state.activeStudyId] ?? null) : null;
   }
 
   function setProcessingControls(controls) {
@@ -101,8 +101,12 @@ function makeStore_BEFORE() {
     setProcessingControls,
     getState: () => state,
     getListenerCount: () => listenerCount,
-    resetListenerCount: () => { listenerCount = 0; },
-    setActiveStudyId: (id) => { state = { ...state, activeStudyId: id }; },
+    resetListenerCount: () => {
+      listenerCount = 0;
+    },
+    setActiveStudyId: (id) => {
+      state = { ...state, activeStudyId: id };
+    },
   };
 }
 
@@ -142,7 +146,7 @@ function makeStore_AFTER() {
   }
 
   function activeStudy() {
-    return state.activeStudyId ? state.studies[state.activeStudyId] ?? null : null;
+    return state.activeStudyId ? (state.studies[state.activeStudyId] ?? null) : null;
   }
 
   function commitPendingControls() {
@@ -208,8 +212,12 @@ function makeStore_AFTER() {
     runActiveStudyProcessing,
     getState: () => state,
     getListenerCount: () => listenerCount,
-    resetListenerCount: () => { listenerCount = 0; },
-    setActiveStudyId: (id) => { state = { ...state, activeStudyId: id }; },
+    resetListenerCount: () => {
+      listenerCount = 0;
+    },
+    setActiveStudyId: (id) => {
+      state = { ...state, activeStudyId: id };
+    },
     getRAFQueueLength: () => rafQueue.length,
   };
 }
@@ -232,8 +240,11 @@ test("BEFORE: 5 rapid slider events fire 5 state updates", () => {
     store.setProcessingControls(makeControls(i * 10));
   }
   assert.equal(store.getListenerCount(), 5, "BEFORE: 5 slider events → 5 state updates");
-  assert.equal(store.getState().studies["study-1"].processing.form.controls.brightness, 40,
-    "BEFORE: final brightness is last value");
+  assert.equal(
+    store.getState().studies["study-1"].processing.form.controls.brightness,
+    40,
+    "BEFORE: final brightness is last value",
+  );
 });
 
 test("BEFORE: 10 rapid events in one 'frame' → 10 state updates", () => {
@@ -258,8 +269,11 @@ test("AFTER: single setProcessingControls fires 0 updates immediately, 1 after r
   flushRAF();
   await flushMicrotasks();
   assert.equal(store.getListenerCount(), 1, "AFTER: 1 notification after rAF+microtask flush");
-  assert.equal(store.getState().studies["study-1"].processing.form.controls.brightness, 10,
-    "AFTER: state updated to correct value");
+  assert.equal(
+    store.getState().studies["study-1"].processing.form.controls.brightness,
+    10,
+    "AFTER: state updated to correct value",
+  );
 });
 
 test("AFTER: 5 rapid slider events → 1 rAF scheduled, 0 updates until flush", async () => {
@@ -281,8 +295,11 @@ test("AFTER: 5 rapid slider events → 1 update after rAF flush, last value wins
   flushRAF();
   await flushMicrotasks();
   assert.equal(store.getListenerCount(), 1, "AFTER: 5 events coalesced to 1 state update");
-  assert.equal(store.getState().studies["study-1"].processing.form.controls.brightness, 40,
-    "AFTER: last value (40) wins");
+  assert.equal(
+    store.getState().studies["study-1"].processing.form.controls.brightness,
+    40,
+    "AFTER: last value (40) wins",
+  );
 });
 
 test("AFTER: 10 rapid events coalesced to 1 update (90% reduction vs BEFORE)", async () => {
@@ -295,8 +312,11 @@ test("AFTER: 10 rapid events coalesced to 1 update (90% reduction vs BEFORE)", a
   flushRAF();
   await flushMicrotasks();
   assert.equal(store.getListenerCount(), 1, "AFTER: 10 events → 1 state update (1/10th the work)");
-  assert.equal(store.getState().studies["study-1"].processing.form.controls.brightness, 9,
-    "AFTER: final value is last event value");
+  assert.equal(
+    store.getState().studies["study-1"].processing.form.controls.brightness,
+    9,
+    "AFTER: final value is last event value",
+  );
 });
 
 test("AFTER: second frame after flush schedules new rAF independently", async () => {
@@ -317,8 +337,11 @@ test("AFTER: second frame after flush schedules new rAF independently", async ()
   flushRAF();
   await flushMicrotasks();
   assert.equal(store.getListenerCount(), 2, "AFTER: frame 2 → 1 more update (2 total)");
-  assert.equal(store.getState().studies["study-1"].processing.form.controls.brightness, 40,
-    "AFTER: frame 2 final value correct");
+  assert.equal(
+    store.getState().studies["study-1"].processing.form.controls.brightness,
+    40,
+    "AFTER: frame 2 final value correct",
+  );
 });
 
 test("AFTER: single-field updates merge against pending controls", async () => {
@@ -334,7 +357,11 @@ test("AFTER: single-field updates merge against pending controls", async () => {
   const controls = store.getState().studies["study-1"].processing.form.controls;
   assert.equal(controls.brightness, 40, "AFTER: brightness is preserved from the pending change");
   assert.equal(controls.invert, true, "AFTER: invert is applied on top of pending brightness");
-  assert.equal(store.getListenerCount(), 1, "AFTER: merged field updates still coalesce to 1 update");
+  assert.equal(
+    store.getListenerCount(),
+    1,
+    "AFTER: merged field updates still coalesce to 1 update",
+  );
 });
 
 test("AFTER: run processing flushes pending controls before building request", async () => {
@@ -385,12 +412,14 @@ test("AFTER: study ID captured at call time, not at rAF time", async () => {
   await flushMicrotasks();
 
   assert.equal(
-    store.getState().studies["study-1"].processing.form.controls.brightness, 77,
-    "AFTER: controls committed to study captured at call time (study-1)"
+    store.getState().studies["study-1"].processing.form.controls.brightness,
+    77,
+    "AFTER: controls committed to study captured at call time (study-1)",
   );
   assert.equal(
-    store.getState().studies["study-2"].processing.form.controls.brightness, 0,
-    "AFTER: study-2 controls unchanged (correct isolation)"
+    store.getState().studies["study-2"].processing.form.controls.brightness,
+    0,
+    "AFTER: study-2 controls unchanged (correct isolation)",
   );
 });
 
@@ -399,9 +428,27 @@ test("AFTER: contrast and brightness both coalesced correctly", async () => {
   const store = makeStore_AFTER();
 
   // Simulate slider moving brightness and contrast together across multiple events
-  store.setProcessingControls({ brightness: 10, contrast: 1.1, invert: false, equalize: false, palette: "none" });
-  store.setProcessingControls({ brightness: 20, contrast: 1.2, invert: false, equalize: false, palette: "none" });
-  store.setProcessingControls({ brightness: 30, contrast: 1.5, invert: true,  equalize: false, palette: "hot"  });
+  store.setProcessingControls({
+    brightness: 10,
+    contrast: 1.1,
+    invert: false,
+    equalize: false,
+    palette: "none",
+  });
+  store.setProcessingControls({
+    brightness: 20,
+    contrast: 1.2,
+    invert: false,
+    equalize: false,
+    palette: "none",
+  });
+  store.setProcessingControls({
+    brightness: 30,
+    contrast: 1.5,
+    invert: true,
+    equalize: false,
+    palette: "hot",
+  });
 
   flushRAF();
   await flushMicrotasks();

@@ -13,11 +13,7 @@ function pickEnvValue(env, plainKey, viteKey) {
 
 export function applyFrontendRuntimeEnv(env = process.env) {
   const nextEnv = { ...env };
-  const rawMode = pickEnvValue(
-    env,
-    "XRAYVIEW_BACKEND_RUNTIME",
-    "VITE_XRAYVIEW_BACKEND_RUNTIME",
-  );
+  const rawMode = pickEnvValue(env, "XRAYVIEW_BACKEND_RUNTIME", "VITE_XRAYVIEW_BACKEND_RUNTIME");
 
   if (!rawMode) {
     return nextEnv;

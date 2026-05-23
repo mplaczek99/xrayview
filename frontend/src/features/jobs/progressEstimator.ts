@@ -142,10 +142,7 @@ function calculateOverallRate(
   nowMs: number,
 ): number | null {
   const firstMeasuredSample = timing.firstMeasuredSample;
-  if (
-    !firstMeasuredSample ||
-    percent <= firstMeasuredSample.percent + MIN_PERCENT_DELTA
-  ) {
+  if (!firstMeasuredSample || percent <= firstMeasuredSample.percent + MIN_PERCENT_DELTA) {
     return null;
   }
 
@@ -157,10 +154,7 @@ function calculateOverallRate(
   return (percent - firstMeasuredSample.percent) / elapsedMs;
 }
 
-function calculateRecentRateWeight(
-  staleMs: number,
-  recentRate: number | null,
-): number {
+function calculateRecentRateWeight(staleMs: number, recentRate: number | null): number {
   if (!recentRate) {
     return 0;
   }
@@ -174,8 +168,7 @@ function calculateRecentRateWeight(
   }
 
   const decaySpan = RECENT_RATE_DECAY_END_MS - RECENT_RATE_DECAY_START_MS;
-  const freshness =
-    1 - (staleMs - RECENT_RATE_DECAY_START_MS) / Math.max(1, decaySpan);
+  const freshness = 1 - (staleMs - RECENT_RATE_DECAY_START_MS) / Math.max(1, decaySpan);
   return BASE_RECENT_RATE_WEIGHT * Math.max(0, freshness);
 }
 
@@ -201,10 +194,7 @@ function blendRates(
   return overallRate * overallWeight + recentRate * clampedRecentWeight;
 }
 
-function rateAgreement(
-  overallRate: number | null,
-  recentRate: number | null,
-): number {
+function rateAgreement(overallRate: number | null, recentRate: number | null): number {
   if (overallRate === null || recentRate === null) {
     return 0;
   }

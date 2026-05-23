@@ -1,21 +1,21 @@
 import type htmx from "htmx.org";
-import {
-  getWorkbenchState,
-  subscribeWorkbenchStore,
-  workbenchActions,
-} from "./store/workbenchStore";
-import {
-  escapeHtml,
-  renderApp,
-  selectViewerRenderModel,
-  type CompareView,
-  type HtmxUiState,
-} from "./htmxView";
 import { startJobSync } from "../features/jobs/jobSync";
 import { buildProcessingUiState } from "../features/processing/presets";
 import { ViewerController } from "../features/viewer/ViewerController";
 import type { ProcessingControls } from "../lib/generated/contracts";
 import type { ActiveTab } from "../lib/types";
+import {
+  type CompareView,
+  escapeHtml,
+  type HtmxUiState,
+  renderApp,
+  selectViewerRenderModel,
+} from "./htmxView";
+import {
+  getWorkbenchState,
+  subscribeWorkbenchStore,
+  workbenchActions,
+} from "./store/workbenchStore";
 
 type HtmxApi = typeof htmx;
 
@@ -38,9 +38,7 @@ function isLiveWorkbench() {
     return true;
   }
 
-  const activeStudy = state.activeStudyId
-    ? state.studies[state.activeStudyId] ?? null
-    : null;
+  const activeStudy = state.activeStudyId ? (state.studies[state.activeStudyId] ?? null) : null;
   const runStatus = activeStudy?.processing.runStatus;
   return runStatus?.state === "running" || runStatus?.state === "cancelling";
 }
@@ -104,15 +102,11 @@ class HtmxWorkbenchApp {
     const state = getWorkbenchState();
     try {
       this.viewer.detach();
-      this.htmxApi.swap(
-        this.root,
-        renderApp(state, this.ui, Date.now()),
-        {
-          swapStyle: "innerHTML",
-          swapDelay: 0,
-          settleDelay: 0,
-        },
-      );
+      this.htmxApi.swap(this.root, renderApp(state, this.ui, Date.now()), {
+        swapStyle: "innerHTML",
+        swapDelay: 0,
+        settleDelay: 0,
+      });
       this.htmxApi.process(this.root);
       this.viewer.mount(this.root, selectViewerRenderModel(state));
       this.syncClock();
@@ -122,9 +116,9 @@ class HtmxWorkbenchApp {
         <div class="viewer-stage">
           <div class="viewer-placeholder">
             <div class="viewer-placeholder__title">Frontend Error</div>
-            <p class="viewer-placeholder__copy">${
-              escapeHtml(error instanceof Error ? error.message : String(error))
-            }</p>
+            <p class="viewer-placeholder__copy">${escapeHtml(
+              error instanceof Error ? error.message : String(error),
+            )}</p>
             <button class="button button--primary" type="button" data-action="reload">
               Reload
             </button>
@@ -321,9 +315,7 @@ class HtmxWorkbenchApp {
     workbenchActions.setProcessingControls({ ...preset.controls });
   }
 
-  private updateProcessingControl(
-    target: HTMLInputElement | HTMLSelectElement,
-  ) {
+  private updateProcessingControl(target: HTMLInputElement | HTMLSelectElement) {
     const control = target.dataset.control as keyof ProcessingControls | undefined;
     if (!control) {
       return;
@@ -362,11 +354,7 @@ class HtmxWorkbenchApp {
     const state = getWorkbenchState();
     const next = new Set(this.ui.dismissedJobIds);
     for (const job of Object.values(state.jobs)) {
-      if (
-        job.state === "completed" ||
-        job.state === "failed" ||
-        job.state === "cancelled"
-      ) {
+      if (job.state === "completed" || job.state === "failed" || job.state === "cancelled") {
         next.add(job.jobId);
       }
     }

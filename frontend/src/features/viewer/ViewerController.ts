@@ -1,27 +1,21 @@
+import { escapeHtml, type ViewerRenderModel } from "../../app/htmxView";
+import { workbenchActions } from "../../app/store/workbenchStore";
 import type {
   AnnotationBundle,
   AnnotationPoint,
   LineAnnotation,
 } from "../../lib/generated/contracts";
-import {
-  createManualLineAnnotation,
-  getLineAnnotation,
-} from "../annotations/tools";
-import { workbenchActions } from "../../app/store/workbenchStore";
-import {
-  escapeHtml,
-  type ViewerRenderModel,
-} from "../../app/htmxView";
+import { createManualLineAnnotation, getLineAnnotation } from "../annotations/tools";
 import {
   clampPointToImage,
   createViewport,
   getViewerTransform,
   screenToImage,
-  zoomAtPoint,
   type ViewerFrame,
   type ViewerImageSize,
   type ViewerTransform,
   type ViewerViewport,
+  zoomAtPoint,
 } from "./viewport";
 
 type ViewerInteraction =
@@ -82,12 +76,9 @@ function renderAnnotationLayer(
   draftLine: LineAnnotation | null,
   draftLineOverride: LineAnnotation | null,
 ): string {
-  const selectedBase =
-    annotations.lines.find((line) => line.id === selectedAnnotationId) ?? null;
+  const selectedBase = annotations.lines.find((line) => line.id === selectedAnnotationId) ?? null;
   const selectedLine =
-    selectedBase && draftLineOverride?.id === selectedBase.id
-      ? draftLineOverride
-      : selectedBase;
+    selectedBase && draftLineOverride?.id === selectedBase.id ? draftLineOverride : selectedBase;
   const handleRadius = 7 / Math.max(transform.scale, 1);
 
   return `
@@ -99,7 +90,9 @@ function renderAnnotationLayer(
       aria-hidden="true"
     >
       <g transform="translate(${attr(transform.offsetX)} ${attr(transform.offsetY)}) scale(${attr(transform.scale)})">
-        ${annotations.rectangles.map((annotation) => `
+        ${annotations.rectangles
+          .map(
+            (annotation) => `
           <rect
             class="annotation-layer__rect"
             x="${attr(annotation.x)}"
@@ -108,17 +101,22 @@ function renderAnnotationLayer(
             height="${attr(annotation.height)}"
             vector-effect="non-scaling-stroke"
           ></rect>
-        `).join("")}
+        `,
+          )
+          .join("")}
 
-        ${annotations.polylines.map((annotation) => {
-          const points = annotation.points.map((point) => `${point.x},${point.y}`).join(" ");
-          return annotation.closed ? `
+        ${annotations.polylines
+          .map((annotation) => {
+            const points = annotation.points.map((point) => `${point.x},${point.y}`).join(" ");
+            return annotation.closed
+              ? `
             <polygon
               class="annotation-layer__polyline annotation-layer__polyline--${attr(annotation.source)}"
               points="${attr(points)}"
               vector-effect="non-scaling-stroke"
             ></polygon>
-          ` : `
+          `
+              : `
             <polyline
               class="annotation-layer__polyline annotation-layer__polyline--${attr(annotation.source)}"
               points="${attr(points)}"
@@ -126,15 +124,17 @@ function renderAnnotationLayer(
               fill="none"
             ></polyline>
           `;
-        }).join("")}
+          })
+          .join("")}
 
-        ${annotations.lines.map((annotation) => {
-          const visible =
-            draftLineOverride?.id === annotation.id ? draftLineOverride : annotation;
-          const mid = lineMidpoint(visible);
-          const labelOffset = 10 / Math.max(transform.scale, 1);
+        ${annotations.lines
+          .map((annotation) => {
+            const visible =
+              draftLineOverride?.id === annotation.id ? draftLineOverride : annotation;
+            const mid = lineMidpoint(visible);
+            const labelOffset = 10 / Math.max(transform.scale, 1);
 
-          return `
+            return `
             <g>
               <line
                 class="annotation-layer__line annotation-layer__line--${attr(annotation.source)}${annotation.id === selectedAnnotationId ? " annotation-layer__line--selected" : ""}"
@@ -156,9 +156,12 @@ function renderAnnotationLayer(
               >${escapeHtml(lineLabel(visible))}</text>
             </g>
           `;
-        }).join("")}
+          })
+          .join("")}
 
-        ${draftLine ? `
+        ${
+          draftLine
+            ? `
           <line
             class="annotation-layer__line annotation-layer__line--draft"
             x1="${attr(draftLine.start.x)}"
@@ -167,9 +170,13 @@ function renderAnnotationLayer(
             y2="${attr(draftLine.end.y)}"
             vector-effect="non-scaling-stroke"
           ></line>
-        ` : ""}
+        `
+            : ""
+        }
 
-        ${selectedLine ? `
+        ${
+          selectedLine
+            ? `
           <circle
             class="annotation-layer__handle"
             cx="${attr(selectedLine.start.x)}"
@@ -190,7 +197,9 @@ function renderAnnotationLayer(
             data-annotation-id="${attr(selectedLine.id)}"
             data-endpoint="end"
           ></circle>
-        ` : ""}
+        `
+            : ""
+        }
       </g>
     </svg>
   `;
@@ -345,13 +354,7 @@ export class ViewerController {
     event.preventDefault();
     const pointer = pointerToLocalPoint(event, this.canvas);
     const factor = event.deltaY < 0 ? 1.12 : 0.9;
-    this.viewport = zoomAtPoint(
-      this.viewport,
-      this.frame,
-      this.resolvedImageSize,
-      pointer,
-      factor,
-    );
+    this.viewport = zoomAtPoint(this.viewport, this.frame, this.resolvedImageSize, pointer, factor);
     this.updateCanvas();
   };
 
@@ -429,21 +432,14 @@ export class ViewerController {
     if (this.interaction.kind === "pan") {
       this.viewport = {
         ...this.viewport,
-        panX:
-          this.interaction.panStart.panX +
-          (pointer.x - this.interaction.pointerStart.x),
-        panY:
-          this.interaction.panStart.panY +
-          (pointer.y - this.interaction.pointerStart.y),
+        panX: this.interaction.panStart.panX + (pointer.x - this.interaction.pointerStart.x),
+        panY: this.interaction.panStart.panY + (pointer.y - this.interaction.pointerStart.y),
       };
       this.updateCanvas();
       return;
     }
 
-    const imagePoint = clampPointToImage(
-      screenToImage(pointer, transform),
-      this.resolvedImageSize,
-    );
+    const imagePoint = clampPointToImage(screenToImage(pointer, transform), this.resolvedImageSize);
     if (this.interaction.kind === "draw") {
       this.draftLine = this.draftLine
         ? {
@@ -501,7 +497,7 @@ export class ViewerController {
     }
 
     const annotation = getLineAnnotation(this.model.annotations, annotationId);
-    if (!annotation || !annotation.editable) {
+    if (!annotation?.editable) {
       return;
     }
 
@@ -529,11 +525,7 @@ export class ViewerController {
   }
 
   private currentTransform(): ViewerTransform | null {
-    if (
-      !this.resolvedImageSize ||
-      this.frame.width === 0 ||
-      this.frame.height === 0
-    ) {
+    if (!this.resolvedImageSize || this.frame.width === 0 || this.frame.height === 0) {
       return null;
     }
 
@@ -572,8 +564,7 @@ export class ViewerController {
     this.image.classList.toggle("viewer-canvas__image--ready", this.imageReady);
 
     if (this.annotationHost && this.imageReady) {
-      const draftLineOverride =
-        this.interaction?.kind === "edit" ? this.draftLine : null;
+      const draftLineOverride = this.interaction?.kind === "edit" ? this.draftLine : null;
       this.annotationHost.innerHTML = renderAnnotationLayer(
         this.frame,
         transform,

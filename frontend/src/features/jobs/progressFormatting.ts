@@ -1,15 +1,11 @@
 import type { JobProgress, JobState } from "../../lib/generated/contracts";
 import type { JobProgressTiming } from "./model";
-import { estimateRate, type EtaConfidence, type RateEstimate } from "./progressEstimator";
+import { type EtaConfidence, estimateRate, type RateEstimate } from "./progressEstimator";
 import { isPendingJobState, isTerminalJobState } from "./progressTiming";
 
 const FAST_TASK_MS = 1_000;
 
-type ProgressDisplayMode =
-  | "hidden"
-  | "simple"
-  | "detailed"
-  | "indeterminate";
+type ProgressDisplayMode = "hidden" | "simple" | "detailed" | "indeterminate";
 
 interface ProgressPresentation {
   mode: ProgressDisplayMode;
@@ -36,11 +32,8 @@ export function describeProgress(
   nowMs = Date.now(),
 ): ProgressPresentation {
   const percent = clampPercent(snapshot.progress.percent);
-  const percentLabel =
-    percent > 0 && percent < 100 ? `${Math.round(percent)}%` : null;
-  const elapsedMs = snapshot.timing
-    ? Math.max(0, nowMs - snapshot.timing.startedAtMs)
-    : null;
+  const percentLabel = percent > 0 && percent < 100 ? `${Math.round(percent)}%` : null;
+  const elapsedMs = snapshot.timing ? Math.max(0, nowMs - snapshot.timing.startedAtMs) : null;
 
   if (snapshot.fromCache || isTerminalJobState(snapshot.state)) {
     return {
@@ -79,10 +72,7 @@ export function describeProgress(
     rateEstimate.remainingMs !== null &&
     rateEstimate.confidence !== "none";
   const mode = resolveDisplayMode(percent, elapsedMs, showEta);
-  const detailParts = [
-    percentLabel,
-    etaLabel,
-  ].filter((value): value is string => Boolean(value));
+  const detailParts = [percentLabel, etaLabel].filter((value): value is string => Boolean(value));
 
   return {
     mode,
@@ -118,10 +108,7 @@ function resolveDisplayMode(
   return "simple";
 }
 
-function formatEtaLabel(
-  remainingMs: number | null,
-  confidence: EtaConfidence,
-): string | null {
+function formatEtaLabel(remainingMs: number | null, confidence: EtaConfidence): string | null {
   if (remainingMs === null) {
     return null;
   }

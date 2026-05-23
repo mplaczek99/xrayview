@@ -2,8 +2,8 @@
 // Runs with: node frontend/scripts/validate-selectors.mjs
 // Tests both BEFORE (unmemoized) and AFTER (memoized) invocation counts.
 
-import { test } from "node:test";
 import assert from "node:assert/strict";
+import { test } from "node:test";
 
 // ---------------------------------------------------------------------------
 // Minimal WorkbenchState shape needed for selector testing
@@ -13,24 +13,24 @@ function makeState({ jobs = {}, activeStudyId = null, studies = {} } = {}) {
 }
 
 function makeJob(id, state) {
-  return { jobId: id, state, jobKind: "renderStudy", studyId: null, progress: { percent: 0 }, fromCache: false, result: null, error: null, timing: null };
+  return {
+    jobId: id,
+    state,
+    jobKind: "renderStudy",
+    studyId: null,
+    progress: { percent: 0 },
+    fromCache: false,
+    result: null,
+    error: null,
+    timing: null,
+  };
 }
 
 // ---------------------------------------------------------------------------
-// BEFORE: unmemoized implementations (mirrors original code)
-// ---------------------------------------------------------------------------
-function selectPendingJobCount_BEFORE(s) {
-  return Object.values(s.jobs).filter(
-    (job) => job.state === "queued" || job.state === "running" || job.state === "cancelling",
-  ).length;
-}
-
-function selectActiveStudy_BEFORE(s) {
-  return s.activeStudyId ? s.studies[s.activeStudyId] ?? null : null;
-}
-
-// ---------------------------------------------------------------------------
-// AFTER: memoization helpers (mirrors implementation in workbenchStore.ts)
+// Memoization helpers (mirrors implementation in workbenchStore.ts)
+//
+// Note: BEFORE reference selectors are inlined per-test so each test can
+// instrument its own call counter; no top-level BEFORE functions live here.
 // ---------------------------------------------------------------------------
 function createSelector(inputSelector, resultFn) {
   let lastInput;
@@ -109,7 +109,11 @@ test("AFTER selectPendingJobCount: filter runs once when jobs ref unchanged", ()
   for (let i = 0; i < 5; i++) selectPendingJobCount_AFTER(state);
 
   // AFTER: filter runs only once — memoized on jobs ref
-  assert.equal(filterCallCount, 1, "AFTER: expected filter to run exactly once for 5 calls with same jobs ref");
+  assert.equal(
+    filterCallCount,
+    1,
+    "AFTER: expected filter to run exactly once for 5 calls with same jobs ref",
+  );
 });
 
 test("AFTER selectPendingJobCount: recomputes when jobs ref changes", () => {
@@ -125,7 +129,7 @@ test("AFTER selectPendingJobCount: recomputes when jobs ref changes", () => {
   );
 
   const jobs1 = { j1: makeJob("j1", "running") };
-  const jobs2 = { j1: makeJob("j1", "done") };   // new reference — job finished
+  const jobs2 = { j1: makeJob("j1", "done") }; // new reference — job finished
 
   selectPendingJobCount_AFTER(makeState({ jobs: jobs1 }));
   selectPendingJobCount_AFTER(makeState({ jobs: jobs1 })); // same ref, skipped
@@ -162,7 +166,7 @@ test("BEFORE selectActiveStudy: lookup runs on every call (same inputs)", () => 
   let callCount = 0;
   const selectActiveStudy_traced = (s) => {
     callCount++;
-    return s.activeStudyId ? s.studies[s.activeStudyId] ?? null : null;
+    return s.activeStudyId ? (s.studies[s.activeStudyId] ?? null) : null;
   };
 
   const study = { studyId: "s1", inputName: "scan.bmp" };
@@ -180,7 +184,7 @@ test("AFTER selectActiveStudy: result fn runs once when activeStudyId + studies 
     (s) => s.studies,
     (activeStudyId, studies) => {
       callCount++;
-      return activeStudyId ? studies[activeStudyId] ?? null : null;
+      return activeStudyId ? (studies[activeStudyId] ?? null) : null;
     },
   );
 
@@ -200,7 +204,7 @@ test("AFTER selectActiveStudy: recomputes when activeStudyId changes", () => {
     (s) => s.studies,
     (activeStudyId, studies) => {
       callCount++;
-      return activeStudyId ? studies[activeStudyId] ?? null : null;
+      return activeStudyId ? (studies[activeStudyId] ?? null) : null;
     },
   );
 
@@ -220,8 +224,7 @@ test("AFTER selectActiveStudy: returns same object reference when cached", () =>
   const sel = createSelector2(
     (s) => s.activeStudyId,
     (s) => s.studies,
-    (activeStudyId, studies) =>
-      activeStudyId ? studies[activeStudyId] ?? null : null,
+    (activeStudyId, studies) => (activeStudyId ? (studies[activeStudyId] ?? null) : null),
   );
 
   const study = { studyId: "s1" };
@@ -241,7 +244,7 @@ test("AFTER selectActiveStudy: recomputes when studies ref changes (other study 
     (s) => s.studies,
     (activeStudyId, studies) => {
       callCount++;
-      return activeStudyId ? studies[activeStudyId] ?? null : null;
+      return activeStudyId ? (studies[activeStudyId] ?? null) : null;
     },
   );
 

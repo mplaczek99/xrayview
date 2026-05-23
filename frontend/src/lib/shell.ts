@@ -1,5 +1,5 @@
-import { MOCK_BMP_PATH } from "./mockRuntime";
 import { pickDesktopBmpFile } from "./desktop";
+import { MOCK_BMP_PATH } from "./mockRuntime";
 import type { ShellAPI } from "./runtimeTypes";
 
 export function createMockShellAPI(): ShellAPI {

@@ -5,8 +5,8 @@
 //   BEFORE: left/top/width/height inline styles → triggers layout on every change
 //   AFTER:  transform: translate+scale with fixed natural dimensions → compositor only
 
-import { test } from "node:test";
 import assert from "node:assert/strict";
+import { test } from "node:test";
 
 // ---------------------------------------------------------------------------
 // BEFORE: style computation using layout-triggering properties
@@ -160,11 +160,7 @@ test("AFTER: transform string maps pixels correctly (math equivalence to BEFORE)
   // BEFORE maps image corner (W,H) to screen (offsetX + W*S, offsetY + H*S)
   // AFTER: element corner (W,H) → after scale → (W*S, H*S) → after translate → (offsetX + W*S, offsetY + H*S) ✓
 
-  assert.equal(
-    style.transform,
-    "translate(100px, 80px) scale(0.5)",
-    "transform string is correct",
-  );
+  assert.equal(style.transform, "translate(100px, 80px) scale(0.5)", "transform string is correct");
   assert.equal(style.transformOrigin, "0 0", "transformOrigin anchors to top-left");
 
   // Verify BEFORE and AFTER produce equivalent screen positions for image corners
@@ -218,11 +214,15 @@ test("BEFORE vs AFTER: layout trigger count comparison for 100 pan frames", () =
     afterLayoutTriggers += layoutTriggersCount(changedProperties(sa1, sa2));
   }
 
-  assert.equal(beforeLayoutTriggers, 200, "BEFORE: 100 pan frames × 2 layout triggers (left+top) = 200");
+  assert.equal(
+    beforeLayoutTriggers,
+    200,
+    "BEFORE: 100 pan frames × 2 layout triggers (left+top) = 200",
+  );
   assert.equal(afterLayoutTriggers, 0, "AFTER: 100 pan frames × 0 layout triggers = 0");
   console.log(
     `\n  Layout trigger reduction: ${beforeLayoutTriggers} → ${afterLayoutTriggers} ` +
-    `(100% eliminated for pan gestures)`,
+      `(100% eliminated for pan gestures)`,
   );
 });
 
@@ -251,6 +251,6 @@ test("BEFORE vs AFTER: layout trigger count comparison for 100 zoom frames", () 
   assert.equal(afterLayoutTriggers, 0, "AFTER: 100 zoom frames × 0 layout triggers = 0");
   console.log(
     `  Layout trigger reduction: ${beforeLayoutTriggers} → ${afterLayoutTriggers} ` +
-    `(100% eliminated for zoom gestures)\n`,
+      `(100% eliminated for zoom gestures)\n`,
   );
 });

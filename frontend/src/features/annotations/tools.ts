@@ -41,10 +41,7 @@ export function upsertLineAnnotation(
 ): AnnotationBundle {
   return {
     ...current,
-    lines: [
-      line,
-      ...current.lines.filter((annotation) => annotation.id !== line.id),
-    ],
+    lines: [line, ...current.lines.filter((annotation) => annotation.id !== line.id)],
   };
 }
 
@@ -54,12 +51,8 @@ export function removeAnnotation(
 ): AnnotationBundle {
   return {
     lines: current.lines.filter((annotation) => annotation.id !== annotationId),
-    rectangles: current.rectangles.filter(
-      (annotation) => annotation.id !== annotationId,
-    ),
-    polylines: current.polylines.filter(
-      (annotation) => annotation.id !== annotationId,
-    ),
+    rectangles: current.rectangles.filter((annotation) => annotation.id !== annotationId),
+    polylines: current.polylines.filter((annotation) => annotation.id !== annotationId),
   };
 }
 
@@ -71,14 +64,10 @@ export function getLineAnnotation(
     return null;
   }
 
-  return (
-    current.lines.find((annotation) => annotation.id === annotationId) ?? null
-  );
+  return current.lines.find((annotation) => annotation.id === annotationId) ?? null;
 }
 
-export function formatLineMeasurement(
-  measurement: LineMeasurement | null | undefined,
-): string {
+export function formatLineMeasurement(measurement: LineMeasurement | null | undefined): string {
   if (!measurement) {
     return "Pending";
   }

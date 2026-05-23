@@ -1,7 +1,18 @@
 import {
-  FALLBACK_PROCESSING_MANIFEST,
-  getRuntimeAdapter,
-} from "../../lib/runtime";
+  removeAnnotation,
+  upsertLineAnnotation,
+  type ViewerTool,
+} from "../../features/annotations/tools";
+import { recordJobSubmit } from "../../features/jobs/benchmarks";
+import type { JobSnapshot } from "../../features/jobs/model";
+import { advanceJobProgressTiming } from "../../features/jobs/progressTiming";
+import { processingControlsEqual } from "../../features/processing/presets";
+import {
+  createWorkbenchStudy,
+  defaultControlsForManifest,
+  type WorkbenchState,
+  type WorkbenchStudy,
+} from "../../features/study/model";
 import { formatBackendError } from "../../lib/backendErrors";
 import type {
   LineAnnotation,
@@ -9,22 +20,8 @@ import type {
   ProcessingManifest,
   ProcessingPreset,
 } from "../../lib/generated/contracts";
+import { FALLBACK_PROCESSING_MANIFEST, getRuntimeAdapter } from "../../lib/runtime";
 import type { ProcessingRequest } from "../../lib/types";
-import type { JobSnapshot } from "../../features/jobs/model";
-import { recordJobSubmit } from "../../features/jobs/benchmarks";
-import { advanceJobProgressTiming } from "../../features/jobs/progressTiming";
-import {
-  removeAnnotation,
-  upsertLineAnnotation,
-  type ViewerTool,
-} from "../../features/annotations/tools";
-import {
-  createWorkbenchStudy,
-  defaultControlsForManifest,
-  type WorkbenchState,
-  type WorkbenchStudy,
-} from "../../features/study/model";
-import { processingControlsEqual } from "../../features/processing/presets";
 import { applyJobToStudy } from "./applyJob";
 
 const runtime = getRuntimeAdapter();
@@ -57,10 +54,9 @@ function activeJob(jobId: string | null, jobs: WorkbenchState["jobs"]): JobSnaps
 }
 
 function isPendingJob(job: JobSnapshot | null): boolean {
-  return job !== null && (
-    job.state === "queued" ||
-    job.state === "running" ||
-    job.state === "cancelling"
+  return (
+    job !== null &&
+    (job.state === "queued" || job.state === "running" || job.state === "cancelling")
   );
 }
 
@@ -187,10 +183,7 @@ class WorkbenchStore {
   getState = () => this.state;
 
   async ensureManifest() {
-    if (
-      this.state.manifestStatus === "loading" ||
-      this.state.manifestStatus === "ready"
-    ) {
+    if (this.state.manifestStatus === "loading" || this.state.manifestStatus === "ready") {
       return;
     }
 
@@ -358,16 +351,13 @@ class WorkbenchStore {
 
   deleteSelectedAnnotation() {
     const study = this.activeStudy();
-    if (!study || !study.viewer.selectedAnnotationId) {
+    if (!study?.viewer.selectedAnnotationId) {
       return;
     }
 
     this.setStudyState(study.studyId, (current) => ({
       ...current,
-      annotations: removeAnnotation(
-        current.annotations,
-        current.viewer.selectedAnnotationId ?? "",
-      ),
+      annotations: removeAnnotation(current.annotations, current.viewer.selectedAnnotationId ?? ""),
       viewer: {
         ...current.viewer,
         selectedAnnotationId: null,
@@ -396,10 +386,7 @@ class WorkbenchStore {
     }
   }
 
-  setProcessingControl<K extends keyof ProcessingControls>(
-    key: K,
-    value: ProcessingControls[K],
-  ) {
+  setProcessingControl<K extends keyof ProcessingControls>(key: K, value: ProcessingControls[K]) {
     const study = this.activeStudy();
     if (!study) {
       return;
@@ -545,20 +532,13 @@ class WorkbenchStore {
       }
       const nextJob: JobSnapshot = {
         ...job,
-        timing: advanceJobProgressTiming(
-          previous?.timing ?? job.timing,
-          job,
-        ),
+        timing: advanceJobProgressTiming(previous?.timing ?? job.timing, job),
       };
       const jobs = {
         ...current.jobs,
         [job.jobId]: nextJob,
       };
-      const pendingJobIds = nextPendingJobIds(
-        current.pendingJobIds,
-        previous,
-        nextJob,
-      );
+      const pendingJobIds = nextPendingJobIds(current.pendingJobIds, previous, nextJob);
       const studies = { ...current.studies };
       if (nextJob.studyId && studies[nextJob.studyId]) {
         studies[nextJob.studyId] = applyJobToStudy(studies[nextJob.studyId], nextJob);
@@ -594,10 +574,7 @@ class WorkbenchStore {
     }
   }
 
-  private async measureAndStoreLineAnnotation(
-    annotation: LineAnnotation,
-    successStatus: string,
-  ) {
+  private async measureAndStoreLineAnnotation(annotation: LineAnnotation, successStatus: string) {
     const study = this.activeStudy();
     if (!study) {
       return;
@@ -622,10 +599,7 @@ class WorkbenchStore {
     }
   }
 
-  private setStudyState(
-    studyId: string,
-    updater: (study: WorkbenchStudy) => WorkbenchStudy,
-  ) {
+  private setStudyState(studyId: string, updater: (study: WorkbenchStudy) => WorkbenchStudy) {
     this.setState((current) => {
       const study = current.studies[studyId];
       if (!study) {
@@ -642,7 +616,7 @@ class WorkbenchStore {
         studies,
         workbenchStatus:
           current.activeStudyId === studyId
-            ? studies[studyId]?.status ?? current.workbenchStatus
+            ? (studies[studyId]?.status ?? current.workbenchStatus)
             : current.workbenchStatus,
       };
     });

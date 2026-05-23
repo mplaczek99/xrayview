@@ -1,8 +1,5 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
-import {
-  isTauriRuntime,
-  pickTauriBmpFile,
-} from "./tauri";
+import { isTauriRuntime, pickTauriBmpFile } from "./tauri";
 
 export function isDesktopRuntime(): boolean {
   return isTauriRuntime();

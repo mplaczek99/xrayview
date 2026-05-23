@@ -1,6 +1,6 @@
-import { formatBackendError } from "../../lib/backendErrors";
 import type { JobSnapshot } from "../../features/jobs/model";
 import type { WorkbenchStudy } from "../../features/study/model";
+import { formatBackendError } from "../../lib/backendErrors";
 
 function applyRenderJob(study: WorkbenchStudy, job: JobSnapshot): WorkbenchStudy {
   switch (job.state) {
@@ -144,13 +144,12 @@ function applyProcessJob(study: WorkbenchStudy, job: JobSnapshot): WorkbenchStud
           runStatus: {
             state: "error",
             jobId: job.jobId,
-            error:
-              job.error ?? {
-                code: "internal",
-                message: "Processing failed.",
-                details: [],
-                recoverable: false,
-              },
+            error: job.error ?? {
+              code: "internal",
+              message: "Processing failed.",
+              details: [],
+              recoverable: false,
+            },
           },
         },
       };

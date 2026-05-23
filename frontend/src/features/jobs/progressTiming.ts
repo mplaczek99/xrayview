@@ -86,9 +86,7 @@ export function advanceJobProgressTiming(
   const deltaPercent = percent - lastSample.percent;
   const nextSample = { atMs: nowMs, percent };
   const measuredRate =
-    lastSample.percent > 0 &&
-    deltaMs >= MIN_RATE_WINDOW_MS &&
-    deltaPercent >= MIN_PERCENT_DELTA
+    lastSample.percent > 0 && deltaMs >= MIN_RATE_WINDOW_MS && deltaPercent >= MIN_PERCENT_DELTA
       ? deltaPercent / deltaMs
       : null;
 
@@ -96,21 +94,14 @@ export function advanceJobProgressTiming(
     startedAtMs: base.startedAtMs,
     lastUpdatedAtMs: nowMs,
     lastProgressAtMs: nowMs,
-    firstMeasuredSample:
-      base.firstMeasuredSample ?? (percent > 0 ? nextSample : null),
-    measuredSampleCount:
-      base.measuredSampleCount + (percent > 0 ? 1 : 0),
-    smoothedRate: measuredRate
-      ? smoothRate(base.smoothedRate, measuredRate)
-      : base.smoothedRate,
+    firstMeasuredSample: base.firstMeasuredSample ?? (percent > 0 ? nextSample : null),
+    measuredSampleCount: base.measuredSampleCount + (percent > 0 ? 1 : 0),
+    smoothedRate: measuredRate ? smoothRate(base.smoothedRate, measuredRate) : base.smoothedRate,
     samples: trimSamples([...base.samples, nextSample], nowMs),
   };
 }
 
-function smoothRate(
-  previousRate: number | null,
-  nextRate: number,
-): number {
+function smoothRate(previousRate: number | null, nextRate: number): number {
   if (previousRate === null) {
     return nextRate;
   }
@@ -118,10 +109,7 @@ function smoothRate(
   return previousRate + (nextRate - previousRate) * RATE_EMA_ALPHA;
 }
 
-function trimSamples(
-  samples: JobProgressSample[],
-  nowMs: number,
-): JobProgressSample[] {
+function trimSamples(samples: JobProgressSample[], nowMs: number): JobProgressSample[] {
   const recent = samples.filter((sample, index) => {
     if (index === samples.length - 1) {
       return true;

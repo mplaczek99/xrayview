@@ -1,4 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
+import { normalizeBackendError } from "./backendErrors";
+import { buildProcessStudyCommand } from "./commandBuilders";
 import type {
   AnalyzeStudyCommand,
   JobCommand,
@@ -8,13 +10,11 @@ import type {
   MeasureLineAnnotationCommandResult,
   OpenStudyCommand,
   OpenStudyCommandResult,
-  ProcessStudyCommand,
   ProcessingManifest,
+  ProcessStudyCommand,
   RenderStudyCommand,
   StartedJob,
 } from "./generated/contracts";
-import { normalizeBackendError } from "./backendErrors";
-import { buildProcessStudyCommand } from "./commandBuilders";
 import { uniqueJobIds } from "./jobIds";
 import type { BackendAPI } from "./runtimeTypes";
 
@@ -32,8 +32,7 @@ async function invokeCommand<TResult>(
 export function createDesktopBackendAPI(): BackendAPI {
   return {
     mode: "desktop",
-    loadProcessingManifest: () =>
-      invokeCommand<ProcessingManifest>("get_processing_manifest"),
+    loadProcessingManifest: () => invokeCommand<ProcessingManifest>("get_processing_manifest"),
     openStudy: (inputPath) =>
       invokeCommand<OpenStudyCommandResult>("open_study", {
         command: { inputPath } satisfies OpenStudyCommand,

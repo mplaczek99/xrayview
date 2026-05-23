@@ -1,19 +1,19 @@
 import type { JobResultPayload, JobSnapshot } from "../features/jobs/model";
-import { createDesktopBackendAPI } from "./desktopBackend";
 import { buildDesktopPreviewUrl, isDesktopRuntime } from "./desktop";
+import { createDesktopBackendAPI } from "./desktopBackend";
 import type {
-  JobResult,
-  JobSnapshot as ContractJobSnapshot,
-  OpenStudyCommandResult,
   AnalyzeStudyCommandResult,
+  JobSnapshot as ContractJobSnapshot,
+  JobResult,
+  OpenStudyCommandResult,
   ProcessStudyCommandResult,
   RenderStudyCommandResult,
 } from "./generated/contracts";
 import { createMockBackendAPI } from "./mockBackend";
 import { MOCK_PROCESSING_MANIFEST } from "./mockProcessingManifest";
 import { resolveRuntimeConfiguration } from "./runtimeConfig";
+import type { BackendAPI, RuntimeAdapter, ShellAPI } from "./runtimeTypes";
 import { createDesktopShellAPI, createMockShellAPI } from "./shell";
-import type { BackendAPI, RuntimeAdapter } from "./runtimeTypes";
 import type {
   AnalysisResult,
   OpenedStudy,
@@ -32,10 +32,7 @@ function resolvePreviewUrl(previewPath: string, runtime: RuntimeMode): string {
   return previewPath;
 }
 
-function asOpenedStudy(
-  payload: OpenStudyCommandResult,
-  runtime: RuntimeMode,
-): OpenedStudy {
+function asOpenedStudy(payload: OpenStudyCommandResult, runtime: RuntimeMode): OpenedStudy {
   return {
     studyId: payload.study.studyId,
     inputPath: payload.study.inputPath,
@@ -45,10 +42,7 @@ function asOpenedStudy(
   };
 }
 
-function asPreviewResult(
-  payload: RenderStudyCommandResult,
-  runtime: RuntimeMode,
-): PreviewResult {
+function asPreviewResult(payload: RenderStudyCommandResult, runtime: RuntimeMode): PreviewResult {
   return {
     studyId: payload.studyId,
     previewUrl: resolvePreviewUrl(payload.previewPath, runtime),
@@ -61,10 +55,7 @@ function asPreviewResult(
   };
 }
 
-function asProcessResult(
-  payload: ProcessStudyCommandResult,
-  runtime: RuntimeMode,
-): ProcessResult {
+function asProcessResult(payload: ProcessStudyCommandResult, runtime: RuntimeMode): ProcessResult {
   return {
     ...asPreviewResult(payload, runtime),
     mode: payload.mode,
@@ -82,10 +73,7 @@ function asAnalysisResult(
   };
 }
 
-function normalizeJobResultPayload(
-  result: JobResult,
-  runtime: RuntimeMode,
-): JobResultPayload {
+function normalizeJobResultPayload(result: JobResult, runtime: RuntimeMode): JobResultPayload {
   switch (result.kind) {
     case "renderStudy":
       return {
@@ -116,9 +104,7 @@ export function normalizeJobSnapshot(
     state: snapshot.state,
     progress: snapshot.progress,
     fromCache: snapshot.fromCache,
-    result: snapshot.result
-      ? normalizeJobResultPayload(snapshot.result, runtime)
-      : null,
+    result: snapshot.result ? normalizeJobResultPayload(snapshot.result, runtime) : null,
     error: snapshot.error ?? null,
     timing: null,
   };
@@ -129,14 +115,13 @@ function createRuntimeAdapter(
 ): RuntimeAdapter {
   const { mode } = configuration;
 
-  let shell;
+  let shell: ShellAPI;
   let backend: BackendAPI;
   switch (mode) {
     case "mock":
       shell = createMockShellAPI();
       backend = createMockBackendAPI();
       break;
-    case "desktop":
     default:
       shell = createDesktopShellAPI();
       backend = createDesktopBackendAPI();
@@ -149,14 +134,11 @@ function createRuntimeAdapter(
     backend,
     loadProcessingManifest: () => backend.loadProcessingManifest(),
     pickBmpFile: () => shell.pickBmpFile(),
-    openStudy: async (inputPath) =>
-      asOpenedStudy(await backend.openStudy(inputPath), mode),
+    openStudy: async (inputPath) => asOpenedStudy(await backend.openStudy(inputPath), mode),
     startRenderStudyJob: (studyId) => backend.startRenderStudyJob(studyId),
     startAnalyzeStudyJob: (studyId) => backend.startAnalyzeStudyJob(studyId),
-    startProcessStudyJob: (studyId, request) =>
-      backend.startProcessStudyJob(studyId, request),
-    getJob: async (jobId) =>
-      normalizeJobSnapshot(await backend.getJob(jobId), mode),
+    startProcessStudyJob: (studyId, request) => backend.startProcessStudyJob(studyId, request),
+    getJob: async (jobId) => normalizeJobSnapshot(await backend.getJob(jobId), mode),
     getJobs: async (jobIds) => {
       const snapshots = await backend.getJobs(jobIds);
       const jobs = new Array<JobSnapshot>(snapshots.length);
@@ -171,8 +153,7 @@ function createRuntimeAdapter(
         visitor(normalizeJobSnapshot(snapshot, mode));
       }
     },
-    cancelJob: async (jobId) =>
-      normalizeJobSnapshot(await backend.cancelJob(jobId), mode),
+    cancelJob: async (jobId) => normalizeJobSnapshot(await backend.cancelJob(jobId), mode),
     measureLineAnnotation: (studyId, annotation) =>
       backend.measureLineAnnotation(studyId, annotation),
   };

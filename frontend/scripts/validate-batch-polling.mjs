@@ -9,8 +9,8 @@
 //
 // Expected: 60-80% reduction in HTTP requests with 3+ concurrent jobs.
 
-import { test } from "node:test";
 import assert from "node:assert/strict";
+import { test } from "node:test";
 
 // ---------------------------------------------------------------------------
 // Mock timer infrastructure.
@@ -73,7 +73,10 @@ function makePoller_BEFORE(getJobs, notifyFetch) {
     const pendingJobs = getJobs().filter(
       (j) => j.state === "queued" || j.state === "running" || j.state === "cancelling",
     );
-    if (pendingJobs.length === 0) { scheduleNext(IDLE_POLL_MS); return; }
+    if (pendingJobs.length === 0) {
+      scheduleNext(IDLE_POLL_MS);
+      return;
+    }
 
     const prePollState = new Map(
       pendingJobs.map((j) => [j.jobId, { percent: j.progress.percent, state: j.state }]),
@@ -87,7 +90,10 @@ function makePoller_BEFORE(getJobs, notifyFetch) {
     const updatedJobs = getJobs().filter(
       (j) => j.state === "queued" || j.state === "running" || j.state === "cancelling",
     );
-    if (updatedJobs.length === 0) { scheduleNext(IDLE_POLL_MS); return; }
+    if (updatedJobs.length === 0) {
+      scheduleNext(IDLE_POLL_MS);
+      return;
+    }
 
     let anyProgress = false;
     let allQueued = true;
@@ -97,7 +103,8 @@ function makePoller_BEFORE(getJobs, notifyFetch) {
       if (job.state !== "queued") allQueued = false;
       if (job.state === "running" && job.progress.percent > 80) anyNearComplete = true;
       const pre = prePollState.get(job.jobId);
-      if (pre && (job.progress.percent > pre.percent || job.state !== pre.state)) anyProgress = true;
+      if (pre && (job.progress.percent > pre.percent || job.state !== pre.state))
+        anyProgress = true;
     }
 
     if (anyProgress || anyNearComplete) {
@@ -113,7 +120,10 @@ function makePoller_BEFORE(getJobs, notifyFetch) {
 
   return {
     start: () => poll(),
-    cancel: () => { cancelled = true; if (timer !== undefined) mockClearTimeout(timer); },
+    cancel: () => {
+      cancelled = true;
+      if (timer !== undefined) mockClearTimeout(timer);
+    },
   };
 }
 
@@ -138,7 +148,10 @@ function makePoller_AFTER(getJobs, notifyBatchFetch) {
     const pendingJobs = getJobs().filter(
       (j) => j.state === "queued" || j.state === "running" || j.state === "cancelling",
     );
-    if (pendingJobs.length === 0) { scheduleNext(IDLE_POLL_MS); return; }
+    if (pendingJobs.length === 0) {
+      scheduleNext(IDLE_POLL_MS);
+      return;
+    }
 
     const prePollState = new Map(
       pendingJobs.map((j) => [j.jobId, { percent: j.progress.percent, state: j.state }]),
@@ -151,7 +164,10 @@ function makePoller_AFTER(getJobs, notifyBatchFetch) {
     const updatedJobs = getJobs().filter(
       (j) => j.state === "queued" || j.state === "running" || j.state === "cancelling",
     );
-    if (updatedJobs.length === 0) { scheduleNext(IDLE_POLL_MS); return; }
+    if (updatedJobs.length === 0) {
+      scheduleNext(IDLE_POLL_MS);
+      return;
+    }
 
     let anyProgress = false;
     let allQueued = true;
@@ -161,7 +177,8 @@ function makePoller_AFTER(getJobs, notifyBatchFetch) {
       if (job.state !== "queued") allQueued = false;
       if (job.state === "running" && job.progress.percent > 80) anyNearComplete = true;
       const pre = prePollState.get(job.jobId);
-      if (pre && (job.progress.percent > pre.percent || job.state !== pre.state)) anyProgress = true;
+      if (pre && (job.progress.percent > pre.percent || job.state !== pre.state))
+        anyProgress = true;
     }
 
     if (anyProgress || anyNearComplete) {
@@ -177,7 +194,10 @@ function makePoller_AFTER(getJobs, notifyBatchFetch) {
 
   return {
     start: () => poll(),
-    cancel: () => { cancelled = true; if (timer !== undefined) mockClearTimeout(timer); },
+    cancel: () => {
+      cancelled = true;
+      if (timer !== undefined) mockClearTimeout(timer);
+    },
   };
 }
 
@@ -190,14 +210,18 @@ function simulate({ jobCount, durationMs, makePollerFn }) {
   let wallTimeMs = 0;
   let httpRequestCount = 0;
 
-  const jobs = Array.from({ length: jobCount }, (_, i) =>
-    makeJob(`job-${i + 1}`, "running", 10),
-  );
+  const jobs = Array.from({ length: jobCount }, (_, i) => makeJob(`job-${i + 1}`, "running", 10));
 
   const poller = makePollerFn({
     getJobs: () => jobs,
-    notifyFetch: (id) => { httpRequestCount++; void id; },
-    notifyBatchFetch: (ids) => { httpRequestCount++; void ids; },
+    notifyFetch: (id) => {
+      httpRequestCount++;
+      void id;
+    },
+    notifyBatchFetch: (ids) => {
+      httpRequestCount++;
+      void ids;
+    },
   });
 
   poller.start();
@@ -221,15 +245,19 @@ function simulate({ jobCount, durationMs, makePollerFn }) {
 test("BEFORE: 1 job → 1 HTTP request per poll cycle", () => {
   resetTimers();
   let perCycleRequests = 0;
-  let cycles = 0;
   const jobs = [makeJob("j1", "running", 10)];
-  const poller = makePoller_BEFORE(() => jobs, () => { perCycleRequests++; });
+  const poller = makePoller_BEFORE(
+    () => jobs,
+    () => {
+      perCycleRequests++;
+    },
+  );
 
   // Run 3 cycles manually to count per-cycle requests.
-  poller.start(); cycles++;
+  poller.start();
   assert.equal(perCycleRequests, 1, "BEFORE: 1 job = 1 request first cycle");
   perCycleRequests = 0;
-  flushOneTimer(); cycles++;
+  flushOneTimer();
   assert.equal(perCycleRequests, 1, "BEFORE: 1 job = 1 request second cycle");
   poller.cancel();
   console.log("\nBEFORE: 1 job → 1 request/cycle ✓");
@@ -243,7 +271,12 @@ test("BEFORE: 3 jobs → 3 HTTP requests per poll cycle", () => {
     makeJob("j2", "running", 20),
     makeJob("j3", "running", 30),
   ];
-  const poller = makePoller_BEFORE(() => jobs, () => { requestsThisCycle++; });
+  const poller = makePoller_BEFORE(
+    () => jobs,
+    () => {
+      requestsThisCycle++;
+    },
+  );
 
   poller.start();
   assert.equal(requestsThisCycle, 3, "BEFORE: 3 pending jobs = 3 get_job requests per cycle");
@@ -256,7 +289,13 @@ test("AFTER: 1 job → 1 HTTP request per poll cycle (same as before)", () => {
   let batchCalls = 0;
   let batchIds = [];
   const jobs = [makeJob("j1", "running", 10)];
-  const poller = makePoller_AFTER(() => jobs, (ids) => { batchCalls++; batchIds = ids; });
+  const poller = makePoller_AFTER(
+    () => jobs,
+    (ids) => {
+      batchCalls++;
+      batchIds = ids;
+    },
+  );
 
   poller.start();
   assert.equal(batchCalls, 1, "AFTER: 1 batch call per cycle");
@@ -274,7 +313,13 @@ test("AFTER: 3 jobs → 1 HTTP request per poll cycle (67% reduction)", () => {
     makeJob("j2", "running", 20),
     makeJob("j3", "running", 30),
   ];
-  const poller = makePoller_AFTER(() => jobs, (ids) => { batchCalls++; batchIds = [...ids]; });
+  const poller = makePoller_AFTER(
+    () => jobs,
+    (ids) => {
+      batchCalls++;
+      batchIds = [...ids];
+    },
+  );
 
   poller.start();
   assert.equal(batchCalls, 1, "AFTER: 3 pending jobs still = 1 batch request");
@@ -295,7 +340,12 @@ test("AFTER: deduplication — no duplicate IDs in batch even if map has same ID
     makeJob("j1", "running", 10), // duplicate
     makeJob("j2", "running", 20),
   ];
-  const poller = makePoller_AFTER(() => duplicateJobs, (ids) => { batchIds = [...ids]; });
+  const poller = makePoller_AFTER(
+    () => duplicateJobs,
+    (ids) => {
+      batchIds = [...ids];
+    },
+  );
 
   poller.start();
   const uniqueIds = [...new Set(batchIds)];
@@ -317,7 +367,8 @@ test("BEFORE vs AFTER: 3-job request count over 5s simulated run", () => {
     makePollerFn: ({ getJobs, notifyBatchFetch }) => makePoller_AFTER(getJobs, notifyBatchFetch),
   });
 
-  const reduction = ((before.httpRequestCount - after.httpRequestCount) / before.httpRequestCount) * 100;
+  const reduction =
+    ((before.httpRequestCount - after.httpRequestCount) / before.httpRequestCount) * 100;
 
   console.log("\nRequest count comparison (3 jobs, 5s simulated, no progress):");
   console.log(`  BEFORE: ${before.httpRequestCount} HTTP requests (3 per poll cycle)`);
@@ -346,7 +397,8 @@ test("BEFORE vs AFTER: 5-job request count over 5s simulated run", () => {
     makePollerFn: ({ getJobs, notifyBatchFetch }) => makePoller_AFTER(getJobs, notifyBatchFetch),
   });
 
-  const reduction = ((before.httpRequestCount - after.httpRequestCount) / before.httpRequestCount) * 100;
+  const reduction =
+    ((before.httpRequestCount - after.httpRequestCount) / before.httpRequestCount) * 100;
 
   console.log("\nRequest count comparison (5 jobs, 5s simulated, no progress):");
   console.log(`  BEFORE: ${before.httpRequestCount} HTTP requests (5 per poll cycle)`);
@@ -363,7 +415,12 @@ test("AFTER: batch poller handles empty pending list without sending request", (
   resetTimers();
   let batchCalls = 0;
   const jobs = []; // no pending jobs
-  const poller = makePoller_AFTER(() => jobs, () => { batchCalls++; });
+  const poller = makePoller_AFTER(
+    () => jobs,
+    () => {
+      batchCalls++;
+    },
+  );
 
   poller.start();
   assert.equal(batchCalls, 0, "AFTER: no batch request when no pending jobs");

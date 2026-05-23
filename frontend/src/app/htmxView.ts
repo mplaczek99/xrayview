@@ -1,5 +1,3 @@
-import { selectActiveStudy, selectJobs, selectStudies } from "./store/selectors";
-import type { WorkbenchState } from "../features/study/model";
 import {
   annotationSourceLabel,
   formatLineMeasurement,
@@ -8,11 +6,10 @@ import {
 } from "../features/annotations/tools";
 import type { JobSnapshot } from "../features/jobs/model";
 import { describeProgress } from "../features/jobs/progressFormatting";
-import {
-  buildProcessingUiState,
-  processingControlsEqual,
-} from "../features/processing/presets";
+import { buildProcessingUiState, processingControlsEqual } from "../features/processing/presets";
+import type { WorkbenchState } from "../features/study/model";
 import { createProcessingForm } from "../features/study/model";
+import type { ViewerImageSize } from "../features/viewer/viewport";
 import { formatBackendError } from "../lib/backendErrors";
 import type {
   AnnotationBundle,
@@ -20,7 +17,7 @@ import type {
   MeasurementScale,
 } from "../lib/generated/contracts";
 import type { ActiveTab } from "../lib/types";
-import type { ViewerImageSize } from "../features/viewer/viewport";
+import { selectActiveStudy, selectJobs, selectStudies } from "./store/selectors";
 
 const CUSTOM_PRESET_ID = "__custom";
 
@@ -110,7 +107,9 @@ function renderTabs(activeTab: ActiveTab): string {
   const tabs: ActiveTab[] = ["view", "processing"];
   return `
     <nav class="tab-bar" role="tablist" aria-label="Main tabs">
-      ${tabs.map((tab) => `
+      ${tabs
+        .map(
+          (tab) => `
         <button
           id="tab-${tab}"
           class="tab-bar__tab${activeTab === tab ? " tab-bar__tab--active" : ""}"
@@ -123,7 +122,9 @@ function renderTabs(activeTab: ActiveTab): string {
           data-tab="${tab}"
           hx-swap="innerHTML"
         >${tab === "view" ? "View" : "Processing"}</button>
-      `).join("")}
+      `,
+        )
+        .join("")}
     </nav>
   `;
 }
@@ -137,7 +138,7 @@ export function selectViewerRenderModel(state: WorkbenchState): ViewerRenderMode
     ? analysisOverlayMode === "sections"
       ? analysisPreview.filledPreviewUrl
       : analysisPreview.previewUrl
-    : originalPreview?.previewUrl ?? null;
+    : (originalPreview?.previewUrl ?? null);
 
   return {
     previewUrl,
@@ -154,11 +155,14 @@ function renderEmptyView(isOpeningStudy: boolean): string {
     <div class="view-tab">
       <h2 class="sr-only">View</h2>
       <div class="empty-state">
-        ${isOpeningStudy ? `
+        ${
+          isOpeningStudy
+            ? `
           <span class="empty-state__loader" aria-hidden="true"></span>
           <h3 class="empty-state__title">Opening study...</h3>
           <p class="empty-state__copy">Loading and rendering the study preview.</p>
-        ` : `
+        `
+            : `
           <svg class="empty-state__icon" viewBox="0 0 48 48" fill="none" aria-hidden="true">
             <rect x="6" y="8" width="36" height="32" rx="4" stroke="currentColor" stroke-width="2"></rect>
             <path d="M6 16h36" stroke="currentColor" stroke-width="2"></path>
@@ -176,7 +180,8 @@ function renderEmptyView(isOpeningStudy: boolean): string {
             data-testid="action-open-study"
             data-action="open-study"
           >Open Study</button>
-        `}
+        `
+        }
       </div>
     </div>
   `;
@@ -248,19 +253,27 @@ function renderViewSidebar(
           Drag to pan, use the mouse wheel to zoom, then switch to Measure
           line to place calibrated annotations in source pixel space.
         </p>
-        ${line ? `
+        ${
+          line
+            ? `
           <div class="measurement-card__hero">
             <span class="measurement-card__hero-label">Selected line</span>
             <span class="measurement-card__hero-value">${escapeHtml(formatLineMeasurement(line.measurement))}</span>
           </div>
-        ` : ""}
+        `
+            : ""
+        }
       </section>
 
       <section class="measurement-card">
         <h3 class="measurement-card__eyebrow">Line Annotations</h3>
-        ${annotations.lines.length ? `
+        ${
+          annotations.lines.length
+            ? `
           <div class="${annotationListClassName}">
-            ${annotations.lines.map((annotation) => `
+            ${annotations.lines
+              .map(
+                (annotation) => `
               <button
                 class="annotation-list__item${annotation.id === selectedAnnotationId ? " annotation-list__item--selected" : ""}"
                 type="button"
@@ -272,20 +285,30 @@ function renderViewSidebar(
                 <span class="annotation-list__title">${escapeHtml(annotation.label)}</span>
                 <span class="annotation-list__meta">${escapeHtml(annotationSourceLabel(annotation.source))}</span>
                 <span class="annotation-list__value">${escapeHtml(formatLineMeasurement(annotation.measurement))}</span>
-                ${formatSecondaryMeasurement(annotation.measurement) ? `
+                ${
+                  formatSecondaryMeasurement(annotation.measurement)
+                    ? `
                   <span class="annotation-list__subvalue">${escapeHtml(formatSecondaryMeasurement(annotation.measurement))}</span>
-                ` : ""}
+                `
+                    : ""
+                }
               </button>
-            `).join("")}
+            `,
+              )
+              .join("")}
           </div>
-        ` : `
+        `
+            : `
           <p class="measurement-card__copy">
             No manual line annotations yet. Draw one to store a measurement.
           </p>
-        `}
+        `
+        }
       </section>
 
-      ${measurementScale ? `
+      ${
+        measurementScale
+          ? `
         <section class="measurement-card">
           <h3 class="measurement-card__eyebrow">Calibration</h3>
           <div class="measurement-card__hero">
@@ -297,7 +320,9 @@ function renderViewSidebar(
             ${measurementScale.columnSpacingMm.toFixed(3)} mm.
           </p>
         </section>
-      ` : ""}
+      `
+          : ""
+      }
     </aside>
   `;
 }
@@ -310,7 +335,7 @@ function renderViewTab(state: WorkbenchState): string {
 
   const model = selectViewerRenderModel(state);
   const jobs = selectJobs(state);
-  const analysisJob = study.analysisJobId ? jobs[study.analysisJobId] ?? null : null;
+  const analysisJob = study.analysisJobId ? (jobs[study.analysisJobId] ?? null) : null;
   const isAnalyzing =
     analysisJob?.state === "queued" ||
     analysisJob?.state === "running" ||
@@ -386,7 +411,9 @@ function renderViewTab(state: WorkbenchState): string {
             </svg>
             ${isAnalyzing ? "Analyzing..." : "Analyze"}
           </button>
-          ${study.analysisPreview ? `
+          ${
+            study.analysisPreview
+              ? `
             <div class="analysis-toggle" role="group" aria-label="Analysis overlay">
               <button
                 class="analysis-toggle__btn${analysisOverlayMode === "outline" ? " analysis-toggle__btn--active" : ""}"
@@ -405,7 +432,9 @@ function renderViewTab(state: WorkbenchState): string {
                 data-mode="sections"
               >Sections</button>
             </div>
-          ` : ""}
+          `
+              : ""
+          }
           <button
             class="button button--ghost"
             type="button"
@@ -438,7 +467,9 @@ function renderXrayViewer(
 ): string {
   return `
     <div class="viewer-stage">
-      ${previewUrl ? `
+      ${
+        previewUrl
+          ? `
         <div class="viewer-stage__media">
           <img
             class="viewer-stage__image"
@@ -447,12 +478,14 @@ function renderXrayViewer(
             draggable="false"
           />
         </div>
-      ` : `
+      `
+          : `
         <div class="viewer-placeholder">
           <div class="viewer-placeholder__title">${escapeHtml(emptyTitle)}</div>
           <p class="viewer-placeholder__copy">${escapeHtml(emptyDescription)}</p>
         </div>
-      `}
+      `
+      }
     </div>
   `;
 }
@@ -579,18 +612,26 @@ function renderProcessingTab(state: WorkbenchState, ui: HtmxUiState, nowMs: numb
     <h2 class="sr-only">Processing</h2>
     <div class="processing-tab">
       <div class="processing-tab__preview">
-        ${processedPreviewUrl ? `
+        ${
+          processedPreviewUrl
+            ? `
           <div class="compare-toggle">
-            ${(["original", "processed", "split"] as const).map((view) => `
+            ${(["original", "processed", "split"] as const)
+              .map(
+                (view) => `
               <button
                 class="compare-toggle__btn${ui.compareView === view ? " compare-toggle__btn--active" : ""}"
                 type="button"
                 data-action="set-compare-view"
                 data-compare-view="${view}"
               >${view === "original" ? "Original" : view === "processed" ? "Processed" : "Split"}</button>
-            `).join("")}
+            `,
+              )
+              .join("")}
           </div>
-          ${ui.compareView === "split" ? `
+          ${
+            ui.compareView === "split"
+              ? `
             <div class="compare-split">
               <div class="compare-split__pane">
                 <div class="compare-split__label">Original</div>
@@ -601,12 +642,16 @@ function renderProcessingTab(state: WorkbenchState, ui: HtmxUiState, nowMs: numb
                 ${renderXrayViewer(processedPreviewUrl)}
               </div>
             </div>
-          ` : renderXrayViewer(ui.compareView === "processed" ? processedPreviewUrl : previewUrl)}
-        ` : renderXrayViewer(
-          previewUrl,
-          "No image loaded",
-          "Load a bitewing X-ray (BMP) in the View tab first.",
-        )}
+          `
+              : renderXrayViewer(ui.compareView === "processed" ? processedPreviewUrl : previewUrl)
+          }
+        `
+            : renderXrayViewer(
+                previewUrl,
+                "No image loaded",
+                "Load a bitewing X-ray (BMP) in the View tab first.",
+              )
+        }
       </div>
 
       <div class="processing-tab__form">
@@ -619,17 +664,23 @@ function renderProcessingTab(state: WorkbenchState, ui: HtmxUiState, nowMs: numb
             data-action="set-processing-preset"
             ${disabled(busy)}
           >
-            ${processingUi.presets.map((preset) => `
+            ${processingUi.presets
+              .map(
+                (preset) => `
               <option value="${attr(preset.id)}"${selected(activePreset?.id === preset.id)}>
                 ${escapeHtml(preset.label)}
               </option>
-            `).join("")}
+            `,
+              )
+              .join("")}
             ${!activePreset ? `<option value="${CUSTOM_PRESET_ID}" selected>Custom</option>` : ""}
           </select>
           <p class="form-hint">
-            ${escapeHtml(activePreset
-              ? activePreset.description
-              : "Custom controls. The backend will use the default preset plus the explicit overrides shown below.")}
+            ${escapeHtml(
+              activePreset
+                ? activePreset.description
+                : "Custom controls. The backend will use the default preset plus the explicit overrides shown below.",
+            )}
           </p>
         </section>
 
@@ -645,9 +696,13 @@ function renderProcessingTab(state: WorkbenchState, ui: HtmxUiState, nowMs: numb
             data-control="palette"
             ${disabled(busy)}
           >
-            ${["none", "hot", "bone"].map((palette) => `
+            ${["none", "hot", "bone"]
+              .map(
+                (palette) => `
               <option value="${palette}"${selected(form.controls.palette === palette)}>${palette}</option>
-            `).join("")}
+            `,
+              )
+              .join("")}
           </select>
         </section>
 
@@ -672,13 +727,19 @@ function renderProcessingTab(state: WorkbenchState, ui: HtmxUiState, nowMs: numb
             data-action="run-processing"
             ${disabled(!canRun)}
           >
-            ${busy ? `
+            ${
+              busy
+                ? `
               <span class="spinner" aria-hidden="true"></span>
               ${runStatus.state === "cancelling" ? "Cancelling..." : "Processing..."}
-            ` : "Run Processing"}
+            `
+                : "Run Processing"
+            }
           </button>
 
-          ${runStatus.state === "running" ? `
+          ${
+            runStatus.state === "running"
+              ? `
             <button
               class="button button--ghost"
               type="button"
@@ -686,29 +747,51 @@ function renderProcessingTab(state: WorkbenchState, ui: HtmxUiState, nowMs: numb
               data-action="cancel-job"
               data-job-id="${attr(runStatus.jobId)}"
             >Cancel Job</button>
-          ` : ""}
+          `
+              : ""
+          }
 
-          ${runStatus.state === "success" ? `
+          ${
+            runStatus.state === "success"
+              ? `
             <div class="run-status run-status--success">
               ${runStatus.fromCache ? "Processing loaded from cache." : "Processing complete."}
             </div>
-          ` : ""}
-          ${runStatus.state === "error" ? `
+          `
+              : ""
+          }
+          ${
+            runStatus.state === "error"
+              ? `
             <div class="run-status run-status--error">
               ${escapeHtml(formatBackendError(runStatus.error, "Processing failed."))}
             </div>
-          ` : ""}
-          ${runStatus.state === "cancelled" ? `
+          `
+              : ""
+          }
+          ${
+            runStatus.state === "cancelled"
+              ? `
             <div class="run-status run-status--error">Processing cancelled.</div>
-          ` : ""}
-          ${busy ? `
+          `
+              : ""
+          }
+          ${
+            busy
+              ? `
             <div class="run-status">
               <div>${escapeHtml(runStatus.progress.message)}</div>
-              ${progressView?.detailLabel ? `
+              ${
+                progressView?.detailLabel
+                  ? `
                 <div class="run-status__detail">${escapeHtml(progressView.detailLabel)}</div>
-              ` : ""}
+              `
+                  : ""
+              }
             </div>
-          ` : ""}
+          `
+              : ""
+          }
         </div>
       </div>
     </div>
@@ -778,29 +861,36 @@ function renderJobCenter(state: WorkbenchState, ui: HtmxUiState, nowMs: number):
           <span class="job-center__eyebrow">Jobs</span>
           ${activeCount > 0 ? `<span class="job-center__badge">${activeCount}</span>` : ""}
         </button>
-        ${ui.jobsExpanded && jobs.some((job) => isTerminal(job.state)) ? `
+        ${
+          ui.jobsExpanded && jobs.some((job) => isTerminal(job.state))
+            ? `
           <button
             class="button button--ghost job-center__clear"
             type="button"
             data-action="clear-terminal-jobs"
           >Clear finished</button>
-        ` : ""}
+        `
+            : ""
+        }
       </div>
 
-      ${ui.jobsExpanded ? `
+      ${
+        ui.jobsExpanded
+          ? `
         <div class="job-center__list">
-          ${jobs.map((job) => {
-            const studyName = job.studyId ? studies[job.studyId]?.inputName ?? null : null;
-            const canCancel = job.state === "queued" || job.state === "running";
-            const terminal = isTerminal(job.state);
-            const progressView = describeProgress(job, nowMs);
-            const message =
-              job.state === "failed"
-                ? formatBackendError(job.error, "Job failed.")
-                : job.progress.message;
-            const width = Math.max(job.progress.percent, job.state === "completed" ? 100 : 4);
+          ${jobs
+            .map((job) => {
+              const studyName = job.studyId ? (studies[job.studyId]?.inputName ?? null) : null;
+              const canCancel = job.state === "queued" || job.state === "running";
+              const terminal = isTerminal(job.state);
+              const progressView = describeProgress(job, nowMs);
+              const message =
+                job.state === "failed"
+                  ? formatBackendError(job.error, "Job failed.")
+                  : job.progress.message;
+              const width = Math.max(job.progress.percent, job.state === "completed" ? 100 : 4);
 
-            return `
+              return `
               <article
                 class="job-card"
                 data-testid="job-row"
@@ -820,7 +910,9 @@ function renderJobCenter(state: WorkbenchState, ui: HtmxUiState, nowMs: number):
                       ${job.fromCache ? " - cache" : ""}
                     </div>
                   </div>
-                  ${canCancel ? `
+                  ${
+                    canCancel
+                      ? `
                     <button
                       class="button button--ghost job-card__cancel"
                       type="button"
@@ -828,7 +920,9 @@ function renderJobCenter(state: WorkbenchState, ui: HtmxUiState, nowMs: number):
                       data-action="cancel-job"
                       data-job-id="${attr(job.jobId)}"
                     >Cancel</button>
-                  ` : terminal ? `
+                  `
+                      : terminal
+                        ? `
                     <button
                       class="button button--ghost job-card__cancel"
                       type="button"
@@ -836,7 +930,9 @@ function renderJobCenter(state: WorkbenchState, ui: HtmxUiState, nowMs: number):
                       data-job-id="${attr(job.jobId)}"
                       aria-label="Dismiss"
                     >Dismiss</button>
-                  ` : ""}
+                  `
+                        : ""
+                  }
                 </div>
 
                 <div class="job-card__progress">
@@ -846,23 +942,28 @@ function renderJobCenter(state: WorkbenchState, ui: HtmxUiState, nowMs: number):
                   ></div>
                 </div>
                 <p class="job-card__message">${escapeHtml(message)}</p>
-                ${progressView.detailLabel ? `
+                ${
+                  progressView.detailLabel
+                    ? `
                   <p class="job-card__detail">${escapeHtml(progressView.detailLabel)}</p>
-                ` : ""}
+                `
+                    : ""
+                }
               </article>
             `;
-          }).join("")}
+            })
+            .join("")}
         </div>
-      ` : ""}
+      `
+          : ""
+      }
     </section>
   `;
 }
 
 export function renderApp(state: WorkbenchState, ui: HtmxUiState, nowMs: number): string {
   const tabContent =
-    ui.activeTab === "view"
-      ? renderViewTab(state)
-      : renderProcessingTab(state, ui, nowMs);
+    ui.activeTab === "view" ? renderViewTab(state) : renderProcessingTab(state, ui, nowMs);
 
   return `
     <div class="app-shell" hx-swap="innerHTML">

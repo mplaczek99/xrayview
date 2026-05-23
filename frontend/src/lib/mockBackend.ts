@@ -1,19 +1,16 @@
+import { normalizeBackendError } from "./backendErrors";
 import type {
-  JobResult,
   JobSnapshot as ContractJobSnapshot,
+  JobResult,
   JobState,
   LineAnnotation,
   OpenStudyCommandResult,
   ProcessingManifest,
   StartedJob,
 } from "./generated/contracts";
-import { normalizeBackendError } from "./backendErrors";
 import { uniqueJobIds } from "./jobIds";
 import { MOCK_PROCESSING_MANIFEST } from "./mockProcessingManifest";
-import {
-  createMockPreview,
-  measureMockLineAnnotation,
-} from "./mockStudy";
+import { createMockPreview, measureMockLineAnnotation } from "./mockStudy";
 import type { BackendAPI } from "./runtimeTypes";
 
 const mockJobs = new Map<string, ContractJobSnapshot>();
@@ -237,8 +234,7 @@ export function createMockBackendAPI(): BackendAPI {
         state: job.state === "queued" ? "cancelled" : "cancelling",
         progress: {
           ...job.progress,
-          message:
-            job.state === "queued" ? "Cancelled before start" : "Cancellation requested",
+          message: job.state === "queued" ? "Cancelled before start" : "Cancellation requested",
         },
       }));
 

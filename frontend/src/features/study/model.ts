@@ -11,11 +11,8 @@ import type {
   ProcessResult,
   RuntimeMode,
 } from "../../lib/types";
+import { emptyAnnotationBundle, type ViewerTool } from "../annotations/tools";
 import type { JobSnapshot, ProcessingRunState } from "../jobs/model";
-import {
-  emptyAnnotationBundle,
-  type ViewerTool,
-} from "../annotations/tools";
 
 export interface ProcessingForm {
   controls: ProcessingControls;
@@ -63,18 +60,14 @@ export interface WorkbenchState {
   workbenchStatus: string;
 }
 
-export function createProcessingForm(
-  defaultControls: ProcessingControls,
-): ProcessingForm {
+export function createProcessingForm(defaultControls: ProcessingControls): ProcessingForm {
   return {
     controls: { ...defaultControls },
     compare: false,
   };
 }
 
-export function defaultControlsForManifest(
-  manifest: ProcessingManifest,
-): ProcessingControls {
+export function defaultControlsForManifest(manifest: ProcessingManifest): ProcessingControls {
   const defaultPreset =
     manifest.presets.find((preset) => preset.id === manifest.defaultPresetId) ??
     manifest.presets[0];

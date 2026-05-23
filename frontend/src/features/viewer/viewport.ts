@@ -54,30 +54,21 @@ export function getViewerTransform(
   };
 }
 
-function imageToScreen(
-  point: AnnotationPoint,
-  transform: ViewerTransform,
-): AnnotationPoint {
+function imageToScreen(point: AnnotationPoint, transform: ViewerTransform): AnnotationPoint {
   return {
     x: transform.offsetX + point.x * transform.scale,
     y: transform.offsetY + point.y * transform.scale,
   };
 }
 
-export function screenToImage(
-  point: AnnotationPoint,
-  transform: ViewerTransform,
-): AnnotationPoint {
+export function screenToImage(point: AnnotationPoint, transform: ViewerTransform): AnnotationPoint {
   return {
     x: (point.x - transform.offsetX) / transform.scale,
     y: (point.y - transform.offsetY) / transform.scale,
   };
 }
 
-export function clampPointToImage(
-  point: AnnotationPoint,
-  image: ViewerImageSize,
-): AnnotationPoint {
+export function clampPointToImage(point: AnnotationPoint, image: ViewerImageSize): AnnotationPoint {
   return {
     x: clamp(point.x, 0, image.width),
     y: clamp(point.y, 0, image.height),
