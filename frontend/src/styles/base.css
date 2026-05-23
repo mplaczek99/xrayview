@@ -866,6 +866,12 @@ button {
   }
 }
 
+@keyframes analysis-pulse {
+  to {
+    box-shadow: 0 0 0 8px rgba(55, 148, 255, 0);
+  }
+}
+
 .spinner {
   display: inline-block;
   width: 14px;
@@ -910,6 +916,17 @@ button {
 .viewer-tool--active {
   border-color: rgba(90, 176, 255, 0.58);
   background: rgba(35, 84, 136, 0.42);
+}
+
+.analysis-button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.analysis-button .button__icon,
+.analysis-button__spinner {
+  margin-right: 0;
 }
 
 .analysis-toggle {
@@ -1014,6 +1031,55 @@ button {
   border-radius: var(--radius-sm);
   object-fit: contain;
   user-select: none;
+}
+
+.analysis-progress {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.analysis-progress__badge {
+  position: absolute;
+  left: var(--space-3);
+  bottom: var(--space-3);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  max-width: min(320px, calc(100% - var(--space-6)));
+  min-height: 34px;
+  padding: 8px 10px;
+  border: 1px solid rgba(90, 176, 255, 0.34);
+  border-radius: var(--radius-sm);
+  background: rgba(8, 11, 16, 0.84);
+  color: var(--text);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.28);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.analysis-progress__pulse {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 0 rgba(55, 148, 255, 0.44);
+  animation: analysis-pulse 950ms ease-out infinite;
+}
+
+.analysis-progress__text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.analysis-progress__detail {
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 11px;
 }
 
 .viewer-placeholder {
@@ -1205,5 +1271,11 @@ button {
   .measurement-grid,
   .annotation-list {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .analysis-progress__pulse {
+    animation: none;
   }
 }

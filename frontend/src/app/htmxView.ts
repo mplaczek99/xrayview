@@ -187,7 +187,36 @@ function renderEmptyView(isOpeningStudy: boolean): string {
   `;
 }
 
-function renderViewerStage(model: ViewerRenderModel): string {
+function progressPercentLabel(job: JobSnapshot | null): string | null {
+  const percent = job?.progress.percent ?? 0;
+  if (!Number.isFinite(percent) || percent <= 0 || percent >= 100) {
+    return null;
+  }
+  return `${Math.round(percent)}%`;
+}
+
+function renderAnalysisProgress(job: JobSnapshot | null): string {
+  const label = job?.state === "cancelling" ? "Cancelling analysis..." : "Analyzing...";
+  const detail = progressPercentLabel(job);
+
+  return `
+    <div
+      class="analysis-progress"
+      data-testid="analysis-progress"
+      role="status"
+      aria-live="polite"
+      aria-label="${attr(detail ? `${label} ${detail}` : label)}"
+    >
+      <div class="analysis-progress__badge">
+        <span class="analysis-progress__pulse" aria-hidden="true"></span>
+        <span class="analysis-progress__text">${escapeHtml(label)}</span>
+        ${detail ? `<span class="analysis-progress__detail">${escapeHtml(detail)}</span>` : ""}
+      </div>
+    </div>
+  `;
+}
+
+function renderViewerStage(model: ViewerRenderModel, analysisJob: JobSnapshot | null): string {
   if (!model.previewUrl) {
     return `
       <div class="viewer-stage viewer-stage--interactive">
@@ -223,6 +252,7 @@ function renderViewerStage(model: ViewerRenderModel): string {
         />
         <div data-annotation-layer></div>
       </div>
+      ${analysisJob ? renderAnalysisProgress(analysisJob) : ""}
     </div>
   `;
 }
@@ -399,17 +429,26 @@ function renderViewTab(state: WorkbenchState): string {
 
         <div class="toolbar-group">
           <button
-            class="button button--ghost"
+            class="button button--ghost analysis-button"
             type="button"
             data-testid="action-measure-teeth"
             data-action="analyze-study"
             ${disabled(!study.originalPreview || isAnalyzing)}
           >
-            <svg class="button__icon" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-              <circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.5"></circle>
-              <path d="M8 5v6M5 8h6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></path>
-            </svg>
-            ${isAnalyzing ? "Analyzing..." : "Analyze"}
+            ${
+              isAnalyzing
+                ? `
+              <span class="spinner analysis-button__spinner" aria-hidden="true"></span>
+              <span>Analyzing...</span>
+            `
+                : `
+              <svg class="button__icon" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.5"></circle>
+                <path d="M8 5v6M5 8h6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></path>
+              </svg>
+              <span>Analyze</span>
+            `
+            }
           </button>
           ${
             study.analysisPreview
@@ -453,7 +492,7 @@ function renderViewTab(state: WorkbenchState): string {
       </div>
 
       <div class="study-layout">
-        <div class="study-layout__viewer">${renderViewerStage(model)}</div>
+        <div class="study-layout__viewer">${renderViewerStage(model, isAnalyzing ? analysisJob : null)}</div>
         ${renderViewSidebar(model.annotations, model.selectedAnnotationId, line, measurementScale)}
       </div>
     </div>

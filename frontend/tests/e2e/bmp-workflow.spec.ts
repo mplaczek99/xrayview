@@ -33,3 +33,25 @@ test("opens and processes a BMP without legacy output UI", async ({ page }) => {
   ).toHaveCount(0);
   expect(runtimeErrors).toEqual([]);
 });
+
+test("shows an active animation while analysis is running", async ({ page }) => {
+  const runtimeErrors: string[] = [];
+  page.on("pageerror", (error) => runtimeErrors.push(error.message));
+  page.on("console", (message) => {
+    if (message.type() === "error") {
+      runtimeErrors.push(message.text());
+    }
+  });
+
+  await page.goto("/");
+  await page.getByTestId("action-open-study").click();
+  await expect(page.locator(".viewer-canvas__image")).toBeVisible();
+
+  await page.getByTestId("action-measure-teeth").click();
+
+  await expect(page.getByTestId("analysis-progress")).toBeVisible();
+  await expect(page.locator(".analysis-progress__badge")).toBeVisible();
+  await expect(page.locator(".analysis-progress__scanline")).toHaveCount(0);
+  await expect(page.getByTestId("action-measure-teeth")).toContainText("Analyzing...");
+  expect(runtimeErrors).toEqual([]);
+});
