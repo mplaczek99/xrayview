@@ -31,7 +31,7 @@
 xrayview/
 ├── frontend/        HTMX/TypeScript workstation UI (Vite)
 ├── desktop-tauri/   Tauri 2 desktop shell (Rust crate; links backend-rs as a library)
-├── backend-rs/      Rust backend library + standalone HTTP/CLI binary
+├── backend-rs/      Rust backend library + headless CLI binary
 ├── contracts/       shared JSON schema + generated TypeScript bindings
 └── images/          sample image assets for dev & detector tuning
 ```
@@ -115,17 +115,17 @@ XRAYVIEW_BACKEND_RUNTIME=mock npm run dev
 
 ## Rust Backend
 
-`backend-rs/` is a library used in-process by the desktop shell and also ships
-a standalone HTTP binary (`xrayview-backend-rs`) for CLI/tests. The standalone
-binary binds `127.0.0.1:38181` by default and is loopback-only.
+`backend-rs/` is a library used in-process by the desktop shell. It also ships
+a headless CLI binary (`xrayview-backend-rs`) for scripted/manual inspection
+of BMP studies; the CLI calls the same library code directly — there is no
+local HTTP server.
 
 ```bash
 npm run backend:build
-npm run backend:serve
 npm run backend:test
 ```
 
-### Command surface (Tauri IPC + standalone HTTP)
+### Command surface (Tauri IPC)
 
 | Command | Purpose |
 |---|---|
@@ -139,15 +139,14 @@ npm run backend:test
 | `cancel_job` | Cancel a running job |
 | `measure_line_annotation` | Calibration-aware line measurement |
 
-In the desktop shell each command is reached via `invoke("<command>", { command: <payload> })`
-from the frontend; the standalone HTTP binary exposes them under
-`POST /api/v1/commands/{command}`.
+Each command is reached via `invoke("<command>", { command: <payload> })`
+from the frontend.
 
 ---
 
 ## CLI
 
-The headless CLI runs through the standalone backend binary.
+The headless CLI runs through the backend binary.
 
 ### Utility subcommands
 
@@ -209,7 +208,7 @@ shell that links it in-process.
 |---|---|
 | `frontend/` | Workstation UI and mock-mode behavior |
 | `desktop-tauri/` | Tauri shell: window lifecycle, file dialogs, IPC command wrappers, job-event forwarding |
-| `backend-rs/` | Rust library: BMP decode, render, processing, annotations, jobs. Also ships a standalone HTTP/CLI binary |
+| `backend-rs/` | Rust library: BMP decode, render, processing, annotations, jobs. Also ships a headless CLI binary |
 | `contracts/` | Shared command payload shapes via JSON schema |
 
 ```

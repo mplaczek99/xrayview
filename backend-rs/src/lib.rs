@@ -6,7 +6,6 @@ pub mod cli;
 pub mod config;
 pub mod contracts;
 pub mod bmp;
-pub mod http;
 pub mod persistence;
 pub mod processing;
 pub mod render;

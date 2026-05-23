@@ -44,8 +44,9 @@ HTMX UI (frontend) ─── Tauri IPC ───▶ desktop-tauri (Rust shell)
                                  xrayview_backend_rs::App (in-process)
 ```
 
-The shell does not run the loopback HTTP server; that binary
-(`xrayview-backend-rs`) is built only for CLI/testing scenarios.
+The shell links `backend-rs` directly as a library — there is no local HTTP
+server. The standalone `xrayview-backend-rs` binary is the headless CLI used
+for scripted inspection of BMP studies.
 
 ## Platform support
 

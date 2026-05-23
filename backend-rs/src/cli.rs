@@ -387,11 +387,6 @@ fn print_config(stdout: &mut dyn Write) -> Result<(), String> {
         stdout,
         &json!({
             "serviceName": config.service_name,
-            "server": {
-                "host": config.server.host,
-                "port": config.server.port,
-                "shutdownTimeout": format_duration(config.server.shutdown_timeout),
-            },
             "logging": {
                 "level": config.logging.level,
             },
@@ -697,11 +692,6 @@ fn print_usage(stream: &mut dyn Write) -> Result<(), String> {
     writeln!(stream, "utility subcommands:").map_err(|error| error.to_string())?;
     writeln!(
         stream,
-        "  serve                    start the loopback HTTP backend"
-    )
-    .map_err(|error| error.to_string())?;
-    writeln!(
-        stream,
         "  print-config             print resolved backend configuration as JSON"
     )
     .map_err(|error| error.to_string())?;
@@ -795,14 +785,6 @@ fn print_legacy_usage(stream: &mut dyn Write) -> Result<(), String> {
     .map_err(|error| error.to_string())?;
     writeln!(stream, "  --palette <name>              none, hot, or bone")
         .map_err(|error| error.to_string())
-}
-
-fn format_duration(duration: std::time::Duration) -> String {
-    if duration.as_millis().is_multiple_of(1000) {
-        format!("{}s", duration.as_secs())
-    } else {
-        format!("{}ms", duration.as_millis())
-    }
 }
 
 #[derive(Debug, Clone, Serialize)]
