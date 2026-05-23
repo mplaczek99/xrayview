@@ -15,13 +15,13 @@
 ## Features
 
 - Open local bitewing X-rays in BMP format
-- Render PNG previews for the workstation viewer
+- Render BMP previews for the workstation viewer
 - Apply grayscale processing, palettes, and side-by-side comparison
 - Run background render and process jobs with cancellation
 - Measure line annotations
 - Persist a recent-studies catalog
 
-> The user-facing workflow is **BMP in, PNG previews for display and processing**.
+> The user-facing workflow is **BMP in, BMP previews for display and processing**.
 
 ---
 
@@ -161,10 +161,10 @@ npm run backend:cli -- list-commands     # supported backend commands
 npm run backend:cli -- decode-source /path/to/image.bmp
 
 # Render & process
-npm run backend:cli -- render-preview /path/to/image.bmp /tmp/preview.png
-npm run backend:cli -- render-preview --full-range /path/to/image.bmp /tmp/preview.png
-npm run backend:cli -- process-preview --invert --equalize /path/to/image.bmp /tmp/processed.png
-npm run backend:cli -- analyze-preview /path/to/image.bmp /tmp/analyze.png
+npm run backend:cli -- render-preview /path/to/image.bmp /tmp/preview.bmp
+npm run backend:cli -- render-preview --full-range /path/to/image.bmp /tmp/preview.bmp
+npm run backend:cli -- process-preview --invert --equalize /path/to/image.bmp /tmp/processed.bmp
+npm run backend:cli -- analyze-preview /path/to/image.bmp /tmp/analyze.bmp
 ```
 
 <details>
@@ -173,7 +173,7 @@ npm run backend:cli -- analyze-preview /path/to/image.bmp /tmp/analyze.png
 ```bash
 npm run backend:cli -- --describe-presets
 npm run backend:cli -- --input /path/to/image.bmp --describe-study
-npm run backend:cli -- --input /path/to/image.bmp --preview-output /tmp/preview.png
+npm run backend:cli -- --input /path/to/image.bmp --preview-output /tmp/preview.bmp
 ```
 
 </details>

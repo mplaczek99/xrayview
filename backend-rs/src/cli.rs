@@ -212,7 +212,7 @@ fn render_legacy_preview(
     stdout: &mut dyn Write,
 ) -> Result<(), String> {
     let rendered = bmp::render_grayscale_preview_file(input_path)?;
-    render::save_gray_png(
+    render::save_gray_bmp(
         preview_output,
         rendered.width,
         rendered.height,
@@ -246,7 +246,7 @@ fn process_legacy_study(
         resolved.compare,
     )?;
 
-    render::save_preview_png(preview_output, &processed.preview)?;
+    render::save_preview_bmp(preview_output, &processed.preview)?;
 
     writeln!(
         stdout,
@@ -327,7 +327,7 @@ fn default_legacy_preview_output_path(input_path: &str) -> String {
         .unwrap_or_else(|| "image".to_string());
     path.parent()
         .unwrap_or_else(|| std::path::Path::new(""))
-        .join(format!("{stem}_processed.png"))
+        .join(format!("{stem}_processed.bmp"))
         .display()
         .to_string()
 }
@@ -423,7 +423,7 @@ fn render_preview(args: &[&str], stdout: &mut dyn Write) -> Result<(), String> {
         &options.input_path,
         render_window_mode(options.full_range),
     )?;
-    render::save_gray_png(
+    render::save_gray_bmp(
         &options.output_path,
         rendered.width,
         rendered.height,
@@ -460,7 +460,7 @@ fn process_preview(args: &[&str], stdout: &mut dyn Write) -> Result<(), String> 
         &options.palette,
         options.compare,
     )?;
-    render::save_preview_png(&options.output_path, &processed.preview)?;
+    render::save_preview_bmp(&options.output_path, &processed.preview)?;
 
     write_json(
         stdout,
@@ -492,7 +492,7 @@ fn analyze_preview(args: &[&str], stdout: &mut dyn Write) -> Result<(), String> 
     } else {
         &result.preview
     };
-    render::save_preview_png(&options.output_path, preview)?;
+    render::save_preview_bmp(&options.output_path, preview)?;
 
     write_json(
         stdout,
@@ -532,7 +532,7 @@ fn parse_render_preview_args(args: &[&str]) -> Result<RenderPreviewOptions, Stri
 
     if positional.len() != 2 {
         return Err(
-            "render-preview requires INPUT_BMP OUTPUT_PNG and accepts optional --full-range"
+            "render-preview requires INPUT_BMP OUTPUT_BMP and accepts optional --full-range"
                 .to_string(),
         );
     }
@@ -605,7 +605,7 @@ fn parse_process_preview_args(args: &[&str]) -> Result<ProcessPreviewOptions, St
     }
 
     if positional.len() != 2 {
-        return Err("process-preview requires INPUT_BMP OUTPUT_PNG and accepts optional --full-range, --invert, --brightness, --contrast, --equalize, --palette, and --compare".to_string());
+        return Err("process-preview requires INPUT_BMP OUTPUT_BMP and accepts optional --full-range, --invert, --brightness, --contrast, --equalize, --palette, and --compare".to_string());
     }
     if !(-256..=256).contains(&options.controls.brightness) {
         return Err(format!(
@@ -633,7 +633,7 @@ fn parse_analyze_preview_args(args: &[&str]) -> Result<AnalyzePreviewOptions, St
     }
     if positional.len() != 2 {
         return Err(
-            "analyze-preview requires INPUT_BMP OUTPUT_PNG and accepts optional --filled"
+            "analyze-preview requires INPUT_BMP OUTPUT_BMP and accepts optional --filled"
                 .to_string(),
         );
     }
@@ -685,12 +685,12 @@ fn print_usage(stream: &mut dyn Write) -> Result<(), String> {
     .map_err(|error| error.to_string())?;
     writeln!(
         stream,
-        "  --input <image.bmp> --preview-output <png> render a grayscale preview PNG"
+        "  --input <image.bmp> --preview-output <bmp> render a grayscale preview BMP"
     )
     .map_err(|error| error.to_string())?;
     writeln!(
         stream,
-        "  --input <image.bmp> [processing flags]     write processed preview PNG"
+        "  --input <image.bmp> [processing flags]     write processed preview BMP"
     )
     .map_err(|error| error.to_string())?;
     writeln!(stream).map_err(|error| error.to_string())?;
@@ -712,7 +712,7 @@ fn print_usage(stream: &mut dyn Write) -> Result<(), String> {
     .map_err(|error| error.to_string())?;
     writeln!(
         stream,
-        "  render-preview           render a grayscale PNG preview"
+        "  render-preview           render a grayscale BMP preview"
     )
     .map_err(|error| error.to_string())?;
     writeln!(
@@ -749,7 +749,7 @@ fn print_legacy_usage(stream: &mut dyn Write) -> Result<(), String> {
     .map_err(|error| error.to_string())?;
     writeln!(
         stream,
-        "  --preview-output <image.png>  PNG preview output path"
+        "  --preview-output <image.bmp>  BMP preview output path"
     )
     .map_err(|error| error.to_string())?;
     writeln!(stream).map_err(|error| error.to_string())?;
@@ -991,7 +991,7 @@ mod tests {
             "BONE",
             "--compare",
             "input.bmp",
-            "output.png",
+            "output.bmp",
         ])
         .unwrap();
 
@@ -1003,16 +1003,16 @@ mod tests {
         assert_eq!(options.palette, "bone");
         assert!(options.compare);
         assert_eq!(options.input_path, Path::new("input.bmp"));
-        assert_eq!(options.output_path, Path::new("output.png"));
+        assert_eq!(options.output_path, Path::new("output.bmp"));
     }
 
     #[test]
-    fn render_and_process_preview_write_pngs() {
+    fn render_and_process_preview_write_bmps() {
         let root = unique_temp_dir("preview");
         fs::create_dir_all(&root).unwrap();
         let input = root.join("study.bmp");
-        let render_output = root.join("render.png");
-        let process_output = root.join("process.png");
+        let render_output = root.join("render.bmp");
+        let process_output = root.join("process.bmp");
         fs::write(&input, build_renderable_test_bmp()).unwrap();
 
         let mut stdout = Vec::new();
@@ -1027,7 +1027,7 @@ mod tests {
             &mut stderr,
         )
         .unwrap();
-        assert!(fs::read(&render_output).unwrap().starts_with(b"\x89PNG"));
+        assert!(fs::read(&render_output).unwrap().starts_with(b"BM"));
 
         stdout.clear();
         run_args(
@@ -1043,7 +1043,7 @@ mod tests {
             &mut stderr,
         )
         .unwrap();
-        assert!(fs::read(&process_output).unwrap().starts_with(b"\x89PNG"));
+        assert!(fs::read(&process_output).unwrap().starts_with(b"BM"));
 
         let summary: serde_json::Value = serde_json::from_slice(&stdout).unwrap();
         assert_eq!(summary["palette"], "hot");
@@ -1106,8 +1106,8 @@ mod tests {
         let root = unique_temp_dir("legacy-artifacts");
         fs::create_dir_all(&root).unwrap();
         let input = root.join("study.bmp");
-        let preview_output = root.join("preview.png");
-        let processed_preview_output = root.join("processed-preview.png");
+        let preview_output = root.join("preview.bmp");
+        let processed_preview_output = root.join("processed-preview.bmp");
         fs::write(&input, build_renderable_test_bmp()).unwrap();
 
         let mut stdout = Vec::new();
@@ -1124,7 +1124,7 @@ mod tests {
         )
         .unwrap();
         let preview_stdout = String::from_utf8(stdout.clone()).unwrap();
-        assert!(fs::read(&preview_output).unwrap().starts_with(b"\x89PNG"));
+        assert!(fs::read(&preview_output).unwrap().starts_with(b"BM"));
         assert!(preview_stdout.contains("loaded BMP image: 4x2"));
         assert!(preview_stdout.contains("saved grayscale preview image:"));
 
@@ -1147,7 +1147,7 @@ mod tests {
         assert!(
             fs::read(&processed_preview_output)
                 .unwrap()
-                .starts_with(b"\x89PNG")
+                .starts_with(b"BM")
         );
         assert!(process_stdout.contains("loaded BMP image: 4x2"));
         assert!(process_stdout.contains("preview image:"));
@@ -1159,7 +1159,7 @@ mod tests {
         let root = unique_temp_dir("legacy-default-output");
         fs::create_dir_all(&root).unwrap();
         let input = root.join("study.bmp");
-        let output = root.join("study_processed.png");
+        let output = root.join("study_processed.bmp");
         fs::write(&input, build_renderable_test_bmp()).unwrap();
 
         let mut stdout = Vec::new();

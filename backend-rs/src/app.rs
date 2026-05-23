@@ -566,8 +566,8 @@ impl App {
     ) -> Result<JobSnapshot, BackendError> {
         let preview = self.load_source_preview(study)?;
 
-        let preview_path = self.cache.artifact_path("render", fingerprint, "png")?;
-        render::save_gray_png(
+        let preview_path = self.cache.artifact_path("render", fingerprint, "bmp")?;
+        render::save_gray_bmp(
             &preview_path,
             preview.width,
             preview.height,
@@ -618,9 +618,9 @@ impl App {
         )
         .map_err(|error| BackendError::internal(format!("process source preview: {error}")))?;
 
-        let preview_path = self.cache.artifact_path("process", fingerprint, "png")?;
+        let preview_path = self.cache.artifact_path("process", fingerprint, "bmp")?;
 
-        render::save_preview_png(&preview_path, &output.preview).map_err(BackendError::internal)?;
+        render::save_preview_bmp(&preview_path, &output.preview).map_err(BackendError::internal)?;
         self.track_artifact_bytes(&preview_path);
 
         let result = ProcessStudyCommandResult {
@@ -659,13 +659,13 @@ impl App {
         let output = analysis::generate_tooth_overlay(&source_preview)
             .map_err(|error| BackendError::internal(format!("analyze source preview: {error}")))?;
 
-        let preview_path = self.cache.artifact_path("analyze", fingerprint, "png")?;
+        let preview_path = self.cache.artifact_path("analyze", fingerprint, "bmp")?;
         let filled_preview_path = self
             .cache
-            .artifact_path("analyze-filled", fingerprint, "png")?;
-        render::save_preview_png(&preview_path, &output.preview).map_err(BackendError::internal)?;
+            .artifact_path("analyze-filled", fingerprint, "bmp")?;
+        render::save_preview_bmp(&preview_path, &output.preview).map_err(BackendError::internal)?;
         self.track_artifact_bytes(&preview_path);
-        render::save_preview_png(&filled_preview_path, &output.filled_preview)
+        render::save_preview_bmp(&filled_preview_path, &output.filled_preview)
             .map_err(BackendError::internal)?;
         self.track_artifact_bytes(&filled_preview_path);
 
@@ -937,9 +937,9 @@ impl App {
             "Writing preview",
             &[],
             || {
-                let path = self.cache.artifact_path("render", &fingerprint, "png")?;
+                let path = self.cache.artifact_path("render", &fingerprint, "bmp")?;
                 preview_path = Some(path.clone());
-                render::save_gray_png(&path, source.width, source.height, &source.pixels)
+                render::save_gray_bmp(&path, source.width, source.height, &source.pixels)
                     .map_err(BackendError::internal)?;
                 self.track_artifact_bytes(&path);
                 Ok(path)
@@ -1020,7 +1020,7 @@ impl App {
             || {
                 validate_input_file(&study.input_path)?;
                 let resolved = processing::resolve_process_study_command(&command)?;
-                let preview_path = self.cache.artifact_path("process", &fingerprint, "png")?;
+                let preview_path = self.cache.artifact_path("process", &fingerprint, "bmp")?;
                 Ok((resolved, preview_path))
             },
         ) {
@@ -1114,7 +1114,7 @@ impl App {
             "Writing processed preview",
             &[preview_path.as_path()],
             || {
-                render::save_preview_png(&preview_path, &output.preview)
+                render::save_preview_bmp(&preview_path, &output.preview)
                     .map_err(BackendError::internal)?;
                 self.track_artifact_bytes(&preview_path);
                 Ok(())
@@ -1271,16 +1271,16 @@ impl App {
             "Writing tooth and bone overlay preview",
             &[],
             || {
-                let preview = self.cache.artifact_path("analyze", &fingerprint, "png")?;
+                let preview = self.cache.artifact_path("analyze", &fingerprint, "bmp")?;
                 let filled = self
                     .cache
-                    .artifact_path("analyze-filled", &fingerprint, "png")?;
+                    .artifact_path("analyze-filled", &fingerprint, "bmp")?;
                 preview_path = Some(preview.clone());
                 filled_preview_path = Some(filled.clone());
-                render::save_preview_png(&preview, &output.preview)
+                render::save_preview_bmp(&preview, &output.preview)
                     .map_err(BackendError::internal)?;
                 self.track_artifact_bytes(&preview);
-                render::save_preview_png(&filled, &output.filled_preview)
+                render::save_preview_bmp(&filled, &output.filled_preview)
                     .map_err(BackendError::internal)?;
                 self.track_artifact_bytes(&filled);
                 Ok((preview, filled))
@@ -2265,7 +2265,7 @@ mod tests {
             std::process::id()
         ));
         fs::create_dir_all(&temp_dir).unwrap();
-        let preview_path = temp_dir.join("preview.png");
+        let preview_path = temp_dir.join("preview.bmp");
         fs::write(&preview_path, b"preview").unwrap();
 
         let app = App::new(Config::default()).unwrap();

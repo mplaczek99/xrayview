@@ -151,7 +151,7 @@ test("AFTER: state transition running→completed fires listener", () => {
   const done = makeSnapshot({
     state: "completed",
     progress: makeProgress(100),
-    result: { kind: "renderStudy", payload: { previewPath: "/tmp/out.png" } },
+    result: { kind: "renderStudy", payload: { previewPath: "/tmp/out.bmp" } },
   });
   store.receiveJobUpdate_AFTER(done);
   assert.equal(store.getListenerCount(), 1, "AFTER: running→completed fires listener");
@@ -175,7 +175,7 @@ test("AFTER: repeated completed snapshot does NOT fire listener again", () => {
   const done = makeSnapshot({
     state: "completed",
     progress: makeProgress(100),
-    result: { kind: "renderStudy", payload: { previewPath: "/tmp/out.png" } },
+    result: { kind: "renderStudy", payload: { previewPath: "/tmp/out.bmp" } },
   });
   const store = makeMinimalStore(done);
   store.resetListenerCount();
@@ -185,7 +185,7 @@ test("AFTER: repeated completed snapshot does NOT fire listener again", () => {
     store.receiveJobUpdate_AFTER(makeSnapshot({
       state: "completed",
       progress: makeProgress(100),
-      result: { kind: "renderStudy", payload: { previewPath: "/tmp/out.png" } },
+      result: { kind: "renderStudy", payload: { previewPath: "/tmp/out.bmp" } },
     }));
   }
   assert.equal(store.getListenerCount(), 0, "AFTER: terminal state repeated polls → 0 notifications");

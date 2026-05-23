@@ -728,9 +728,6 @@ fn preview_etag(metadata: &fs::Metadata) -> String {
 
 fn content_type_for_path(path: &Path) -> &'static str {
     match path.extension().and_then(|extension| extension.to_str()) {
-        Some(extension) if extension.eq_ignore_ascii_case("png") => "image/png",
-        Some(extension) if extension.eq_ignore_ascii_case("jpg") => "image/jpeg",
-        Some(extension) if extension.eq_ignore_ascii_case("jpeg") => "image/jpeg",
         Some(extension) if extension.eq_ignore_ascii_case("bmp") => "image/bmp",
         _ => "application/octet-stream",
     }
@@ -1361,8 +1358,8 @@ mod tests {
         let cache_dir = temp_dir.join("cache");
         let state_dir = temp_dir.join("state");
         fs::create_dir_all(&cache_dir).unwrap();
-        let artifact_path = cache_dir.join("preview.png");
-        fs::write(&artifact_path, b"png-bytes").unwrap();
+        let artifact_path = cache_dir.join("preview.bmp");
+        fs::write(&artifact_path, b"bmp-bytes").unwrap();
 
         let mut config = Config::default();
         config.paths.cache_dir = cache_dir.clone();
@@ -1380,10 +1377,10 @@ mod tests {
         ));
 
         assert_eq!(response.status, 200);
-        assert_eq!(response.body, b"png-bytes");
+        assert_eq!(response.body, b"bmp-bytes");
         assert_eq!(
             response.headers.get("content-type"),
-            Some(&"image/png".to_string())
+            Some(&"image/bmp".to_string())
         );
 
         let _ = fs::remove_file(artifact_path);
@@ -1398,8 +1395,8 @@ mod tests {
         ));
         let cache_dir = temp_dir.join("cache");
         fs::create_dir_all(&cache_dir).unwrap();
-        let artifact_path = cache_dir.join("preview.png");
-        fs::write(&artifact_path, b"png-bytes").unwrap();
+        let artifact_path = cache_dir.join("preview.bmp");
+        fs::write(&artifact_path, b"bmp-bytes").unwrap();
 
         let mut config = Config::default();
         config.paths.cache_dir = cache_dir;
@@ -1430,7 +1427,7 @@ mod tests {
         let stale = router
             .handle(Request::new("GET", &url).with_header("If-None-Match", "\"stale-etag\""));
         assert_eq!(stale.status, 200);
-        assert_eq!(stale.body, b"png-bytes");
+        assert_eq!(stale.body, b"bmp-bytes");
 
         let _ = fs::remove_file(artifact_path);
         let _ = fs::remove_dir_all(temp_dir);
@@ -1446,8 +1443,8 @@ mod tests {
         let outside_dir = temp_dir.join("outside");
         fs::create_dir_all(&cache_dir).unwrap();
         fs::create_dir_all(&outside_dir).unwrap();
-        let artifact_path = outside_dir.join("preview.png");
-        fs::write(&artifact_path, b"png-bytes").unwrap();
+        let artifact_path = outside_dir.join("preview.bmp");
+        fs::write(&artifact_path, b"bmp-bytes").unwrap();
 
         let mut config = Config::default();
         config.paths.cache_dir = cache_dir;

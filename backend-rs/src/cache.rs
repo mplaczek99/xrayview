@@ -490,7 +490,7 @@ mod tests {
         assert_eq!(store.root_dir(), root.join("cache"));
         assert_eq!(store.persistence_dir(), root.join("state"));
         let render_path = store
-            .artifact_path("render", "fingerprint-1", "png")
+            .artifact_path("render", "fingerprint-1", "bmp")
             .unwrap();
 
         assert_eq!(
@@ -498,7 +498,7 @@ mod tests {
             root.join("cache")
                 .join("artifacts")
                 .join("render")
-                .join("fingerprint-1.png")
+                .join("fingerprint-1.bmp")
         );
         assert!(
             fs::metadata(root.join("cache").join("artifacts").join("render"))
@@ -541,7 +541,7 @@ mod tests {
         let store = Store::new_with_root(&root);
         let mut paths = Vec::new();
         for name in ["a", "b", "c"] {
-            let path = store.artifact_path("render", name, "png").unwrap();
+            let path = store.artifact_path("render", name, "bmp").unwrap();
             fs::write(&path, vec![0_u8; 600]).unwrap();
             paths.push(path);
             thread::sleep(Duration::from_millis(2));
@@ -566,7 +566,7 @@ mod tests {
         let store = Store::new_with_root(&root);
         assert_eq!(store.evict_artifacts_over_limit(100).unwrap(), 0);
 
-        let path = store.artifact_path("render", "small", "png").unwrap();
+        let path = store.artifact_path("render", "small", "bmp").unwrap();
         fs::write(&path, vec![0_u8; 100]).unwrap();
 
         assert_eq!(store.evict_artifacts_over_limit(1000).unwrap(), 0);
@@ -583,7 +583,7 @@ mod tests {
         let _ = fs::remove_dir_all(&root);
         let store = Store::new_with_root(&root);
         store.force_evict_state(Some(500), Some(Instant::now()));
-        let path = store.artifact_path("render", "big", "png").unwrap();
+        let path = store.artifact_path("render", "big", "bmp").unwrap();
         fs::write(&path, vec![0_u8; 2_000]).unwrap();
 
         assert_eq!(store.evict_artifacts_over_limit(1000).unwrap(), 0);
@@ -618,7 +618,7 @@ mod tests {
         let store = Store::new_with_paths(root.join("cache"), root.join("state"));
 
         let error = store
-            .artifact_path("render", "fingerprint-1", "png")
+            .artifact_path("render", "fingerprint-1", "bmp")
             .unwrap_err();
 
         assert_eq!(error.code, crate::contracts::BackendErrorCode::Internal);
