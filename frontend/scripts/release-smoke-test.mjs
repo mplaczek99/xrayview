@@ -33,6 +33,7 @@ function run(command, args, cwd, envOverrides = {}) {
 }
 
 async function main() {
+  run("npm", ["run", "lint"], workspaceRoot);
   run("npm", ["run", "contracts:check"], workspaceRoot);
   run("npm", ["run", "backend:test"], workspaceRoot);
   run("npm", ["run", "build"], frontendRoot);

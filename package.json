@@ -22,7 +22,10 @@
     "release:smoke:bundle": "npm --prefix frontend run release:smoke:bundle --",
     "playwright": "npm --prefix frontend exec playwright",
     "test:e2e": "PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS=1 npm --prefix frontend exec playwright test",
-    "playwright:install": "PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS=1 npm --prefix frontend exec playwright install chromium"
+    "playwright:install": "PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS=1 npm --prefix frontend exec playwright install chromium",
+    "lint": "npm run lint:rust && npm run lint:ts",
+    "lint:ts": "npm --prefix frontend run lint --",
+    "lint:rust": "cargo clippy --manifest-path backend-rs/Cargo.toml --all-targets --locked -- -D warnings && cargo clippy --manifest-path desktop-tauri/Cargo.toml --all-targets --locked -- -D warnings"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2"

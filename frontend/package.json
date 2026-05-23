@@ -12,7 +12,10 @@
     "build": "npm run generate:contracts && node ./scripts/parallel-build.mjs",
     "preview": "vite preview",
     "release:smoke": "node ./scripts/release-smoke-test.mjs",
-    "release:smoke:bundle": "node ./scripts/release-smoke-test.mjs --bundle"
+    "release:smoke:bundle": "node ./scripts/release-smoke-test.mjs --bundle",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "format": "biome format --write ."
   },
   "dependencies": {
     "@tauri-apps/api": "^2",
@@ -20,6 +23,7 @@
     "htmx.org": "^2.0.10"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.4.15",
     "@emnapi/core": "^1.9.1",
     "@emnapi/runtime": "^1.9.1",
     "@playwright/test": "^1.59.1",
