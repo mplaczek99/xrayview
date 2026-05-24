@@ -46,32 +46,23 @@ pub fn save_gray_bmp(
     height: u32,
     pixels: &[u8],
 ) -> Result<(), String> {
-    save_preview_bmp(path, &PreviewImage::gray(width, height, pixels.to_vec()))
+    let encoded = encode_gray_bmp(width, height, pixels)?;
+    fs::write(path.as_ref(), encoded)
+        .map_err(|error| format!("write preview BMP {}: {error}", path.as_ref().display()))
 }
 
 pub fn encode_gray_bmp(width: u32, height: u32, pixels: &[u8]) -> Result<Vec<u8>, String> {
-    encode_preview_bmp(&PreviewImage::gray(width, height, pixels.to_vec()))
+    validate_preview_pixels(width, height, PreviewFormat::Gray8, pixels.len())?;
+    encode_gray8_bmp(width, height, pixels)
 }
 
 pub fn encode_preview_bmp(preview: &PreviewImage) -> Result<Vec<u8>, String> {
-    if preview.width == 0 || preview.height == 0 {
-        return Err("preview dimensions must be non-zero".to_string());
-    }
-    let channels: usize = match preview.format {
-        PreviewFormat::Gray8 => 1,
-        PreviewFormat::Rgba8 => 4,
-    };
-    let expected = (preview.width as usize)
-        .checked_mul(preview.height as usize)
-        .and_then(|count| count.checked_mul(channels))
-        .ok_or_else(|| "preview dimensions overflow".to_string())?;
-    if preview.pixels.len() != expected {
-        return Err(format!(
-            "preview pixel length = {}, want {}",
-            preview.pixels.len(),
-            expected
-        ));
-    }
+    validate_preview_pixels(
+        preview.width,
+        preview.height,
+        preview.format,
+        preview.pixels.len(),
+    )?;
 
     match preview.format {
         PreviewFormat::Gray8 => encode_gray8_bmp(preview.width, preview.height, &preview.pixels),
@@ -79,6 +70,33 @@ pub fn encode_preview_bmp(preview: &PreviewImage) -> Result<Vec<u8>, String> {
             encode_rgba8_as_bgr24_bmp(preview.width, preview.height, &preview.pixels)
         }
     }
+}
+
+fn validate_preview_pixels(
+    width: u32,
+    height: u32,
+    format: PreviewFormat,
+    pixel_len: usize,
+) -> Result<(), String> {
+    if width == 0 || height == 0 {
+        return Err("preview dimensions must be non-zero".to_string());
+    }
+    let channels: usize = match format {
+        PreviewFormat::Gray8 => 1,
+        PreviewFormat::Rgba8 => 4,
+    };
+    let expected = (width as usize)
+        .checked_mul(height as usize)
+        .and_then(|count| count.checked_mul(channels))
+        .ok_or_else(|| "preview dimensions overflow".to_string())?;
+    if pixel_len != expected {
+        return Err(format!(
+            "preview pixel length = {}, want {}",
+            pixel_len, expected
+        ));
+    }
+
+    Ok(())
 }
 
 fn encode_gray8_bmp(width: u32, height: u32, pixels: &[u8]) -> Result<Vec<u8>, String> {
