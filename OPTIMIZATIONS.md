@@ -32,7 +32,7 @@ size-optimized release profile, is where the largest wins are.
 
 ## Tier 1 — Highest impact
 
-### 1. Release profile optimizes for size, not speed
+### 1. Release profile optimizes for size, not speed (COMPLETE)
 
 `desktop-tauri/Cargo.toml:21`
 
@@ -245,7 +245,7 @@ analysis with the same input.
   so build `[u8; 256]` once and apply it in a single pass instead of the
   per-pixel compare/multiply/divide at `analysis.rs:896-907`.
 
-### 7. `save_gray_bmp` / `encode_gray_bmp` copy the whole image before encoding
+### 7. `save_gray_bmp` / `encode_gray_bmp` copy the whole image before encoding (COMPLETE)
 
 `render.rs:43-54`
 
