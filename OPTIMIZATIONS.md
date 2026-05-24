@@ -204,7 +204,7 @@ common open→render sequence from two decodes to one.
 
 ## Tier 2 — High impact
 
-### 5. Decode stores 8-bit pixels as `Vec<f32>` (4× memory, slow mapping)
+### 5. Decode stores 8-bit pixels as `Vec<f32>` (4× memory, slow mapping) (COMPLETE)
 
 `bmp.rs:156` (`pixels: Vec<f32>`), `bmp.rs:233`, `bmp.rs:104-138`
 
@@ -231,6 +231,11 @@ Two compounding wins:
 
    Identical output, but the hot pass is now a cache-friendly table lookup. O(256)
    to build + O(n) byte lookups, no floats in the loop.
+
+Validation on `images/BMP/1.bmp` with
+`cargo run --release --locked --example render_preview_bench -- ../images/BMP/1.bmp 200`:
+before average render time was 4.78-4.93 ms with ~11.3 MB peak RSS; after average
+render time was 1.84-1.93 ms with ~8.0-8.2 MB peak RSS.
 
 ### 6. `normalize_gray` runs twice and does per-pixel float-free but branchy math
 

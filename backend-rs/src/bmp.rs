@@ -118,20 +118,21 @@ fn render_grayscale_preview_with_options(
         max = max.max(*value);
     }
 
-    let preserve_eight_bit_range = preserve_eight_bit_range && min >= 0.0 && max <= 255.0;
     let manual_eight_bit_window = WindowTransform::new(128.0, 256.0);
+    let lut: [u8; 256] = std::array::from_fn(|value| {
+        let value = value as u8;
+        if preserve_eight_bit_range {
+            manual_eight_bit_window
+                .expect("valid 8-bit analysis window")
+                .map(f32::from(value))
+        } else {
+            map_linear(f32::from(value), f32::from(min), f32::from(max))
+        }
+    });
     let pixels: Vec<u8> = image
         .pixels
         .into_iter()
-        .map(|value| {
-            if preserve_eight_bit_range {
-                manual_eight_bit_window
-                    .expect("valid 8-bit analysis window")
-                    .map(value)
-            } else {
-                map_linear(value, min, max)
-            }
-        })
+        .map(|value| lut[usize::from(value)])
         .collect();
 
     Ok(RenderedPreview {
@@ -155,7 +156,7 @@ fn supports_bmp_path(path: &Path) -> bool {
 struct DecodedBmp {
     width: u32,
     height: u32,
-    pixels: Vec<f32>,
+    pixels: Vec<u8>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -282,7 +283,7 @@ fn decode_bmp(bytes: &[u8]) -> Result<DecodedBmp, String> {
         None
     };
 
-    let mut pixels = vec![0.0; width * height];
+    let mut pixels = vec![0; width * height];
     for output_y in 0..height {
         let source_y = if header.top_down {
             output_y
@@ -303,22 +304,14 @@ fn decode_bmp(bytes: &[u8]) -> Result<DecodedBmp, String> {
                                 palette.len() / 4
                             ));
                         }
-                        f32::from(gray_from_rgb8(
-                            palette[offset + 2],
-                            palette[offset + 1],
-                            palette[offset],
-                        ))
+                        gray_from_rgb8(palette[offset + 2], palette[offset + 1], palette[offset])
                     } else {
-                        f32::from(row[x])
+                        row[x]
                     }
                 }
                 24 | 32 => {
                     let offset = x * header.bytes_per_pixel();
-                    f32::from(gray_from_rgb8(
-                        row[offset + 2],
-                        row[offset + 1],
-                        row[offset],
-                    ))
+                    gray_from_rgb8(row[offset + 2], row[offset + 1], row[offset])
                 }
                 _ => unreachable!(),
             };
