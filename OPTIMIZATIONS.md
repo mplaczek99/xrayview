@@ -348,9 +348,9 @@ dedicated SVG nodes created once at drag start, and update just their
 nodes untouched until the annotation set actually changes. Big smoothness win when
 annotations are present.
 
-### 10. Bone-exemplar lookup hashes the entire image on every analysis
+### 10. Bone-exemplar lookup hashes the entire image on every analysis (COMPLETE)
 
-`analysis.rs:1218-1297`
+`analysis.rs:1256-1282`
 
 ```rust
 fn bone_exemplar_mask(gray, width, height) -> Option<Vec<bool>> {
@@ -363,20 +363,44 @@ fn bone_exemplar_mask(gray, width, height) -> Option<Vec<bool>> {
 The exemplar table is a memorized exact-match lookup; for arbitrary user images it
 essentially always misses, but it still pays a full-image hash (an extra O(n)
 pass) before real detection begins. A match additionally requires
-`exemplar.width == width && exemplar.height == height` (`analysis.rs:1226`).
+`exemplar.width == width && exemplar.height == height` (the inner check at
+`analysis.rs:1276`).
 
 **Change:** pre-filter by dimensions before hashing. If no exemplar shares the
 image's `(width, height)`, the pixel hash cannot match — skip it entirely:
 
 ```rust
-if !exemplars.iter().any(|e| e.width == width as u32 && e.height == height as u32) {
-    return None;   // avoids the full-image hash for the common case
+let (width, height) = (width as u32, height as u32);
+if !exemplars
+    .iter()
+    .any(|exemplar| exemplar.width == width && exemplar.height == height)
+{
+    return None; // avoids the full-image hash for the common case
 }
-let hash = hash_bone_exemplar_pixels(gray, width as u32, height as u32);
+let hash = hash_bone_exemplar_pixels(gray, width, height);
 ```
 
-Also avoids the `.iter().map(|v| *v != 0).collect()` `u8`→`bool` mask copy on the
-miss path.
+The dimension scan is exactly equivalent: the inner loop already requires a
+dimension match before returning `Some`, so an image whose `(width, height)` is
+absent from the table could only have returned `None` — now it does so without
+hashing. Output is bit-identical.
+
+Validation isolates the bone-exemplar lookup, since end-to-end the avoided hash
+is dwarfed by the ~600 ms learned tooth-scoring loop. The shipped
+`bone_exemplar_model.bin.gz` holds 38 exemplars in two dimensions
+(29×`1200×854` + 9×`854×1200`), so the bundled fixtures *match* and still hash;
+the win is on the **dimension-miss path** that arbitrary user images take. A
+focused microbenchmark over `images/BMP/1.bmp`'s 1,024,800 gray bytes
+(`cargo run --release --locked --example bone_exemplar_bench -- ../images/BMP/1.bmp 2000`,
+hash mirror asserted against the `bone_exemplar_hash_matches_reference_fnv_layout`
+fingerprint) measured the miss path at **0.967–0.988 ms** before (full-image FNV
+hash + dimension scan) versus **~12 ns** after (dimension scan only, hash
+skipped) across three runs — **~0.97 ms saved per analysis** on the common
+arbitrary-image path, at unchanged ~8.2 MB peak RSS. Matching-dimension images
+(e.g. the bundled fixtures) are unaffected beyond the ~12 ns scan, which finds a
+match and proceeds to hash exactly as before. The `generate_tooth_overlay` tests
+and the `bone_exemplar_hash_matches_reference_fnv_layout` /
+`sections-reference-mask-v16` guardrails all pass.
 
 ---
 

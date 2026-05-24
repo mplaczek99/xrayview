@@ -1255,13 +1255,25 @@ fn evaluate_learned_tree(tree: &[LearnedNode], features: [f64; 18]) -> f64 {
 
 fn bone_exemplar_mask(gray: &[u8], width: usize, height: usize) -> Option<Vec<bool>> {
     let exemplars = loaded_bone_exemplar_model()?;
-    let hash = hash_bone_exemplar_pixels(gray, width as u32, height as u32);
+    let (width, height) = (width as u32, height as u32);
+    // The exemplar table is a memorized exact-match lookup, and a hit additionally
+    // requires identical dimensions (see the inner check below). If no exemplar
+    // shares this image's (width, height), the pixel hash cannot match, so reject
+    // on a cheap scan of the dimensions and skip the full-image FNV hash — an
+    // O(pixels) pass — entirely. This is the common case for arbitrary user images.
+    if !exemplars
+        .iter()
+        .any(|exemplar| exemplar.width == width && exemplar.height == height)
+    {
+        return None;
+    }
+    let hash = hash_bone_exemplar_pixels(gray, width, height);
     let index = exemplars.partition_point(|exemplar| exemplar.hash < hash);
     for exemplar in &exemplars[index..] {
         if exemplar.hash != hash {
             break;
         }
-        if exemplar.width == width as u32 && exemplar.height == height as u32 {
+        if exemplar.width == width && exemplar.height == height {
             return Some(exemplar.mask.iter().map(|value| *value != 0).collect());
         }
     }
