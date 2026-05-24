@@ -402,6 +402,7 @@ button {
 }
 
 .study-layout__viewer {
+  position: relative;
   min-height: 0;
   display: flex;
   flex-direction: column;

@@ -118,12 +118,25 @@ export class ViewerController {
   private renderedSelectedAnnotationId: string | null = null;
   private renderedDraftLineKey = "";
 
-  mount(root: ParentNode, model: ViewerRenderModel) {
-    this.detach();
-    this.model = model;
+  reusableStageFor(model: ViewerRenderModel): HTMLElement | null {
+    if (
+      !this.stage ||
+      !this.image ||
+      !model.previewUrl ||
+      this.previewUrl !== model.previewUrl ||
+      this.resetKey !== model.viewportResetKey
+    ) {
+      return null;
+    }
 
+    return this.stage;
+  }
+
+  mount(root: ParentNode, model: ViewerRenderModel) {
     const stage = root.querySelector<HTMLElement>("[data-viewer-stage]");
     if (!stage || !model.previewUrl) {
+      this.detach();
+      this.model = model;
       this.stage = null;
       this.canvas = null;
       this.image = null;
@@ -132,6 +145,7 @@ export class ViewerController {
       return;
     }
 
+    const sameStage = this.stage === stage && this.canvas?.isConnected === true;
     const previewChanged = this.previewUrl !== model.previewUrl;
     const resetChanged = this.resetKey !== model.viewportResetKey;
     if (previewChanged || resetChanged) {
@@ -142,33 +156,51 @@ export class ViewerController {
       this.loadFailed = false;
     }
 
+    if (!sameStage) {
+      this.detach();
+    }
+
+    this.model = model;
     this.previewUrl = model.previewUrl;
     this.resetKey = model.viewportResetKey;
     this.resolvedImageSize = model.imageSize;
     this.stage = stage;
-    this.canvas = stage.querySelector<HTMLElement>("[data-viewer-canvas]");
-    this.image = stage.querySelector<HTMLImageElement>("[data-viewer-image]");
-    this.annotationHost = stage.querySelector<HTMLElement>("[data-annotation-layer]");
-    this.draftDistanceEl = stage.querySelector<HTMLElement>("[data-viewer-draft-distance]");
-    this.zoomEl = stage.querySelector<HTMLElement>("[data-viewer-zoom]");
+    this.canvas = sameStage
+      ? this.canvas
+      : stage.querySelector<HTMLElement>("[data-viewer-canvas]");
+    this.image = sameStage
+      ? this.image
+      : stage.querySelector<HTMLImageElement>("[data-viewer-image]");
+    this.annotationHost = sameStage
+      ? this.annotationHost
+      : stage.querySelector<HTMLElement>("[data-annotation-layer]");
+    this.draftDistanceEl = sameStage
+      ? this.draftDistanceEl
+      : stage.querySelector<HTMLElement>("[data-viewer-draft-distance]");
+    this.zoomEl = sameStage ? this.zoomEl : stage.querySelector<HTMLElement>("[data-viewer-zoom]");
 
     if (!this.canvas || !this.image || !this.annotationHost) {
       return;
     }
 
-    this.canvas.addEventListener("pointerdown", this.handlePointerDown);
-    this.canvas.addEventListener("pointermove", this.handlePointerMove);
-    this.canvas.addEventListener("pointerup", this.handlePointerUp);
-    this.canvas.addEventListener("pointercancel", this.handlePointerUp);
-    this.canvas.addEventListener("wheel", this.handleWheel, { passive: false });
-    this.image.addEventListener("load", this.handleImageLoad);
-    this.image.addEventListener("error", this.handleImageError);
+    this.canvas.classList.toggle("viewer-canvas--pan", model.tool === "pan");
+    this.canvas.classList.toggle("viewer-canvas--measureLine", model.tool === "measureLine");
 
-    this.resizeObserver = new ResizeObserver(() => {
-      this.updateFrame();
-      this.updateCanvas();
-    });
-    this.resizeObserver.observe(this.canvas);
+    if (!sameStage) {
+      this.canvas.addEventListener("pointerdown", this.handlePointerDown);
+      this.canvas.addEventListener("pointermove", this.handlePointerMove);
+      this.canvas.addEventListener("pointerup", this.handlePointerUp);
+      this.canvas.addEventListener("pointercancel", this.handlePointerUp);
+      this.canvas.addEventListener("wheel", this.handleWheel, { passive: false });
+      this.image.addEventListener("load", this.handleImageLoad);
+      this.image.addEventListener("error", this.handleImageError);
+
+      this.resizeObserver = new ResizeObserver(() => {
+        this.updateFrame();
+        this.updateCanvas();
+      });
+      this.resizeObserver.observe(this.canvas);
+    }
 
     if (this.image.complete && this.image.naturalWidth > 0) {
       this.imageReady = true;

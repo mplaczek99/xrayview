@@ -104,15 +104,33 @@ class HtmxWorkbenchApp {
 
   private render() {
     const state = getWorkbenchState();
+    const viewerModel = selectViewerRenderModel(state);
+    const preservedViewerStage =
+      this.ui.activeTab === "view" ? this.viewer.reusableStageFor(viewerModel) : null;
+    const html = renderApp(state, this.ui, Date.now());
+
     try {
-      this.viewer.detach();
-      this.htmxApi.swap(this.root, renderApp(state, this.ui, Date.now()), {
-        swapStyle: "innerHTML",
-        swapDelay: 0,
-        settleDelay: 0,
-      });
+      if (!preservedViewerStage) {
+        this.viewer.detach();
+      }
+      if (preservedViewerStage) {
+        if (!this.patchAppShellPreservingViewer(html, preservedViewerStage)) {
+          this.viewer.detach();
+          this.htmxApi.swap(this.root, html, {
+            swapStyle: "innerHTML",
+            swapDelay: 0,
+            settleDelay: 0,
+          });
+        }
+      } else {
+        this.htmxApi.swap(this.root, html, {
+          swapStyle: "innerHTML",
+          swapDelay: 0,
+          settleDelay: 0,
+        });
+      }
       this.htmxApi.process(this.root);
-      this.viewer.mount(this.root, selectViewerRenderModel(state));
+      this.viewer.mount(this.root, viewerModel);
       this.syncClock();
     } catch (error) {
       console.error("xrayview htmx render error", error);
@@ -130,6 +148,222 @@ class HtmxWorkbenchApp {
         </div>
       `;
     }
+  }
+
+  private patchAppShellPreservingViewer(html: string, viewerStage: HTMLElement): boolean {
+    const template = document.createElement("template");
+    template.innerHTML = html.trim();
+
+    const currentShell = this.root.querySelector<HTMLElement>(".app-shell");
+    const nextShell = template.content.querySelector<HTMLElement>(".app-shell");
+    const currentMain = currentShell?.querySelector<HTMLElement>(".tab-content") ?? null;
+    const nextMain = nextShell?.querySelector<HTMLElement>(".tab-content") ?? null;
+    const currentViewTab = currentMain?.querySelector<HTMLElement>(".view-tab") ?? null;
+    const nextViewTab = nextMain?.querySelector<HTMLElement>(".view-tab") ?? null;
+    const currentViewerHost =
+      currentViewTab?.querySelector<HTMLElement>(".study-layout__viewer") ?? null;
+    const nextViewerHost = nextViewTab?.querySelector<HTMLElement>(".study-layout__viewer") ?? null;
+
+    if (
+      !currentShell ||
+      !nextShell ||
+      !currentMain ||
+      !nextMain ||
+      !currentViewTab ||
+      !nextViewTab ||
+      !currentViewerHost ||
+      !nextViewerHost ||
+      !currentViewerHost.contains(viewerStage)
+    ) {
+      return false;
+    }
+
+    this.replaceRequiredChild(currentShell, nextShell, ".tab-bar");
+    this.copyAttributes(currentMain, nextMain);
+    this.copyAttributes(currentViewTab, nextViewTab);
+    this.copyAttributes(currentViewerHost, nextViewerHost);
+
+    this.patchViewToolbar(currentViewTab, nextViewTab);
+    this.patchAnalysisProgress(currentViewerHost, nextViewerHost);
+    this.replaceRequiredChild(currentViewTab, nextViewTab, ".study-layout__sidebar");
+    this.patchStatusBar(currentShell, nextShell);
+    this.patchOptionalShellChild(currentShell, nextShell, ".job-center");
+
+    return true;
+  }
+
+  private copyAttributes(target: HTMLElement, source: HTMLElement) {
+    for (const attribute of [...target.attributes]) {
+      target.removeAttribute(attribute.name);
+    }
+    for (const attribute of [...source.attributes]) {
+      target.setAttribute(attribute.name, attribute.value);
+    }
+  }
+
+  private replaceRequiredChild(parent: HTMLElement, sourceParent: HTMLElement, selector: string) {
+    const current = parent.querySelector<HTMLElement>(selector);
+    const next = sourceParent.querySelector<HTMLElement>(selector);
+    if (current && next) {
+      current.replaceWith(next);
+    }
+  }
+
+  private patchViewToolbar(currentViewTab: HTMLElement, nextViewTab: HTMLElement) {
+    const current = currentViewTab.querySelector<HTMLElement>(".view-panel__toolbar");
+    const next = nextViewTab.querySelector<HTMLElement>(".view-panel__toolbar");
+    if (!current || !next) {
+      return;
+    }
+
+    this.copyAttributes(current, next);
+    const currentChildren = [...current.children];
+    const nextChildren = [...next.children];
+    for (let index = 0; index < nextChildren.length; index += 1) {
+      const currentChild = currentChildren[index];
+      const nextChild = nextChildren[index];
+      if (!(nextChild instanceof HTMLElement)) {
+        continue;
+      }
+      if (
+        currentChild instanceof HTMLElement &&
+        currentChild.querySelector("[data-action='analyze-study']") &&
+        nextChild.querySelector("[data-action='analyze-study']")
+      ) {
+        this.patchAnalysisToolbarGroup(currentChild, nextChild);
+      } else if (currentChild) {
+        currentChild.replaceWith(nextChild);
+      } else {
+        current.append(nextChild);
+      }
+    }
+    for (const extra of currentChildren.slice(nextChildren.length)) {
+      extra.remove();
+    }
+  }
+
+  private patchAnalysisToolbarGroup(currentGroup: HTMLElement, nextGroup: HTMLElement) {
+    const currentButton = currentGroup.querySelector<HTMLButtonElement>(
+      "[data-action='analyze-study']",
+    );
+    const nextButton = nextGroup.querySelector<HTMLButtonElement>("[data-action='analyze-study']");
+    const currentSpinner = currentButton?.querySelector<HTMLElement>(".analysis-button__spinner");
+    const nextSpinner = nextButton?.querySelector<HTMLElement>(".analysis-button__spinner");
+
+    if (!currentButton || !nextButton || !currentSpinner || !nextSpinner) {
+      currentGroup.replaceWith(nextGroup);
+      return;
+    }
+
+    this.copyAttributes(currentGroup, nextGroup);
+    this.copyAttributes(currentButton, nextButton);
+    const currentLabel = currentButton.querySelector<HTMLElement>("span:not(.spinner)");
+    const nextLabel = nextButton.querySelector<HTMLElement>("span:not(.spinner)");
+    if (currentLabel && nextLabel) {
+      currentLabel.textContent = nextLabel.textContent;
+      this.copyAttributes(currentLabel, nextLabel);
+    }
+
+    for (const child of [...currentGroup.children]) {
+      if (child !== currentButton) {
+        child.remove();
+      }
+    }
+    for (const child of [...nextGroup.children]) {
+      if (child !== nextButton) {
+        currentGroup.append(child);
+      }
+    }
+  }
+
+  private patchStatusBar(currentShell: HTMLElement, nextShell: HTMLElement) {
+    const current = currentShell.querySelector<HTMLElement>(".status-bar");
+    const next = nextShell.querySelector<HTMLElement>(".status-bar");
+    const currentSpinner = current?.querySelector<HTMLElement>(".status-bar__spinner");
+    const nextSpinner = next?.querySelector<HTMLElement>(".status-bar__spinner");
+
+    if (!current || !next) {
+      return;
+    }
+    if (!currentSpinner || !nextSpinner) {
+      current.replaceWith(next);
+      return;
+    }
+
+    this.copyAttributes(current, next);
+    this.copyAttributes(currentSpinner, nextSpinner);
+    const currentText = current.querySelector<HTMLElement>(".status-bar__text");
+    const nextText = next.querySelector<HTMLElement>(".status-bar__text");
+    if (currentText && nextText) {
+      currentText.textContent = nextText.textContent;
+      this.copyAttributes(currentText, nextText);
+    }
+  }
+
+  private patchOptionalShellChild(
+    parent: HTMLElement,
+    sourceParent: HTMLElement,
+    selector: string,
+  ) {
+    const current = parent.querySelector<HTMLElement>(selector);
+    const next = sourceParent.querySelector<HTMLElement>(selector);
+    if (current && next) {
+      current.replaceWith(next);
+    } else if (current) {
+      current.remove();
+    } else if (next) {
+      parent.append(next);
+    }
+  }
+
+  private patchAnalysisProgress(currentViewerHost: HTMLElement, nextViewerHost: HTMLElement) {
+    const current = this.directChildByClass(currentViewerHost, "analysis-progress");
+    const next = this.directChildByClass(nextViewerHost, "analysis-progress");
+    if (current && next) {
+      this.copyAttributes(current, next);
+      this.patchAnalysisProgressBadge(current, next);
+    } else if (current) {
+      current.remove();
+    } else if (next) {
+      currentViewerHost.append(next);
+    }
+  }
+
+  private patchAnalysisProgressBadge(currentProgress: HTMLElement, nextProgress: HTMLElement) {
+    const currentBadge = currentProgress.querySelector<HTMLElement>(".analysis-progress__badge");
+    const nextBadge = nextProgress.querySelector<HTMLElement>(".analysis-progress__badge");
+    if (!currentBadge || !nextBadge) {
+      currentProgress.replaceChildren(...nextProgress.childNodes);
+      return;
+    }
+
+    this.copyAttributes(currentBadge, nextBadge);
+    const currentText = currentBadge.querySelector<HTMLElement>(".analysis-progress__text");
+    const nextText = nextBadge.querySelector<HTMLElement>(".analysis-progress__text");
+    if (currentText && nextText) {
+      currentText.textContent = nextText.textContent;
+      this.copyAttributes(currentText, nextText);
+    }
+
+    const currentDetail = currentBadge.querySelector<HTMLElement>(".analysis-progress__detail");
+    const nextDetail = nextBadge.querySelector<HTMLElement>(".analysis-progress__detail");
+    if (currentDetail && nextDetail) {
+      currentDetail.textContent = nextDetail.textContent;
+      this.copyAttributes(currentDetail, nextDetail);
+    } else if (currentDetail) {
+      currentDetail.remove();
+    } else if (nextDetail) {
+      currentBadge.append(nextDetail);
+    }
+  }
+
+  private directChildByClass(parent: HTMLElement, className: string): HTMLElement | null {
+    return (
+      Array.from(parent.children).find(
+        (child): child is HTMLElement =>
+          child instanceof HTMLElement && child.classList.contains(className),
+      ) ?? null
+    );
   }
 
   private syncClock() {

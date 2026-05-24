@@ -252,8 +252,8 @@ function renderViewerStage(model: ViewerRenderModel, analysisJob: JobSnapshot | 
         />
         <div data-annotation-layer></div>
       </div>
-      ${analysisJob ? renderAnalysisProgress(analysisJob) : ""}
     </div>
+    ${analysisJob ? renderAnalysisProgress(analysisJob) : ""}
   `;
 }
 
