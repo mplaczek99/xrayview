@@ -162,7 +162,7 @@ overlay post-processing time and the associated allocations.
 
 ---
 
-### 4. `open_study` fully decodes every pixel just to read dimensions
+### 4. `open_study` fully decodes every pixel just to read dimensions (COMPLETE)
 
 `bmp.rs:36-58`, used at `app.rs:484` and `cli.rs:187,443`
 

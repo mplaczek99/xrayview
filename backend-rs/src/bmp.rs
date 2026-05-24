@@ -42,18 +42,23 @@ pub fn read_file(path: &str) -> Result<Metadata, String> {
             path.display()
         ));
     }
-    read(&bytes).map_err(|error| format!("read BMP metadata from {}: {error}", path.display()))
+    read_header(&bytes)
+        .map_err(|error| format!("read BMP metadata from {}: {error}", path.display()))
 }
 
 pub fn read(bytes: &[u8]) -> Result<Metadata, String> {
-    let image = decode_bmp(bytes)?;
+    read_header(bytes)
+}
+
+pub fn read_header(bytes: &[u8]) -> Result<Metadata, String> {
+    let header = parse_bmp_header(bytes)?;
     Ok(Metadata {
-        rows: image.height as u16,
-        columns: image.width as u16,
-        samples_per_pixel: image.samples_per_pixel,
-        bits_allocated: image.bits_allocated,
-        bits_stored: image.bits_allocated,
-        photometric_interpretation: image.photometric_interpretation,
+        rows: header.height as u16,
+        columns: header.width as u16,
+        samples_per_pixel: header.samples_per_pixel(),
+        bits_allocated: 8,
+        bits_stored: 8,
+        photometric_interpretation: header.photometric_interpretation().to_string(),
     })
 }
 
@@ -150,13 +155,45 @@ fn supports_bmp_path(path: &Path) -> bool {
 struct DecodedBmp {
     width: u32,
     height: u32,
-    samples_per_pixel: u16,
-    bits_allocated: u16,
-    photometric_interpretation: String,
     pixels: Vec<f32>,
 }
 
-fn decode_bmp(bytes: &[u8]) -> Result<DecodedBmp, String> {
+#[derive(Debug, Clone, Copy)]
+struct BmpHeader {
+    pixel_offset: usize,
+    dib_size: u32,
+    width: usize,
+    height: usize,
+    top_down: bool,
+    bits_per_pixel: u16,
+}
+
+impl BmpHeader {
+    fn samples_per_pixel(self) -> u16 {
+        if self.bits_per_pixel == 8 { 1 } else { 3 }
+    }
+
+    fn photometric_interpretation(self) -> &'static str {
+        if self.samples_per_pixel() == 1 {
+            "MONOCHROME2"
+        } else {
+            "RGB"
+        }
+    }
+
+    fn bytes_per_pixel(self) -> usize {
+        usize::from(self.bits_per_pixel / 8)
+    }
+
+    fn row_stride(self) -> Result<usize, String> {
+        self.width
+            .checked_mul(self.bytes_per_pixel())
+            .ok_or_else(|| "BMP row size overflow".to_string())
+            .map(|row_bytes| row_bytes.div_ceil(4) * 4)
+    }
+}
+
+fn parse_bmp_header(bytes: &[u8]) -> Result<BmpHeader, String> {
     if bytes.len() < 54 || &bytes[..2] != b"BM" {
         return Err("unsupported BMP header".to_string());
     }
@@ -194,13 +231,28 @@ fn decode_bmp(bytes: &[u8]) -> Result<DecodedBmp, String> {
         return Err(format!("unsupported BMP bit depth: {bits_per_pixel}"));
     }
 
-    let width = width as usize;
-    let height = raw_height.unsigned_abs() as usize;
-    let top_down = raw_height < 0;
-    let bytes_per_pixel = usize::from(bits_per_pixel / 8);
-    let row_stride = (width * bytes_per_pixel).div_ceil(4) * 4;
-    let required = pixel_offset
-        .checked_add(row_stride.saturating_mul(height))
+    Ok(BmpHeader {
+        pixel_offset,
+        dib_size,
+        width: width as usize,
+        height: raw_height.unsigned_abs() as usize,
+        top_down: raw_height < 0,
+        bits_per_pixel,
+    })
+}
+
+fn decode_bmp(bytes: &[u8]) -> Result<DecodedBmp, String> {
+    let header = parse_bmp_header(bytes)?;
+    let width = header.width;
+    let height = header.height;
+    let row_stride = header.row_stride()?;
+    let required = header
+        .pixel_offset
+        .checked_add(
+            row_stride
+                .checked_mul(height)
+                .ok_or_else(|| "BMP pixel data size overflow".to_string())?,
+        )
         .ok_or_else(|| "BMP pixel data size overflow".to_string())?;
     if bytes.len() < required {
         return Err(format!(
@@ -209,8 +261,8 @@ fn decode_bmp(bytes: &[u8]) -> Result<DecodedBmp, String> {
         ));
     }
 
-    let palette = if bits_per_pixel == 8 {
-        let palette_start = 14 + dib_size as usize;
+    let palette = if header.bits_per_pixel == 8 {
+        let palette_start = 14 + header.dib_size as usize;
         let color_count = read_le_u32_at(bytes, 46).unwrap_or(0);
         let palette_entries = if color_count == 0 {
             256
@@ -220,7 +272,7 @@ fn decode_bmp(bytes: &[u8]) -> Result<DecodedBmp, String> {
         let palette_bytes = palette_entries
             .checked_mul(4)
             .ok_or_else(|| "BMP palette size overflow".to_string())?;
-        if pixel_offset < palette_start + palette_bytes
+        if header.pixel_offset < palette_start + palette_bytes
             || bytes.len() < palette_start + palette_bytes
         {
             return Err("truncated BMP palette".to_string());
@@ -232,15 +284,15 @@ fn decode_bmp(bytes: &[u8]) -> Result<DecodedBmp, String> {
 
     let mut pixels = vec![0.0; width * height];
     for output_y in 0..height {
-        let source_y = if top_down {
+        let source_y = if header.top_down {
             output_y
         } else {
             height - 1 - output_y
         };
-        let row_start = pixel_offset + source_y * row_stride;
+        let row_start = header.pixel_offset + source_y * row_stride;
         let row = &bytes[row_start..row_start + row_stride];
         for x in 0..width {
-            pixels[output_y * width + x] = match bits_per_pixel {
+            pixels[output_y * width + x] = match header.bits_per_pixel {
                 8 => {
                     let index = usize::from(row[x]);
                     if let Some(palette) = palette {
@@ -261,7 +313,7 @@ fn decode_bmp(bytes: &[u8]) -> Result<DecodedBmp, String> {
                     }
                 }
                 24 | 32 => {
-                    let offset = x * bytes_per_pixel;
+                    let offset = x * header.bytes_per_pixel();
                     f32::from(gray_from_rgb8(
                         row[offset + 2],
                         row[offset + 1],
@@ -273,18 +325,9 @@ fn decode_bmp(bytes: &[u8]) -> Result<DecodedBmp, String> {
         }
     }
 
-    let samples_per_pixel = if bits_per_pixel == 8 { 1 } else { 3 };
-    let photometric_interpretation = if samples_per_pixel == 1 {
-        "MONOCHROME2"
-    } else {
-        "RGB"
-    };
     Ok(DecodedBmp {
         width: width as u32,
         height: height as u32,
-        samples_per_pixel,
-        bits_allocated: 8,
-        photometric_interpretation: photometric_interpretation.to_string(),
         pixels,
     })
 }
@@ -395,6 +438,39 @@ pub mod tests {
         assert_eq!(metadata.bits_allocated, 8);
         assert_eq!(metadata.photometric_interpretation, "RGB");
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn read_file_reads_metadata_without_pixel_data() {
+        let path = unique_temp_path("metadata-header-only", "bmp");
+        let pixels = vec![(0, 0, 0); 854_usize * 1200_usize];
+        let mut bmp = build_bmp_32(854, 1200, &pixels);
+        bmp.truncate(54);
+        std::fs::write(&path, bmp).unwrap();
+
+        let metadata = read_file(path.to_str().unwrap()).unwrap();
+
+        assert_eq!(metadata.rows, 1200);
+        assert_eq!(metadata.columns, 854);
+        assert_eq!(metadata.samples_per_pixel, 3);
+        assert_eq!(metadata.bits_allocated, 8);
+        assert_eq!(metadata.bits_stored, 8);
+        assert_eq!(metadata.photometric_interpretation, "RGB");
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn render_still_rejects_missing_pixel_data() {
+        let mut bmp = build_bmp_32(
+            2,
+            2,
+            &[(0, 0, 0), (255, 0, 0), (0, 255, 0), (255, 255, 255)],
+        );
+        bmp.truncate(54);
+
+        let error = render_grayscale_preview(&bmp).unwrap_err();
+
+        assert!(error.contains("BMP pixel data length"));
     }
 
     #[test]
