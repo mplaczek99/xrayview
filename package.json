@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.4.1",
   "engines": {
-    "node": ">=18.18.0"
+    "node": ">=20.0.0"
   },
   "scripts": {
     "contracts:generate": "node ./contracts/scripts/generate-contract-bindings.mjs",
