@@ -5,6 +5,7 @@ use std::{
 };
 
 use flate2::read::GzDecoder;
+use rayon::prelude::*;
 
 use crate::render::{PreviewFormat, PreviewImage};
 
@@ -199,11 +200,13 @@ fn detect_learned_tooth_mask(normalized: &[u8], width: usize, height: usize) -> 
     let scores = learned_tooth_scores(normalized, width, height)?;
     let table = loaded_tooth_feature_table();
     let mut mask = vec![false; normalized.len()];
-    for y in 0..height {
-        for x in 0..width {
+    // Per-pixel and independent (each does a read-only table binary search over a
+    // ~53 MB key array, a cache miss per pixel); parallelize over rows.
+    mask.par_chunks_mut(width).enumerate().for_each(|(y, row)| {
+        for (x, slot) in row.iter_mut().enumerate() {
             let index = y * width + x;
             let score = scores[index];
-            if let Some(probability) = table.and_then(|table| {
+            *slot = if let Some(probability) = table.and_then(|table| {
                 table.probability(tooth_feature_table_key(
                     x,
                     y,
@@ -213,12 +216,12 @@ fn detect_learned_tooth_mask(normalized: &[u8], width: usize, height: usize) -> 
                     score,
                 ))
             }) {
-                mask[index] = probability >= TOOTH_TABLE_PROBABILITY_THRESHOLD;
+                probability >= TOOTH_TABLE_PROBABILITY_THRESHOLD
             } else {
-                mask[index] = score >= LEARNED_MODEL_THRESHOLD;
-            }
+                score >= LEARNED_MODEL_THRESHOLD
+            };
         }
-    }
+    });
     Some(mask)
 }
 
@@ -279,19 +282,17 @@ fn detect_bone_feature_table_mask(
     let table = loaded_bone_feature_table()?;
     let gradient = gradient_gray(&box_blur_gray(normalized, width, height, 2), width, height);
     let mut mask = vec![false; normalized.len()];
-    for y in 0..height {
-        for x in 0..width {
+    // Per-pixel, independent, read-only table lookup; parallelize over rows.
+    mask.par_chunks_mut(width).enumerate().for_each(|(y, row)| {
+        for (x, slot) in row.iter_mut().enumerate() {
             let index = y * width + x;
             let key =
                 bone_feature_table_key(x, y, width, height, normalized[index], gradient[index]);
-            if table
+            *slot = table
                 .get(&key)
-                .is_some_and(|probability| *probability >= BONE_TABLE_PROBABILITY_THRESHOLD)
-            {
-                mask[index] = true;
-            }
+                .is_some_and(|probability| *probability >= BONE_TABLE_PROBABILITY_THRESHOLD);
         }
-    }
+    });
 
     close_mask_into(&mask, width, height, 1, buffers);
     mask.copy_from_slice(&buffers.b);
@@ -975,43 +976,49 @@ fn box_blur_gray(pixels: &[u8], width: usize, height: usize, radius: usize) -> V
     let window = radius * 2 + 1;
     let max_x = width - 1;
     let mut horizontal = vec![0_u16; pixels.len()];
-    for y in 0..height {
-        let row = y * width;
-        let mut sum = i32::from(pixels[row]) * (radius + 1) as i32;
-        let right_edge = radius.min(max_x);
-        for x in 1..=right_edge {
-            sum += i32::from(pixels[row + x]);
-        }
-        if radius > max_x {
-            sum += i32::from(pixels[row + max_x]) * (radius - max_x) as i32;
-        }
+    // Horizontal pass: each output row depends only on the same row of the
+    // read-only `pixels`, so rows are independent — parallelize over them.
+    horizontal
+        .par_chunks_mut(width)
+        .enumerate()
+        .for_each(|(y, hrow)| {
+            let row = y * width;
+            let mut sum = i32::from(pixels[row]) * (radius + 1) as i32;
+            let right_edge = radius.min(max_x);
+            for x in 1..=right_edge {
+                sum += i32::from(pixels[row + x]);
+            }
+            if radius > max_x {
+                sum += i32::from(pixels[row + max_x]) * (radius - max_x) as i32;
+            }
 
-        let mut x = 0;
-        let left_border_end = radius.min(max_x);
-        while x < left_border_end {
-            horizontal[row + x] = ((sum + (window / 2) as i32) / window as i32) as u16;
-            let right = x + radius + 1;
-            let right_value = if right < width {
-                pixels[row + right]
-            } else {
-                pixels[row + max_x]
-            };
-            sum += i32::from(right_value) - i32::from(pixels[row]);
-            x += 1;
-        }
-        let middle_end = max_x.saturating_sub(radius);
-        while x < middle_end {
-            horizontal[row + x] = ((sum + (window / 2) as i32) / window as i32) as u16;
-            sum += i32::from(pixels[row + x + radius + 1]) - i32::from(pixels[row + x - radius]);
-            x += 1;
-        }
-        while x < max_x {
-            horizontal[row + x] = ((sum + (window / 2) as i32) / window as i32) as u16;
-            sum += i32::from(pixels[row + max_x]) - i32::from(pixels[row + x - radius]);
-            x += 1;
-        }
-        horizontal[row + max_x] = ((sum + (window / 2) as i32) / window as i32) as u16;
-    }
+            let mut x = 0;
+            let left_border_end = radius.min(max_x);
+            while x < left_border_end {
+                hrow[x] = ((sum + (window / 2) as i32) / window as i32) as u16;
+                let right = x + radius + 1;
+                let right_value = if right < width {
+                    pixels[row + right]
+                } else {
+                    pixels[row + max_x]
+                };
+                sum += i32::from(right_value) - i32::from(pixels[row]);
+                x += 1;
+            }
+            let middle_end = max_x.saturating_sub(radius);
+            while x < middle_end {
+                hrow[x] = ((sum + (window / 2) as i32) / window as i32) as u16;
+                sum +=
+                    i32::from(pixels[row + x + radius + 1]) - i32::from(pixels[row + x - radius]);
+                x += 1;
+            }
+            while x < max_x {
+                hrow[x] = ((sum + (window / 2) as i32) / window as i32) as u16;
+                sum += i32::from(pixels[row + max_x]) - i32::from(pixels[row + x - radius]);
+                x += 1;
+            }
+            hrow[max_x] = ((sum + (window / 2) as i32) / window as i32) as u16;
+        });
 
     let max_y = height - 1;
     let mut blurred = vec![0_u8; pixels.len()];
@@ -1061,16 +1068,26 @@ fn gradient_gray(pixels: &[u8], width: usize, height: usize) -> Vec<u8> {
     if width < 3 || height < 3 {
         return gradient;
     }
-    for y in 1..height - 1 {
-        for x in 1..width - 1 {
-            let value = (i32::from(pixels[y * width + x + 1])
-                - i32::from(pixels[y * width + x - 1]))
-            .abs()
-                + (i32::from(pixels[(y + 1) * width + x]) - i32::from(pixels[(y - 1) * width + x]))
+    // Each output row reads only the read-only `pixels` (rows y-1, y, y+1) and
+    // writes its own row, so rows are independent. Borders stay 0 as in the
+    // serial version.
+    gradient
+        .par_chunks_mut(width)
+        .enumerate()
+        .for_each(|(y, row)| {
+            if y == 0 || y >= height - 1 {
+                return;
+            }
+            for x in 1..width - 1 {
+                let value = (i32::from(pixels[y * width + x + 1])
+                    - i32::from(pixels[y * width + x - 1]))
+                .abs()
+                    + (i32::from(pixels[(y + 1) * width + x])
+                        - i32::from(pixels[(y - 1) * width + x]))
                     .abs();
-            gradient[y * width + x] = value.min(255) as u8;
-        }
-    }
+                row[x] = value.min(255) as u8;
+            }
+        });
     gradient
 }
 
@@ -1094,26 +1111,33 @@ fn learned_tooth_scores(normalized: &[u8], width: usize, height: usize) -> Optio
     let blur21 = box_blur_gray(normalized, width, height, 21);
     let gradient = gradient_gray(&blur3, width, height);
     let mut scores = vec![0.0; normalized.len()];
-    for y in 0..height {
-        for x in 0..width {
-            let index = y * width + x;
-            let features = learned_features(
-                x,
-                y,
-                width,
-                height,
-                normalized[index],
-                blur3[index],
-                blur21[index],
-                gradient[index],
-            );
-            let score = trees
-                .iter()
-                .map(|tree| LEARNED_MODEL_LEARNING_RATE * evaluate_learned_tree(tree, features))
-                .sum();
-            scores[index] = score;
-        }
-    }
+    // Each output pixel depends only on read-only inputs (normalized, blur3,
+    // blur21, gradient, trees), so rows are independent — parallelize over them.
+    // The per-pixel tree summation order is unchanged, so output is bit-identical
+    // to the serial version. This is the heaviest loop in the program
+    // (O(pixels x trees)).
+    scores
+        .par_chunks_mut(width)
+        .enumerate()
+        .for_each(|(y, row)| {
+            for (x, slot) in row.iter_mut().enumerate() {
+                let index = y * width + x;
+                let features = learned_features(
+                    x,
+                    y,
+                    width,
+                    height,
+                    normalized[index],
+                    blur3[index],
+                    blur21[index],
+                    gradient[index],
+                );
+                *slot = trees
+                    .iter()
+                    .map(|tree| LEARNED_MODEL_LEARNING_RATE * evaluate_learned_tree(tree, features))
+                    .sum();
+            }
+        });
     Some(scores)
 }
 

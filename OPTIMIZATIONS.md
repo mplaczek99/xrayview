@@ -6,8 +6,8 @@ performance, and low memory usage**. Each item lists where it is, what's there
 now, the change, and why it helps. Items are grouped by tier (impact × effort).
 
 The backend is CPU- and memory-bound on three hot paths — **decode**, **render/process**,
-and **analyze** — and none of them are parallelized today. That, plus a
-size-optimized release profile, is where the largest wins are.
+and **analyze**. The analyze path is now parallelized (#2); decode and render are
+not. That, plus a size-optimized release profile, is where the largest wins are.
 
 | # | Optimization | Area | Impact | Effort |
 |---|---|---|---|---|
@@ -85,7 +85,7 @@ Caveats:
 
 ---
 
-### 2. The analysis pipeline is entirely single-threaded
+### 2. The analysis pipeline is entirely single-threaded (COMPLETE)
 
 `backend-rs/src/analysis.rs` — confirmed no `rayon`/`par_iter`/threads anywhere.
 
@@ -132,6 +132,44 @@ the box-blur passes (horizontal parallelizes over rows, vertical over columns).
 Near-linear speedup with core count on the analysis job. If you want to avoid a
 dependency, `std::thread::scope` with manual row ranges gets most of the win, but
 `rayon` load-balances and is far simpler.
+
+**Done:** added `rayon` and parallelized the per-pixel analysis loops over output
+rows with `par_chunks_mut(width)`: the learned tooth-scoring loop
+(`learned_tooth_scores`, O(pixels × trees) — the heaviest loop in the program),
+the learned tooth-mask loop (`detect_learned_tooth_mask`, a per-pixel binary
+search over the ~53 MB tooth feature table), the bone feature-table loop
+(`detect_bone_feature_table_mask`, per-pixel hashmap lookup), `gradient_gray`,
+and the `box_blur_gray` **horizontal** pass. Each parallel closure only reads
+shared, immutable inputs (`normalized`, `blur3`, `blur21`, `gradient`, the
+`&'static` model/tables) and writes its own output row, and the per-pixel tree
+summation order is unchanged — so output is bit-identical, not merely close.
+
+The `box_blur_gray` **vertical** pass is deliberately left serial: it writes
+strided columns into a row-major buffer, so a safe (no-`unsafe`) parallelization
+has to process row-bands that each re-seed a per-column running sum. Because the
+sliding window is already O(1) per output pixel regardless of radius, that
+per-band re-seed (O(width × window)) competes with the radius-21 blur's actual
+work unless the bands are large — which then starves the parallelism. Poor
+cost/benefit on the riskiest change, so it stays as-is; the horizontal pass and
+`gradient_gray` already cover the cheap, clearly-safe row-parallel wins here.
+
+Validation on `images/BMP/1.bmp` (854×1200, 1,024,800 pixels) on a 16-core
+machine, same methodology as #3/#6 (one-byte preview mutation to bypass the
+bone-exemplar shortcut and exercise the full tooth+bone detector path):
+`cargo run --release --locked --example analyze_preview_bench -- ../images/BMP/1.bmp 20`.
+Before, average `generate_tooth_overlay` time was 628.3 ms (626.8–636.3 ms across
+three runs) at ~181 MB peak RSS; after it was 173.8 ms (172.4–175.2 ms across
+five runs) at ~182 MB peak RSS — a **~3.6× speedup**, ~454 ms (~72%) less per
+analysis. Peak RSS is essentially unchanged: rayon adds only per-thread stacks
+and a work-stealing deque, not per-pixel buffers, so the ~67 MB tooth feature
+table and the score/mask buffers still set the high-water mark. Output is
+bit-identical: a full FNV-1a checksum of both overlay buffers held at
+`0x3aa4f0df6b3c1774` (tooth_pixels=573571, bone_pixels=300402,
+candidate_count=2455, coverage=0.852822989852) before and after, and the
+`generate_tooth_overlay` tests plus the `sections-reference-mask-v16` /
+feature-table-key fingerprints all pass. Full `npm run release:smoke` is green
+(clippy on both crates, Biome, contracts:check, backend tests, frontend build,
+`tauri build --no-bundle`).
 
 ---
 
