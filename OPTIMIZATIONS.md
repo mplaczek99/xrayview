@@ -135,7 +135,7 @@ dependency, `std::thread::scope` with manual row ranges gets most of the win, bu
 
 ---
 
-### 3. The bone-section mask is computed twice per analysis
+### 3. The bone-section mask is computed twice per analysis (COMPLETE)
 
 `analysis.rs:307` and `analysis.rs:353`
 
@@ -159,6 +159,24 @@ border clear. Running it twice roughly doubles the overlay cost for no reason.
 **Change:** compute `bone_section` once in `generate_tooth_overlay` and pass it
 into both `overlay_outline_preview` and `overlay_filled_preview`. Roughly halves
 overlay post-processing time and the associated allocations.
+
+Validation on `images/BMP/1.bmp` (854×1200, 1,024,800 pixels) with a one-byte
+preview mutation to bypass the bone-exemplar shortcut and exercise the full
+tooth+bone detector path:
+`cargo run --release --locked --example analyze_preview_bench -- ../images/BMP/1.bmp 20`.
+Before average `generate_tooth_overlay` time was 621.05 ms (617.484–623.803 ms
+across three runs) at ~181.3 MB peak RSS; after it was 604.14 ms
+(596.320–608.565 ms) at ~181.2 MB peak RSS — a ~16.9 ms / ~2.7% end-to-end
+improvement with non-overlapping ranges. Because the total is dominated by the
+learned tooth-scoring loop (#2/#16, ~0.6 s/analysis), that ~17 ms is essentially
+the cost of one full `bone_section_mask_with_ignored_cutouts` invocation: the
+post-processing step is now run once instead of twice, and the per-call
+`MaskBuffers` (3 × full `Vec<bool>`) plus the dilation/close/fill scratch
+allocations are no longer paid twice. Peak RSS is unchanged because those buffers
+are transient and freed each call, so they never set the high-water mark (the
+~67 MB tooth feature table and score buffers do). Output is bit-identical: the
+`generate_tooth_overlay`/overlay tests and the `sections-reference-mask-v16`
+fingerprint all pass.
 
 ---
 

@@ -148,20 +148,32 @@ pub fn generate_tooth_overlay(preview: &PreviewImage) -> Result<ToothOverlayResu
         mode.push_str("; no reliable bone level found");
     }
 
+    // The bone-section mask is a pure function of (gray, bone_mask, tooth_mask)
+    // and is the heaviest post-processing step (two dilations, a morphological
+    // close, fill_holes, remove_small_components). Compute it once and share it
+    // between the outline and filled overlays instead of rebuilding it twice.
+    let bone_section = bone_section_mask_with_ignored_cutouts(
+        &preview.pixels,
+        &bone_mask,
+        &tooth_mask,
+        width,
+        height,
+    );
+
     Ok(ToothOverlayResult {
         preview: overlay_outline_preview(
             &preview.pixels,
             preview.width,
             preview.height,
             &tooth_mask,
-            &bone_mask,
+            &bone_section,
         ),
         filled_preview: overlay_filled_preview(
             &preview.pixels,
             preview.width,
             preview.height,
             &tooth_mask,
-            &bone_mask,
+            &bone_section,
         ),
         tooth_pixels,
         bone_pixels,
@@ -305,20 +317,13 @@ fn overlay_outline_preview(
     width: u32,
     height: u32,
     tooth_mask: &[bool],
-    bone_mask: &[bool],
+    bone_section: &[bool],
 ) -> PreviewImage {
     let width_usize = width as usize;
     let height_usize = height as usize;
     let mut pixels = grayscale_rgba(gray);
-    let bone_section = bone_section_mask_with_ignored_cutouts(
-        gray,
-        bone_mask,
-        tooth_mask,
-        width_usize,
-        height_usize,
-    );
     let mut bone_outline = centered_outline_mask(
-        &bone_section,
+        bone_section,
         width_usize,
         height_usize,
         BONE_OUTLINE_THICKNESS_PIXELS,
@@ -348,22 +353,13 @@ fn overlay_filled_preview(
     width: u32,
     height: u32,
     tooth_mask: &[bool],
-    bone_mask: &[bool],
+    bone_section: &[bool],
 ) -> PreviewImage {
-    let width_usize = width as usize;
-    let height_usize = height as usize;
     let mut pixels = vec![0; gray.len() * 4];
     for index in 0..gray.len() {
         pixels[index * 4 + 3] = 255;
     }
-    let bone_section = bone_section_mask_with_ignored_cutouts(
-        gray,
-        bone_mask,
-        tooth_mask,
-        width_usize,
-        height_usize,
-    );
-    fill_solid_mask(&mut pixels, &bone_section, BONE_RED, Some(tooth_mask));
+    fill_solid_mask(&mut pixels, bone_section, BONE_RED, Some(tooth_mask));
     fill_solid_mask(&mut pixels, tooth_mask, TOOTH_GREEN, None);
     PreviewImage::rgba(width, height, pixels)
 }
