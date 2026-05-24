@@ -2,6 +2,7 @@ use crate::{
     contracts::{BackendError, PaletteName, ProcessStudyCommand, default_processing_manifest},
     render::{PreviewFormat, PreviewImage},
 };
+use std::{borrow::Cow, sync::Arc};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct GrayscaleControls {
@@ -14,7 +15,7 @@ pub struct GrayscaleControls {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ResolvedProcessStudy {
     pub controls: GrayscaleControls,
-    pub palette: String,
+    pub palette: Palette,
     pub compare: bool,
 }
 
@@ -22,6 +23,39 @@ pub struct ResolvedProcessStudy {
 pub struct PipelineOutput {
     pub preview: PreviewImage,
     pub mode: String,
+}
+
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+pub enum ProcessingError {
+    #[error("grayscale processing requires Gray8 preview input")]
+    NonGray8Input,
+    #[error("pseudocolor palettes require Gray8 preview input")]
+    PaletteRequiresGray8,
+    #[error("compare preview requires Gray8 source on the left side")]
+    CompareRequiresGray8Left,
+    #[error("compare preview requires matching image dimensions")]
+    CompareDimensionMismatch,
+    #[error("compare preview width overflow")]
+    CompareWidthOverflow,
+    #[error("palette must be one of: none, hot, bone")]
+    UnknownPalette,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Palette {
+    None,
+    Hot,
+    Bone,
+}
+
+impl Palette {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Hot => "hot",
+            Self::Bone => "bone",
+        }
+    }
 }
 
 pub fn resolve_process_study_command(
@@ -65,7 +99,8 @@ pub fn resolve_process_study_command(
         .palette
         .unwrap_or(preset.controls.palette)
         .contract_name();
-    let palette = normalize_palette_name(palette).map_err(BackendError::invalid_input)?;
+    let palette = normalize_palette_name(palette)
+        .map_err(|error| BackendError::invalid_input(error.to_string()))?;
 
     Ok(ResolvedProcessStudy {
         controls: GrayscaleControls {
@@ -80,42 +115,36 @@ pub fn resolve_process_study_command(
 }
 
 pub fn process_rendered_preview(
-    source_preview: &PreviewImage,
+    mut source_preview: PreviewImage,
     controls: GrayscaleControls,
-    palette: &str,
+    palette: Palette,
     compare: bool,
-) -> Result<PipelineOutput, String> {
+) -> Result<PipelineOutput, ProcessingError> {
     if source_preview.format != PreviewFormat::Gray8 {
-        return Err("grayscale processing requires Gray8 preview input".to_string());
+        return Err(ProcessingError::NonGray8Input);
     }
 
-    let mut processed_pixels = source_preview.pixels.clone();
-    let mut mode = process_grayscale_pixels(&mut processed_pixels, controls);
-    let normalized_palette = normalize_palette_name(palette)?;
-
-    let mut output_preview = PreviewImage::gray(
-        source_preview.width,
-        source_preview.height,
-        processed_pixels,
-    );
-    if normalized_palette != "none" {
-        mode = format!("{mode} with {normalized_palette} palette");
-        output_preview = apply_named_palette(&output_preview, &normalized_palette)?;
+    let source_for_compare = compare.then(|| source_preview.clone());
+    let mut mode = process_grayscale_pixels(Arc::make_mut(&mut source_preview.pixels), controls);
+    if palette != Palette::None {
+        mode = format!("{mode} with {} palette", palette.label());
+        source_preview = apply_named_palette(&source_preview, palette)?;
     }
-
     if compare {
-        output_preview = combine_comparison(source_preview, &output_preview)?;
+        let source_for_compare = source_for_compare.expect("compare source captured");
+        source_preview = combine_comparison(&source_for_compare, &source_preview)?;
         mode = format!("comparison of grayscale and {mode}");
     }
 
     Ok(PipelineOutput {
-        preview: output_preview,
+        preview: source_preview,
         mode,
     })
 }
 
 pub fn process_grayscale_pixels(pixels: &mut [u8], controls: GrayscaleControls) -> String {
-    let mut mode = "grayscale".to_string();
+    let mut mode_parts: Vec<Cow<'static, str>> = Vec::with_capacity(4);
+    mode_parts.push("grayscale".into());
     let mut lookup = identity_lookup_table();
     let mut pending_lookup = false;
 
@@ -124,14 +153,14 @@ pub fn process_grayscale_pixels(pixels: &mut [u8], controls: GrayscaleControls) 
             *value = 255 - *value;
         }
         pending_lookup = true;
-        mode = "inverted grayscale".to_string();
+        mode_parts[0] = "inverted grayscale".into();
     }
     if controls.brightness != 0 {
         for value in &mut lookup {
             *value = clamp_lookup_value(i32::from(*value) + controls.brightness);
         }
         pending_lookup = true;
-        mode = format!("{mode} with brightness {:+}", controls.brightness);
+        mode_parts.push(format!("brightness {:+}", controls.brightness).into());
     }
     if controls.contrast != 1.0 {
         for value in &mut lookup {
@@ -139,7 +168,7 @@ pub fn process_grayscale_pixels(pixels: &mut [u8], controls: GrayscaleControls) 
             *value = clamp_lookup_value(adjusted.round() as i32);
         }
         pending_lookup = true;
-        mode = format!("{mode} with contrast {}", controls.contrast);
+        mode_parts.push(format!("contrast {}", controls.contrast).into());
     }
     if controls.equalize {
         if pending_lookup {
@@ -148,55 +177,59 @@ pub fn process_grayscale_pixels(pixels: &mut [u8], controls: GrayscaleControls) 
             pending_lookup = false;
         }
         equalize_histogram_in_place(pixels);
-        mode = format!("{mode} with histogram equalization");
+        mode_parts.push("histogram equalization".into());
     }
 
     if pending_lookup {
         apply_lookup_in_place(pixels, &lookup);
     }
-    mode
+    mode_parts.join(" with ")
 }
 
-fn normalize_palette_name(name: &str) -> Result<String, String> {
+pub fn normalize_palette_name(name: &str) -> Result<Palette, ProcessingError> {
     match name.trim().to_ascii_lowercase().as_str() {
-        "" | "none" => Ok("none".to_string()),
-        "hot" => Ok("hot".to_string()),
-        "bone" => Ok("bone".to_string()),
-        _ => Err("palette must be one of: none, hot, bone".to_string()),
+        "" | "none" => Ok(Palette::None),
+        "hot" => Ok(Palette::Hot),
+        "bone" => Ok(Palette::Bone),
+        _ => Err(ProcessingError::UnknownPalette),
     }
 }
 
-fn apply_named_palette(preview: &PreviewImage, palette: &str) -> Result<PreviewImage, String> {
+fn apply_named_palette(
+    preview: &PreviewImage,
+    palette: Palette,
+) -> Result<PreviewImage, ProcessingError> {
     if preview.format != PreviewFormat::Gray8 {
-        return Err("pseudocolor palettes require Gray8 preview input".to_string());
+        return Err(ProcessingError::PaletteRequiresGray8);
     }
 
     let color_fn: fn(u8) -> [u8; 4] = match palette {
-        "hot" => hot_color,
-        "bone" => bone_color,
-        _ => return Err("palette must be one of: none, hot, bone".to_string()),
+        Palette::Hot => hot_color,
+        Palette::Bone => bone_color,
+        Palette::None => return Ok(preview.clone()),
     };
 
     let mut pixels = Vec::with_capacity(preview.pixels.len() * 4);
-    for value in &preview.pixels {
-        pixels.extend_from_slice(&color_fn(*value));
-    }
+    pixels.extend(preview.pixels.iter().copied().flat_map(color_fn));
     Ok(PreviewImage::rgba(preview.width, preview.height, pixels))
 }
 
-fn combine_comparison(left: &PreviewImage, right: &PreviewImage) -> Result<PreviewImage, String> {
+fn combine_comparison(
+    left: &PreviewImage,
+    right: &PreviewImage,
+) -> Result<PreviewImage, ProcessingError> {
     if left.format != PreviewFormat::Gray8 {
-        return Err("compare preview requires Gray8 source on the left side".to_string());
+        return Err(ProcessingError::CompareRequiresGray8Left);
     }
     if left.width != right.width || left.height != right.height {
-        return Err("compare preview requires matching image dimensions".to_string());
+        return Err(ProcessingError::CompareDimensionMismatch);
     }
 
     let width = left.width as usize;
     let combined_width = left
         .width
         .checked_mul(2)
-        .ok_or_else(|| "compare preview width overflow".to_string())?;
+        .ok_or(ProcessingError::CompareWidthOverflow)?;
     let mut pixels = vec![0; combined_width as usize * left.height as usize * 4];
 
     for row in 0..left.height as usize {
@@ -351,14 +384,14 @@ mod tests {
     fn process_rendered_preview_applies_palette_and_compare() {
         let source = PreviewImage::gray(2, 1, vec![0, 255]);
         let output = process_rendered_preview(
-            &source,
+            source,
             GrayscaleControls {
                 invert: false,
                 brightness: 0,
                 contrast: 1.0,
                 equalize: false,
             },
-            "hot",
+            Palette::Hot,
             true,
         )
         .unwrap();
@@ -388,6 +421,6 @@ mod tests {
 
         assert_eq!(resolved.controls.brightness, 10);
         assert_eq!(resolved.controls.contrast, 1.4);
-        assert_eq!(resolved.palette, "bone");
+        assert_eq!(resolved.palette, Palette::Bone);
     }
 }

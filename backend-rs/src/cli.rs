@@ -5,28 +5,65 @@ use serde_json::json;
 
 use crate::{
     analysis,
+    bmp::{self, Metadata, RenderWindowMode, RenderedPreview},
     config::Config,
     contracts::{
-        BACKEND_CONTRACT_VERSION, MeasurementScale, PaletteName, ProcessStudyCommand, SERVICE_NAME,
-        SUPPORTED_COMMANDS, default_processing_manifest,
+        BACKEND_CONTRACT_VERSION, BackendError, MeasurementScale, PaletteName, ProcessStudyCommand,
+        SERVICE_NAME, SUPPORTED_COMMANDS, default_processing_manifest,
     },
-    bmp::{self, Metadata, RenderWindowMode, RenderedPreview},
     processing::{self, GrayscaleControls},
     render::{self, PreviewImage},
 };
 
 const LEGACY_HELP_SENTINEL: &str = "__xrayview_legacy_help__";
 
-pub fn run(args: &[String], stdout: &mut dyn Write, stderr: &mut dyn Write) -> Result<(), String> {
-    let args = args.iter().map(String::as_str).collect::<Vec<_>>();
-    run_args(&args, stdout, stderr)
+#[derive(Debug, thiserror::Error)]
+pub enum CliError {
+    #[error("{0}")]
+    Message(String),
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+    #[error(transparent)]
+    Json(#[from] serde_json::Error),
+    #[error(transparent)]
+    Processing(#[from] processing::ProcessingError),
 }
 
-fn run_args(args: &[&str], stdout: &mut dyn Write, stderr: &mut dyn Write) -> Result<(), String> {
+impl CliError {
+    fn message(message: impl Into<String>) -> Self {
+        Self::Message(message.into())
+    }
+}
+
+impl From<String> for CliError {
+    fn from(message: String) -> Self {
+        Self::message(message)
+    }
+}
+
+impl From<&str> for CliError {
+    fn from(message: &str) -> Self {
+        Self::message(message)
+    }
+}
+
+impl From<BackendError> for CliError {
+    fn from(error: BackendError) -> Self {
+        Self::message(error.message)
+    }
+}
+
+type CliResult<T> = Result<T, CliError>;
+
+pub fn run(args: &[&str], stdout: &mut dyn Write, stderr: &mut dyn Write) -> CliResult<()> {
+    run_args(args, stdout, stderr)
+}
+
+fn run_args(args: &[&str], stdout: &mut dyn Write, stderr: &mut dyn Write) -> CliResult<()> {
     let args = trim_leading_separators(args);
     if args.is_empty() {
         print_usage(stderr)?;
-        return Err("expected a subcommand".to_string());
+        return Err("expected a subcommand".to_string().into());
     }
     if args[0].starts_with('-') {
         return run_legacy_args(args, stdout, stderr);
@@ -39,33 +76,31 @@ fn run_args(args: &[&str], stdout: &mut dyn Write, stderr: &mut dyn Write) -> Re
         "process-preview" => process_preview(&args[1..], stdout),
         "analyze-preview" => analyze_preview(&args[1..], stdout),
         "list-commands" => list_commands(stdout),
-        "version" => writeln!(
-            stdout,
-            "{SERVICE_NAME} contract-v{BACKEND_CONTRACT_VERSION}"
-        )
-        .map_err(|error| error.to_string()),
+        "version" => {
+            writeln!(
+                stdout,
+                "{SERVICE_NAME} contract-v{BACKEND_CONTRACT_VERSION}"
+            )?;
+            Ok(())
+        }
         "help" | "-h" | "--help" => print_usage(stdout),
         command => {
             print_usage(stderr)?;
-            Err(format!("unknown subcommand: {command}"))
+            Err(format!("unknown subcommand: {command}").into())
         }
     }
 }
 
-fn run_legacy_args(
-    args: &[&str],
-    stdout: &mut dyn Write,
-    stderr: &mut dyn Write,
-) -> Result<(), String> {
+fn run_legacy_args(args: &[&str], stdout: &mut dyn Write, stderr: &mut dyn Write) -> CliResult<()> {
     let options = match parse_legacy_args(args, stderr) {
         Ok(options) => options,
-        Err(error) if error == LEGACY_HELP_SENTINEL => return Ok(()),
+        Err(CliError::Message(error)) if error == LEGACY_HELP_SENTINEL => return Ok(()),
         Err(error) => return Err(error),
     };
     execute_legacy(options, stdout)
 }
 
-fn parse_legacy_args(args: &[&str], stderr: &mut dyn Write) -> Result<LegacyOptions, String> {
+fn parse_legacy_args(args: &[&str], stderr: &mut dyn Write) -> CliResult<LegacyOptions> {
     let mut options = LegacyOptions {
         preset: "default".to_string(),
         ..LegacyOptions::default()
@@ -75,10 +110,10 @@ fn parse_legacy_args(args: &[&str], stderr: &mut dyn Write) -> Result<LegacyOpti
         let arg = args[index];
         if matches!(arg, "-h" | "--help") {
             print_legacy_usage(stderr)?;
-            return Err(LEGACY_HELP_SENTINEL.to_string());
+            return Err(LEGACY_HELP_SENTINEL.into());
         }
         if !arg.starts_with('-') {
-            return Err(format!("unexpected positional arguments: {arg}"));
+            return Err(format!("unexpected positional arguments: {arg}").into());
         }
 
         let (flag, inline_value) = split_flag_value(arg);
@@ -133,7 +168,7 @@ fn parse_legacy_args(args: &[&str], stderr: &mut dyn Write) -> Result<LegacyOpti
                 options.palette =
                     required_flag_value(args, &mut index, &flag, inline_value)?.to_string()
             }
-            unknown => return Err(format!("unknown workflow flag: {unknown}")),
+            unknown => return Err(format!("unknown workflow flag: {unknown}").into()),
         }
         index += 1;
     }
@@ -141,7 +176,7 @@ fn parse_legacy_args(args: &[&str], stderr: &mut dyn Write) -> Result<LegacyOpti
     Ok(options)
 }
 
-fn execute_legacy(options: LegacyOptions, stdout: &mut dyn Write) -> Result<(), String> {
+fn execute_legacy(options: LegacyOptions, stdout: &mut dyn Write) -> CliResult<()> {
     validate_legacy_mode_selection(&options)?;
     if options.describe_presets {
         return write_json_compact(stdout, &default_processing_manifest());
@@ -170,29 +205,31 @@ fn execute_legacy(options: LegacyOptions, stdout: &mut dyn Write) -> Result<(), 
     process_legacy_study(&input_path, &preview_output, &options, stdout)
 }
 
-fn validate_legacy_mode_selection(options: &LegacyOptions) -> Result<(), String> {
+fn validate_legacy_mode_selection(options: &LegacyOptions) -> CliResult<()> {
     let mode_count = [options.describe_presets, options.describe_study]
         .into_iter()
         .filter(|enabled| *enabled)
         .count();
     if mode_count > 1 {
         return Err(
-            "choose only one backend mode: --describe-presets or --describe-study".to_string(),
+            "choose only one backend mode: --describe-presets or --describe-study"
+                .to_string()
+                .into(),
         );
     }
     Ok(())
 }
 
-fn required_input_path(options: &LegacyOptions) -> Result<String, String> {
+fn required_input_path(options: &LegacyOptions) -> CliResult<String> {
     let input_path = options.input.trim();
     if input_path.is_empty() {
-        return Err("--input is required".to_string());
+        return Err("--input is required".to_string().into());
     }
     validate_legacy_input_path(input_path)?;
     Ok(input_path.to_string())
 }
 
-fn validate_legacy_input_path(input_path: &str) -> Result<(), String> {
+fn validate_legacy_input_path(input_path: &str) -> CliResult<()> {
     let metadata = fs::metadata(input_path).map_err(|error| {
         if error.kind() == std::io::ErrorKind::NotFound {
             format!("input file does not exist: {input_path}")
@@ -201,7 +238,7 @@ fn validate_legacy_input_path(input_path: &str) -> Result<(), String> {
         }
     })?;
     if metadata.is_dir() {
-        return Err(format!("input path must be a file: {input_path}"));
+        return Err(format!("input path must be a file: {input_path}").into());
     }
     Ok(())
 }
@@ -210,7 +247,7 @@ fn render_legacy_preview(
     input_path: &str,
     preview_output: &str,
     stdout: &mut dyn Write,
-) -> Result<(), String> {
+) -> CliResult<()> {
     let rendered = bmp::render_grayscale_preview_file(input_path)?;
     render::save_gray_bmp(
         preview_output,
@@ -222,10 +259,9 @@ fn render_legacy_preview(
         stdout,
         "loaded BMP image: {}x{}",
         rendered.width, rendered.height
-    )
-    .map_err(|error| error.to_string())?;
-    writeln!(stdout, "saved grayscale preview image: {preview_output}")
-        .map_err(|error| error.to_string())
+    )?;
+    writeln!(stdout, "saved grayscale preview image: {preview_output}")?;
+    Ok(())
 }
 
 fn process_legacy_study(
@@ -233,16 +269,15 @@ fn process_legacy_study(
     preview_output: &str,
     options: &LegacyOptions,
     stdout: &mut dyn Write,
-) -> Result<(), String> {
+) -> CliResult<()> {
     let rendered = bmp::render_grayscale_preview_file(input_path)?;
     let command = legacy_process_command(options)?;
-    let resolved =
-        processing::resolve_process_study_command(&command).map_err(|error| error.message)?;
+    let resolved = processing::resolve_process_study_command(&command)?;
     let source = rendered_preview_image(&rendered);
     let processed = processing::process_rendered_preview(
-        &source,
+        source,
         resolved.controls,
-        &resolved.palette,
+        resolved.palette,
         resolved.compare,
     )?;
 
@@ -252,18 +287,16 @@ fn process_legacy_study(
         stdout,
         "loaded BMP image: {}x{}",
         rendered.width, rendered.height
-    )
-    .map_err(|error| error.to_string())?;
+    )?;
     writeln!(
         stdout,
         "saved {} preview image: {}",
         processed.mode, preview_output
-    )
-    .map_err(|error| error.to_string())?;
+    )?;
     Ok(())
 }
 
-fn legacy_process_command(options: &LegacyOptions) -> Result<ProcessStudyCommand, String> {
+fn legacy_process_command(options: &LegacyOptions) -> CliResult<ProcessStudyCommand> {
     let mut command = ProcessStudyCommand {
         study_id: String::new(),
         preset_id: options.preset.clone(),
@@ -296,13 +329,13 @@ fn legacy_preset_controls(preset_id: &str) -> Option<crate::contracts::Processin
         .map(|preset| preset.controls)
 }
 
-fn parse_palette_name(value: &str) -> Result<Option<PaletteName>, String> {
+fn parse_palette_name(value: &str) -> CliResult<Option<PaletteName>> {
     Ok(match value.trim().to_ascii_lowercase().as_str() {
         "" => None,
         "none" => Some(PaletteName::None),
         "hot" => Some(PaletteName::Hot),
         "bone" => Some(PaletteName::Bone),
-        _ => return Err("palette must be one of: none, hot, bone".to_string()),
+        _ => return Err("palette must be one of: none, hot, bone".to_string().into()),
     })
 }
 
@@ -353,25 +386,26 @@ fn required_flag_value<'a>(
     index: &mut usize,
     flag: &str,
     inline_value: Option<&'a str>,
-) -> Result<&'a str, String> {
+) -> CliResult<&'a str> {
     if let Some(value) = inline_value {
         return Ok(value);
     }
     *index += 1;
-    args.get(*index)
+    Ok(args
+        .get(*index)
         .copied()
-        .ok_or_else(|| format!("workflow flag {flag} requires a value"))
+        .ok_or_else(|| format!("workflow flag {flag} requires a value"))?)
 }
 
-fn parse_bool_flag(flag: &str, inline_value: Option<&str>) -> Result<Option<bool>, String> {
-    inline_value
+fn parse_bool_flag(flag: &str, inline_value: Option<&str>) -> CliResult<Option<bool>> {
+    Ok(inline_value
         .map(|value| {
             value
                 .trim()
                 .parse::<bool>()
                 .map_err(|error| format!("parse workflow flag {flag} value {value:?}: {error}"))
         })
-        .transpose()
+        .transpose()?)
 }
 
 fn trim_leading_separators<'a>(mut args: &'a [&'a str]) -> &'a [&'a str] {
@@ -381,7 +415,7 @@ fn trim_leading_separators<'a>(mut args: &'a [&'a str]) -> &'a [&'a str] {
     args
 }
 
-fn print_config(stdout: &mut dyn Write) -> Result<(), String> {
+fn print_config(stdout: &mut dyn Write) -> CliResult<()> {
     let config = Config::load()?;
     write_json(
         stdout,
@@ -399,9 +433,11 @@ fn print_config(stdout: &mut dyn Write) -> Result<(), String> {
     )
 }
 
-fn decode_source(args: &[&str], stdout: &mut dyn Write) -> Result<(), String> {
+fn decode_source(args: &[&str], stdout: &mut dyn Write) -> CliResult<()> {
     if args.len() != 1 {
-        return Err("decode-source requires exactly one BMP path".to_string());
+        return Err("decode-source requires exactly one BMP path"
+            .to_string()
+            .into());
     }
 
     let metadata = bmp::read_file(args[0])?;
@@ -412,7 +448,7 @@ fn decode_source(args: &[&str], stdout: &mut dyn Write) -> Result<(), String> {
     )
 }
 
-fn render_preview(args: &[&str], stdout: &mut dyn Write) -> Result<(), String> {
+fn render_preview(args: &[&str], stdout: &mut dyn Write) -> CliResult<()> {
     let options = parse_render_preview_args(args)?;
     let rendered = bmp::render_grayscale_preview_file_with_window_mode(
         &options.input_path,
@@ -442,19 +478,16 @@ fn render_preview(args: &[&str], stdout: &mut dyn Write) -> Result<(), String> {
     )
 }
 
-fn process_preview(args: &[&str], stdout: &mut dyn Write) -> Result<(), String> {
+fn process_preview(args: &[&str], stdout: &mut dyn Write) -> CliResult<()> {
     let options = parse_process_preview_args(args)?;
     let rendered = bmp::render_grayscale_preview_file_with_window_mode(
         &options.input_path,
         render_window_mode(options.full_range),
     )?;
     let source = rendered_preview_image(&rendered);
-    let processed = processing::process_rendered_preview(
-        &source,
-        options.controls,
-        &options.palette,
-        options.compare,
-    )?;
+    let palette = processing::normalize_palette_name(&options.palette)?;
+    let processed =
+        processing::process_rendered_preview(source, options.controls, palette, options.compare)?;
     render::save_preview_bmp(&options.output_path, &processed.preview)?;
 
     write_json(
@@ -477,7 +510,7 @@ fn process_preview(args: &[&str], stdout: &mut dyn Write) -> Result<(), String> 
     )
 }
 
-fn analyze_preview(args: &[&str], stdout: &mut dyn Write) -> Result<(), String> {
+fn analyze_preview(args: &[&str], stdout: &mut dyn Write) -> CliResult<()> {
     let options = parse_analyze_preview_args(args)?;
     let rendered = bmp::render_grayscale_preview_file_for_tooth_analysis(&options.input_path)?;
     let source = rendered_preview_image(&rendered);
@@ -505,21 +538,21 @@ fn analyze_preview(args: &[&str], stdout: &mut dyn Write) -> Result<(), String> 
     )
 }
 
-fn list_commands(stdout: &mut dyn Write) -> Result<(), String> {
+fn list_commands(stdout: &mut dyn Write) -> CliResult<()> {
     for command in SUPPORTED_COMMANDS {
-        writeln!(stdout, "{command}").map_err(|error| error.to_string())?;
+        writeln!(stdout, "{command}")?;
     }
     Ok(())
 }
 
-fn parse_render_preview_args(args: &[&str]) -> Result<RenderPreviewOptions, String> {
+fn parse_render_preview_args(args: &[&str]) -> CliResult<RenderPreviewOptions> {
     let mut full_range = false;
     let mut positional = Vec::with_capacity(2);
     for arg in args {
         match *arg {
             "--full-range" => full_range = true,
             value if value.starts_with('-') => {
-                return Err(format!("unknown render-preview flag: {value}"));
+                return Err(format!("unknown render-preview flag: {value}").into());
             }
             value => positional.push(value),
         }
@@ -528,7 +561,8 @@ fn parse_render_preview_args(args: &[&str]) -> Result<RenderPreviewOptions, Stri
     if positional.len() != 2 {
         return Err(
             "render-preview requires INPUT_BMP OUTPUT_BMP and accepts optional --full-range"
-                .to_string(),
+                .to_string()
+                .into(),
         );
     }
 
@@ -539,7 +573,7 @@ fn parse_render_preview_args(args: &[&str]) -> Result<RenderPreviewOptions, Stri
     })
 }
 
-fn parse_process_preview_args(args: &[&str]) -> Result<ProcessPreviewOptions, String> {
+fn parse_process_preview_args(args: &[&str]) -> CliResult<ProcessPreviewOptions> {
     let mut options = ProcessPreviewOptions {
         full_range: false,
         controls: GrayscaleControls {
@@ -580,7 +614,7 @@ fn parse_process_preview_args(args: &[&str]) -> Result<ProcessPreviewOptions, St
                     format!("parse process-preview contrast {value:?}: {error}")
                 })?;
                 if !parsed.is_finite() || parsed < 0.0 {
-                    return Err(format!("contrast must be >= 0.0, got {parsed}"));
+                    return Err(format!("contrast must be >= 0.0, got {parsed}").into());
                 }
                 options.controls.contrast = parsed;
             }
@@ -592,7 +626,7 @@ fn parse_process_preview_args(args: &[&str]) -> Result<ProcessPreviewOptions, St
                     .to_ascii_lowercase();
             }
             value if value.starts_with('-') => {
-                return Err(format!("unknown process-preview flag: {value}"));
+                return Err(format!("unknown process-preview flag: {value}").into());
             }
             value => positional.push(value),
         }
@@ -600,13 +634,14 @@ fn parse_process_preview_args(args: &[&str]) -> Result<ProcessPreviewOptions, St
     }
 
     if positional.len() != 2 {
-        return Err("process-preview requires INPUT_BMP OUTPUT_BMP and accepts optional --full-range, --invert, --brightness, --contrast, --equalize, --palette, and --compare".to_string());
+        return Err("process-preview requires INPUT_BMP OUTPUT_BMP and accepts optional --full-range, --invert, --brightness, --contrast, --equalize, --palette, and --compare".to_string().into());
     }
     if !(-256..=256).contains(&options.controls.brightness) {
         return Err(format!(
             "brightness must be between -256 and 256, got {}",
             options.controls.brightness
-        ));
+        )
+        .into());
     }
 
     options.input_path = PathBuf::from(positional[0]);
@@ -614,14 +649,14 @@ fn parse_process_preview_args(args: &[&str]) -> Result<ProcessPreviewOptions, St
     Ok(options)
 }
 
-fn parse_analyze_preview_args(args: &[&str]) -> Result<AnalyzePreviewOptions, String> {
+fn parse_analyze_preview_args(args: &[&str]) -> CliResult<AnalyzePreviewOptions> {
     let mut filled = false;
     let mut positional = Vec::with_capacity(2);
     for arg in args {
         match *arg {
             "--filled" => filled = true,
             value if value.starts_with('-') => {
-                return Err(format!("unknown analyze-preview flag: {value}"));
+                return Err(format!("unknown analyze-preview flag: {value}").into());
             }
             value => positional.push(value),
         }
@@ -629,7 +664,8 @@ fn parse_analyze_preview_args(args: &[&str]) -> Result<AnalyzePreviewOptions, St
     if positional.len() != 2 {
         return Err(
             "analyze-preview requires INPUT_BMP OUTPUT_BMP and accepts optional --filled"
-                .to_string(),
+                .to_string()
+                .into(),
         );
     }
     Ok(AnalyzePreviewOptions {
@@ -651,140 +687,119 @@ fn rendered_preview_image(rendered: &RenderedPreview) -> PreviewImage {
     PreviewImage::gray(rendered.width, rendered.height, rendered.pixels.clone())
 }
 
-fn write_json(stdout: &mut dyn Write, value: &impl Serialize) -> Result<(), String> {
-    serde_json::to_writer_pretty(&mut *stdout, value).map_err(|error| error.to_string())?;
-    writeln!(stdout).map_err(|error| error.to_string())
+fn write_json(stdout: &mut dyn Write, value: &impl Serialize) -> CliResult<()> {
+    serde_json::to_writer_pretty(&mut *stdout, value)?;
+    writeln!(stdout)?;
+    Ok(())
 }
 
-fn write_json_compact(stdout: &mut dyn Write, value: &impl Serialize) -> Result<(), String> {
-    serde_json::to_writer(&mut *stdout, value).map_err(|error| error.to_string())?;
-    writeln!(stdout).map_err(|error| error.to_string())
+fn write_json_compact(stdout: &mut dyn Write, value: &impl Serialize) -> CliResult<()> {
+    serde_json::to_writer(&mut *stdout, value)?;
+    writeln!(stdout)?;
+    Ok(())
 }
 
-fn print_usage(stream: &mut dyn Write) -> Result<(), String> {
-    writeln!(stream, "usage: xrayview-backend-rs <subcommand>")
-        .map_err(|error| error.to_string())?;
-    writeln!(stream, "       xrayview-backend-rs [workflow flags]")
-        .map_err(|error| error.to_string())?;
-    writeln!(stream).map_err(|error| error.to_string())?;
-    writeln!(stream, "workflow flags:").map_err(|error| error.to_string())?;
+fn print_usage(stream: &mut dyn Write) -> CliResult<()> {
+    writeln!(stream, "usage: xrayview-backend-rs <subcommand>")?;
+    writeln!(stream, "       xrayview-backend-rs [workflow flags]")?;
+    writeln!(stream)?;
+    writeln!(stream, "workflow flags:")?;
     writeln!(
         stream,
         "  --describe-presets                          print processing preset metadata as JSON"
-    )
-    .map_err(|error| error.to_string())?;
+    )?;
     writeln!(
         stream,
         "  --input <image.bmp> --describe-study       print image metadata as JSON"
-    )
-    .map_err(|error| error.to_string())?;
+    )?;
     writeln!(
         stream,
         "  --input <image.bmp> --preview-output <bmp> render a grayscale preview BMP"
-    )
-    .map_err(|error| error.to_string())?;
+    )?;
     writeln!(
         stream,
         "  --input <image.bmp> [processing flags]     write processed preview BMP"
-    )
-    .map_err(|error| error.to_string())?;
-    writeln!(stream).map_err(|error| error.to_string())?;
-    writeln!(stream, "utility subcommands:").map_err(|error| error.to_string())?;
+    )?;
+    writeln!(stream)?;
+    writeln!(stream, "utility subcommands:")?;
     writeln!(
         stream,
         "  print-config             print resolved backend configuration as JSON"
-    )
-    .map_err(|error| error.to_string())?;
+    )?;
     writeln!(
         stream,
         "  decode-source            decode source pixels directly in Rust"
-    )
-    .map_err(|error| error.to_string())?;
+    )?;
     writeln!(
         stream,
         "  render-preview           render a grayscale BMP preview"
-    )
-    .map_err(|error| error.to_string())?;
+    )?;
     writeln!(
         stream,
         "  process-preview          render then run the Rust preview pipeline"
-    )
-    .map_err(|error| error.to_string())?;
+    )?;
     writeln!(
         stream,
         "  analyze-preview          render the analysis overlay preview"
-    )
-    .map_err(|error| error.to_string())?;
+    )?;
     writeln!(
         stream,
         "  list-commands            print supported command names"
-    )
-    .map_err(|error| error.to_string())?;
+    )?;
     writeln!(
         stream,
         "  version                  print service and contract version"
-    )
-    .map_err(|error| error.to_string())
+    )?;
+    Ok(())
 }
 
-fn print_legacy_usage(stream: &mut dyn Write) -> Result<(), String> {
-    writeln!(stream, "usage: xrayview-backend-rs [workflow flags]")
-        .map_err(|error| error.to_string())?;
-    writeln!(stream).map_err(|error| error.to_string())?;
-    writeln!(stream, "input / output:").map_err(|error| error.to_string())?;
+fn print_legacy_usage(stream: &mut dyn Write) -> CliResult<()> {
+    writeln!(stream, "usage: xrayview-backend-rs [workflow flags]")?;
+    writeln!(stream)?;
+    writeln!(stream, "input / output:")?;
     writeln!(
         stream,
         "  --input <image.bmp>           path to the source BMP image"
-    )
-    .map_err(|error| error.to_string())?;
+    )?;
     writeln!(
         stream,
         "  --preview-output <image.bmp>  BMP preview output path"
-    )
-    .map_err(|error| error.to_string())?;
-    writeln!(stream).map_err(|error| error.to_string())?;
-    writeln!(stream, "metadata:").map_err(|error| error.to_string())?;
+    )?;
+    writeln!(stream)?;
+    writeln!(stream, "metadata:")?;
     writeln!(
         stream,
         "  --describe-presets            print processing preset metadata as JSON"
-    )
-    .map_err(|error| error.to_string())?;
+    )?;
     writeln!(
         stream,
         "  --describe-study              print study measurement metadata as JSON"
-    )
-    .map_err(|error| error.to_string())?;
-    writeln!(stream).map_err(|error| error.to_string())?;
-    writeln!(stream, "processing:").map_err(|error| error.to_string())?;
+    )?;
+    writeln!(stream)?;
+    writeln!(stream, "processing:")?;
     writeln!(
         stream,
         "  --preset <id>                 default, xray, or high-contrast"
-    )
-    .map_err(|error| error.to_string())?;
-    writeln!(stream, "  --invert[=true|false]         invert grayscale")
-        .map_err(|error| error.to_string())?;
+    )?;
+    writeln!(stream, "  --invert[=true|false]         invert grayscale")?;
     writeln!(
         stream,
         "  --brightness <int>            brightness adjustment (-256 to 256)"
-    )
-    .map_err(|error| error.to_string())?;
+    )?;
     writeln!(
         stream,
         "  --contrast <float>            contrast multiplier (>= 0.0)"
-    )
-    .map_err(|error| error.to_string())?;
+    )?;
     writeln!(
         stream,
         "  --equalize[=true|false]       apply histogram equalization"
-    )
-    .map_err(|error| error.to_string())?;
+    )?;
     writeln!(
         stream,
         "  --compare                     show before/after comparison"
-    )
-    .map_err(|error| error.to_string())?;
-    writeln!(stream, "  --palette <name>              none, hot, or bone")
-        .map_err(|error| error.to_string())
+    )?;
+    writeln!(stream, "  --palette <name>              none, hot, or bone")?;
+    Ok(())
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -805,7 +820,9 @@ impl DecodeSourceSummary {
     fn from_rendered_and_metadata(rendered: RenderedPreview, metadata: &Metadata) -> Self {
         let min_value = rendered.pixels.iter().copied().min().unwrap_or_default();
         let max_value = rendered.pixels.iter().copied().max().unwrap_or_default();
-        let measurement_scale = rendered.measurement_scale.or_else(|| metadata.measurement_scale());
+        let measurement_scale = rendered
+            .measurement_scale
+            .or_else(|| metadata.measurement_scale());
         Self {
             width: rendered.width,
             height: rendered.height,

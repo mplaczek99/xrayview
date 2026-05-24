@@ -1,4 +1,4 @@
-import { escapeHtml, type ViewerRenderModel } from "../../app/htmxView";
+import type { ViewerRenderModel } from "../../app/htmxView";
 import { workbenchActions } from "../../app/store/workbenchStore";
 import type {
   AnnotationBundle,
@@ -31,6 +31,8 @@ type ViewerInteraction =
       endpoint: "start" | "end";
     };
 
+const SVG_NS = "http://www.w3.org/2000/svg";
+
 function pointDistance(left: AnnotationPoint, right: AnnotationPoint): number {
   return Math.hypot(left.x - right.x, left.y - right.y);
 }
@@ -50,10 +52,6 @@ function pointerToLocalPoint(event: MouseEvent, element: HTMLElement): Annotatio
   };
 }
 
-function attr(value: unknown): string {
-  return escapeHtml(value);
-}
-
 function lineLabel(annotation: LineAnnotation): string {
   if (!annotation.measurement) {
     return annotation.label;
@@ -68,141 +66,31 @@ function lineLabel(annotation: LineAnnotation): string {
   return `${annotation.label} - ${measurement}`;
 }
 
-function renderAnnotationLayer(
-  frame: ViewerFrame,
-  transform: ViewerTransform,
-  annotations: AnnotationBundle,
-  selectedAnnotationId: string | null,
-  draftLine: LineAnnotation | null,
-  draftLineOverride: LineAnnotation | null,
-): string {
-  const selectedBase = annotations.lines.find((line) => line.id === selectedAnnotationId) ?? null;
-  const selectedLine =
-    selectedBase && draftLineOverride?.id === selectedBase.id ? draftLineOverride : selectedBase;
-  const handleRadius = 7 / Math.max(transform.scale, 1);
+function createSvgElement<K extends keyof SVGElementTagNameMap>(
+  tagName: K,
+): SVGElementTagNameMap[K] {
+  return document.createElementNS(SVG_NS, tagName);
+}
 
-  return `
-    <svg
-      class="annotation-layer"
-      width="${attr(frame.width)}"
-      height="${attr(frame.height)}"
-      viewBox="0 0 ${attr(frame.width)} ${attr(frame.height)}"
-      aria-hidden="true"
-    >
-      <g transform="translate(${attr(transform.offsetX)} ${attr(transform.offsetY)}) scale(${attr(transform.scale)})">
-        ${annotations.rectangles
-          .map(
-            (annotation) => `
-          <rect
-            class="annotation-layer__rect"
-            x="${attr(annotation.x)}"
-            y="${attr(annotation.y)}"
-            width="${attr(annotation.width)}"
-            height="${attr(annotation.height)}"
-            vector-effect="non-scaling-stroke"
-          ></rect>
-        `,
-          )
-          .join("")}
+function setSvgAttributes(element: Element, attributes: Record<string, string | number>): void {
+  for (const [name, value] of Object.entries(attributes)) {
+    element.setAttribute(name, String(value));
+  }
+}
 
-        ${annotations.polylines
-          .map((annotation) => {
-            const points = annotation.points.map((point) => `${point.x},${point.y}`).join(" ");
-            return annotation.closed
-              ? `
-            <polygon
-              class="annotation-layer__polyline annotation-layer__polyline--${attr(annotation.source)}"
-              points="${attr(points)}"
-              vector-effect="non-scaling-stroke"
-            ></polygon>
-          `
-              : `
-            <polyline
-              class="annotation-layer__polyline annotation-layer__polyline--${attr(annotation.source)}"
-              points="${attr(points)}"
-              vector-effect="non-scaling-stroke"
-              fill="none"
-            ></polyline>
-          `;
-          })
-          .join("")}
-
-        ${annotations.lines
-          .map((annotation) => {
-            const visible =
-              draftLineOverride?.id === annotation.id ? draftLineOverride : annotation;
-            const mid = lineMidpoint(visible);
-            const labelOffset = 10 / Math.max(transform.scale, 1);
-
-            return `
-            <g>
-              <line
-                class="annotation-layer__line annotation-layer__line--${attr(annotation.source)}${annotation.id === selectedAnnotationId ? " annotation-layer__line--selected" : ""}"
-                x1="${attr(visible.start.x)}"
-                y1="${attr(visible.start.y)}"
-                x2="${attr(visible.end.x)}"
-                y2="${attr(visible.end.y)}"
-                vector-effect="non-scaling-stroke"
-                data-annotation-line
-                data-annotation-id="${attr(annotation.id)}"
-              ></line>
-              <text
-                class="annotation-layer__label"
-                x="${attr(mid.x)}"
-                y="${attr(mid.y - labelOffset)}"
-                text-anchor="middle"
-                pointer-events="none"
-                opacity="1"
-              >${escapeHtml(lineLabel(visible))}</text>
-            </g>
-          `;
-          })
-          .join("")}
-
-        ${
-          draftLine
-            ? `
-          <line
-            class="annotation-layer__line annotation-layer__line--draft"
-            x1="${attr(draftLine.start.x)}"
-            y1="${attr(draftLine.start.y)}"
-            x2="${attr(draftLine.end.x)}"
-            y2="${attr(draftLine.end.y)}"
-            vector-effect="non-scaling-stroke"
-          ></line>
-        `
-            : ""
-        }
-
-        ${
-          selectedLine
-            ? `
-          <circle
-            class="annotation-layer__handle"
-            cx="${attr(selectedLine.start.x)}"
-            cy="${attr(selectedLine.start.y)}"
-            r="${attr(handleRadius)}"
-            vector-effect="non-scaling-stroke"
-            data-annotation-handle
-            data-annotation-id="${attr(selectedLine.id)}"
-            data-endpoint="start"
-          ></circle>
-          <circle
-            class="annotation-layer__handle"
-            cx="${attr(selectedLine.end.x)}"
-            cy="${attr(selectedLine.end.y)}"
-            r="${attr(handleRadius)}"
-            vector-effect="non-scaling-stroke"
-            data-annotation-handle
-            data-annotation-id="${attr(selectedLine.id)}"
-            data-endpoint="end"
-          ></circle>
-        `
-            : ""
-        }
-      </g>
-    </svg>
-  `;
+function lineKey(line: LineAnnotation | null): string {
+  if (!line) {
+    return "";
+  }
+  return [
+    line.id,
+    line.start.x,
+    line.start.y,
+    line.end.x,
+    line.end.y,
+    line.measurement?.pixelLength ?? "",
+    line.measurement?.calibratedLengthMm ?? "",
+  ].join(":");
 }
 
 export class ViewerController {
@@ -223,6 +111,12 @@ export class ViewerController {
   private resetKey: string | null = null;
   private interaction: ViewerInteraction | null = null;
   private draftLine: LineAnnotation | null = null;
+  private annotationSvg: SVGSVGElement | null = null;
+  private annotationTransformGroup: SVGGElement | null = null;
+  private annotationContentGroup: SVGGElement | null = null;
+  private renderedAnnotations: AnnotationBundle | null = null;
+  private renderedSelectedAnnotationId: string | null = null;
+  private renderedDraftLineKey = "";
 
   mount(root: ParentNode, model: ViewerRenderModel) {
     this.detach();
@@ -234,6 +128,7 @@ export class ViewerController {
       this.canvas = null;
       this.image = null;
       this.annotationHost = null;
+      this.clearAnnotationLayer();
       return;
     }
 
@@ -304,6 +199,7 @@ export class ViewerController {
     }
     this.resizeObserver?.disconnect();
     this.resizeObserver = null;
+    this.clearAnnotationLayer();
     this.stage = null;
     this.canvas = null;
     this.image = null;
@@ -532,6 +428,205 @@ export class ViewerController {
     return getViewerTransform(this.frame, this.resolvedImageSize, this.viewport);
   }
 
+  private clearAnnotationLayer() {
+    if (this.annotationHost) {
+      this.annotationHost.replaceChildren();
+    }
+    this.annotationSvg = null;
+    this.annotationTransformGroup = null;
+    this.annotationContentGroup = null;
+    this.renderedAnnotations = null;
+    this.renderedSelectedAnnotationId = null;
+    this.renderedDraftLineKey = "";
+  }
+
+  private ensureAnnotationLayer(): SVGGElement | null {
+    if (!this.annotationHost) {
+      return null;
+    }
+    if (this.annotationSvg && this.annotationTransformGroup && this.annotationContentGroup) {
+      return this.annotationContentGroup;
+    }
+
+    const svg = createSvgElement("svg");
+    svg.classList.add("annotation-layer");
+    svg.setAttribute("aria-hidden", "true");
+    const transformGroup = createSvgElement("g");
+    const contentGroup = createSvgElement("g");
+    transformGroup.classList.add("annotation-transform");
+    transformGroup.append(contentGroup);
+    svg.append(transformGroup);
+    this.annotationHost.replaceChildren(svg);
+    this.annotationSvg = svg;
+    this.annotationTransformGroup = transformGroup;
+    this.annotationContentGroup = contentGroup;
+    return contentGroup;
+  }
+
+  private syncAnnotationLayer(
+    annotations: AnnotationBundle,
+    selectedAnnotationId: string | null,
+    transform: ViewerTransform,
+    draftLine: LineAnnotation | null,
+    draftLineOverride: LineAnnotation | null,
+  ) {
+    const contentGroup = this.ensureAnnotationLayer();
+    if (!contentGroup || !this.annotationSvg || !this.annotationTransformGroup) {
+      return;
+    }
+
+    setSvgAttributes(this.annotationSvg, {
+      width: this.frame.width,
+      height: this.frame.height,
+      viewBox: `0 0 ${this.frame.width} ${this.frame.height}`,
+    });
+    this.annotationTransformGroup.setAttribute(
+      "transform",
+      `matrix(${transform.scale} 0 0 ${transform.scale} ${transform.offsetX} ${transform.offsetY})`,
+    );
+
+    const draftKey = `${lineKey(draftLine)}|${lineKey(draftLineOverride)}`;
+    if (
+      this.renderedAnnotations === annotations &&
+      this.renderedSelectedAnnotationId === selectedAnnotationId &&
+      this.renderedDraftLineKey === draftKey
+    ) {
+      return;
+    }
+
+    contentGroup.replaceChildren(
+      ...this.buildAnnotationNodes(annotations, selectedAnnotationId, draftLine, draftLineOverride),
+    );
+    this.renderedAnnotations = annotations;
+    this.renderedSelectedAnnotationId = selectedAnnotationId;
+    this.renderedDraftLineKey = draftKey;
+  }
+
+  private buildAnnotationNodes(
+    annotations: AnnotationBundle,
+    selectedAnnotationId: string | null,
+    draftLine: LineAnnotation | null,
+    draftLineOverride: LineAnnotation | null,
+  ): SVGElement[] {
+    const nodes: SVGElement[] = [];
+    const selectedBase = annotations.lines.find((line) => line.id === selectedAnnotationId) ?? null;
+    const selectedLine =
+      selectedBase && draftLineOverride?.id === selectedBase.id ? draftLineOverride : selectedBase;
+
+    for (const annotation of annotations.rectangles) {
+      const rect = createSvgElement("rect");
+      rect.classList.add("annotation-layer__rect");
+      setSvgAttributes(rect, {
+        x: annotation.x,
+        y: annotation.y,
+        width: annotation.width,
+        height: annotation.height,
+        "vector-effect": "non-scaling-stroke",
+      });
+      nodes.push(rect);
+    }
+
+    for (const annotation of annotations.polylines) {
+      const polyline = createSvgElement(annotation.closed ? "polygon" : "polyline");
+      polyline.classList.add(
+        "annotation-layer__polyline",
+        `annotation-layer__polyline--${annotation.source}`,
+      );
+      setSvgAttributes(polyline, {
+        points: annotation.points.map((point) => `${point.x},${point.y}`).join(" "),
+        "vector-effect": "non-scaling-stroke",
+      });
+      if (!annotation.closed) {
+        polyline.setAttribute("fill", "none");
+      }
+      nodes.push(polyline);
+    }
+
+    for (const annotation of annotations.lines) {
+      nodes.push(this.buildLineAnnotationNode(annotation, selectedAnnotationId, draftLineOverride));
+    }
+
+    if (draftLine) {
+      nodes.push(this.buildDraftLineNode(draftLine));
+    }
+
+    if (selectedLine) {
+      nodes.push(this.buildHandleNode(selectedLine, "start"));
+      nodes.push(this.buildHandleNode(selectedLine, "end"));
+    }
+
+    return nodes;
+  }
+
+  private buildLineAnnotationNode(
+    annotation: LineAnnotation,
+    selectedAnnotationId: string | null,
+    draftLineOverride: LineAnnotation | null,
+  ): SVGGElement {
+    const visible = draftLineOverride?.id === annotation.id ? draftLineOverride : annotation;
+    const mid = lineMidpoint(visible);
+    const group = createSvgElement("g");
+    const line = createSvgElement("line");
+    line.classList.add("annotation-layer__line", `annotation-layer__line--${annotation.source}`);
+    if (annotation.id === selectedAnnotationId) {
+      line.classList.add("annotation-layer__line--selected");
+    }
+    setSvgAttributes(line, {
+      x1: visible.start.x,
+      y1: visible.start.y,
+      x2: visible.end.x,
+      y2: visible.end.y,
+      "vector-effect": "non-scaling-stroke",
+      "data-annotation-id": annotation.id,
+    });
+    line.dataset.annotationLine = "";
+
+    const label = createSvgElement("text");
+    label.classList.add("annotation-layer__label");
+    setSvgAttributes(label, {
+      x: mid.x,
+      y: mid.y - 10,
+      "text-anchor": "middle",
+      "pointer-events": "none",
+      opacity: "1",
+    });
+    label.textContent = lineLabel(visible);
+    group.append(line, label);
+    return group;
+  }
+
+  private buildDraftLineNode(draftLine: LineAnnotation): SVGLineElement {
+    const line = createSvgElement("line");
+    line.classList.add("annotation-layer__line", "annotation-layer__line--draft");
+    setSvgAttributes(line, {
+      x1: draftLine.start.x,
+      y1: draftLine.start.y,
+      x2: draftLine.end.x,
+      y2: draftLine.end.y,
+      "vector-effect": "non-scaling-stroke",
+    });
+    return line;
+  }
+
+  private buildHandleNode(
+    selectedLine: LineAnnotation,
+    endpoint: "start" | "end",
+  ): SVGCircleElement {
+    const point = selectedLine[endpoint];
+    const handle = createSvgElement("circle");
+    handle.classList.add("annotation-layer__handle");
+    setSvgAttributes(handle, {
+      cx: point.x,
+      cy: point.y,
+      r: 7,
+      "vector-effect": "non-scaling-stroke",
+      "data-annotation-id": selectedLine.id,
+      "data-endpoint": endpoint,
+    });
+    handle.dataset.annotationHandle = "";
+    return handle;
+  }
+
   private updateCanvas() {
     const transform = this.currentTransform();
     if (this.zoomEl) {
@@ -551,9 +646,7 @@ export class ViewerController {
     }
 
     if (!transform || !this.image || !this.resolvedImageSize || !this.model) {
-      if (this.annotationHost) {
-        this.annotationHost.innerHTML = "";
-      }
+      this.clearAnnotationLayer();
       return;
     }
 
@@ -565,16 +658,15 @@ export class ViewerController {
 
     if (this.annotationHost && this.imageReady) {
       const draftLineOverride = this.interaction?.kind === "edit" ? this.draftLine : null;
-      this.annotationHost.innerHTML = renderAnnotationLayer(
-        this.frame,
-        transform,
+      this.syncAnnotationLayer(
         this.model.annotations,
         this.model.selectedAnnotationId,
+        transform,
         this.interaction?.kind === "draw" ? this.draftLine : null,
         draftLineOverride,
       );
     } else if (this.annotationHost) {
-      this.annotationHost.innerHTML = "";
+      this.clearAnnotationLayer();
     }
   }
 }

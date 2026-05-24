@@ -1,4 +1,4 @@
-use std::{fs, path::Path};
+use std::{fs, path::Path, sync::Arc};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PreviewFormat {
@@ -11,25 +11,25 @@ pub struct PreviewImage {
     pub width: u32,
     pub height: u32,
     pub format: PreviewFormat,
-    pub pixels: Vec<u8>,
+    pub pixels: Arc<[u8]>,
 }
 
 impl PreviewImage {
-    pub fn gray(width: u32, height: u32, pixels: Vec<u8>) -> Self {
+    pub fn gray(width: u32, height: u32, pixels: impl Into<Arc<[u8]>>) -> Self {
         Self {
             width,
             height,
             format: PreviewFormat::Gray8,
-            pixels,
+            pixels: pixels.into(),
         }
     }
 
-    pub fn rgba(width: u32, height: u32, pixels: Vec<u8>) -> Self {
+    pub fn rgba(width: u32, height: u32, pixels: impl Into<Arc<[u8]>>) -> Self {
         Self {
             width,
             height,
             format: PreviewFormat::Rgba8,
-            pixels,
+            pixels: pixels.into(),
         }
     }
 }
@@ -227,7 +227,9 @@ mod tests {
 
     #[test]
     fn encode_rgba_preview_writes_24bit_bmp() {
-        let pixels = vec![255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 255, 255];
+        let pixels = vec![
+            255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 255, 255,
+        ];
         let preview = PreviewImage::rgba(2, 2, pixels);
         let bmp = encode_preview_bmp(&preview).unwrap();
 

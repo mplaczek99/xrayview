@@ -5,7 +5,7 @@ use std::{
     fs,
     path::Path,
     sync::{
-        Arc, Mutex,
+        Arc,
         atomic::{AtomicU64, Ordering},
         mpsc::{Receiver, SyncSender, TrySendError, sync_channel},
     },
@@ -16,11 +16,11 @@ use std::{
 #[cfg(test)]
 use crate::cache::SourcePreviewCacheStats;
 use chrono::{DateTime, Utc};
+use parking_lot::Mutex;
 use serde::Serialize;
 
 use crate::{
-    analysis, annotations,
-    bmp,
+    analysis, annotations, bmp,
     cache::{SourcePreviewCache, Store},
     config::Config,
     contracts::{
@@ -39,7 +39,7 @@ pub struct App {
     started_at: DateTime<Utc>,
     cache_session_id: String,
     cache: Store,
-    studies: Mutex<HashMap<String, StudyRecord>>,
+    studies: Mutex<HashMap<String, Arc<StudyRecord>>>,
     jobs: Mutex<HashMap<String, JobSnapshot>>,
     active_fingerprints: Mutex<HashMap<String, String>>,
     result_cache: Mutex<HashMap<String, JobResult>>,
@@ -93,10 +93,12 @@ impl App {
         })
     }
 
+    #[must_use]
     pub fn config(&self) -> &Config {
         &self.config
     }
 
+    #[must_use]
     pub fn started_at(&self) -> DateTime<Utc> {
         self.started_at
     }
@@ -106,17 +108,17 @@ impl App {
         self.persistence.ensure()
     }
 
+    #[must_use]
     pub fn study_count(&self) -> usize {
-        self.studies
-            .lock()
-            .expect("study registry mutex poisoned")
-            .len()
+        self.studies.lock().len()
     }
 
+    #[must_use]
     pub fn supported_job_kinds(&self) -> [&'static str; 3] {
         ["renderStudy", "analyzeStudy", "processStudy"]
     }
 
+    #[must_use]
     pub fn get_processing_manifest(&self) -> ProcessingManifest {
         default_processing_manifest()
     }
@@ -129,18 +131,12 @@ impl App {
     pub fn subscribe_job_updates(&self) -> JobUpdateSubscription {
         let id = self.next_subscriber_number.fetch_add(1, Ordering::Relaxed);
         let (sender, receiver) = sync_channel(JOB_UPDATE_BUFFER_SIZE);
-        self.job_update_subscribers
-            .lock()
-            .expect("job update subscriber mutex poisoned")
-            .insert(id, sender);
+        self.job_update_subscribers.lock().insert(id, sender);
         JobUpdateSubscription { id, receiver }
     }
 
     pub fn unsubscribe_job_updates(&self, subscription_id: u64) {
-        self.job_update_subscribers
-            .lock()
-            .expect("job update subscriber mutex poisoned")
-            .remove(&subscription_id);
+        self.job_update_subscribers.lock().remove(&subscription_id);
     }
 
     pub fn start_render_job(
@@ -155,7 +151,6 @@ impl App {
         let study = self
             .studies
             .lock()
-            .expect("study registry mutex poisoned")
             .get(study_id)
             .cloned()
             .ok_or_else(|| BackendError::not_found(format!("study not found: {study_id}")))?;
@@ -203,7 +198,6 @@ impl App {
         let study = self
             .studies
             .lock()
-            .expect("study registry mutex poisoned")
             .get(study_id)
             .cloned()
             .ok_or_else(|| BackendError::not_found(format!("study not found: {study_id}")))?;
@@ -240,7 +234,6 @@ impl App {
         let study = self
             .studies
             .lock()
-            .expect("study registry mutex poisoned")
             .get(study_id)
             .cloned()
             .ok_or_else(|| BackendError::not_found(format!("study not found: {study_id}")))?;
@@ -288,7 +281,6 @@ impl App {
         let study = self
             .studies
             .lock()
-            .expect("study registry mutex poisoned")
             .get(study_id)
             .cloned()
             .ok_or_else(|| BackendError::not_found(format!("study not found: {study_id}")))?;
@@ -325,7 +317,6 @@ impl App {
         let study = self
             .studies
             .lock()
-            .expect("study registry mutex poisoned")
             .get(study_id)
             .cloned()
             .ok_or_else(|| BackendError::not_found(format!("study not found: {study_id}")))?;
@@ -373,7 +364,6 @@ impl App {
         let study = self
             .studies
             .lock()
-            .expect("study registry mutex poisoned")
             .get(study_id)
             .cloned()
             .ok_or_else(|| BackendError::not_found(format!("study not found: {study_id}")))?;
@@ -406,14 +396,13 @@ impl App {
 
         self.jobs
             .lock()
-            .expect("job registry mutex poisoned")
             .get(job_id)
             .cloned()
             .ok_or_else(|| BackendError::not_found(format!("job not found: {job_id}")))
     }
 
     pub fn get_jobs(&self, command: GetJobsCommand) -> Result<Vec<JobSnapshot>, BackendError> {
-        let jobs = self.jobs.lock().expect("job registry mutex poisoned");
+        let jobs = self.jobs.lock();
         Ok(command
             .job_ids
             .into_iter()
@@ -434,7 +423,7 @@ impl App {
         }
 
         let (snapshot, changed) = {
-            let mut jobs = self.jobs.lock().expect("job registry mutex poisoned");
+            let mut jobs = self.jobs.lock();
             let snapshot = jobs
                 .get_mut(job_id)
                 .ok_or_else(|| BackendError::not_found(format!("job not found: {job_id}")))?;
@@ -445,11 +434,9 @@ impl App {
                 snapshot.error = None;
                 self.active_fingerprints
                     .lock()
-                    .expect("active job fingerprint mutex poisoned")
                     .retain(|_, active_job_id| active_job_id != job_id);
                 true
-            } else if snapshot.state == JobState::Running || snapshot.state == JobState::Cancelling
-            {
+            } else if matches!(snapshot.state, JobState::Running | JobState::Cancelling) {
                 snapshot.state = JobState::Cancelling;
                 snapshot.progress.message = "Cancellation requested".to_string();
                 snapshot.result = None;
@@ -515,13 +502,12 @@ impl App {
         let study = self
             .studies
             .lock()
-            .expect("study registry mutex poisoned")
             .get(study_id)
             .cloned()
             .ok_or_else(|| BackendError::not_found(format!("study not found: {study_id}")))?;
 
         Ok(MeasureLineAnnotationCommandResult {
-            study_id: study.study_id,
+            study_id: study.study_id.clone(),
             annotation: annotations::measure_line_annotation(
                 command.annotation,
                 study.measurement_scale.as_ref(),
@@ -553,8 +539,7 @@ impl App {
 
         self.studies
             .lock()
-            .expect("study registry mutex poisoned")
-            .insert(study_id, study.clone());
+            .insert(study_id, Arc::new(study.clone()));
         Ok(study)
     }
 
@@ -611,9 +596,9 @@ impl App {
         let source_preview =
             render::PreviewImage::gray(source.width, source.height, source.pixels.clone());
         let output = processing::process_rendered_preview(
-            &source_preview,
+            source_preview,
             resolved.controls,
-            &resolved.palette,
+            resolved.palette,
             resolved.compare,
         )
         .map_err(|error| BackendError::internal(format!("process source preview: {error}")))?;
@@ -695,10 +680,7 @@ impl App {
     }
 
     fn publish_job_update(&self, snapshot: &JobSnapshot) {
-        let mut subscribers = self
-            .job_update_subscribers
-            .lock()
-            .expect("job update subscriber mutex poisoned");
+        let mut subscribers = self.job_update_subscribers.lock();
         subscribers.retain(|_, sender| match sender.try_send(snapshot.clone()) {
             Ok(()) | Err(TrySendError::Full(_)) => true,
             Err(TrySendError::Disconnected(_)) => false,
@@ -776,20 +758,12 @@ impl App {
         job_kind: JobKind,
         study_id: String,
     ) -> Result<Option<StartedJob>, BackendError> {
-        let cached = self
-            .result_cache
-            .lock()
-            .expect("result cache mutex poisoned")
-            .get(fingerprint)
-            .cloned();
+        let cached = self.result_cache.lock().get(fingerprint).cloned();
         let Some(result) = cached else {
             return Ok(None);
         };
         if !result_artifacts_exist(&result) {
-            self.result_cache
-                .lock()
-                .expect("result cache mutex poisoned")
-                .remove(fingerprint);
+            self.result_cache.lock().remove(fingerprint);
             return Ok(None);
         }
 
@@ -808,11 +782,8 @@ impl App {
         job_kind: JobKind,
         study_id: String,
     ) -> Result<AsyncJobReservation, BackendError> {
-        let mut jobs = self.jobs.lock().expect("job registry mutex poisoned");
-        let mut active = self
-            .active_fingerprints
-            .lock()
-            .expect("active job fingerprint mutex poisoned");
+        let mut jobs = self.jobs.lock();
+        let mut active = self.active_fingerprints.lock();
 
         if let Some(job_id) = active.get(fingerprint).cloned() {
             if jobs
@@ -841,7 +812,7 @@ impl App {
 
     fn store_job_snapshot(&self, snapshot: JobSnapshot) {
         let job_id = snapshot.job_id.clone();
-        let mut jobs = self.jobs.lock().expect("job registry mutex poisoned");
+        let mut jobs = self.jobs.lock();
         jobs.insert(job_id.clone(), snapshot);
         evict_old_terminal_jobs(&mut jobs, &job_id);
     }
@@ -850,7 +821,7 @@ impl App {
         self: Arc<Self>,
         job_id: String,
         fingerprint: String,
-        study: StudyRecord,
+        study: Arc<StudyRecord>,
     ) {
         let Some(validated) = self.run_job_stage(
             &job_id,
@@ -949,7 +920,7 @@ impl App {
             Some(Ok(path)) => path,
             Some(Err(error)) => {
                 if let Some(path) = preview_path.as_deref() {
-                    cleanup_file(path);
+                    cleanup([path]);
                 }
                 self.finish_async_job(
                     &job_id,
@@ -965,7 +936,7 @@ impl App {
             }
             None => {
                 if let Some(path) = preview_path.as_deref() {
-                    cleanup_file(path);
+                    cleanup([path]);
                 }
                 return;
             }
@@ -1007,7 +978,7 @@ impl App {
         self: Arc<Self>,
         job_id: String,
         fingerprint: String,
-        study: StudyRecord,
+        study: Arc<StudyRecord>,
         command: ProcessStudyCommand,
     ) {
         let prepared = match self.run_job_stage(
@@ -1053,7 +1024,7 @@ impl App {
         ) {
             Some(Ok(source)) => source,
             Some(Err(error)) => {
-                cleanup_file(&preview_path);
+                cleanup([&preview_path]);
                 self.finish_async_job(
                     &job_id,
                     &fingerprint,
@@ -1080,9 +1051,9 @@ impl App {
                 let source_preview =
                     render::PreviewImage::gray(source.width, source.height, source.pixels.clone());
                 processing::process_rendered_preview(
-                    &source_preview,
+                    source_preview,
                     resolved.controls,
-                    &resolved.palette,
+                    resolved.palette,
                     resolved.compare,
                 )
                 .map_err(|error| BackendError::internal(format!("process source preview: {error}")))
@@ -1090,7 +1061,7 @@ impl App {
         ) {
             Some(Ok(output)) => output,
             Some(Err(error)) => {
-                cleanup_file(&preview_path);
+                cleanup([&preview_path]);
                 self.finish_async_job(
                     &job_id,
                     &fingerprint,
@@ -1123,7 +1094,7 @@ impl App {
         match written_preview {
             Some(Ok(())) => {}
             Some(Err(error)) => {
-                cleanup_file(&preview_path);
+                cleanup([&preview_path]);
                 self.finish_async_job(
                     &job_id,
                     &fingerprint,
@@ -1176,7 +1147,7 @@ impl App {
         self: Arc<Self>,
         job_id: String,
         fingerprint: String,
-        study: StudyRecord,
+        study: Arc<StudyRecord>,
     ) {
         let Some(validated) = self.run_job_stage(
             &job_id,
@@ -1290,10 +1261,10 @@ impl App {
             Some(Ok(paths)) => paths,
             Some(Err(error)) => {
                 if let Some(path) = preview_path.as_deref() {
-                    cleanup_file(path);
+                    cleanup([path]);
                 }
                 if let Some(path) = filled_preview_path.as_deref() {
-                    cleanup_file(path);
+                    cleanup([path]);
                 }
                 self.finish_async_job(
                     &job_id,
@@ -1309,10 +1280,10 @@ impl App {
             }
             None => {
                 if let Some(path) = preview_path.as_deref() {
-                    cleanup_file(path);
+                    cleanup([path]);
                 }
                 if let Some(path) = filled_preview_path.as_deref() {
-                    cleanup_file(path);
+                    cleanup([path]);
                 }
                 return;
             }
@@ -1361,7 +1332,7 @@ impl App {
         message: &str,
     ) {
         let snapshot = {
-            let mut jobs = self.jobs.lock().expect("job registry mutex poisoned");
+            let mut jobs = self.jobs.lock();
             let Some(snapshot) = jobs.get_mut(job_id) else {
                 return;
             };
@@ -1414,26 +1385,23 @@ impl App {
         cleanup_paths: &[&Path],
     ) -> bool {
         let should_cancel = {
-            let jobs = self.jobs.lock().expect("job registry mutex poisoned");
+            let jobs = self.jobs.lock();
             let Some(snapshot) = jobs.get(job_id) else {
                 return true;
             };
-            if snapshot.state == JobState::Cancelled {
+            if matches!(snapshot.state, JobState::Cancelled) {
                 return true;
             }
-            snapshot.state == JobState::Cancelling
+            matches!(snapshot.state, JobState::Cancelling)
         };
         if !should_cancel {
             return false;
         }
 
-        cleanup_files(cleanup_paths);
+        cleanup(cleanup_paths.iter().copied());
         let snapshot = {
-            let mut jobs = self.jobs.lock().expect("job registry mutex poisoned");
-            let mut active = self
-                .active_fingerprints
-                .lock()
-                .expect("active job fingerprint mutex poisoned");
+            let mut jobs = self.jobs.lock();
+            let mut active = self.active_fingerprints.lock();
             if active
                 .get(fingerprint)
                 .is_some_and(|active_job| active_job == job_id)
@@ -1457,11 +1425,8 @@ impl App {
 
     fn finish_async_job(&self, job_id: &str, fingerprint: &str, terminal_snapshot: JobSnapshot) {
         let snapshot = {
-            let mut jobs = self.jobs.lock().expect("job registry mutex poisoned");
-            let mut active = self
-                .active_fingerprints
-                .lock()
-                .expect("active job fingerprint mutex poisoned");
+            let mut jobs = self.jobs.lock();
+            let mut active = self.active_fingerprints.lock();
             if active
                 .get(fingerprint)
                 .is_some_and(|active_job| active_job == job_id)
@@ -1471,8 +1436,7 @@ impl App {
 
             let snapshot = match jobs.get(job_id).cloned() {
                 Some(current)
-                    if current.state == JobState::Cancelling
-                        || current.state == JobState::Cancelled =>
+                    if matches!(current.state, JobState::Cancelling | JobState::Cancelled) =>
                 {
                     if let Some(result) = terminal_snapshot.result.as_ref() {
                         cleanup_result_artifacts(result);
@@ -1502,7 +1466,6 @@ impl App {
         };
         self.result_cache
             .lock()
-            .expect("result cache mutex poisoned")
             .insert(fingerprint.to_string(), result);
         true
     }
@@ -1605,10 +1568,10 @@ fn result_artifacts_exist(result: &JobResult) -> bool {
         .is_ok_and(|payload| {
             artifact_exists(&payload.preview_path) && artifact_exists(&payload.filled_preview_path)
         }),
-        JobKind::ProcessStudy => serde_json::from_value::<ProcessStudyCommandResult>(
-            result.payload.clone(),
-        )
-        .is_ok_and(|payload| artifact_exists(&payload.preview_path)),
+        JobKind::ProcessStudy => {
+            serde_json::from_value::<ProcessStudyCommandResult>(result.payload.clone())
+                .is_ok_and(|payload| artifact_exists(&payload.preview_path))
+        }
     }
 }
 
@@ -1731,39 +1694,30 @@ fn cleanup_result_artifacts(result: &JobResult) {
             if let Ok(payload) =
                 serde_json::from_value::<RenderStudyCommandResult>(result.payload.clone())
             {
-                cleanup_path(&payload.preview_path);
+                cleanup([payload.preview_path]);
             }
         }
         JobKind::AnalyzeStudy => {
             if let Ok(payload) =
                 serde_json::from_value::<AnalyzeStudyCommandResult>(result.payload.clone())
             {
-                cleanup_path(&payload.preview_path);
-                cleanup_path(&payload.filled_preview_path);
+                cleanup([payload.preview_path, payload.filled_preview_path]);
             }
         }
         JobKind::ProcessStudy => {
             if let Ok(payload) =
                 serde_json::from_value::<ProcessStudyCommandResult>(result.payload.clone())
             {
-                cleanup_path(&payload.preview_path);
+                cleanup([payload.preview_path]);
             }
         }
     }
 }
 
-fn cleanup_file(path: impl AsRef<Path>) {
-    let _ = fs::remove_file(path);
-}
-
-fn cleanup_files(paths: &[&Path]) {
+fn cleanup<P: AsRef<Path>>(paths: impl IntoIterator<Item = P>) {
     for path in paths {
-        cleanup_file(path);
+        let _ = fs::remove_file(path);
     }
-}
-
-fn cleanup_path(path: &str) {
-    cleanup_file(path);
 }
 
 fn is_terminal_state(state: &JobState) -> bool {
@@ -1980,10 +1934,8 @@ mod tests {
 
     #[test]
     fn start_render_job_async_publishes_contract_compatible_stage_updates() {
-        let (temp_dir, app, study) = app_with_renderable_study(
-            "render-async-stage-updates",
-            build_renderable_test_bmp(),
-        );
+        let (temp_dir, app, study) =
+            app_with_renderable_study("render-async-stage-updates", build_renderable_test_bmp());
         let app = std::sync::Arc::new(app);
         let subscription = app.subscribe_job_updates();
 
@@ -2027,10 +1979,8 @@ mod tests {
 
     #[test]
     fn start_render_job_reuses_in_session_cached_result_for_same_input() {
-        let (temp_dir, app, first_study) = app_with_renderable_study(
-            "render-cache-hit",
-            build_renderable_test_bmp(),
-        );
+        let (temp_dir, app, first_study) =
+            app_with_renderable_study("render-cache-hit", build_renderable_test_bmp());
         let first_started = app
             .start_render_job(RenderStudyCommand {
                 study_id: first_study.study_id.clone(),
@@ -2075,10 +2025,8 @@ mod tests {
 
     #[test]
     fn render_cache_misses_when_cached_artifact_was_deleted() {
-        let (temp_dir, app, study) = app_with_renderable_study(
-            "render-cache-deleted-artifact",
-            build_renderable_test_bmp(),
-        );
+        let (temp_dir, app, study) =
+            app_with_renderable_study("render-cache-deleted-artifact", build_renderable_test_bmp());
         let first_started = app
             .start_render_job(RenderStudyCommand {
                 study_id: study.study_id.clone(),
@@ -2114,7 +2062,7 @@ mod tests {
     #[test]
     fn get_jobs_skips_blank_and_unknown_ids() {
         let app = App::new(Config::default()).unwrap();
-        app.jobs.lock().unwrap().insert(
+        app.jobs.lock().insert(
             "job-1".to_string(),
             completed_job_snapshot(
                 "job-1".to_string(),
@@ -2207,7 +2155,7 @@ mod tests {
             ));
         }
 
-        let jobs = app.jobs.lock().unwrap();
+        let jobs = app.jobs.lock();
         assert_eq!(jobs.len(), MAX_TERMINAL_JOBS);
         assert!(jobs.contains_key(&format!("job-{}", MAX_TERMINAL_JOBS + 4)));
         assert!(
@@ -2321,7 +2269,6 @@ mod tests {
         assert!(
             app.active_fingerprints
                 .lock()
-                .unwrap()
                 .get("fingerprint-1")
                 .is_none()
         );
@@ -2386,10 +2333,8 @@ mod tests {
 
     #[test]
     fn start_process_job_reuses_in_session_cached_result_for_same_controls() {
-        let (temp_dir, app, study) = app_with_renderable_study(
-            "process-cache-hit",
-            build_renderable_test_bmp(),
-        );
+        let (temp_dir, app, study) =
+            app_with_renderable_study("process-cache-hit", build_renderable_test_bmp());
         let command = ProcessStudyCommand {
             study_id: study.study_id.clone(),
             preset_id: "xray".to_string(),
@@ -2427,10 +2372,8 @@ mod tests {
 
     #[test]
     fn source_preview_cache_reuses_decode_for_different_process_jobs() {
-        let (temp_dir, app, study) = app_with_renderable_study(
-            "source-preview-cache-hit",
-            build_renderable_test_bmp(),
-        );
+        let (temp_dir, app, study) =
+            app_with_renderable_study("source-preview-cache-hit", build_renderable_test_bmp());
         let first = ProcessStudyCommand {
             study_id: study.study_id.clone(),
             preset_id: "default".to_string(),
@@ -2532,10 +2475,8 @@ mod tests {
 
     #[test]
     fn start_analyze_job_reuses_in_session_cached_result() {
-        let (temp_dir, app, study) = app_with_renderable_study(
-            "analyze-cache-hit",
-            build_analysis_test_bmp(),
-        );
+        let (temp_dir, app, study) =
+            app_with_renderable_study("analyze-cache-hit", build_analysis_test_bmp());
 
         let first_started = app
             .start_analyze_job(AnalyzeStudyCommand {

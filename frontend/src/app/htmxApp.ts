@@ -19,13 +19,17 @@ import {
 
 type HtmxApi = typeof htmx;
 
-const TABS: ActiveTab[] = ["view", "processing"];
+const TABS: readonly ActiveTab[] = ["view", "processing"] as const;
 
 function clamp(value: number, min: number, max: number): number | null {
   if (Number.isNaN(value)) {
     return null;
   }
   return Math.min(max, Math.max(min, value));
+}
+
+function isCompareView(value: string | undefined): value is CompareView {
+  return value === "original" || value === "processed" || value === "split";
 }
 
 function isButtonDisabled(element: HTMLElement): boolean {
@@ -299,10 +303,10 @@ class HtmxWorkbenchApp {
   }
 
   private setCompareView(value: string | undefined) {
-    if (value !== "original" && value !== "processed" && value !== "split") {
+    if (!isCompareView(value)) {
       return;
     }
-    this.ui.compareView = value as CompareView;
+    this.ui.compareView = value;
     this.render();
   }
 

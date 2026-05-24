@@ -1,4 +1,5 @@
 import type { AnnotationPoint } from "../../lib/generated/contracts";
+import { clamp } from "../../lib/math";
 
 export interface ViewerFrame {
   width: number;
@@ -96,8 +97,4 @@ export function zoomAtPoint(
     panX: next.panX + (pointer.x - anchoredScreen.x),
     panY: next.panY + (pointer.y - anchoredScreen.y),
   };
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
 }

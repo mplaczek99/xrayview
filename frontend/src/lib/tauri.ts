@@ -6,7 +6,7 @@ const BMP_FILTER = [
     name: "Bitewing X-ray (BMP)",
     extensions: ["bmp"],
   },
-];
+] as const;
 
 export function isTauriRuntime(): boolean {
   if (typeof window === "undefined") {
@@ -21,7 +21,10 @@ export async function pickTauriBmpFile(): Promise<string | null> {
       title: "Open Bitewing X-ray",
       multiple: false,
       directory: false,
-      filters: BMP_FILTER,
+      filters: BMP_FILTER.map((filter) => ({
+        ...filter,
+        extensions: [...filter.extensions],
+      })),
     });
     if (typeof selected === "string" && selected.trim()) {
       return selected;

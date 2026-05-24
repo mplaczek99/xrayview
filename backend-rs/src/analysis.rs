@@ -89,6 +89,22 @@ pub struct ToothOverlayResult {
     pub mode: String,
 }
 
+struct MaskBuffers {
+    a: Vec<bool>,
+    b: Vec<bool>,
+    scratch: Vec<bool>,
+}
+
+impl MaskBuffers {
+    fn new(len: usize) -> Self {
+        Self {
+            a: vec![false; len],
+            b: vec![false; len],
+            scratch: vec![false; len],
+        }
+    }
+}
+
 pub fn generate_tooth_overlay(preview: &PreviewImage) -> Result<ToothOverlayResult, String> {
     if preview.format != PreviewFormat::Gray8 {
         return Err("tooth analysis requires Gray8 preview input".to_string());
@@ -109,8 +125,9 @@ pub fn generate_tooth_overlay(preview: &PreviewImage) -> Result<ToothOverlayResu
         ));
     }
 
+    let mut mask_buffers = MaskBuffers::new(width * height);
     let tooth_mask = detect_tooth_mask(&preview.pixels, width, height);
-    let bone_mask = detect_bone_line_mask(&preview.pixels, width, height);
+    let bone_mask = detect_bone_line_mask(&preview.pixels, width, height, &mut mask_buffers);
     let tooth_pixels = count_mask(&tooth_mask);
     let bone_pixels = count_mask(&bone_mask);
     let coverage = (tooth_pixels + bone_pixels) as f64 / preview.pixels.len().max(1) as f64;
@@ -187,12 +204,18 @@ fn detect_learned_tooth_mask(gray: &[u8], width: usize, height: usize) -> Option
     Some(mask)
 }
 
-fn detect_bone_line_mask(gray: &[u8], width: usize, height: usize) -> Vec<bool> {
+fn detect_bone_line_mask(
+    gray: &[u8],
+    width: usize,
+    height: usize,
+    buffers: &mut MaskBuffers,
+) -> Vec<bool> {
     if let Some(mask) = bone_exemplar_mask(gray, width, height) {
-        return fill_holes(&mask, width, height);
+        fill_holes_into(&mask, width, height, &mut buffers.a);
+        return buffers.a.clone();
     }
 
-    if let Some(mask) = detect_bone_feature_table_mask(gray, width, height) {
+    if let Some(mask) = detect_bone_feature_table_mask(gray, width, height, buffers) {
         return mask;
     }
 
@@ -224,7 +247,12 @@ fn detect_bone_gradient_line_mask(gray: &[u8], width: usize, height: usize) -> V
     mask
 }
 
-fn detect_bone_feature_table_mask(gray: &[u8], width: usize, height: usize) -> Option<Vec<bool>> {
+fn detect_bone_feature_table_mask(
+    gray: &[u8],
+    width: usize,
+    height: usize,
+    buffers: &mut MaskBuffers,
+) -> Option<Vec<bool>> {
     if width == 0 || height == 0 || gray.len() != width * height {
         return None;
     }
@@ -247,14 +275,18 @@ fn detect_bone_feature_table_mask(gray: &[u8], width: usize, height: usize) -> O
         }
     }
 
-    mask = close_mask(&mask, width, height, 1);
-    mask = remove_small_components(
+    close_mask_into(&mask, width, height, 1, buffers);
+    mask.copy_from_slice(&buffers.b);
+    remove_small_components_into(
         &mask,
         width,
         height,
         minimum_bone_area_pixels(width, height),
+        &mut buffers.a,
     );
-    mask = fill_holes(&mask, width, height);
+    mask.copy_from_slice(&buffers.a);
+    fill_holes_into(&mask, width, height, &mut buffers.a);
+    mask.copy_from_slice(&buffers.a);
     if mask.iter().any(|value| *value) {
         Some(mask)
     } else {
@@ -387,23 +419,40 @@ fn bone_section_mask_with_ignored_cutouts(
         return section_mask;
     }
 
-    let near_bone = dilate_mask(bone_mask, width, height, radius);
-    let ignored_cutouts = dilate_mask(tooth_mask, width, height, radius);
-    for index in 0..section_mask.len() {
-        if ignored_cutouts[index] && near_bone[index] {
-            section_mask[index] = true;
+    let mut buffers = MaskBuffers::new(bone_mask.len());
+    dilate_mask_into(
+        bone_mask,
+        width,
+        height,
+        radius,
+        &mut buffers.scratch,
+        &mut buffers.a,
+    );
+    dilate_mask_into(
+        tooth_mask,
+        width,
+        height,
+        radius,
+        &mut buffers.scratch,
+        &mut buffers.b,
+    );
+    for (index, value) in section_mask.iter_mut().enumerate() {
+        if buffers.b[index] && buffers.a[index] {
+            *value = true;
         }
     }
 
     let close_radius = (radius / 2).clamp(1, 8);
-    let closed = close_mask(&section_mask, width, height, close_radius);
-    let filled = fill_holes(&closed, width, height);
-    let mut cleaned = remove_small_components(
-        &filled,
+    close_mask_into(&section_mask, width, height, close_radius, &mut buffers);
+    fill_holes_into(&buffers.b, width, height, &mut buffers.a);
+    remove_small_components_into(
+        &buffers.a,
         width,
         height,
         minimum_bone_outline_area_pixels(width, height),
+        &mut buffers.b,
     );
+    let mut cleaned = buffers.b.clone();
     clear_border_background_from_mask(&mut cleaned, gray, width, height);
     cleaned
 }
@@ -421,9 +470,17 @@ fn inner_outline_mask(mask: &[bool], width: usize, height: usize, thickness: usi
     if thickness == 0 || mask.is_empty() {
         return mask.to_vec();
     }
-    let eroded = erode_mask(mask, width, height, thickness);
+    let mut buffers = MaskBuffers::new(mask.len());
+    erode_mask_into(
+        mask,
+        width,
+        height,
+        thickness,
+        &mut buffers.scratch,
+        &mut buffers.a,
+    );
     mask.iter()
-        .zip(eroded)
+        .zip(&buffers.a)
         .map(|(value, eroded)| *value && !eroded)
         .collect()
 }
@@ -437,12 +494,28 @@ fn centered_outline_mask(
     if thickness == 0 || mask.is_empty() {
         return mask.to_vec();
     }
-    let dilated = dilate_mask(mask, width, height, thickness);
-    let eroded = erode_mask(mask, width, height, thickness);
-    dilated
-        .into_iter()
-        .zip(eroded)
-        .map(|(dilated, eroded)| dilated && !eroded)
+    let mut buffers = MaskBuffers::new(mask.len());
+    dilate_mask_into(
+        mask,
+        width,
+        height,
+        thickness,
+        &mut buffers.scratch,
+        &mut buffers.a,
+    );
+    erode_mask_into(
+        mask,
+        width,
+        height,
+        thickness,
+        &mut buffers.scratch,
+        &mut buffers.b,
+    );
+    buffers
+        .a
+        .iter()
+        .zip(&buffers.b)
+        .map(|(dilated, eroded)| *dilated && !eroded)
         .collect()
 }
 
@@ -535,15 +608,24 @@ fn bone_image_frame_clearance(width: usize, height: usize, thickness: usize) -> 
     BONE_IMAGE_FRAME_CLEARANCE_PIXELS.min(thickness.max(width.min(height) / 64))
 }
 
-fn dilate_mask(mask: &[bool], width: usize, height: usize, radius: usize) -> Vec<bool> {
+fn dilate_mask_into(
+    mask: &[bool],
+    width: usize,
+    height: usize,
+    radius: usize,
+    scratch: &mut [bool],
+    output: &mut [bool],
+) {
     if radius == 0 || mask.is_empty() {
-        return mask.to_vec();
+        output.copy_from_slice(mask);
+        return;
     }
     if width == 0 || height == 0 || mask.len() != width * height {
-        return vec![false; mask.len()];
+        output.fill(false);
+        return;
     }
 
-    let mut scratch = vec![false; mask.len()];
+    scratch.fill(false);
     for y in 0..height {
         let row = y * width;
         let mut count = 0_usize;
@@ -574,7 +656,7 @@ fn dilate_mask(mask: &[bool], width: usize, height: usize, radius: usize) -> Vec
         }
     }
 
-    let mut output = vec![false; mask.len()];
+    output.fill(false);
     for y in 0..height {
         let row = y * width;
         for x in 0..width {
@@ -598,19 +680,27 @@ fn dilate_mask(mask: &[bool], width: usize, height: usize, radius: usize) -> Vec
             }
         }
     }
-    output
 }
 
-fn erode_mask(mask: &[bool], width: usize, height: usize, radius: usize) -> Vec<bool> {
+fn erode_mask_into(
+    mask: &[bool],
+    width: usize,
+    height: usize,
+    radius: usize,
+    scratch: &mut [bool],
+    output: &mut [bool],
+) {
     if radius == 0 || mask.is_empty() {
-        return mask.to_vec();
+        output.copy_from_slice(mask);
+        return;
     }
     if width == 0 || height == 0 || mask.len() != width * height {
-        return vec![false; mask.len()];
+        output.fill(false);
+        return;
     }
 
     let window = radius * 2 + 1;
-    let mut scratch = vec![false; mask.len()];
+    scratch.fill(false);
     for y in 0..height {
         let row = y * width;
         let mut count = 0_usize;
@@ -641,7 +731,7 @@ fn erode_mask(mask: &[bool], width: usize, height: usize, radius: usize) -> Vec<
         }
     }
 
-    let mut output = vec![false; mask.len()];
+    output.fill(false);
     for y in 0..height {
         let row = y * width;
         for x in 0..width {
@@ -665,29 +755,46 @@ fn erode_mask(mask: &[bool], width: usize, height: usize, radius: usize) -> Vec<
             }
         }
     }
-    output
 }
 
-fn close_mask(mask: &[bool], width: usize, height: usize, radius: usize) -> Vec<bool> {
-    erode_mask(
-        &dilate_mask(mask, width, height, radius),
+fn close_mask_into(
+    mask: &[bool],
+    width: usize,
+    height: usize,
+    radius: usize,
+    buffers: &mut MaskBuffers,
+) {
+    dilate_mask_into(
+        mask,
         width,
         height,
         radius,
-    )
+        &mut buffers.scratch,
+        &mut buffers.a,
+    );
+    erode_mask_into(
+        &buffers.a,
+        width,
+        height,
+        radius,
+        &mut buffers.scratch,
+        &mut buffers.b,
+    );
 }
 
-fn remove_small_components(
+fn remove_small_components_into(
     mask: &[bool],
     width: usize,
     height: usize,
     min_area: usize,
-) -> Vec<bool> {
+    output: &mut [bool],
+) {
     if min_area <= 1 || width == 0 || height == 0 || mask.len() != width * height {
-        return mask.to_vec();
+        output.copy_from_slice(mask);
+        return;
     }
 
-    let mut output = vec![false; mask.len()];
+    output.fill(false);
     let mut visited = vec![false; mask.len()];
     let mut stack = Vec::new();
     let mut component = Vec::new();
@@ -723,29 +830,29 @@ fn remove_small_components(
             }
         }
     }
-    output
 }
 
-fn fill_holes(mask: &[bool], width: usize, height: usize) -> Vec<bool> {
+fn fill_holes_into(mask: &[bool], width: usize, height: usize, output: &mut [bool]) {
     if width == 0 || height == 0 || mask.len() != width * height {
-        return mask.to_vec();
+        output.copy_from_slice(mask);
+        return;
     }
 
-    let mut outside = vec![false; mask.len()];
+    output.fill(false);
     let mut queue = Vec::new();
-    let push = |index: usize, outside: &mut [bool], queue: &mut Vec<usize>| {
-        if !mask[index] && !outside[index] {
-            outside[index] = true;
+    let push = |index: usize, output: &mut [bool], queue: &mut Vec<usize>| {
+        if !mask[index] && !output[index] {
+            output[index] = true;
             queue.push(index);
         }
     };
     for x in 0..width {
-        push(x, &mut outside, &mut queue);
-        push((height - 1) * width + x, &mut outside, &mut queue);
+        push(x, output, &mut queue);
+        push((height - 1) * width + x, output, &mut queue);
     }
     for y in 0..height {
-        push(y * width, &mut outside, &mut queue);
-        push(y * width + width - 1, &mut outside, &mut queue);
+        push(y * width, output, &mut queue);
+        push(y * width + width - 1, output, &mut queue);
     }
 
     let mut head = 0;
@@ -755,23 +862,23 @@ fn fill_holes(mask: &[bool], width: usize, height: usize) -> Vec<bool> {
         let x = index % width;
         let y = index / width;
         if x > 0 {
-            push(index - 1, &mut outside, &mut queue);
+            push(index - 1, output, &mut queue);
         }
         if x + 1 < width {
-            push(index + 1, &mut outside, &mut queue);
+            push(index + 1, output, &mut queue);
         }
         if y > 0 {
-            push(index - width, &mut outside, &mut queue);
+            push(index - width, output, &mut queue);
         }
         if y + 1 < height {
-            push(index + width, &mut outside, &mut queue);
+            push(index + width, output, &mut queue);
         }
     }
 
-    mask.iter()
-        .zip(outside)
-        .map(|(inside, outside)| *inside || !outside)
-        .collect()
+    for index in 0..output.len() {
+        let outside = output[index];
+        output[index] = mask[index] || !outside;
+    }
 }
 
 fn minimum_bone_area_pixels(width: usize, height: usize) -> usize {

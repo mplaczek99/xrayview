@@ -1,4 +1,5 @@
 import type { JobProgress, JobState } from "../../lib/generated/contracts";
+import { clamp } from "../../lib/math";
 import type { JobProgressTiming } from "./model";
 import { type EtaConfidence, estimateRate, type RateEstimate } from "./progressEstimator";
 import { isPendingJobState, isTerminalJobState } from "./progressTiming";
@@ -172,11 +173,7 @@ function clampPercent(percent: number): number {
     return 0;
   }
 
-  return clampNumber(percent, 0, 100);
-}
-
-function clampNumber(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
+  return clamp(percent, 0, 100);
 }
 
 function formatDuration(durationMs: number): string {

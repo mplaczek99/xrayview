@@ -1,4 +1,4 @@
-use std::{fs, path::Path};
+use std::{fs, path::Path, sync::Arc};
 
 use crate::contracts::MeasurementScale;
 
@@ -13,6 +13,7 @@ pub struct Metadata {
 }
 
 impl Metadata {
+    #[must_use]
     pub fn measurement_scale(&self) -> Option<MeasurementScale> {
         None
     }
@@ -22,7 +23,7 @@ impl Metadata {
 pub struct RenderedPreview {
     pub width: u32,
     pub height: u32,
-    pub pixels: Vec<u8>,
+    pub pixels: Arc<[u8]>,
     pub measurement_scale: Option<MeasurementScale>,
 }
 
@@ -114,7 +115,7 @@ fn render_grayscale_preview_with_options(
 
     let preserve_eight_bit_range = preserve_eight_bit_range && min >= 0.0 && max <= 255.0;
     let manual_eight_bit_window = WindowTransform::new(128.0, 256.0);
-    let pixels = image
+    let pixels: Vec<u8> = image
         .pixels
         .into_iter()
         .map(|value| {
@@ -131,7 +132,7 @@ fn render_grayscale_preview_with_options(
     Ok(RenderedPreview {
         width: image.width,
         height: image.height,
-        pixels,
+        pixels: pixels.into(),
         measurement_scale: None,
     })
 }
@@ -414,13 +415,14 @@ pub mod tests {
         assert_eq!(preview.width, 2);
         assert_eq!(preview.height, 2);
         assert_eq!(
-            preview.pixels,
+            preview.pixels.as_ref(),
             full_range_mapped_u8(&[
                 gray_from_rgb8(0, 0, 0),
                 gray_from_rgb8(255, 0, 0),
                 gray_from_rgb8(0, 255, 0),
                 gray_from_rgb8(255, 255, 255),
             ])
+            .as_slice()
         );
         let _ = std::fs::remove_file(path);
     }
@@ -442,8 +444,8 @@ pub mod tests {
         let default_preview = render_grayscale_preview_file(&path).unwrap();
         let analysis_preview = render_grayscale_preview_file_for_tooth_analysis(&path).unwrap();
 
-        assert_eq!(default_preview.pixels, vec![0, 85, 170, 255]);
-        assert_eq!(analysis_preview.pixels, vec![10, 20, 30, 40]);
+        assert_eq!(default_preview.pixels.as_ref(), [0, 85, 170, 255]);
+        assert_eq!(analysis_preview.pixels.as_ref(), [10, 20, 30, 40]);
         let _ = std::fs::remove_file(path);
     }
 
@@ -452,7 +454,7 @@ pub mod tests {
         let bmp = build_bmp_8_palette(2, 1, &[(0, 0, 0), (255, 255, 255)], &[0, 1]);
         let preview = render_grayscale_preview(&bmp).unwrap();
 
-        assert_eq!(preview.pixels, vec![0, 255]);
+        assert_eq!(preview.pixels.as_ref(), [0, 255]);
     }
 
     #[test]

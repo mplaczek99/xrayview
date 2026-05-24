@@ -1,10 +1,10 @@
 use std::{
     fs, io,
     path::{Path, PathBuf},
-    sync::Mutex,
 };
 
 use chrono::{DateTime, SecondsFormat, Utc};
+use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 
 use crate::contracts::{BackendError, BackendErrorCode, MeasurementScale, StudyRecord};
@@ -68,10 +68,12 @@ impl Catalog {
         }
     }
 
+    #[must_use]
     pub fn root_dir(&self) -> &Path {
         &self.root_dir
     }
 
+    #[must_use]
     pub fn path(&self) -> &Path {
         &self.path
     }
@@ -81,7 +83,7 @@ impl Catalog {
     where
         F: Fn() -> DateTime<Utc> + Send + Sync + 'static,
     {
-        *self.now.lock().expect("catalog clock mutex poisoned") = Box::new(now);
+        *self.now.lock() = Box::new(now);
     }
 
     pub fn ensure(&self) -> Result<(), BackendError> {
@@ -94,31 +96,25 @@ impl Catalog {
     }
 
     pub fn load(&self) -> Result<StudyCatalog, BackendError> {
-        let _operation_guard = self
-            .operation_lock
-            .lock()
-            .expect("catalog operation mutex poisoned");
+        let _operation_guard = self.operation_lock.lock();
         let value = match self.load_from_disk() {
             Ok(value) => value,
             Err(error) => {
-                let mut state = self.state.lock().expect("catalog state mutex poisoned");
+                let mut state = self.state.lock();
                 state.loaded = false;
                 state.cache = empty_study_catalog();
                 return Err(error);
             }
         };
 
-        let mut state = self.state.lock().expect("catalog state mutex poisoned");
+        let mut state = self.state.lock();
         state.loaded = true;
         state.cache = value.clone();
         Ok(value)
     }
 
     pub fn record_opened_study(&self, study: &StudyRecord) -> Result<(), BackendError> {
-        let _operation_guard = self
-            .operation_lock
-            .lock()
-            .expect("catalog operation mutex poisoned");
+        let _operation_guard = self.operation_lock.lock();
         let mut value = self.load_or_default()?;
         value
             .recent_studies
@@ -130,8 +126,7 @@ impl Catalog {
                 input_path: study.input_path.clone(),
                 input_name: study.input_name.clone(),
                 measurement_scale: study.measurement_scale.clone(),
-                last_opened_at: self.now.lock().expect("catalog clock mutex poisoned")()
-                    .to_rfc3339_opts(SecondsFormat::Secs, true),
+                last_opened_at: self.now.lock()().to_rfc3339_opts(SecondsFormat::Secs, true),
             },
         );
         value.recent_studies.truncate(RECENT_STUDY_LIMIT);
@@ -167,7 +162,7 @@ impl Catalog {
 
     fn load_or_default(&self) -> Result<StudyCatalog, BackendError> {
         {
-            let state = self.state.lock().expect("catalog state mutex poisoned");
+            let state = self.state.lock();
             if state.loaded {
                 return Ok(state.cache.clone());
             }
@@ -175,7 +170,7 @@ impl Catalog {
 
         match self.load_from_disk() {
             Ok(value) => {
-                let mut state = self.state.lock().expect("catalog state mutex poisoned");
+                let mut state = self.state.lock();
                 state.loaded = true;
                 state.cache = value.clone();
                 Ok(value)
@@ -200,7 +195,7 @@ impl Catalog {
             ))
         })?;
 
-        let mut state = self.state.lock().expect("catalog state mutex poisoned");
+        let mut state = self.state.lock();
         state.loaded = true;
         state.cache = value;
         Ok(())

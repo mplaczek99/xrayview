@@ -189,7 +189,7 @@ function blendRates(
     return overallRate;
   }
 
-  const clampedRecentWeight = clampNumber(recentWeight, 0, 1);
+  const clampedRecentWeight = clamp(recentWeight, 0, 1);
   const overallWeight = 1 - clampedRecentWeight;
   return overallRate * overallWeight + recentRate * clampedRecentWeight;
 }
@@ -208,6 +208,4 @@ function rateAgreement(overallRate: number | null, recentRate: number | null): n
   return lower / higher;
 }
 
-function clampNumber(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
-}
+import { clamp } from "../../lib/math";

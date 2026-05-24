@@ -2,12 +2,13 @@ use std::{
     collections::{HashMap, VecDeque},
     fs, io,
     path::{Path, PathBuf},
-    sync::{Arc, Condvar, Mutex},
+    sync::Arc,
     time::{Duration, Instant, UNIX_EPOCH},
 };
 
-use crate::contracts::BackendError;
 use crate::bmp::RenderedPreview;
+use crate::contracts::BackendError;
+use parking_lot::{Condvar, Mutex};
 
 pub const DEFAULT_ROOT_DIR_NAME: &str = "xrayview";
 pub const CACHE_DIR_NAME: &str = "cache";
@@ -67,10 +68,12 @@ impl Store {
         }
     }
 
+    #[must_use]
     pub fn root_dir(&self) -> &Path {
         &self.root_dir
     }
 
+    #[must_use]
     pub fn persistence_dir(&self) -> &Path {
         &self.persistence_dir
     }
@@ -110,10 +113,7 @@ impl Store {
         if delta == 0 {
             return;
         }
-        let mut state = self
-            .evict_state
-            .lock()
-            .expect("cache eviction mutex poisoned");
+        let mut state = self.evict_state.lock();
         if let Some(tracked_bytes) = state.tracked_bytes.as_mut() {
             *tracked_bytes = tracked_bytes.saturating_add(delta);
         }
@@ -121,10 +121,7 @@ impl Store {
 
     pub fn evict_artifacts_over_limit(&self, max_total_bytes: u64) -> Result<usize, BackendError> {
         {
-            let mut state = self
-                .evict_state
-                .lock()
-                .expect("cache eviction mutex poisoned");
+            let mut state = self.evict_state.lock();
             if state
                 .tracked_bytes
                 .is_some_and(|tracked_bytes| tracked_bytes <= max_total_bytes)
@@ -144,10 +141,7 @@ impl Store {
         }
 
         let result = self.walk_and_evict(max_total_bytes);
-        let mut state = self
-            .evict_state
-            .lock()
-            .expect("cache eviction mutex poisoned");
+        let mut state = self.evict_state.lock();
         state.evicting = false;
         state.last_eviction = Some(Instant::now());
         state.tracked_bytes = result.as_ref().ok().map(|(_, bytes)| *bytes);
@@ -192,10 +186,7 @@ impl Store {
 
     #[cfg(test)]
     fn force_evict_state(&self, tracked_bytes: Option<u64>, last_eviction: Option<Instant>) {
-        let mut state = self
-            .evict_state
-            .lock()
-            .expect("cache eviction mutex poisoned");
+        let mut state = self.evict_state.lock();
         state.tracked_bytes = tracked_bytes;
         state.last_eviction = last_eviction;
         state.evicting = false;
@@ -203,10 +194,7 @@ impl Store {
 
     #[cfg(test)]
     fn tracked_bytes(&self) -> Option<u64> {
-        self.evict_state
-            .lock()
-            .expect("cache eviction mutex poisoned")
-            .tracked_bytes
+        self.evict_state.lock().tracked_bytes
     }
 }
 
@@ -306,18 +294,13 @@ impl SourcePreviewCache {
         )
     }
 
+    #[must_use]
     pub fn get(&self, key: &str) -> Option<RenderedPreview> {
-        self.state
-            .lock()
-            .expect("source preview cache mutex poisoned")
-            .get(key)
+        self.state.lock().get(key)
     }
 
     pub fn insert(&self, key: String, preview: RenderedPreview) {
-        self.state
-            .lock()
-            .expect("source preview cache mutex poisoned")
-            .insert(key, preview);
+        self.state.lock().insert(key, preview);
     }
 
     pub fn get_or_try_insert_with(
@@ -326,10 +309,7 @@ impl SourcePreviewCache {
         load: impl FnOnce() -> Result<RenderedPreview, BackendError>,
     ) -> Result<RenderedPreview, BackendError> {
         let inflight = {
-            let mut state = self
-                .state
-                .lock()
-                .expect("source preview cache mutex poisoned");
+            let mut state = self.state.lock();
             if let Some(preview) = state.get(&key) {
                 return Ok(preview);
             }
@@ -351,10 +331,7 @@ impl SourcePreviewCache {
             SourcePreviewLoad::Decode(inflight) => {
                 let result = load();
                 {
-                    let mut state = self
-                        .state
-                        .lock()
-                        .expect("source preview cache mutex poisoned");
+                    let mut state = self.state.lock();
                     if let Ok(preview) = &result {
                         state.insert(key.clone(), preview.clone());
                     }
@@ -368,10 +345,7 @@ impl SourcePreviewCache {
 
     #[cfg(test)]
     pub fn stats(&self) -> SourcePreviewCacheStats {
-        let state = self
-            .state
-            .lock()
-            .expect("source preview cache mutex poisoned");
+        let state = self.state.lock();
         SourcePreviewCacheStats {
             len: state.entries.len(),
             total_bytes: state.total_bytes,
@@ -396,26 +370,17 @@ impl SourcePreviewInflight {
     }
 
     fn wait(&self) -> Result<RenderedPreview, BackendError> {
-        let mut result = self
-            .result
-            .lock()
-            .expect("source preview inflight mutex poisoned");
+        let mut result = self.result.lock();
         loop {
             if let Some(result) = result.clone() {
                 return result;
             }
-            result = self
-                .ready
-                .wait(result)
-                .expect("source preview inflight mutex poisoned");
+            self.ready.wait(&mut result);
         }
     }
 
     fn complete(&self, result: Result<RenderedPreview, BackendError>) {
-        *self
-            .result
-            .lock()
-            .expect("source preview inflight mutex poisoned") = Some(result);
+        *self.result.lock() = Some(result);
         self.ready.notify_all();
     }
 }
@@ -632,14 +597,14 @@ mod tests {
         let preview = RenderedPreview {
             width: 2,
             height: 2,
-            pixels: vec![1, 2, 3, 4],
+            pixels: vec![1, 2, 3, 4].into(),
             measurement_scale: None,
         };
 
         assert!(cache.get("study-1").is_none());
         cache.insert("study-1".to_string(), preview.clone());
         let mut cached = cache.get("study-1").unwrap();
-        cached.pixels[0] = 99;
+        Arc::make_mut(&mut cached.pixels)[0] = 99;
         let cached_again = cache.get("study-1").unwrap();
 
         assert_eq!(cached_again, preview);
@@ -661,7 +626,7 @@ mod tests {
         let preview = |value| RenderedPreview {
             width: 1,
             height: 1,
-            pixels: vec![value],
+            pixels: vec![value].into(),
             measurement_scale: None,
         };
         cache.insert("a".to_string(), preview(1));
@@ -680,7 +645,7 @@ mod tests {
         let preview = |bytes: usize| RenderedPreview {
             width: bytes as u32,
             height: 1,
-            pixels: vec![7; bytes],
+            pixels: vec![7; bytes].into(),
             measurement_scale: None,
         };
         cache.insert("a".to_string(), preview(3));
@@ -709,7 +674,7 @@ mod tests {
                     Ok(RenderedPreview {
                         width: 1,
                         height: 3,
-                        pixels: vec![7, 8, 9],
+                        pixels: vec![7, 8, 9].into(),
                         measurement_scale: None,
                     })
                 })
@@ -727,7 +692,7 @@ mod tests {
                     Ok(RenderedPreview {
                         width: 1,
                         height: 1,
-                        pixels: vec![99],
+                        pixels: vec![99].into(),
                         measurement_scale: None,
                     })
                 })
