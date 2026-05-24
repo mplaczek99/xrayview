@@ -237,7 +237,7 @@ Validation on `images/BMP/1.bmp` with
 before average render time was 4.78-4.93 ms with ~11.3 MB peak RSS; after average
 render time was 1.84-1.93 ms with ~8.0-8.2 MB peak RSS.
 
-### 6. `normalize_gray` runs twice and does per-pixel float-free but branchy math
+### 6. `normalize_gray` runs twice and does per-pixel float-free but branchy math (COMPLETE)
 
 `analysis.rs:180` (tooth path) and `analysis.rs:261` (bone path) both call
 `normalize_gray(gray)` — a full O(n) pass plus allocation, computed twice per
@@ -249,6 +249,12 @@ analysis with the same input.
 - Make it a **256-entry LUT** as well: the mapping depends only on `(low, high)`,
   so build `[u8; 256]` once and apply it in a single pass instead of the
   per-pixel compare/multiply/divide at `analysis.rs:896-907`.
+
+Validation on `images/BMP/1.bmp` with a one-byte preview mutation to bypass the
+bone exemplar shortcut and exercise the full tooth+bone detector path:
+`cargo run --release --locked --example analyze_preview_bench -- ../images/BMP/1.bmp 20`.
+Before average overlay analysis time was 638.985 ms with ~182.6 MB peak RSS;
+after average overlay analysis time was 627.315 ms with ~183.0 MB peak RSS.
 
 ### 7. `save_gray_bmp` / `encode_gray_bmp` copy the whole image before encoding (COMPLETE)
 

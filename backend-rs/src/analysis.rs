@@ -125,9 +125,16 @@ pub fn generate_tooth_overlay(preview: &PreviewImage) -> Result<ToothOverlayResu
         ));
     }
 
+    let normalized = normalize_gray(&preview.pixels);
     let mut mask_buffers = MaskBuffers::new(width * height);
-    let tooth_mask = detect_tooth_mask(&preview.pixels, width, height);
-    let bone_mask = detect_bone_line_mask(&preview.pixels, width, height, &mut mask_buffers);
+    let tooth_mask = detect_tooth_mask(&preview.pixels, &normalized, width, height);
+    let bone_mask = detect_bone_line_mask(
+        &preview.pixels,
+        &normalized,
+        width,
+        height,
+        &mut mask_buffers,
+    );
     let tooth_pixels = count_mask(&tooth_mask);
     let bone_pixels = count_mask(&bone_mask);
     let coverage = (tooth_pixels + bone_pixels) as f64 / preview.pixels.len().max(1) as f64;
@@ -164,8 +171,8 @@ pub fn generate_tooth_overlay(preview: &PreviewImage) -> Result<ToothOverlayResu
     })
 }
 
-fn detect_tooth_mask(gray: &[u8], width: usize, height: usize) -> Vec<bool> {
-    if let Some(mask) = detect_learned_tooth_mask(gray, width, height) {
+fn detect_tooth_mask(gray: &[u8], normalized: &[u8], width: usize, height: usize) -> Vec<bool> {
+    if let Some(mask) = detect_learned_tooth_mask(normalized, width, height) {
         return mask;
     }
 
@@ -173,14 +180,13 @@ fn detect_tooth_mask(gray: &[u8], width: usize, height: usize) -> Vec<bool> {
     gray.iter().map(|value| *value >= threshold).collect()
 }
 
-fn detect_learned_tooth_mask(gray: &[u8], width: usize, height: usize) -> Option<Vec<bool>> {
-    if width == 0 || height == 0 || gray.len() != width * height {
+fn detect_learned_tooth_mask(normalized: &[u8], width: usize, height: usize) -> Option<Vec<bool>> {
+    if width == 0 || height == 0 || normalized.len() != width * height {
         return None;
     }
-    let normalized = normalize_gray(gray);
-    let scores = learned_tooth_scores(&normalized, width, height)?;
+    let scores = learned_tooth_scores(normalized, width, height)?;
     let table = loaded_tooth_feature_table();
-    let mut mask = vec![false; gray.len()];
+    let mut mask = vec![false; normalized.len()];
     for y in 0..height {
         for x in 0..width {
             let index = y * width + x;
@@ -206,6 +212,7 @@ fn detect_learned_tooth_mask(gray: &[u8], width: usize, height: usize) -> Option
 
 fn detect_bone_line_mask(
     gray: &[u8],
+    normalized: &[u8],
     width: usize,
     height: usize,
     buffers: &mut MaskBuffers,
@@ -215,7 +222,7 @@ fn detect_bone_line_mask(
         return buffers.a.clone();
     }
 
-    if let Some(mask) = detect_bone_feature_table_mask(gray, width, height, buffers) {
+    if let Some(mask) = detect_bone_feature_table_mask(normalized, width, height, buffers) {
         return mask;
     }
 
@@ -248,19 +255,18 @@ fn detect_bone_gradient_line_mask(gray: &[u8], width: usize, height: usize) -> V
 }
 
 fn detect_bone_feature_table_mask(
-    gray: &[u8],
+    normalized: &[u8],
     width: usize,
     height: usize,
     buffers: &mut MaskBuffers,
 ) -> Option<Vec<bool>> {
-    if width == 0 || height == 0 || gray.len() != width * height {
+    if width == 0 || height == 0 || normalized.len() != width * height {
         return None;
     }
 
     let table = loaded_bone_feature_table()?;
-    let normalized = normalize_gray(gray);
-    let gradient = gradient_gray(&box_blur_gray(&normalized, width, height, 2), width, height);
-    let mut mask = vec![false; gray.len()];
+    let gradient = gradient_gray(&box_blur_gray(normalized, width, height, 2), width, height);
+    let mut mask = vec![false; normalized.len()];
     for y in 0..height {
         for x in 0..width {
             let index = y * width + x;
@@ -886,25 +892,57 @@ fn minimum_bone_area_pixels(width: usize, height: usize) -> usize {
 }
 
 fn normalize_gray(pixels: &[u8]) -> Vec<u8> {
-    let low = percentile_fraction(pixels, 0.01);
-    let high = percentile_fraction(pixels, 0.99);
+    let (low, high) = percentile_fraction_bounds(pixels, 0.01, 0.99);
     if high <= low {
         return pixels.to_vec();
     }
 
     let range = i32::from(high) - i32::from(low);
+    let lut: [u8; 256] = std::array::from_fn(|value| {
+        let value = value as u8;
+        if value <= low {
+            0
+        } else if value >= high {
+            255
+        } else {
+            (((i32::from(value) - i32::from(low)) * 255 + range / 2) / range) as u8
+        }
+    });
     pixels
         .iter()
-        .map(|value| {
-            if *value <= low {
-                0
-            } else if *value >= high {
-                255
-            } else {
-                (((i32::from(*value) - i32::from(low)) * 255 + range / 2) / range) as u8
-            }
-        })
+        .map(|value| lut[usize::from(*value)])
         .collect()
+}
+
+fn percentile_fraction_bounds(
+    pixels: &[u8],
+    low_percentile: f64,
+    high_percentile: f64,
+) -> (u8, u8) {
+    if pixels.is_empty() {
+        return (0, 0);
+    }
+
+    let mut histogram = [0_usize; 256];
+    for value in pixels {
+        histogram[*value as usize] += 1;
+    }
+
+    let low_target = percentile_fraction_target(pixels.len(), low_percentile);
+    let high_target = percentile_fraction_target(pixels.len(), high_percentile);
+    let mut low_value = None;
+    let mut cumulative = 0_isize;
+    for (value, count) in histogram.iter().enumerate() {
+        cumulative += *count as isize;
+        if low_value.is_none() && cumulative > low_target {
+            low_value = Some(value as u8);
+        }
+        if cumulative > high_target {
+            return (low_value.unwrap_or(value as u8), value as u8);
+        }
+    }
+
+    (low_value.unwrap_or(u8::MAX), u8::MAX)
 }
 
 fn percentile_fraction(pixels: &[u8], percentile: f64) -> u8 {
@@ -916,8 +954,7 @@ fn percentile_fraction(pixels: &[u8], percentile: f64) -> u8 {
     for value in pixels {
         histogram[*value as usize] += 1;
     }
-    let mut target = ((pixels.len() - 1) as f64 * percentile).round() as isize;
-    target = target.clamp(0, pixels.len() as isize - 1);
+    let target = percentile_fraction_target(pixels.len(), percentile);
 
     let mut cumulative = 0_isize;
     for (value, count) in histogram.iter().enumerate() {
@@ -927,6 +964,11 @@ fn percentile_fraction(pixels: &[u8], percentile: f64) -> u8 {
         }
     }
     255
+}
+
+fn percentile_fraction_target(len: usize, percentile: f64) -> isize {
+    let target = ((len - 1) as f64 * percentile).round() as isize;
+    target.clamp(0, len as isize - 1)
 }
 
 fn box_blur_gray(pixels: &[u8], width: usize, height: usize, radius: usize) -> Vec<u8> {
