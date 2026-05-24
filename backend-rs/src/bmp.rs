@@ -171,7 +171,11 @@ struct BmpHeader {
 
 impl BmpHeader {
     fn samples_per_pixel(self) -> u16 {
-        if self.bits_per_pixel == 8 { 1 } else { 3 }
+        if self.bits_per_pixel == 8 {
+            1
+        } else {
+            3
+        }
     }
 
     fn photometric_interpretation(self) -> &'static str {
@@ -192,6 +196,13 @@ impl BmpHeader {
             .ok_or_else(|| "BMP row size overflow".to_string())
             .map(|row_bytes| row_bytes.div_ceil(4) * 4)
     }
+}
+
+enum BmpPixelFormat {
+    Gray8,
+    Palette8(Box<[u8; 256]>),
+    Bgr24,
+    Bgra32,
 }
 
 fn parse_bmp_header(bytes: &[u8]) -> Result<BmpHeader, String> {
@@ -262,60 +273,15 @@ fn decode_bmp(bytes: &[u8]) -> Result<DecodedBmp, String> {
         ));
     }
 
-    let palette = if header.bits_per_pixel == 8 {
-        let palette_start = 14 + header.dib_size as usize;
-        let color_count = read_le_u32_at(bytes, 46).unwrap_or(0);
-        let palette_entries = if color_count == 0 {
-            256
-        } else {
-            color_count as usize
-        };
-        let palette_bytes = palette_entries
-            .checked_mul(4)
-            .ok_or_else(|| "BMP palette size overflow".to_string())?;
-        if header.pixel_offset < palette_start + palette_bytes
-            || bytes.len() < palette_start + palette_bytes
-        {
-            return Err("truncated BMP palette".to_string());
-        }
-        Some(&bytes[palette_start..palette_start + palette_bytes])
-    } else {
-        None
-    };
-
+    let pixel_format = bmp_pixel_format(bytes, header, row_stride)?;
     let mut pixels = vec![0; width * height];
-    for output_y in 0..height {
-        let source_y = if header.top_down {
-            output_y
-        } else {
-            height - 1 - output_y
-        };
-        let row_start = header.pixel_offset + source_y * row_stride;
-        let row = &bytes[row_start..row_start + row_stride];
-        for x in 0..width {
-            pixels[output_y * width + x] = match header.bits_per_pixel {
-                8 => {
-                    let index = usize::from(row[x]);
-                    if let Some(palette) = palette {
-                        let offset = index * 4;
-                        if offset + 3 >= palette.len() {
-                            return Err(format!(
-                                "BMP palette index {index} exceeds {} entries",
-                                palette.len() / 4
-                            ));
-                        }
-                        gray_from_rgb8(palette[offset + 2], palette[offset + 1], palette[offset])
-                    } else {
-                        row[x]
-                    }
-                }
-                24 | 32 => {
-                    let offset = x * header.bytes_per_pixel();
-                    gray_from_rgb8(row[offset + 2], row[offset + 1], row[offset])
-                }
-                _ => unreachable!(),
-            };
+    match pixel_format {
+        BmpPixelFormat::Gray8 => decode_gray8_rows(bytes, header, row_stride, &mut pixels),
+        BmpPixelFormat::Palette8(palette_lut) => {
+            decode_palette8_rows(bytes, header, row_stride, &palette_lut, &mut pixels);
         }
+        BmpPixelFormat::Bgr24 => decode_bgr24_rows(bytes, header, row_stride, &mut pixels),
+        BmpPixelFormat::Bgra32 => decode_bgra32_rows(bytes, header, row_stride, &mut pixels),
     }
 
     Ok(DecodedBmp {
@@ -323,6 +289,172 @@ fn decode_bmp(bytes: &[u8]) -> Result<DecodedBmp, String> {
         height: height as u32,
         pixels,
     })
+}
+
+fn bmp_pixel_format(
+    bytes: &[u8],
+    header: BmpHeader,
+    row_stride: usize,
+) -> Result<BmpPixelFormat, String> {
+    match header.bits_per_pixel {
+        8 => bmp_8bit_pixel_format(bytes, header, row_stride),
+        24 => Ok(BmpPixelFormat::Bgr24),
+        32 => Ok(BmpPixelFormat::Bgra32),
+        _ => unreachable!(),
+    }
+}
+
+fn bmp_8bit_pixel_format(
+    bytes: &[u8],
+    header: BmpHeader,
+    row_stride: usize,
+) -> Result<BmpPixelFormat, String> {
+    let palette_start = 14 + header.dib_size as usize;
+    let color_count = read_le_u32_at(bytes, 46).unwrap_or(0);
+    let palette_entries = if color_count == 0 {
+        256
+    } else {
+        color_count as usize
+    };
+    if palette_entries == 0 || palette_entries > 256 {
+        return Err(format!(
+            "unsupported BMP palette entry count: {palette_entries}"
+        ));
+    }
+    let palette_bytes = palette_entries
+        .checked_mul(4)
+        .ok_or_else(|| "BMP palette size overflow".to_string())?;
+    if header.pixel_offset < palette_start + palette_bytes
+        || bytes.len() < palette_start + palette_bytes
+    {
+        return Err("truncated BMP palette".to_string());
+    }
+
+    let palette = &bytes[palette_start..palette_start + palette_bytes];
+    let mut palette_lut = Box::new([0; 256]);
+    let mut identity_gray = palette_entries == 256;
+    for index in 0..palette_entries {
+        let offset = index * 4;
+        let gray = gray_from_rgb8(palette[offset + 2], palette[offset + 1], palette[offset]);
+        palette_lut[index] = gray;
+        identity_gray &= gray == index as u8;
+    }
+
+    if palette_entries < 256 {
+        validate_8bit_palette_indexes(bytes, header, row_stride, palette_entries)?;
+    }
+
+    if identity_gray {
+        Ok(BmpPixelFormat::Gray8)
+    } else {
+        Ok(BmpPixelFormat::Palette8(palette_lut))
+    }
+}
+
+fn validate_8bit_palette_indexes(
+    bytes: &[u8],
+    header: BmpHeader,
+    row_stride: usize,
+    palette_entries: usize,
+) -> Result<(), String> {
+    for output_y in 0..header.height {
+        let source_y = if header.top_down {
+            output_y
+        } else {
+            header.height - 1 - output_y
+        };
+        let row_start = header.pixel_offset + source_y * row_stride;
+        let row = &bytes[row_start..row_start + row_stride];
+        if let Some((_, index)) = row[..header.width]
+            .iter()
+            .enumerate()
+            .find(|(_, index)| usize::from(**index) >= palette_entries)
+        {
+            return Err(format!(
+                "BMP palette index {} exceeds {palette_entries} entries",
+                index
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+fn decode_gray8_rows(bytes: &[u8], header: BmpHeader, row_stride: usize, pixels: &mut [u8]) {
+    for output_y in 0..header.height {
+        let source_y = if header.top_down {
+            output_y
+        } else {
+            header.height - 1 - output_y
+        };
+        let row_start = header.pixel_offset + source_y * row_stride;
+        let row = &bytes[row_start..row_start + header.width];
+        let output_start = output_y * header.width;
+        pixels[output_start..output_start + header.width].copy_from_slice(row);
+    }
+}
+
+fn decode_palette8_rows(
+    bytes: &[u8],
+    header: BmpHeader,
+    row_stride: usize,
+    palette_lut: &[u8; 256],
+    pixels: &mut [u8],
+) {
+    for output_y in 0..header.height {
+        let source_y = if header.top_down {
+            output_y
+        } else {
+            header.height - 1 - output_y
+        };
+        let row_start = header.pixel_offset + source_y * row_stride;
+        let row = &bytes[row_start..row_start + header.width];
+        let output_start = output_y * header.width;
+        for (x, slot) in pixels[output_start..output_start + header.width]
+            .iter_mut()
+            .enumerate()
+        {
+            *slot = palette_lut[usize::from(row[x])];
+        }
+    }
+}
+
+fn decode_bgr24_rows(bytes: &[u8], header: BmpHeader, row_stride: usize, pixels: &mut [u8]) {
+    for output_y in 0..header.height {
+        let source_y = if header.top_down {
+            output_y
+        } else {
+            header.height - 1 - output_y
+        };
+        let row_start = header.pixel_offset + source_y * row_stride;
+        let row = &bytes[row_start..row_start + header.width * 3];
+        let output_start = output_y * header.width;
+        for (source, slot) in row
+            .chunks_exact(3)
+            .zip(pixels[output_start..output_start + header.width].iter_mut())
+        {
+            *slot = gray_from_rgb8(source[2], source[1], source[0]);
+        }
+    }
+}
+
+fn decode_bgra32_rows(bytes: &[u8], header: BmpHeader, row_stride: usize, pixels: &mut [u8]) {
+    for output_y in 0..header.height {
+        let source_y = if header.top_down {
+            output_y
+        } else {
+            header.height - 1 - output_y
+        };
+        let row_start = header.pixel_offset + source_y * row_stride;
+        let row = &bytes[row_start..row_start + header.width * 4];
+        let output_start = output_y * header.width;
+        for (source, slot) in row
+            .chunks_exact(4)
+            .zip(pixels[output_start..output_start + header.width].iter_mut())
+        {
+            *slot = gray_from_rgb8(source[2], source[1], source[0]);
+        }
+    }
 }
 
 fn gray_from_rgb8(red: u8, green: u8, blue: u8) -> u8 {

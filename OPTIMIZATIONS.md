@@ -274,7 +274,7 @@ so **every render-to-disk copies the entire image** just to wrap it in a
 **Change:** validate length and call `encode_gray8_bmp(width, height, pixels)`
 directly — no intermediate owned `PreviewImage`, no copy.
 
-### 8. The `bits_per_pixel` branch is inside the per-pixel decode loop
+### 8. The `bits_per_pixel` branch is inside the per-pixel decode loop (COMPLETE)
 
 `bmp.rs:242-273`
 
@@ -291,9 +291,19 @@ for x in 0..width {
 `bits_per_pixel` is constant for the whole image, yet it's matched on every
 pixel, and the palette bounds check (`bmp.rs:248`) is re-evaluated per pixel.
 
-**Change:** branch once outside the loops and run three specialized row loops
-(8-bit palette / 8-bit gray / 24-32-bit). Validate the palette size once up front.
-Removes a per-pixel branch and lets each loop vectorize cleanly.
+**Change:** branch once outside the loops and run specialized row loops for
+8-bit gray, 8-bit palette, 24-bit BGR, and 32-bit BGRA. The 8-bit palette path
+builds a 256-entry grayscale LUT up front, validates short palettes before
+decoding, and fast-paths identity grayscale palettes to a row copy. The 24-bit
+and 32-bit paths use fixed-width chunks, so the hot loop no longer rematches
+`bits_per_pixel` or recomputes bytes-per-pixel per pixel.
+
+Validation on `images/BMP/1.bmp` (32-bit, 1,024,800 pixels) with
+`cargo run --release --locked --example render_preview_bench -- ../images/BMP/1.bmp 500`:
+before average render time was 1.738-1.750 ms with ~8.2 MB peak RSS; after
+average render time was 1.445-1.463 ms with ~8.2 MB peak RSS. The midpoint moved
+from ~1.744 ms to ~1.452 ms, a ~16.7% speedup for render-preview decode/map on
+this fixture.
 
 ### 9. Drawing/editing an annotation rebuilds *every* SVG node each mousemove
 
