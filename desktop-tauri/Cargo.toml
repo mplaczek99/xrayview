@@ -19,7 +19,7 @@ serde_json = "1"
 xrayview-backend-rs = { path = "../backend-rs" }
 
 [profile.release]
-opt-level = "s"
+opt-level = 3
 lto = true
 codegen-units = 1
 strip = true
