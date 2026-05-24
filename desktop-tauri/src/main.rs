@@ -17,6 +17,11 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .setup(|tauri_app| {
+            #[cfg(target_os = "linux")]
+            if let Some(window) = tauri_app.get_webview_window("main") {
+                window.set_decorations(false)?;
+            }
+
             let config = Config::load().map_err(|message| {
                 Box::<dyn std::error::Error>::from(format!("backend config failed: {message}"))
             })?;
