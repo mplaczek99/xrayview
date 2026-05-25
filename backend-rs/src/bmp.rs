@@ -20,6 +20,14 @@ impl Metadata {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct DecodedSourcePreview {
+    pub width: u32,
+    pub height: u32,
+    pub pixels: Arc<[u8]>,
+    pub measurement_scale: Option<MeasurementScale>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct RenderedPreview {
     pub width: u32,
     pub height: u32,
@@ -79,6 +87,19 @@ pub fn render_grayscale_preview_file_for_tooth_analysis(
     render_grayscale_preview_file_inner(path, true)
 }
 
+pub fn decode_source_preview_file(path: impl AsRef<Path>) -> Result<DecodedSourcePreview, String> {
+    let path = path.as_ref();
+    let bytes = fs::read(path).map_err(|error| format!("open source file: {error}"))?;
+    if !supports_bmp_path(path) {
+        return Err(format!(
+            "unsupported source image extension for {}; expected .bmp",
+            path.display()
+        ));
+    }
+    decode_source_preview(&bytes)
+        .map_err(|error| format!("decode BMP image from {}: {error}", path.display()))
+}
+
 fn render_grayscale_preview_file_inner(
     path: impl AsRef<Path>,
     preserve_eight_bit_range: bool,
@@ -111,6 +132,86 @@ fn render_grayscale_preview_with_options(
     preserve_eight_bit_range: bool,
 ) -> Result<RenderedPreview, String> {
     let image = decode_bmp(bytes)?;
+    Ok(render_decoded_bmp_with_options(
+        image,
+        preserve_eight_bit_range,
+    ))
+}
+
+pub fn decode_source_preview(bytes: &[u8]) -> Result<DecodedSourcePreview, String> {
+    let image = decode_bmp(bytes)?;
+    Ok(DecodedSourcePreview {
+        width: image.width,
+        height: image.height,
+        pixels: image.pixels.into(),
+        measurement_scale: None,
+    })
+}
+
+#[must_use]
+pub fn render_grayscale_preview_from_source(source: &DecodedSourcePreview) -> RenderedPreview {
+    render_grayscale_preview_from_source_with_options(source, false)
+}
+
+#[must_use]
+pub fn render_grayscale_preview_from_source_for_tooth_analysis(
+    source: &DecodedSourcePreview,
+) -> RenderedPreview {
+    render_grayscale_preview_from_source_with_options(source, true)
+}
+
+fn render_grayscale_preview_from_source_with_options(
+    source: &DecodedSourcePreview,
+    preserve_eight_bit_range: bool,
+) -> RenderedPreview {
+    if preserve_eight_bit_range {
+        return RenderedPreview {
+            width: source.width,
+            height: source.height,
+            pixels: Arc::clone(&source.pixels),
+            measurement_scale: source.measurement_scale.clone(),
+        };
+    }
+
+    let mut min = source.pixels[0];
+    let mut max = source.pixels[0];
+    for value in &source.pixels[1..] {
+        min = min.min(*value);
+        max = max.max(*value);
+    }
+
+    let lut: [u8; 256] = std::array::from_fn(|value| {
+        let value = value as u8;
+        map_linear(f32::from(value), f32::from(min), f32::from(max))
+    });
+    let pixels: Vec<u8> = source
+        .pixels
+        .iter()
+        .copied()
+        .map(|value| lut[usize::from(value)])
+        .collect();
+
+    RenderedPreview {
+        width: source.width,
+        height: source.height,
+        pixels: pixels.into(),
+        measurement_scale: source.measurement_scale.clone(),
+    }
+}
+
+fn render_decoded_bmp_with_options(
+    image: DecodedBmp,
+    preserve_eight_bit_range: bool,
+) -> RenderedPreview {
+    if preserve_eight_bit_range {
+        return RenderedPreview {
+            width: image.width,
+            height: image.height,
+            pixels: image.pixels.into(),
+            measurement_scale: None,
+        };
+    }
+
     let mut min = image.pixels[0];
     let mut max = image.pixels[0];
     for value in &image.pixels[1..] {
@@ -118,16 +219,9 @@ fn render_grayscale_preview_with_options(
         max = max.max(*value);
     }
 
-    let manual_eight_bit_window = WindowTransform::new(128.0, 256.0);
     let lut: [u8; 256] = std::array::from_fn(|value| {
         let value = value as u8;
-        if preserve_eight_bit_range {
-            manual_eight_bit_window
-                .expect("valid 8-bit analysis window")
-                .map(f32::from(value))
-        } else {
-            map_linear(f32::from(value), f32::from(min), f32::from(max))
-        }
+        map_linear(f32::from(value), f32::from(min), f32::from(max))
     });
     let pixels: Vec<u8> = image
         .pixels
@@ -135,12 +229,12 @@ fn render_grayscale_preview_with_options(
         .map(|value| lut[usize::from(value)])
         .collect();
 
-    Ok(RenderedPreview {
+    RenderedPreview {
         width: image.width,
         height: image.height,
         pixels: pixels.into(),
         measurement_scale: None,
-    })
+    }
 }
 
 fn supports_bmp_path(path: &Path) -> bool {
@@ -464,41 +558,6 @@ fn gray_from_rgb8(red: u8, green: u8, blue: u8) -> u8 {
     ((19_595 * red + 38_470 * green + 7_471 * blue + (1 << 15)) >> 24) as u8
 }
 
-#[derive(Debug, Clone, Copy)]
-struct WindowTransform {
-    lower: f32,
-    upper: f32,
-    scale: f32,
-    offset: f32,
-}
-
-impl WindowTransform {
-    fn new(center: f32, width: f32) -> Option<Self> {
-        if !center.is_finite() || !width.is_finite() || width <= 1.0 {
-            return None;
-        }
-
-        let scale = 255.0 / (width - 1.0);
-        Some(Self {
-            lower: center - 0.5 - (width - 1.0) / 2.0,
-            upper: center - 0.5 + (width - 1.0) / 2.0,
-            scale,
-            offset: 127.5 - (center - 0.5) * scale,
-        })
-    }
-
-    fn map(self, value: f32) -> u8 {
-        if value <= self.lower {
-            return 0;
-        }
-        if value > self.upper {
-            return 255;
-        }
-
-        clamp_to_byte(value * self.scale + self.offset)
-    }
-}
-
 fn map_linear(value: f32, min: f32, max: f32) -> u8 {
     if max <= min {
         return 0;
@@ -648,6 +707,25 @@ pub mod tests {
         assert_eq!(default_preview.pixels.as_ref(), [0, 85, 170, 255]);
         assert_eq!(analysis_preview.pixels.as_ref(), [10, 20, 30, 40]);
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn decoded_source_preview_derives_matching_render_variants() {
+        let bmp = build_bmp_32(
+            2,
+            2,
+            &[(10, 10, 10), (40, 40, 40), (80, 80, 80), (160, 160, 160)],
+        );
+        let source = decode_source_preview(&bmp).unwrap();
+
+        assert_eq!(
+            render_grayscale_preview_from_source(&source),
+            render_grayscale_preview(&bmp).unwrap()
+        );
+        assert_eq!(
+            render_grayscale_preview_from_source_for_tooth_analysis(&source),
+            render_grayscale_preview_with_options(&bmp, true).unwrap()
+        );
     }
 
     #[test]

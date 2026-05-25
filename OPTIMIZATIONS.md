@@ -581,7 +581,7 @@ draft DOM writes, and ~96% of the benchmarked pointer-move wall-clock while
 preserving the #9 result of zero SVG element creation and zero static annotation
 `replaceChildren` calls during the move loop.
 
-### 13. Render and analysis decode the same file separately
+### 13. Render and analysis decode the same file separately (COMPLETE)
 
 `app.rs:690` (`load_source_preview`) and `app.rs:703` (`load_analysis_preview`)
 
@@ -594,6 +594,30 @@ window). If a study is both rendered and analyzed, the file is read and decoded
 and derive both the render-normalized and analysis-preserved previews from it via
 the 256-entry LUTs from #5/#6. Decodes the file once regardless of how many
 transforms are requested.
+
+**Done:** added a `DecodedSourcePreview` in `bmp.rs` and source-derived render
+helpers so the app session cache now stores the raw decoded grayscale pixels
+under the existing input path + file-identity key. `load_source_preview` derives
+the full-range render preview from that cached source, while
+`load_analysis_preview` uses the same cache key and derives the 8-bit-preserving
+analysis preview from the same decoded pixels instead of using an
+`analysis\0...` cache key. The public one-shot BMP render functions keep their
+direct decode-and-render path, so standalone render performance does not regress.
+
+Validation on `images/BMP/1.bmp` (854×1200, 1,024,800 pixels):
+`cargo run --release --locked --example source_preview_sequence_bench -- ../images/BMP/1.bmp 200`.
+The benchmark compares the previous behavior (render preview file load +
+analysis preview file load, two file reads/decodes) with the new shared-source
+sequence (one file read/decode + both derived previews). Across three runs,
+legacy averaged **2.53 ms** per render+analysis preview sequence
+(2.50–2.60 ms), while shared-source averaged **1.35 ms** (1.29–1.39 ms), saving
+**~1.18 ms per sequence** for a **~1.9× speedup** in this preview-loading path.
+The app-level regression test confirms the cache behavior directly: a render job
+followed by an analysis job for the same study now leaves the source preview
+cache at one miss, one hit, and one entry. A standalone render microbench stayed
+flat/slightly better (`render_grayscale_preview` 1.555 ms before vs 1.517 ms
+after on the same fixture, 200 iterations), confirming the shared-source API did
+not slow the one-shot path.
 
 ### 14. Every state change rebuilds the whole UI HTML string and re-parses it
 

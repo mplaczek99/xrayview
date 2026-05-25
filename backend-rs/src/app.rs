@@ -692,25 +692,29 @@ impl App {
         study: &StudyRecord,
     ) -> Result<bmp::RenderedPreview, BackendError> {
         let cache_key = input_cache_key(&study.input_path);
-        self.source_preview_cache
+        let source = self
+            .source_preview_cache
             .get_or_try_insert_with(cache_key, || {
-                bmp::render_grayscale_preview_file(&study.input_path).map_err(|error| {
+                bmp::decode_source_preview_file(&study.input_path).map_err(|error| {
                     BackendError::invalid_input(format!("failed to render study: {error}"))
                 })
-            })
+            })?;
+        Ok(bmp::render_grayscale_preview_from_source(&source))
     }
 
     fn load_analysis_preview(
         &self,
         study: &StudyRecord,
     ) -> Result<bmp::RenderedPreview, BackendError> {
-        let cache_key = format!("analysis\0{}", input_cache_key(&study.input_path));
-        self.source_preview_cache
+        let cache_key = input_cache_key(&study.input_path);
+        let source = self
+            .source_preview_cache
             .get_or_try_insert_with(cache_key, || {
-                bmp::render_grayscale_preview_file_for_tooth_analysis(&study.input_path).map_err(
-                    |error| BackendError::invalid_input(format!("failed to render study: {error}")),
-                )
-            })
+                bmp::decode_source_preview_file(&study.input_path).map_err(|error| {
+                    BackendError::invalid_input(format!("failed to render study: {error}"))
+                })
+            })?;
+        Ok(bmp::render_grayscale_preview_from_source_for_tooth_analysis(&source))
     }
 
     fn render_fingerprint(&self, study: &StudyRecord) -> Result<String, BackendError> {
@@ -2412,6 +2416,49 @@ mod tests {
         assert_eq!(after_second.len, 1);
         assert_eq!(after_second.misses, 1);
         assert_eq!(after_second.hits, 1);
+
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn source_preview_cache_reuses_decode_between_render_and_analysis() {
+        let (temp_dir, app, study) = app_with_renderable_study(
+            "source-preview-render-analysis-hit",
+            build_analysis_test_bmp(),
+        );
+
+        let render_started = app
+            .start_render_job(RenderStudyCommand {
+                study_id: study.study_id.clone(),
+            })
+            .unwrap();
+        let render_snapshot = app
+            .get_job(JobCommand {
+                job_id: render_started.job_id,
+            })
+            .unwrap();
+        let after_render = app.source_preview_cache_stats();
+
+        let analyze_started = app
+            .start_analyze_job(AnalyzeStudyCommand {
+                study_id: study.study_id.clone(),
+            })
+            .unwrap();
+        let analyze_snapshot = app
+            .get_job(JobCommand {
+                job_id: analyze_started.job_id,
+            })
+            .unwrap();
+        let after_analysis = app.source_preview_cache_stats();
+
+        assert!(!render_snapshot.from_cache);
+        assert!(!analyze_snapshot.from_cache);
+        assert_eq!(after_render.len, 1);
+        assert_eq!(after_render.misses, 1);
+        assert_eq!(after_render.hits, 0);
+        assert_eq!(after_analysis.len, 1);
+        assert_eq!(after_analysis.misses, 1);
+        assert_eq!(after_analysis.hits, 1);
 
         let _ = fs::remove_dir_all(temp_dir);
     }

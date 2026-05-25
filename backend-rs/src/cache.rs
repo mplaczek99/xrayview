@@ -6,7 +6,7 @@ use std::{
     time::{Duration, Instant, UNIX_EPOCH},
 };
 
-use crate::bmp::RenderedPreview;
+use crate::bmp::DecodedSourcePreview;
 use crate::contracts::BackendError;
 use parking_lot::{Condvar, Mutex};
 
@@ -248,12 +248,12 @@ struct SourcePreviewCacheState {
 
 #[derive(Debug, Clone)]
 struct SourcePreviewEntry {
-    preview: RenderedPreview,
+    preview: DecodedSourcePreview,
     byte_size: usize,
 }
 
 struct SourcePreviewInflight {
-    result: Mutex<Option<Result<RenderedPreview, BackendError>>>,
+    result: Mutex<Option<Result<DecodedSourcePreview, BackendError>>>,
     ready: Condvar,
 }
 
@@ -295,19 +295,19 @@ impl SourcePreviewCache {
     }
 
     #[must_use]
-    pub fn get(&self, key: &str) -> Option<RenderedPreview> {
+    pub fn get(&self, key: &str) -> Option<DecodedSourcePreview> {
         self.state.lock().get(key)
     }
 
-    pub fn insert(&self, key: String, preview: RenderedPreview) {
+    pub fn insert(&self, key: String, preview: DecodedSourcePreview) {
         self.state.lock().insert(key, preview);
     }
 
     pub fn get_or_try_insert_with(
         &self,
         key: String,
-        load: impl FnOnce() -> Result<RenderedPreview, BackendError>,
-    ) -> Result<RenderedPreview, BackendError> {
+        load: impl FnOnce() -> Result<DecodedSourcePreview, BackendError>,
+    ) -> Result<DecodedSourcePreview, BackendError> {
         let inflight = {
             let mut state = self.state.lock();
             if let Some(preview) = state.get(&key) {
@@ -369,7 +369,7 @@ impl SourcePreviewInflight {
         }
     }
 
-    fn wait(&self) -> Result<RenderedPreview, BackendError> {
+    fn wait(&self) -> Result<DecodedSourcePreview, BackendError> {
         let mut result = self.result.lock();
         loop {
             if let Some(result) = result.clone() {
@@ -379,14 +379,14 @@ impl SourcePreviewInflight {
         }
     }
 
-    fn complete(&self, result: Result<RenderedPreview, BackendError>) {
+    fn complete(&self, result: Result<DecodedSourcePreview, BackendError>) {
         *self.result.lock() = Some(result);
         self.ready.notify_all();
     }
 }
 
 impl SourcePreviewCacheState {
-    fn get(&mut self, key: &str) -> Option<RenderedPreview> {
+    fn get(&mut self, key: &str) -> Option<DecodedSourcePreview> {
         let Some(preview) = self.entries.get(key).map(|entry| entry.preview.clone()) else {
             #[cfg(test)]
             {
@@ -402,7 +402,7 @@ impl SourcePreviewCacheState {
         Some(preview)
     }
 
-    fn insert(&mut self, key: String, preview: RenderedPreview) {
+    fn insert(&mut self, key: String, preview: DecodedSourcePreview) {
         let byte_size = preview.pixels.len();
         if let Some(existing) = self.entries.remove(&key) {
             self.total_bytes = self.total_bytes.saturating_sub(existing.byte_size);
@@ -594,7 +594,7 @@ mod tests {
     #[test]
     fn source_preview_cache_returns_clones_and_tracks_hits() {
         let cache = SourcePreviewCache::new(2, 1024);
-        let preview = RenderedPreview {
+        let preview = DecodedSourcePreview {
             width: 2,
             height: 2,
             pixels: vec![1, 2, 3, 4].into(),
@@ -623,7 +623,7 @@ mod tests {
     #[test]
     fn source_preview_cache_evicts_least_recently_used_by_capacity() {
         let cache = SourcePreviewCache::new(2, 1024);
-        let preview = |value| RenderedPreview {
+        let preview = |value| DecodedSourcePreview {
             width: 1,
             height: 1,
             pixels: vec![value].into(),
@@ -642,7 +642,7 @@ mod tests {
     #[test]
     fn source_preview_cache_evicts_by_byte_budget() {
         let cache = SourcePreviewCache::new(10, 5);
-        let preview = |bytes: usize| RenderedPreview {
+        let preview = |bytes: usize| DecodedSourcePreview {
             width: bytes as u32,
             height: 1,
             pixels: vec![7; bytes].into(),
@@ -671,7 +671,7 @@ mod tests {
                     first_load_count.fetch_add(1, Ordering::SeqCst);
                     loader_started_tx.send(()).unwrap();
                     release_loader_rx.recv().unwrap();
-                    Ok(RenderedPreview {
+                    Ok(DecodedSourcePreview {
                         width: 1,
                         height: 3,
                         pixels: vec![7, 8, 9].into(),
@@ -689,7 +689,7 @@ mod tests {
             second_cache
                 .get_or_try_insert_with("study-1".to_string(), || {
                     second_load_count.fetch_add(1, Ordering::SeqCst);
-                    Ok(RenderedPreview {
+                    Ok(DecodedSourcePreview {
                         width: 1,
                         height: 1,
                         pixels: vec![99].into(),
