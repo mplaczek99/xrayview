@@ -78,19 +78,12 @@ function setSvgAttributes(element: Element, attributes: Record<string, string | 
   }
 }
 
-function lineKey(line: LineAnnotation | null): string {
-  if (!line) {
-    return "";
+function setSvgElementHidden(element: SVGElement, hidden: boolean): void {
+  if (hidden) {
+    element.setAttribute("display", "none");
+  } else {
+    element.removeAttribute("display");
   }
-  return [
-    line.id,
-    line.start.x,
-    line.start.y,
-    line.end.x,
-    line.end.y,
-    line.measurement?.pixelLength ?? "",
-    line.measurement?.calibratedLengthMm ?? "",
-  ].join(":");
 }
 
 export class ViewerController {
@@ -114,9 +107,16 @@ export class ViewerController {
   private annotationSvg: SVGSVGElement | null = null;
   private annotationTransformGroup: SVGGElement | null = null;
   private annotationContentGroup: SVGGElement | null = null;
+  private annotationDraftGroup: SVGGElement | null = null;
   private renderedAnnotations: AnnotationBundle | null = null;
   private renderedSelectedAnnotationId: string | null = null;
-  private renderedDraftLineKey = "";
+  private renderedDraftMode: "draw" | "edit" | null = null;
+  private renderedDraftLineId: string | null = null;
+  private draftLineNode: SVGLineElement | null = null;
+  private draftLabelNode: SVGTextElement | null = null;
+  private draftStartHandleNode: SVGCircleElement | null = null;
+  private draftEndHandleNode: SVGCircleElement | null = null;
+  private hiddenStaticAnnotationId: string | null = null;
 
   reusableStageFor(model: ViewerRenderModel): HTMLElement | null {
     if (
@@ -467,16 +467,23 @@ export class ViewerController {
     this.annotationSvg = null;
     this.annotationTransformGroup = null;
     this.annotationContentGroup = null;
+    this.annotationDraftGroup = null;
     this.renderedAnnotations = null;
     this.renderedSelectedAnnotationId = null;
-    this.renderedDraftLineKey = "";
+    this.clearDraftNodeReferences();
+    this.hiddenStaticAnnotationId = null;
   }
 
   private ensureAnnotationLayer(): SVGGElement | null {
     if (!this.annotationHost) {
       return null;
     }
-    if (this.annotationSvg && this.annotationTransformGroup && this.annotationContentGroup) {
+    if (
+      this.annotationSvg &&
+      this.annotationTransformGroup &&
+      this.annotationContentGroup &&
+      this.annotationDraftGroup
+    ) {
       return this.annotationContentGroup;
     }
 
@@ -485,13 +492,16 @@ export class ViewerController {
     svg.setAttribute("aria-hidden", "true");
     const transformGroup = createSvgElement("g");
     const contentGroup = createSvgElement("g");
+    const draftGroup = createSvgElement("g");
     transformGroup.classList.add("annotation-transform");
-    transformGroup.append(contentGroup);
+    draftGroup.classList.add("annotation-draft");
+    transformGroup.append(contentGroup, draftGroup);
     svg.append(transformGroup);
     this.annotationHost.replaceChildren(svg);
     this.annotationSvg = svg;
     this.annotationTransformGroup = transformGroup;
     this.annotationContentGroup = contentGroup;
+    this.annotationDraftGroup = draftGroup;
     return contentGroup;
   }
 
@@ -517,33 +527,25 @@ export class ViewerController {
       `matrix(${transform.scale} 0 0 ${transform.scale} ${transform.offsetX} ${transform.offsetY})`,
     );
 
-    const draftKey = `${lineKey(draftLine)}|${lineKey(draftLineOverride)}`;
     if (
-      this.renderedAnnotations === annotations &&
-      this.renderedSelectedAnnotationId === selectedAnnotationId &&
-      this.renderedDraftLineKey === draftKey
+      this.renderedAnnotations !== annotations ||
+      this.renderedSelectedAnnotationId !== selectedAnnotationId
     ) {
-      return;
+      contentGroup.replaceChildren(...this.buildAnnotationNodes(annotations, selectedAnnotationId));
+      this.renderedAnnotations = annotations;
+      this.renderedSelectedAnnotationId = selectedAnnotationId;
+      this.hiddenStaticAnnotationId = null;
     }
 
-    contentGroup.replaceChildren(
-      ...this.buildAnnotationNodes(annotations, selectedAnnotationId, draftLine, draftLineOverride),
-    );
-    this.renderedAnnotations = annotations;
-    this.renderedSelectedAnnotationId = selectedAnnotationId;
-    this.renderedDraftLineKey = draftKey;
+    this.syncDraftLayer(draftLine, draftLineOverride);
   }
 
   private buildAnnotationNodes(
     annotations: AnnotationBundle,
     selectedAnnotationId: string | null,
-    draftLine: LineAnnotation | null,
-    draftLineOverride: LineAnnotation | null,
   ): SVGElement[] {
     const nodes: SVGElement[] = [];
     const selectedBase = annotations.lines.find((line) => line.id === selectedAnnotationId) ?? null;
-    const selectedLine =
-      selectedBase && draftLineOverride?.id === selectedBase.id ? draftLineOverride : selectedBase;
 
     for (const annotation of annotations.rectangles) {
       const rect = createSvgElement("rect");
@@ -575,16 +577,12 @@ export class ViewerController {
     }
 
     for (const annotation of annotations.lines) {
-      nodes.push(this.buildLineAnnotationNode(annotation, selectedAnnotationId, draftLineOverride));
+      nodes.push(this.buildLineAnnotationNode(annotation, selectedAnnotationId));
     }
 
-    if (draftLine) {
-      nodes.push(this.buildDraftLineNode(draftLine));
-    }
-
-    if (selectedLine) {
-      nodes.push(this.buildHandleNode(selectedLine, "start"));
-      nodes.push(this.buildHandleNode(selectedLine, "end"));
+    if (selectedBase) {
+      nodes.push(this.buildHandleNode(selectedBase, "start"));
+      nodes.push(this.buildHandleNode(selectedBase, "end"));
     }
 
     return nodes;
@@ -593,21 +591,20 @@ export class ViewerController {
   private buildLineAnnotationNode(
     annotation: LineAnnotation,
     selectedAnnotationId: string | null,
-    draftLineOverride: LineAnnotation | null,
   ): SVGGElement {
-    const visible = draftLineOverride?.id === annotation.id ? draftLineOverride : annotation;
-    const mid = lineMidpoint(visible);
+    const mid = lineMidpoint(annotation);
     const group = createSvgElement("g");
+    group.dataset.annotationStaticId = annotation.id;
     const line = createSvgElement("line");
     line.classList.add("annotation-layer__line", `annotation-layer__line--${annotation.source}`);
     if (annotation.id === selectedAnnotationId) {
       line.classList.add("annotation-layer__line--selected");
     }
     setSvgAttributes(line, {
-      x1: visible.start.x,
-      y1: visible.start.y,
-      x2: visible.end.x,
-      y2: visible.end.y,
+      x1: annotation.start.x,
+      y1: annotation.start.y,
+      x2: annotation.end.x,
+      y2: annotation.end.y,
       "vector-effect": "non-scaling-stroke",
       "data-annotation-id": annotation.id,
     });
@@ -622,7 +619,7 @@ export class ViewerController {
       "pointer-events": "none",
       opacity: "1",
     });
-    label.textContent = lineLabel(visible);
+    label.textContent = lineLabel(annotation);
     group.append(line, label);
     return group;
   }
@@ -657,6 +654,158 @@ export class ViewerController {
     });
     handle.dataset.annotationHandle = "";
     return handle;
+  }
+
+  private syncDraftLayer(
+    draftLine: LineAnnotation | null,
+    draftLineOverride: LineAnnotation | null,
+  ): void {
+    if (!this.annotationDraftGroup) {
+      return;
+    }
+
+    const mode = draftLine ? "draw" : draftLineOverride ? "edit" : null;
+    const line = draftLine ?? draftLineOverride;
+    this.syncStaticAnnotationVisibility(mode === "edit" && line ? line.id : null);
+
+    if (!mode || !line) {
+      if (this.renderedDraftMode !== null || this.annotationDraftGroup.childNodes.length > 0) {
+        this.annotationDraftGroup.replaceChildren();
+        this.clearDraftNodeReferences();
+      }
+      return;
+    }
+
+    if (
+      this.renderedDraftMode !== mode ||
+      this.renderedDraftLineId !== line.id ||
+      !this.draftLineNode ||
+      (mode === "edit" &&
+        (!this.draftLabelNode || !this.draftStartHandleNode || !this.draftEndHandleNode))
+    ) {
+      this.createDraftNodes(mode, line);
+    }
+
+    this.updateDraftNodes(mode, line);
+  }
+
+  private createDraftNodes(mode: "draw" | "edit", line: LineAnnotation): void {
+    if (!this.annotationDraftGroup) {
+      return;
+    }
+
+    this.clearDraftNodeReferences();
+    if (mode === "draw") {
+      const draftLine = this.buildDraftLineNode(line);
+      this.annotationDraftGroup.replaceChildren(draftLine);
+      this.draftLineNode = draftLine;
+    } else {
+      const group = createSvgElement("g");
+      const draftLine = createSvgElement("line");
+      draftLine.classList.add(
+        "annotation-layer__line",
+        `annotation-layer__line--${line.source}`,
+        "annotation-layer__line--selected",
+      );
+      setSvgAttributes(draftLine, {
+        "vector-effect": "non-scaling-stroke",
+        "data-annotation-id": line.id,
+      });
+      draftLine.dataset.annotationLine = "";
+
+      const label = createSvgElement("text");
+      label.classList.add("annotation-layer__label");
+      setSvgAttributes(label, {
+        "text-anchor": "middle",
+        "pointer-events": "none",
+        opacity: "1",
+      });
+
+      const startHandle = this.buildHandleNode(line, "start");
+      const endHandle = this.buildHandleNode(line, "end");
+      group.append(draftLine, label, startHandle, endHandle);
+      this.annotationDraftGroup.replaceChildren(group);
+      this.draftLineNode = draftLine;
+      this.draftLabelNode = label;
+      this.draftStartHandleNode = startHandle;
+      this.draftEndHandleNode = endHandle;
+    }
+
+    this.renderedDraftMode = mode;
+    this.renderedDraftLineId = line.id;
+  }
+
+  private updateDraftNodes(mode: "draw" | "edit", line: LineAnnotation): void {
+    if (!this.draftLineNode) {
+      return;
+    }
+
+    setSvgAttributes(this.draftLineNode, {
+      x1: line.start.x,
+      y1: line.start.y,
+      x2: line.end.x,
+      y2: line.end.y,
+    });
+
+    if (mode !== "edit") {
+      return;
+    }
+
+    const mid = lineMidpoint(line);
+    if (this.draftLabelNode) {
+      setSvgAttributes(this.draftLabelNode, {
+        x: mid.x,
+        y: mid.y - 10,
+      });
+      this.draftLabelNode.textContent = lineLabel(line);
+    }
+    if (this.draftStartHandleNode) {
+      setSvgAttributes(this.draftStartHandleNode, {
+        cx: line.start.x,
+        cy: line.start.y,
+      });
+    }
+    if (this.draftEndHandleNode) {
+      setSvgAttributes(this.draftEndHandleNode, {
+        cx: line.end.x,
+        cy: line.end.y,
+      });
+    }
+  }
+
+  private syncStaticAnnotationVisibility(hiddenAnnotationId: string | null): void {
+    if (!this.annotationContentGroup || this.hiddenStaticAnnotationId === hiddenAnnotationId) {
+      return;
+    }
+
+    for (const group of this.annotationContentGroup.querySelectorAll<SVGGElement>(
+      "[data-annotation-static-id]",
+    )) {
+      const shouldHide = group.dataset.annotationStaticId === hiddenAnnotationId;
+      const wasHidden = group.dataset.annotationStaticId === this.hiddenStaticAnnotationId;
+      if (shouldHide || wasHidden) {
+        setSvgElementHidden(group, shouldHide);
+      }
+    }
+    for (const handle of this.annotationContentGroup.querySelectorAll<SVGCircleElement>(
+      "[data-annotation-handle]",
+    )) {
+      const shouldHide = handle.dataset.annotationId === hiddenAnnotationId;
+      const wasHidden = handle.dataset.annotationId === this.hiddenStaticAnnotationId;
+      if (shouldHide || wasHidden) {
+        setSvgElementHidden(handle, shouldHide);
+      }
+    }
+    this.hiddenStaticAnnotationId = hiddenAnnotationId;
+  }
+
+  private clearDraftNodeReferences(): void {
+    this.renderedDraftMode = null;
+    this.renderedDraftLineId = null;
+    this.draftLineNode = null;
+    this.draftLabelNode = null;
+    this.draftStartHandleNode = null;
+    this.draftEndHandleNode = null;
   }
 
   private updateCanvas() {

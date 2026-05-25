@@ -361,7 +361,7 @@ average render time was 1.445-1.463 ms with ~8.2 MB peak RSS. The midpoint moved
 from ~1.744 ms to ~1.452 ms, a ~16.7% speedup for render-preview decode/map on
 this fixture.
 
-### 9. Drawing/editing an annotation rebuilds *every* SVG node each mousemove
+### 9. Drawing/editing an annotation rebuilds *every* SVG node each mousemove (COMPLETE)
 
 `frontend/src/features/viewer/ViewerController.ts:529-535`
 
@@ -385,6 +385,31 @@ dedicated SVG nodes created once at drag start, and update just their
 `x1/y1/x2/y2`/`cx/cy` attributes during the move. Leave the static annotation
 nodes untouched until the annotation set actually changes. Big smoothness win when
 annotations are present.
+
+**Done:** split the viewer SVG layer into a static annotation group and a transient
+draft group. `syncAnnotationLayer` now rebuilds the static group only when the
+annotation bundle or selected annotation changes. Draw/edit drags create the
+small transient draft nodes once at drag start, then update only the moving line,
+label, and handles via SVG attributes on pointer moves. During endpoint edits the
+static selected line and its handles are temporarily hidden so the transient line
+is the single visible source of truth until the drag commits.
+
+Validation uses a browser microbenchmark added at
+`frontend/scripts/viewer-annotation-draft-bench.mjs`, which mounts the real
+`ViewerController` in Chromium with 300 existing line annotations, starts a draft
+line, then dispatches 240 pointer moves while counting SVG element creation and
+`replaceChildren` calls after drag start:
+`npm --prefix frontend run bench:viewer-annotations -- --annotations 300 --moves 240 --samples 7`.
+
+Before, average pointer-move dispatch time was **1176.6 ms** (1163.5-1189.6 ms)
+and the 240 moves created **216,240 SVG elements** with **240** static-group
+`replaceChildren` calls. After, average time was **295.1 ms** (285.0-302.1 ms)
+with **0 SVG elements created** and **0 replaceChildren calls** during the 240
+moves. That is an **~4.0x speedup** for the measured drag path and removes the
+O(annotation count) DOM churn from pointer-event frequency.
+The same harness also verifies endpoint-edit drags with
+`--mode edit`: after the change, 240 edit moves averaged **318.8 ms** across five
+samples with **0 SVG elements created** and **0 replaceChildren calls**.
 
 ### 10. Bone-exemplar lookup hashes the entire image on every analysis (COMPLETE)
 
