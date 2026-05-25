@@ -619,7 +619,7 @@ flat/slightly better (`render_grayscale_preview` 1.555 ms before vs 1.517 ms
 after on the same fixture, 200 iterations), confirming the shared-source API did
 not slow the one-shot path.
 
-### 14. Every state change rebuilds the whole UI HTML string and re-parses it
+### 14. Every state change rebuilds the whole UI HTML string and re-parses it (COMPLETE)
 
 `frontend/src/app/htmxApp.ts:105-151`, `:369-384`
 
@@ -635,6 +635,27 @@ specific status/progress text nodes directly. The patch helpers already exist
 (`patchStatusBar`, `patchAnalysisProgress`, `patchAnalysisProgressBadge`) — drive
 those for timing-only updates without calling `renderApp`/building the full
 string. Cuts per-tick CPU and GC pressure during active jobs.
+
+**Done:** `HtmxWorkbenchApp` now keeps a shallow immutable-reference render
+signature for the non-live parts of the shell. Store notifications whose
+signature is unchanged, plus the 1-second live-job clock tick, use a direct DOM
+patch path for the status bar, analysis progress badge, processing run message,
+and visible job-center progress rows. Structural changes still fall back to the
+existing full `renderApp`/HTMX swap path: new/terminal jobs, tab changes, missing
+nodes, detail-node appearance/disappearance, status icon changes, viewer/sidebar
+changes, and processing form changes all force a normal render.
+
+Validation uses a browser benchmark added at
+`frontend/scripts/htmx-live-progress-bench.mjs`, which imports the real
+`renderApp` and compares 500 synthetic live progress/clock updates through the
+old full HTML rebuild + `<template>` parse path against direct DOM patching:
+`npm --prefix frontend run bench:htmx-progress -- --iterations 500 --samples 7 --annotations 120`.
+On the same machine, the full rebuild path averaged **416.9 ms** per 500 updates
+(405.3-422.0 ms across seven samples), while direct patching averaged
+**12.74 ms** (12.6-12.8 ms), a **~32.7× speedup** for the benchmarked live-update
+workload. In per-update terms, this cuts the measured work from ~0.834 ms to
+~0.025 ms and avoids repeatedly allocating/parsing the full shell HTML while jobs
+are already mounted.
 
 ### 15. Small allocation/copy micro-tweaks
 

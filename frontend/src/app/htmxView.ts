@@ -819,11 +819,11 @@ function renderProcessingTab(state: WorkbenchState, ui: HtmxUiState, nowMs: numb
             busy
               ? `
             <div class="run-status">
-              <div>${escapeHtml(runStatus.progress.message)}</div>
+              <div data-processing-run-message>${escapeHtml(runStatus.progress.message)}</div>
               ${
                 progressView?.detailLabel
                   ? `
-                <div class="run-status__detail">${escapeHtml(progressView.detailLabel)}</div>
+                <div class="run-status__detail" data-processing-run-detail>${escapeHtml(progressView.detailLabel)}</div>
               `
                   : ""
               }
@@ -933,6 +933,7 @@ function renderJobCenter(state: WorkbenchState, ui: HtmxUiState, nowMs: number):
               <article
                 class="job-card"
                 data-testid="job-row"
+                data-job-id="${attr(job.jobId)}"
                 data-job-kind="${attr(job.jobKind)}"
                 data-job-state="${attr(job.state)}"
               >
@@ -977,14 +978,15 @@ function renderJobCenter(state: WorkbenchState, ui: HtmxUiState, nowMs: number):
                 <div class="job-card__progress">
                   <div
                     class="job-card__progress-bar job-card__progress-bar--${attr(job.state)}${progressView.indeterminate ? " job-card__progress-bar--indeterminate" : ""}"
+                    data-job-progress-bar
                     ${progressView.indeterminate ? "" : `style="width: ${attr(width)}%;"`}
                   ></div>
                 </div>
-                <p class="job-card__message">${escapeHtml(message)}</p>
+                <p class="job-card__message" data-job-message>${escapeHtml(message)}</p>
                 ${
                   progressView.detailLabel
                     ? `
-                  <p class="job-card__detail">${escapeHtml(progressView.detailLabel)}</p>
+                  <p class="job-card__detail" data-job-detail>${escapeHtml(progressView.detailLabel)}</p>
                 `
                     : ""
                 }

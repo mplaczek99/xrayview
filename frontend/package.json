@@ -13,6 +13,7 @@
     "preview": "vite preview",
     "release:smoke": "node ./scripts/release-smoke-test.mjs",
     "release:smoke:bundle": "node ./scripts/release-smoke-test.mjs --bundle",
+    "bench:htmx-progress": "node ./scripts/htmx-live-progress-bench.mjs",
     "bench:viewer-annotations": "node ./scripts/viewer-annotation-draft-bench.mjs",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",

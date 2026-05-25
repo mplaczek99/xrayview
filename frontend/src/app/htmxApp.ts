@@ -1,6 +1,9 @@
 import type htmx from "htmx.org";
 import { startJobSync } from "../features/jobs/jobSync";
+import type { JobSnapshot, ProcessingRunState } from "../features/jobs/model";
+import { describeProgress } from "../features/jobs/progressFormatting";
 import { buildProcessingUiState } from "../features/processing/presets";
+import type { WorkbenchState, WorkbenchStudy } from "../features/study/model";
 import { ViewerController } from "../features/viewer/ViewerController";
 import type { ProcessingControls } from "../lib/generated/contracts";
 import type { ActiveTab } from "../lib/types";
@@ -20,6 +23,8 @@ import {
 type HtmxApi = typeof htmx;
 
 const TABS: readonly ActiveTab[] = ["view", "processing"] as const;
+const objectIds = new WeakMap<object, number>();
+let nextObjectId = 1;
 
 function clamp(value: number, min: number, max: number): number | null {
   if (Number.isNaN(value)) {
@@ -47,6 +52,137 @@ function isLiveWorkbench() {
   return runStatus?.state === "running" || runStatus?.state === "cancelling";
 }
 
+function isTerminalJob(job: JobSnapshot): boolean {
+  return job.state === "completed" || job.state === "failed" || job.state === "cancelled";
+}
+
+function activeStudy(state: WorkbenchState): WorkbenchStudy | null {
+  return state.activeStudyId ? (state.studies[state.activeStudyId] ?? null) : null;
+}
+
+function visibleJobs(state: WorkbenchState, ui: HtmxUiState): JobSnapshot[] {
+  return state.jobOrder
+    .map((jobId) => state.jobs[jobId])
+    .filter((job): job is JobSnapshot => Boolean(job))
+    .filter((job) => !ui.dismissedJobIds.has(job.jobId))
+    .slice(0, 6);
+}
+
+function objectRefId(value: object | null | undefined): number | null {
+  if (!value) {
+    return null;
+  }
+
+  const existing = objectIds.get(value);
+  if (existing) {
+    return existing;
+  }
+
+  const id = nextObjectId;
+  nextObjectId += 1;
+  objectIds.set(value, id);
+  return id;
+}
+
+function stableRunStatus(runStatus: ProcessingRunState): string {
+  if (runStatus.state === "running" || runStatus.state === "cancelling") {
+    return [runStatus.state, runStatus.jobId, Boolean(runStatus.timing)].join(":");
+  }
+
+  return JSON.stringify(runStatus);
+}
+
+function stableStudy(study: WorkbenchStudy): string {
+  return JSON.stringify({
+    studyId: study.studyId,
+    inputPath: study.inputPath,
+    inputName: study.inputName,
+    measurementScale: objectRefId(study.measurementScale),
+    originalPreview: objectRefId(study.originalPreview),
+    analysisPreview: objectRefId(study.analysisPreview),
+    annotations: objectRefId(study.annotations),
+    viewer: study.viewer,
+    processing: {
+      form: objectRefId(study.processing.form),
+      output: objectRefId(study.processing.output),
+      runStatus: stableRunStatus(study.processing.runStatus),
+    },
+    runtime: study.runtime,
+    renderJobId: study.renderJobId,
+    analysisJobId: study.analysisJobId,
+  });
+}
+
+function stableJob(job: JobSnapshot): string {
+  return JSON.stringify({
+    jobId: job.jobId,
+    jobKind: job.jobKind,
+    studyId: job.studyId,
+    state: job.state,
+    fromCache: job.fromCache,
+    result: isTerminalJob(job) ? objectRefId(job.result) : null,
+    error: isTerminalJob(job) ? objectRefId(job.error) : null,
+    hasTiming: Boolean(job.timing),
+  });
+}
+
+function liveRenderSignature(state: WorkbenchState, ui: HtmxUiState): string {
+  return JSON.stringify({
+    ui: {
+      activeTab: ui.activeTab,
+      compareView: ui.compareView,
+      jobsExpanded: ui.jobsExpanded,
+      dismissedJobIds: [...ui.dismissedJobIds].sort(),
+    },
+    manifest: objectRefId(state.manifest),
+    manifestStatus: state.manifestStatus,
+    activeStudyId: state.activeStudyId,
+    studies: Object.fromEntries(
+      Object.entries(state.studies).map(([studyId, study]) => [studyId, stableStudy(study)]),
+    ),
+    studyOrder: state.studyOrder,
+    jobs: Object.fromEntries(
+      Object.entries(state.jobs).map(([jobId, job]) => [jobId, stableJob(job)]),
+    ),
+    jobOrder: state.jobOrder,
+    pendingJobIds: [...state.pendingJobIds].sort(),
+    isOpeningStudy: state.isOpeningStudy,
+  });
+}
+
+function statusIconKind(status: string): string {
+  if (/cancelled|canceled/i.test(status)) {
+    return "cancelled";
+  }
+  if (/fail|error/i.test(status)) {
+    return "error";
+  }
+  if (/loaded|complete|success/i.test(status)) {
+    return "success";
+  }
+  if (/opening|running|analyzing|processing|cancelling/i.test(status)) {
+    return "spinner";
+  }
+  return "default";
+}
+
+function currentStatusIconKind(statusBar: HTMLElement): string {
+  if (statusBar.querySelector(".status-bar__spinner")) {
+    return "spinner";
+  }
+  if (statusBar.querySelector(".status-bar__icon--error")) {
+    return "error";
+  }
+  if (statusBar.querySelector(".status-bar__icon--success")) {
+    return "success";
+  }
+  const text = statusBar.textContent ?? "";
+  if (/cancelled|canceled/i.test(text)) {
+    return "cancelled";
+  }
+  return "default";
+}
+
 class HtmxWorkbenchApp {
   private readonly viewer = new ViewerController();
   private readonly ui: HtmxUiState = {
@@ -59,6 +195,7 @@ class HtmxWorkbenchApp {
   private stopJobSync: (() => void) | null = null;
   private renderQueued = false;
   private clockTimer = 0;
+  private renderedLiveSignature = "";
 
   constructor(
     private readonly root: HTMLElement,
@@ -98,13 +235,25 @@ class HtmxWorkbenchApp {
     this.renderQueued = true;
     queueMicrotask(() => {
       this.renderQueued = false;
-      this.render();
+      this.renderFastPathOrFull();
     });
+  }
+
+  private renderFastPathOrFull() {
+    const state = getWorkbenchState();
+    const signature = liveRenderSignature(state, this.ui);
+    if (signature === this.renderedLiveSignature && this.patchLiveProgress(state, Date.now())) {
+      this.syncClock();
+      return;
+    }
+
+    this.render();
   }
 
   private render() {
     const state = getWorkbenchState();
     const viewerModel = selectViewerRenderModel(state);
+    const signature = liveRenderSignature(state, this.ui);
     const preservedViewerStage =
       this.ui.activeTab === "view" ? this.viewer.reusableStageFor(viewerModel) : null;
     const html = renderApp(state, this.ui, Date.now());
@@ -131,9 +280,11 @@ class HtmxWorkbenchApp {
       }
       this.htmxApi.process(this.root);
       this.viewer.mount(this.root, viewerModel);
+      this.renderedLiveSignature = signature;
       this.syncClock();
     } catch (error) {
       console.error("xrayview htmx render error", error);
+      this.renderedLiveSignature = "";
       this.root.innerHTML = `
         <div class="viewer-stage">
           <div class="viewer-placeholder">
@@ -366,12 +517,194 @@ class HtmxWorkbenchApp {
     );
   }
 
+  private patchLiveProgress(state: WorkbenchState, nowMs: number): boolean {
+    const shell = this.root.querySelector<HTMLElement>(".app-shell");
+    if (!shell) {
+      return false;
+    }
+
+    return (
+      this.patchLiveStatusBar(shell, state.workbenchStatus) &&
+      this.patchLiveAnalysisProgress(state) &&
+      this.patchLiveProcessingRun(state, nowMs) &&
+      this.patchLiveJobCenter(shell, state, nowMs)
+    );
+  }
+
+  private patchLiveStatusBar(shell: HTMLElement, status: string): boolean {
+    const statusBar = shell.querySelector<HTMLElement>(".status-bar");
+    const statusText = statusBar?.querySelector<HTMLElement>(".status-bar__text");
+    if (!statusBar || !statusText) {
+      return false;
+    }
+    if (currentStatusIconKind(statusBar) !== statusIconKind(status)) {
+      return false;
+    }
+
+    statusText.textContent = status;
+    return true;
+  }
+
+  private patchLiveAnalysisProgress(state: WorkbenchState): boolean {
+    if (this.ui.activeTab !== "view") {
+      return true;
+    }
+
+    const study = activeStudy(state);
+    const job = study?.analysisJobId ? (state.jobs[study.analysisJobId] ?? null) : null;
+    const isAnalyzing =
+      job?.state === "queued" || job?.state === "running" || job?.state === "cancelling";
+    const current = this.root.querySelector<HTMLElement>(
+      ".study-layout__viewer > .analysis-progress",
+    );
+
+    if (!isAnalyzing || !job) {
+      return current === null;
+    }
+    if (!current) {
+      return false;
+    }
+
+    const label = job.state === "cancelling" ? "Cancelling analysis..." : "Analyzing...";
+    const percent = job.progress.percent;
+    const detail =
+      Number.isFinite(percent) && percent > 0 && percent < 100 ? `${Math.round(percent)}%` : null;
+    const text = current.querySelector<HTMLElement>(".analysis-progress__text");
+    const detailNode = current.querySelector<HTMLElement>(".analysis-progress__detail");
+    if (!text || Boolean(detailNode) !== Boolean(detail)) {
+      return false;
+    }
+
+    current.setAttribute("aria-label", detail ? `${label} ${detail}` : label);
+    text.textContent = label;
+    if (detailNode && detail) {
+      detailNode.textContent = detail;
+    }
+    return true;
+  }
+
+  private patchLiveProcessingRun(state: WorkbenchState, nowMs: number): boolean {
+    if (this.ui.activeTab !== "processing") {
+      return true;
+    }
+
+    const runStatus = activeStudy(state)?.processing.runStatus ?? { state: "idle" as const };
+    const busy = runStatus.state === "running" || runStatus.state === "cancelling";
+    const message = this.root.querySelector<HTMLElement>("[data-processing-run-message]");
+
+    if (!busy) {
+      return message === null;
+    }
+    if (!message) {
+      return false;
+    }
+
+    const progressView = describeProgress(
+      {
+        state: runStatus.state,
+        progress: runStatus.progress,
+        timing: runStatus.timing,
+        fromCache: false,
+      },
+      nowMs,
+    );
+    const detail = progressView.detailLabel;
+    const detailNode = this.root.querySelector<HTMLElement>("[data-processing-run-detail]");
+    if (Boolean(detailNode) !== Boolean(detail)) {
+      return false;
+    }
+
+    message.textContent = runStatus.progress.message;
+    if (detailNode && detail) {
+      detailNode.textContent = detail;
+    }
+    return true;
+  }
+
+  private patchLiveJobCenter(shell: HTMLElement, state: WorkbenchState, nowMs: number): boolean {
+    const jobs = visibleJobs(state, this.ui);
+    const current = shell.querySelector<HTMLElement>(".job-center");
+    if (!jobs.length) {
+      return current === null;
+    }
+    if (!current) {
+      return false;
+    }
+
+    const activeCount = jobs.filter((job) => !isTerminalJob(job)).length;
+    const badge = current.querySelector<HTMLElement>(".job-center__badge");
+    if (activeCount > 0) {
+      if (!badge) {
+        return false;
+      }
+      badge.textContent = String(activeCount);
+    } else if (badge) {
+      return false;
+    }
+
+    if (!this.ui.jobsExpanded) {
+      return current.querySelector(".job-center__list") === null;
+    }
+
+    const cards = [...current.querySelectorAll<HTMLElement>(".job-card")];
+    if (cards.length !== jobs.length) {
+      return false;
+    }
+
+    for (let index = 0; index < jobs.length; index += 1) {
+      if (!this.patchLiveJobCard(cards[index], jobs[index], nowMs)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  private patchLiveJobCard(
+    card: HTMLElement | undefined,
+    job: JobSnapshot,
+    nowMs: number,
+  ): boolean {
+    if (!card || card.dataset.jobId !== job.jobId || card.dataset.jobState !== job.state) {
+      return false;
+    }
+    if (isTerminalJob(job)) {
+      return true;
+    }
+
+    const progressView = describeProgress(job, nowMs);
+    const progressBar = card.querySelector<HTMLElement>("[data-job-progress-bar]");
+    const message = card.querySelector<HTMLElement>("[data-job-message]");
+    const detail = card.querySelector<HTMLElement>("[data-job-detail]");
+    if (!progressBar || !message || Boolean(detail) !== Boolean(progressView.detailLabel)) {
+      return false;
+    }
+
+    progressBar.className = `job-card__progress-bar job-card__progress-bar--${job.state}${
+      progressView.indeterminate ? " job-card__progress-bar--indeterminate" : ""
+    }`;
+    if (progressView.indeterminate) {
+      progressBar.removeAttribute("style");
+    } else {
+      const width = Math.max(job.progress.percent, job.state === "completed" ? 100 : 4);
+      progressBar.style.width = `${width}%`;
+    }
+
+    message.textContent = job.progress.message;
+    if (detail && progressView.detailLabel) {
+      detail.textContent = progressView.detailLabel;
+    }
+    return true;
+  }
+
   private syncClock() {
     const shouldTick = isLiveWorkbench();
     if (shouldTick && !this.clockTimer) {
       this.clockTimer = window.setInterval(() => {
         if (isLiveWorkbench()) {
-          this.render();
+          const state = getWorkbenchState();
+          if (!this.patchLiveProgress(state, Date.now())) {
+            this.render();
+          }
         } else if (this.clockTimer) {
           window.clearInterval(this.clockTimer);
           this.clockTimer = 0;
