@@ -42,7 +42,7 @@ pub struct App {
     studies: Mutex<HashMap<String, Arc<StudyRecord>>>,
     jobs: Mutex<HashMap<String, JobSnapshot>>,
     active_fingerprints: Mutex<HashMap<String, String>>,
-    result_cache: Mutex<HashMap<String, JobResult>>,
+    result_cache: Mutex<HashMap<String, Arc<JobResult>>>,
     source_preview_cache: SourcePreviewCache,
     job_update_subscribers: Mutex<HashMap<u64, SyncSender<JobSnapshot>>>,
     persistence: persistence::Catalog,
@@ -1635,7 +1635,7 @@ fn completed_job_snapshot(
             message: "Completed".to_string(),
         },
         from_cache: false,
-        result: Some(result),
+        result: Some(Arc::new(result)),
         error: None,
     }
 }
@@ -1644,7 +1644,7 @@ fn cached_job_snapshot(
     job_id: String,
     job_kind: JobKind,
     study_id: Option<String>,
-    result: JobResult,
+    result: Arc<JobResult>,
 ) -> JobSnapshot {
     JobSnapshot {
         job_id,
@@ -1883,7 +1883,8 @@ mod tests {
         assert_eq!(snapshot.job_kind, JobKind::RenderStudy);
         let result = snapshot.result.unwrap();
         assert_eq!(result.kind, JobKind::RenderStudy);
-        let payload: RenderStudyCommandResult = serde_json::from_value(result.payload).unwrap();
+        let payload: RenderStudyCommandResult =
+            serde_json::from_value(result.payload.clone()).unwrap();
         assert_eq!(payload.study_id, study.study_id);
         assert_eq!(payload.loaded_width, 4);
         assert_eq!(payload.loaded_height, 2);
@@ -1996,7 +1997,7 @@ mod tests {
             })
             .unwrap();
         let first_payload: RenderStudyCommandResult =
-            serde_json::from_value(first_snapshot.result.clone().unwrap().payload).unwrap();
+            serde_json::from_value(first_snapshot.result.clone().unwrap().payload.clone()).unwrap();
         let second_study = app
             .open_study(OpenStudyCommand {
                 input_path: first_study.input_path.clone(),
@@ -2015,7 +2016,8 @@ mod tests {
             })
             .unwrap();
         let second_payload: RenderStudyCommandResult =
-            serde_json::from_value(second_snapshot.result.clone().unwrap().payload).unwrap();
+            serde_json::from_value(second_snapshot.result.clone().unwrap().payload.clone())
+                .unwrap();
 
         assert!(!first_snapshot.from_cache);
         assert!(second_snapshot.from_cache);
@@ -2042,7 +2044,7 @@ mod tests {
             })
             .unwrap();
         let first_payload: RenderStudyCommandResult =
-            serde_json::from_value(first_snapshot.result.unwrap().payload).unwrap();
+            serde_json::from_value(first_snapshot.result.unwrap().payload.clone()).unwrap();
         fs::remove_file(&first_payload.preview_path).unwrap();
 
         let second_started = app
@@ -2323,7 +2325,8 @@ mod tests {
         assert_eq!(snapshot.job_kind, JobKind::ProcessStudy);
         let result = snapshot.result.unwrap();
         assert_eq!(result.kind, JobKind::ProcessStudy);
-        let payload: ProcessStudyCommandResult = serde_json::from_value(result.payload).unwrap();
+        let payload: ProcessStudyCommandResult =
+            serde_json::from_value(result.payload.clone()).unwrap();
         assert_eq!(payload.study_id, study.study_id);
         assert_eq!(payload.loaded_width, 4);
         assert_eq!(payload.loaded_height, 2);
@@ -2357,7 +2360,7 @@ mod tests {
             })
             .unwrap();
         let first_payload: ProcessStudyCommandResult =
-            serde_json::from_value(first_snapshot.result.clone().unwrap().payload).unwrap();
+            serde_json::from_value(first_snapshot.result.clone().unwrap().payload.clone()).unwrap();
         let second_started = app.start_process_job(command).unwrap();
         let second_snapshot = app
             .get_job(JobCommand {
@@ -2365,7 +2368,8 @@ mod tests {
             })
             .unwrap();
         let second_payload: ProcessStudyCommandResult =
-            serde_json::from_value(second_snapshot.result.clone().unwrap().payload).unwrap();
+            serde_json::from_value(second_snapshot.result.clone().unwrap().payload.clone())
+                .unwrap();
 
         assert!(!first_snapshot.from_cache);
         assert!(second_snapshot.from_cache);
@@ -2499,7 +2503,8 @@ mod tests {
         assert_eq!(snapshot.job_kind, JobKind::AnalyzeStudy);
         let result = snapshot.result.unwrap();
         assert_eq!(result.kind, JobKind::AnalyzeStudy);
-        let payload: AnalyzeStudyCommandResult = serde_json::from_value(result.payload).unwrap();
+        let payload: AnalyzeStudyCommandResult =
+            serde_json::from_value(result.payload.clone()).unwrap();
         assert_eq!(payload.study_id, study.study_id);
         assert_eq!(payload.loaded_width, 20);
         assert_eq!(payload.loaded_height, 20);
@@ -2536,7 +2541,7 @@ mod tests {
             })
             .unwrap();
         let first_payload: AnalyzeStudyCommandResult =
-            serde_json::from_value(first_snapshot.result.clone().unwrap().payload).unwrap();
+            serde_json::from_value(first_snapshot.result.clone().unwrap().payload.clone()).unwrap();
         let second_started = app
             .start_analyze_job(AnalyzeStudyCommand {
                 study_id: study.study_id.clone(),
@@ -2548,7 +2553,8 @@ mod tests {
             })
             .unwrap();
         let second_payload: AnalyzeStudyCommandResult =
-            serde_json::from_value(second_snapshot.result.clone().unwrap().payload).unwrap();
+            serde_json::from_value(second_snapshot.result.clone().unwrap().payload.clone())
+                .unwrap();
 
         assert!(!first_snapshot.from_cache);
         assert!(second_snapshot.from_cache);

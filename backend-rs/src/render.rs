@@ -160,9 +160,7 @@ fn encode_rgba8_as_bgr24_bmp(width: u32, height: u32, pixels: &[u8]) -> Result<V
         let row_start = source_y * width_usize * 4;
         for x in 0..width_usize {
             let offset = row_start + x * 4;
-            bmp.push(pixels[offset + 2]);
-            bmp.push(pixels[offset + 1]);
-            bmp.push(pixels[offset]);
+            bmp.extend_from_slice(&[pixels[offset + 2], pixels[offset + 1], pixels[offset]]);
         }
         bmp.extend(std::iter::repeat_n(0, padding));
     }

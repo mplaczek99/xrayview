@@ -377,9 +377,20 @@ fn overlay_filled_preview(
     tooth_mask: &[bool],
     bone_section: &[bool],
 ) -> PreviewImage {
-    let mut pixels = vec![0; gray.len() * 4];
-    for index in 0..gray.len() {
-        pixels[index * 4 + 3] = 255;
+    let output_len = gray.len() * 4;
+    let mut pixels: Vec<u8> = Vec::with_capacity(output_len);
+    unsafe {
+        let output = pixels.as_mut_ptr();
+        for index in 0..gray.len() {
+            let base = index * 4;
+            output.add(base).write(0);
+            output.add(base + 1).write(0);
+            output.add(base + 2).write(0);
+            output.add(base + 3).write(255);
+        }
+        // SAFETY: the initialization loop writes all `output_len` bytes before
+        // exposing them through the vector length.
+        pixels.set_len(output_len);
     }
     fill_solid_mask(&mut pixels, bone_section, BONE_RED, Some(tooth_mask));
     fill_solid_mask(&mut pixels, tooth_mask, TOOTH_GREEN, None);

@@ -230,33 +230,51 @@ fn combine_comparison(
         .width
         .checked_mul(2)
         .ok_or(ProcessingError::CompareWidthOverflow)?;
-    let mut pixels = vec![0; combined_width as usize * left.height as usize * 4];
+    let combined_width_usize = combined_width as usize;
+    let output_len = combined_width_usize * left.height as usize * 4;
+    let mut pixels: Vec<u8> = Vec::with_capacity(output_len);
+    let mut dst = 0;
 
-    for row in 0..left.height as usize {
-        let left_start = row * width;
-        let dst_start = row * combined_width as usize * 4;
-        for x in 0..width {
-            let value = left.pixels[left_start + x];
-            let dst = dst_start + x * 4;
-            pixels[dst..dst + 4].copy_from_slice(&[value, value, value, 255]);
-        }
+    unsafe {
+        let output = pixels.as_mut_ptr();
+        for row in 0..left.height as usize {
+            let left_start = row * width;
+            for x in 0..width {
+                let value = left.pixels[left_start + x];
+                output.add(dst).write(value);
+                output.add(dst + 1).write(value);
+                output.add(dst + 2).write(value);
+                output.add(dst + 3).write(255);
+                dst += 4;
+            }
 
-        match right.format {
-            PreviewFormat::Gray8 => {
-                let right_start = row * width;
-                for x in 0..width {
-                    let value = right.pixels[right_start + x];
-                    let dst = dst_start + (width + x) * 4;
-                    pixels[dst..dst + 4].copy_from_slice(&[value, value, value, 255]);
+            match right.format {
+                PreviewFormat::Gray8 => {
+                    let right_start = row * width;
+                    for x in 0..width {
+                        let value = right.pixels[right_start + x];
+                        output.add(dst).write(value);
+                        output.add(dst + 1).write(value);
+                        output.add(dst + 2).write(value);
+                        output.add(dst + 3).write(255);
+                        dst += 4;
+                    }
+                }
+                PreviewFormat::Rgba8 => {
+                    let right_start = row * width * 4;
+                    std::ptr::copy_nonoverlapping(
+                        right.pixels.as_ptr().add(right_start),
+                        output.add(dst),
+                        width * 4,
+                    );
+                    dst += width * 4;
                 }
             }
-            PreviewFormat::Rgba8 => {
-                let right_start = row * width * 4;
-                let dst = dst_start + width * 4;
-                pixels[dst..dst + width * 4]
-                    .copy_from_slice(&right.pixels[right_start..right_start + width * 4]);
-            }
         }
+        debug_assert_eq!(dst, output_len);
+        // SAFETY: `output_len` is the vector capacity, and the loop writes each
+        // output byte exactly once before exposing it through the vector length.
+        pixels.set_len(dst);
     }
 
     Ok(PreviewImage::rgba(combined_width, left.height, pixels))

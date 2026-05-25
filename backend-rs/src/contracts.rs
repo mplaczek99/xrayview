@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 pub const SERVICE_NAME: &str = "xrayview-backend";
 pub const BACKEND_CONTRACT_VERSION: u32 = 2;
@@ -406,7 +407,7 @@ pub struct JobSnapshot {
     pub progress: JobProgress,
     pub from_cache: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub result: Option<JobResult>,
+    pub result: Option<Arc<JobResult>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<BackendError>,
 }

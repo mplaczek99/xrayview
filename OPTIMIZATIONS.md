@@ -25,7 +25,7 @@ not. That, plus a size-optimized release profile, is where the largest wins are.
 | 12 | rAF-throttle `updateCanvas` + cache canvas rect | viewer | ★ | low |
 | 13 | Decode source once; derive render & analysis previews from it | app | ★★ | medium |
 | 14 | Fast-path progress/clock updates (skip full HTML rebuild) | frontend | ★ | medium |
-| 15 | Misc micro-allocs (compare buffer, RGBA fill, byte pushes) | various | ★ | low |
+| 15 | Misc micro-allocs (compare buffer, RGBA fill, byte pushes) (COMPLETE) | various | ★ | low |
 | 16 | Tooth feature table: 67 MB + per-pixel binary search (locality) | analysis | note | high |
 
 ---
@@ -657,7 +657,7 @@ workload. In per-update terms, this cuts the measured work from ~0.834 ms to
 ~0.025 ms and avoids repeatedly allocating/parsing the full shell HTML while jobs
 are already mounted.
 
-### 15. Small allocation/copy micro-tweaks
+### 15. Small allocation/copy micro-tweaks (COMPLETE)
 
 - **`combine_comparison`** (`processing.rs:233`): `vec![0; combined_width *
   height * 4]` zero-initializes a buffer whose every byte is then overwritten
@@ -674,6 +674,37 @@ are already mounted.
   including the `serde_json::Value` result payload — per subscriber. Wrapping
   `JobResult` in an `Arc` makes the clone a refcount bump. Minor today (usually
   one subscriber), but free insurance.
+
+**Done:** `combine_comparison` now allocates the final RGBA comparison buffer
+with capacity only and writes every output byte directly, avoiding the previous
+full zero-initialization pass. `overlay_filled_preview` initializes the filled
+RGBA preview in one sequential pass instead of zeroing the buffer and then
+striding over alpha bytes. `encode_rgba8_as_bgr24_bmp` writes each BGR triplet
+with one slice append instead of three byte pushes. Completed `JobSnapshot`
+results now hold `Arc<JobResult>`; cached results reuse the same `Arc`, and
+subscriber clones no longer deep-clone the `serde_json::Value` payload. Serde's
+`rc` support is enabled so the wire contract remains unchanged.
+
+Validation adds a focused benchmark at `backend-rs/examples/micro_alloc_bench.rs`
+and compares the same release build inputs before and after:
+`cargo run --release --locked --example micro_alloc_bench -- 80 2048 1536`.
+Before, `process_compare` averaged 11.075 ms, RGBA BMP encoding averaged
+5.328 ms, and cloning one completed snapshot to eight subscribers averaged
+62.231 us with 121 allocations / ~2.1 MB allocated per iteration. After, the same
+run averaged 10.188 ms for `process_compare` (**~8.0% faster**), 3.343 ms for
+RGBA BMP encoding (**~37% faster**), and 1.008 us for snapshot cloning
+(**~62x faster**, 33 allocations / 1.7 KB per iteration). The allocation byte
+counts for the image paths are unchanged because the same output buffers are
+still required; the win is removing redundant writes and clone work.
+
+The full analysis path was also checked with
+`cargo run --release --locked --example analyze_preview_bench -- ../images/BMP/1.bmp 10`.
+The measured end-to-end time moved from 141.013 ms to 143.974 ms on the sampled
+run, which is inside the noise of the already-parallel tooth-scoring work and
+confirms the filled-preview initialization is not a material end-to-end factor.
+The output checksum remained bit-identical at `0x3aa4f0df6b3c1774`
+(`tooth_pixels=573571`, `bone_pixels=300402`, `candidate_count=2455`,
+`coverage=0.852822989852`).
 
 ---
 
