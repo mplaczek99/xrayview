@@ -94,11 +94,15 @@ try {
           };
 
           const counters = {
+            canvasRectReads: 0,
+            draftAttributeWrites: 0,
             svgElementsCreated: 0,
             replaceChildrenCalls: 0,
           };
           const originalCreateElementNS = Document.prototype.createElementNS;
           const originalReplaceChildren = Element.prototype.replaceChildren;
+          const originalSetAttribute = Element.prototype.setAttribute;
+          const originalGetBoundingClientRect = Element.prototype.getBoundingClientRect;
           Document.prototype.createElementNS = function patchedCreateElementNS(namespace, tagName) {
             if (namespace === "http://www.w3.org/2000/svg") {
               counters.svgElementsCreated += 1;
@@ -108,6 +112,21 @@ try {
           Element.prototype.replaceChildren = function patchedReplaceChildren(...nodes) {
             counters.replaceChildrenCalls += 1;
             return originalReplaceChildren.apply(this, nodes);
+          };
+          Element.prototype.setAttribute = function patchedSetAttribute(name, value) {
+            if (
+              this.closest?.(".annotation-draft") &&
+              ["x1", "y1", "x2", "y2", "x", "y", "cx", "cy"].includes(name)
+            ) {
+              counters.draftAttributeWrites += 1;
+            }
+            return originalSetAttribute.call(this, name, value);
+          };
+          Element.prototype.getBoundingClientRect = function patchedGetBoundingClientRect() {
+            if (this === document.querySelector("[data-viewer-canvas]")) {
+              counters.canvasRectReads += 1;
+            }
+            return originalGetBoundingClientRect.call(this);
           };
 
           try {
@@ -141,6 +160,8 @@ try {
 
             counters.svgElementsCreated = 0;
             counters.replaceChildrenCalls = 0;
+            counters.canvasRectReads = 0;
+            counters.draftAttributeWrites = 0;
             const startedAt = performance.now();
             for (let index = 0; index < moveCount; index += 1) {
               canvas.dispatchEvent(
@@ -156,9 +177,13 @@ try {
                 }),
               );
             }
+            await new Promise((resolve) => requestAnimationFrame(() => resolve()));
+            await new Promise((resolve) => requestAnimationFrame(() => resolve()));
             const elapsedMs = performance.now() - startedAt;
             return {
               elapsedMs,
+              canvasRectReads: counters.canvasRectReads,
+              draftAttributeWrites: counters.draftAttributeWrites,
               svgElementsCreated: counters.svgElementsCreated,
               replaceChildrenCalls: counters.replaceChildrenCalls,
               annotationNodes: document.querySelectorAll(".annotation-layer *").length,
@@ -166,6 +191,8 @@ try {
           } finally {
             Document.prototype.createElementNS = originalCreateElementNS;
             Element.prototype.replaceChildren = originalReplaceChildren;
+            Element.prototype.setAttribute = originalSetAttribute;
+            Element.prototype.getBoundingClientRect = originalGetBoundingClientRect;
             controller.detach();
           }
         },

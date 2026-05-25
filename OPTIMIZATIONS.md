@@ -540,7 +540,7 @@ after, the `generate_tooth_overlay` / overlay tests pass, and full
 `npm run release:smoke` is green (clippy on both crates, Biome, contracts:check,
 81 backend tests, frontend build, `tauri build --no-bundle`).
 
-### 12. Pointer interactions aren't frame-throttled and read layout per event
+### 12. Pointer interactions aren't frame-throttled and read layout per event (COMPLETE)
 
 `ViewerController.ts:48` and `:366,378,388`
 
@@ -553,6 +553,33 @@ after, the `generate_tooth_overlay` / overlay tests pass, and full
 **Change:** cache the canvas rect on `pointerdown`/resize and reuse it during the
 drag; and coalesce `updateCanvas` through `requestAnimationFrame` so multiple
 moves in a frame produce a single style/DOM update. Pairs naturally with #9.
+
+**Done:** `ViewerController` now stores the current canvas rect whenever the
+viewer frame is measured (mount, resize, and pointerdown) and maps drag pointer
+positions from that cached rect instead of calling `getBoundingClientRect()` for
+every move. Pointer-move handlers still update the viewport/draft line state
+immediately, but they schedule canvas rendering through a single pending
+`requestAnimationFrame`; immediate flushes are kept for pointerdown, pointerup,
+wheel zoom, image load, reset, and resize so committed state and non-drag updates
+remain synchronous. Pending rAF work is cancelled on detach.
+
+Validation used the viewer annotation draft benchmark with 300 existing line
+annotations, 240 synthetic pointer moves, and seven samples per mode:
+
+`npm --prefix frontend run bench:viewer-annotations -- --mode draw --annotations 300 --moves 240 --samples 7`
+`npm --prefix frontend run bench:viewer-annotations -- --mode edit --annotations 300 --moves 240 --samples 7`
+
+The benchmark now counts canvas rect reads and draft SVG attribute writes around
+the move loop, then waits two rAF ticks so the throttled update is included.
+Before: draw averaged **328.8 ms**, with **241** canvas rect reads and **964**
+draft attribute writes per run; edit averaged **336.1 ms**, with **241** canvas
+rect reads and **2,410** draft attribute writes. After: draw averaged **11.7 ms**
+(6.0-18.9 ms), with **1** canvas rect read and **8** draft attribute writes;
+edit averaged **14.4 ms** (6.7-21.8 ms), with **1** canvas rect read and **20**
+draft attribute writes. That removes ~99.6% of drag-time layout reads, ~99.2% of
+draft DOM writes, and ~96% of the benchmarked pointer-move wall-clock while
+preserving the #9 result of zero SVG element creation and zero static annotation
+`replaceChildren` calls during the move loop.
 
 ### 13. Render and analysis decode the same file separately
 

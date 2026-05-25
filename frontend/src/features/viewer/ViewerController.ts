@@ -31,6 +31,8 @@ type ViewerInteraction =
       endpoint: "start" | "end";
     };
 
+type CanvasRect = Pick<DOMRectReadOnly, "left" | "top" | "width" | "height">;
+
 const SVG_NS = "http://www.w3.org/2000/svg";
 
 function pointDistance(left: AnnotationPoint, right: AnnotationPoint): number {
@@ -44,8 +46,7 @@ function lineMidpoint(line: LineAnnotation): AnnotationPoint {
   };
 }
 
-function pointerToLocalPoint(event: MouseEvent, element: HTMLElement): AnnotationPoint {
-  const rect = element.getBoundingClientRect();
+function pointerToLocalPoint(event: MouseEvent, rect: CanvasRect): AnnotationPoint {
   return {
     x: event.clientX - rect.left,
     y: event.clientY - rect.top,
@@ -97,6 +98,8 @@ export class ViewerController {
   private model: ViewerRenderModel | null = null;
   private viewport: ViewerViewport = createViewport();
   private frame: ViewerFrame = { width: 0, height: 0 };
+  private canvasRect: CanvasRect | null = null;
+  private canvasUpdateFrame: number | null = null;
   private resolvedImageSize: ViewerImageSize | null = null;
   private imageReady = false;
   private loadFailed = false;
@@ -231,6 +234,7 @@ export class ViewerController {
     }
     this.resizeObserver?.disconnect();
     this.resizeObserver = null;
+    this.cancelScheduledCanvasUpdate();
     this.clearAnnotationLayer();
     this.stage = null;
     this.canvas = null;
@@ -238,13 +242,14 @@ export class ViewerController {
     this.annotationHost = null;
     this.draftDistanceEl = null;
     this.zoomEl = null;
+    this.canvasRect = null;
   }
 
   resetViewport() {
     this.viewport = createViewport();
     this.interaction = null;
     this.draftLine = null;
-    this.updateCanvas();
+    this.flushCanvasUpdate();
   }
 
   private handleImageLoad = () => {
@@ -280,10 +285,14 @@ export class ViewerController {
     }
 
     event.preventDefault();
-    const pointer = pointerToLocalPoint(event, this.canvas);
+    const rect = this.updateFrame();
+    if (!rect) {
+      return;
+    }
+    const pointer = pointerToLocalPoint(event, rect);
     const factor = event.deltaY < 0 ? 1.12 : 0.9;
     this.viewport = zoomAtPoint(this.viewport, this.frame, this.resolvedImageSize, pointer, factor);
-    this.updateCanvas();
+    this.flushCanvasUpdate();
   };
 
   private handlePointerDown = (event: PointerEvent) => {
@@ -291,6 +300,7 @@ export class ViewerController {
       return;
     }
 
+    this.updateFrame();
     const target = event.target instanceof Element ? event.target : null;
     const handle = target?.closest<SVGElement>("[data-annotation-handle]");
     if (handle) {
@@ -322,7 +332,11 @@ export class ViewerController {
     }
 
     this.canvas.setPointerCapture(event.pointerId);
-    const pointer = pointerToLocalPoint(event, this.canvas);
+    const rect = this.currentCanvasRect();
+    if (!rect) {
+      return;
+    }
+    const pointer = pointerToLocalPoint(event, rect);
     if (this.model.tool === "measureLine") {
       const imagePoint = clampPointToImage(
         screenToImage(pointer, transform),
@@ -332,7 +346,7 @@ export class ViewerController {
       this.interaction = { kind: "draw" };
       this.draftLine = annotation;
       workbenchActions.selectAnnotation(null);
-      this.updateCanvas();
+      this.flushCanvasUpdate();
       return;
     }
 
@@ -356,14 +370,18 @@ export class ViewerController {
       return;
     }
 
-    const pointer = pointerToLocalPoint(event, this.canvas);
+    const rect = this.currentCanvasRect();
+    if (!rect) {
+      return;
+    }
+    const pointer = pointerToLocalPoint(event, rect);
     if (this.interaction.kind === "pan") {
       this.viewport = {
         ...this.viewport,
         panX: this.interaction.panStart.panX + (pointer.x - this.interaction.pointerStart.x),
         panY: this.interaction.panStart.panY + (pointer.y - this.interaction.pointerStart.y),
       };
-      this.updateCanvas();
+      this.scheduleCanvasUpdate();
       return;
     }
 
@@ -375,7 +393,7 @@ export class ViewerController {
             end: imagePoint,
           }
         : null;
-      this.updateCanvas();
+      this.scheduleCanvasUpdate();
       return;
     }
 
@@ -385,7 +403,7 @@ export class ViewerController {
           [this.interaction.endpoint]: imagePoint,
         }
       : null;
-    this.updateCanvas();
+    this.scheduleCanvasUpdate();
   };
 
   private handlePointerUp = (event: PointerEvent) => {
@@ -401,7 +419,7 @@ export class ViewerController {
     const draft = this.draftLine;
     this.interaction = null;
     this.draftLine = null;
-    this.updateCanvas();
+    this.flushCanvasUpdate();
 
     if (!draft || pointDistance(draft.start, draft.end) < 2) {
       return;
@@ -436,20 +454,57 @@ export class ViewerController {
     };
     this.draftLine = annotation;
     workbenchActions.selectAnnotation(annotationId);
-    this.updateCanvas();
+    this.flushCanvasUpdate();
   }
 
-  private updateFrame() {
+  private updateFrame(): CanvasRect | null {
     if (!this.canvas) {
       this.frame = { width: 0, height: 0 };
-      return;
+      this.canvasRect = null;
+      return null;
     }
 
     const rect = this.canvas.getBoundingClientRect();
+    this.canvasRect = {
+      left: rect.left,
+      top: rect.top,
+      width: rect.width,
+      height: rect.height,
+    };
     this.frame = {
       width: rect.width,
       height: rect.height,
     };
+    return this.canvasRect;
+  }
+
+  private currentCanvasRect(): CanvasRect | null {
+    return this.canvasRect ?? this.updateFrame();
+  }
+
+  private scheduleCanvasUpdate(): void {
+    if (this.canvasUpdateFrame !== null) {
+      return;
+    }
+
+    this.canvasUpdateFrame = window.requestAnimationFrame(() => {
+      this.canvasUpdateFrame = null;
+      this.updateCanvas();
+    });
+  }
+
+  private cancelScheduledCanvasUpdate(): void {
+    if (this.canvasUpdateFrame === null) {
+      return;
+    }
+
+    window.cancelAnimationFrame(this.canvasUpdateFrame);
+    this.canvasUpdateFrame = null;
+  }
+
+  private flushCanvasUpdate(): void {
+    this.cancelScheduledCanvasUpdate();
+    this.updateCanvas();
   }
 
   private currentTransform(): ViewerTransform | null {
