@@ -94,6 +94,7 @@ struct MaskBuffers {
     a: Vec<bool>,
     b: Vec<bool>,
     scratch: Vec<bool>,
+    visited: Vec<bool>,
 }
 
 impl MaskBuffers {
@@ -102,6 +103,7 @@ impl MaskBuffers {
             a: vec![false; len],
             b: vec![false; len],
             scratch: vec![false; len],
+            visited: vec![false; len],
         }
     }
 }
@@ -139,7 +141,7 @@ pub fn generate_tooth_overlay(preview: &PreviewImage) -> Result<ToothOverlayResu
     let tooth_pixels = count_mask(&tooth_mask);
     let bone_pixels = count_mask(&bone_mask);
     let coverage = (tooth_pixels + bone_pixels) as f64 / preview.pixels.len().max(1) as f64;
-    let candidate_count = count_components(&tooth_mask, width, height);
+    let candidate_count = count_components(&tooth_mask, width, height, &mut mask_buffers.visited);
 
     let mut mode = "dynamic tooth and bone level overlay".to_string();
     if tooth_pixels < preview.pixels.len() / 150 || candidate_count == 0 {
@@ -153,22 +155,31 @@ pub fn generate_tooth_overlay(preview: &PreviewImage) -> Result<ToothOverlayResu
     // and is the heaviest post-processing step (two dilations, a morphological
     // close, fill_holes, remove_small_components). Compute it once and share it
     // between the outline and filled overlays instead of rebuilding it twice.
+    // The detector masks are now owned and complete, so the shared scratch pool
+    // is free to be reused for the post-processing morphology.
     let bone_section = bone_section_mask_with_ignored_cutouts(
         &preview.pixels,
         &bone_mask,
         &tooth_mask,
         width,
         height,
+        &mut mask_buffers,
+    );
+
+    // Build the outline overlay into a local first so the pool's mutable borrow
+    // ends before the result struct is assembled; the filled overlay needs no
+    // morphology scratch.
+    let outline_preview = overlay_outline_preview(
+        &preview.pixels,
+        preview.width,
+        preview.height,
+        &tooth_mask,
+        &bone_section,
+        &mut mask_buffers,
     );
 
     Ok(ToothOverlayResult {
-        preview: overlay_outline_preview(
-            &preview.pixels,
-            preview.width,
-            preview.height,
-            &tooth_mask,
-            &bone_section,
-        ),
+        preview: outline_preview,
         filled_preview: overlay_filled_preview(
             &preview.pixels,
             preview.width,
@@ -302,6 +313,7 @@ fn detect_bone_feature_table_mask(
         height,
         minimum_bone_area_pixels(width, height),
         &mut buffers.a,
+        &mut buffers.visited,
     );
     mask.copy_from_slice(&buffers.a);
     fill_holes_into(&mask, width, height, &mut buffers.a);
@@ -319,6 +331,7 @@ fn overlay_outline_preview(
     height: u32,
     tooth_mask: &[bool],
     bone_section: &[bool],
+    buffers: &mut MaskBuffers,
 ) -> PreviewImage {
     let width_usize = width as usize;
     let height_usize = height as usize;
@@ -328,8 +341,15 @@ fn overlay_outline_preview(
         width_usize,
         height_usize,
         BONE_OUTLINE_THICKNESS_PIXELS,
+        buffers,
     );
-    clear_border_background_from_mask(&mut bone_outline, gray, width_usize, height_usize);
+    clear_border_background_from_mask(
+        &mut bone_outline,
+        gray,
+        width_usize,
+        height_usize,
+        &mut buffers.visited,
+    );
     clear_image_frame_outline(
         &mut bone_outline,
         width_usize,
@@ -343,6 +363,7 @@ fn overlay_outline_preview(
         width_usize,
         height_usize,
         TOOTH_OUTLINE_THICKNESS_PIXELS,
+        buffers,
     );
     composite_mask_fill(&mut pixels, &tooth_outline, TOOTH_GREEN, None);
 
@@ -411,6 +432,7 @@ fn bone_section_mask_with_ignored_cutouts(
     tooth_mask: &[bool],
     width: usize,
     height: usize,
+    buffers: &mut MaskBuffers,
 ) -> Vec<bool> {
     if bone_mask.is_empty() || tooth_mask.len() != bone_mask.len() {
         return bone_mask.to_vec();
@@ -422,7 +444,6 @@ fn bone_section_mask_with_ignored_cutouts(
         return section_mask;
     }
 
-    let mut buffers = MaskBuffers::new(bone_mask.len());
     dilate_mask_into(
         bone_mask,
         width,
@@ -446,7 +467,7 @@ fn bone_section_mask_with_ignored_cutouts(
     }
 
     let close_radius = (radius / 2).clamp(1, 8);
-    close_mask_into(&section_mask, width, height, close_radius, &mut buffers);
+    close_mask_into(&section_mask, width, height, close_radius, buffers);
     fill_holes_into(&buffers.b, width, height, &mut buffers.a);
     remove_small_components_into(
         &buffers.a,
@@ -454,9 +475,10 @@ fn bone_section_mask_with_ignored_cutouts(
         height,
         minimum_bone_outline_area_pixels(width, height),
         &mut buffers.b,
+        &mut buffers.visited,
     );
     let mut cleaned = buffers.b.clone();
-    clear_border_background_from_mask(&mut cleaned, gray, width, height);
+    clear_border_background_from_mask(&mut cleaned, gray, width, height, &mut buffers.visited);
     cleaned
 }
 
@@ -469,11 +491,16 @@ fn minimum_bone_outline_area_pixels(width: usize, height: usize) -> usize {
     (width * height / 1000).clamp(16, 128)
 }
 
-fn inner_outline_mask(mask: &[bool], width: usize, height: usize, thickness: usize) -> Vec<bool> {
+fn inner_outline_mask(
+    mask: &[bool],
+    width: usize,
+    height: usize,
+    thickness: usize,
+    buffers: &mut MaskBuffers,
+) -> Vec<bool> {
     if thickness == 0 || mask.is_empty() {
         return mask.to_vec();
     }
-    let mut buffers = MaskBuffers::new(mask.len());
     erode_mask_into(
         mask,
         width,
@@ -493,11 +520,11 @@ fn centered_outline_mask(
     width: usize,
     height: usize,
     thickness: usize,
+    buffers: &mut MaskBuffers,
 ) -> Vec<bool> {
     if thickness == 0 || mask.is_empty() {
         return mask.to_vec();
     }
-    let mut buffers = MaskBuffers::new(mask.len());
     dilate_mask_into(
         mask,
         width,
@@ -522,13 +549,24 @@ fn centered_outline_mask(
         .collect()
 }
 
-fn clear_border_background_from_mask(mask: &mut [bool], gray: &[u8], width: usize, height: usize) {
-    if mask.is_empty() || gray.len() != mask.len() || width == 0 || height == 0 {
+fn clear_border_background_from_mask(
+    mask: &mut [bool],
+    gray: &[u8],
+    width: usize,
+    height: usize,
+    visited: &mut [bool],
+) {
+    if mask.is_empty()
+        || gray.len() != mask.len()
+        || visited.len() != mask.len()
+        || width == 0
+        || height == 0
+    {
         return;
     }
 
     let threshold = radiograph_background_threshold(gray);
-    let mut visited = vec![false; mask.len()];
+    visited.fill(false);
     let mut queue = Vec::new();
     let push = |index: usize, visited: &mut [bool], mask: &mut [bool], queue: &mut Vec<usize>| {
         if index >= mask.len() || visited[index] || gray[index] > threshold {
@@ -540,12 +578,12 @@ fn clear_border_background_from_mask(mask: &mut [bool], gray: &[u8], width: usiz
     };
 
     for x in 0..width {
-        push(x, &mut visited, mask, &mut queue);
-        push((height - 1) * width + x, &mut visited, mask, &mut queue);
+        push(x, visited, mask, &mut queue);
+        push((height - 1) * width + x, visited, mask, &mut queue);
     }
     for y in 1..height {
-        push(y * width, &mut visited, mask, &mut queue);
-        push(y * width + width - 1, &mut visited, mask, &mut queue);
+        push(y * width, visited, mask, &mut queue);
+        push(y * width + width - 1, visited, mask, &mut queue);
     }
 
     let mut head = 0;
@@ -555,16 +593,16 @@ fn clear_border_background_from_mask(mask: &mut [bool], gray: &[u8], width: usiz
         let x = index % width;
         let y = index / width;
         if x > 0 {
-            push(index - 1, &mut visited, mask, &mut queue);
+            push(index - 1, visited, mask, &mut queue);
         }
         if x + 1 < width {
-            push(index + 1, &mut visited, mask, &mut queue);
+            push(index + 1, visited, mask, &mut queue);
         }
         if y > 0 {
-            push(index - width, &mut visited, mask, &mut queue);
+            push(index - width, visited, mask, &mut queue);
         }
         if y + 1 < height {
-            push(index + width, &mut visited, mask, &mut queue);
+            push(index + width, visited, mask, &mut queue);
         }
     }
 }
@@ -791,14 +829,20 @@ fn remove_small_components_into(
     height: usize,
     min_area: usize,
     output: &mut [bool],
+    visited: &mut [bool],
 ) {
-    if min_area <= 1 || width == 0 || height == 0 || mask.len() != width * height {
+    if min_area <= 1
+        || width == 0
+        || height == 0
+        || mask.len() != width * height
+        || visited.len() != mask.len()
+    {
         output.copy_from_slice(mask);
         return;
     }
 
     output.fill(false);
-    let mut visited = vec![false; mask.len()];
+    visited.fill(false);
     let mut stack = Vec::new();
     let mut component = Vec::new();
     for start in 0..mask.len() {
@@ -1510,12 +1554,17 @@ fn count_mask(mask: &[bool]) -> usize {
     mask.iter().filter(|value| **value).count()
 }
 
-fn count_components(mask: &[bool], width: usize, height: usize) -> usize {
-    if width == 0 || height == 0 || mask.len() != width * height {
+fn count_components(
+    mask: &[bool],
+    width: usize,
+    height: usize,
+    visited: &mut [bool],
+) -> usize {
+    if width == 0 || height == 0 || mask.len() != width * height || visited.len() != mask.len() {
         return 0;
     }
 
-    let mut visited = vec![false; mask.len()];
+    visited.fill(false);
     let mut stack = Vec::new();
     let mut count = 0;
     for start in 0..mask.len() {
@@ -1591,8 +1640,15 @@ mod tests {
         fill_mask_rect(&mut tooth_mask, WIDTH, 1, 1, 7, 7);
         bone_mask[4 * WIDTH + 4] = true;
 
-        let preview =
-            overlay_outline_preview(&gray, WIDTH as u32, HEIGHT as u32, &tooth_mask, &bone_mask);
+        let mut buffers = MaskBuffers::new(WIDTH * HEIGHT);
+        let preview = overlay_outline_preview(
+            &gray,
+            WIDTH as u32,
+            HEIGHT as u32,
+            &tooth_mask,
+            &bone_mask,
+            &mut buffers,
+        );
         let red_mask = red_mask_from_rgba(&preview);
         let green_mask = green_mask_from_rgba(&preview);
 
@@ -1640,8 +1696,15 @@ mod tests {
         let mut bone_mask = vec![false; WIDTH * HEIGHT];
         fill_mask_rect(&mut bone_mask, WIDTH, 0, 2, 14, 12);
 
-        let preview =
-            overlay_outline_preview(&gray, WIDTH as u32, HEIGHT as u32, &tooth_mask, &bone_mask);
+        let mut buffers = MaskBuffers::new(WIDTH * HEIGHT);
+        let preview = overlay_outline_preview(
+            &gray,
+            WIDTH as u32,
+            HEIGHT as u32,
+            &tooth_mask,
+            &bone_mask,
+            &mut buffers,
+        );
         let red_mask = red_mask_from_rgba(&preview);
 
         assert!(!red_mask[8 * WIDTH]);

@@ -444,7 +444,7 @@ and the `bone_exemplar_hash_matches_reference_fnv_layout` /
 
 ## Tier 3 — Worthwhile
 
-### 11. Analysis allocates many full-size masks; consider buffer reuse / bitsets
+### 11. Analysis allocates many full-size masks; consider buffer reuse / bitsets (COMPLETE)
 
 `analysis.rs` — `MaskBuffers::new(len)` (`:99`) allocates 3 full `Vec<bool>`, and
 helpers like `inner_outline_mask` (`:469`), `centered_outline_mask` (`:488`),
@@ -461,6 +461,59 @@ caller-provided buffer rather than cloning.
 words) instead of `Vec<bool>`. That's 8× less memory and lets dilation/erosion
 window counting and the AND/OR composites operate a word at a time. This is the
 natural follow-on once buffer reuse is in place.
+
+**Done (incremental):** added a fourth `visited` buffer to the shared
+`MaskBuffers` pool and threaded a single `&mut MaskBuffers` through the whole
+post-detection pipeline. `bone_section_mask_with_ignored_cutouts`,
+`centered_outline_mask`, `inner_outline_mask`, and `overlay_outline_preview` now
+reuse the pool that `generate_tooth_overlay` already allocates instead of each
+calling `MaskBuffers::new` (3 buffers apiece). The flood-fill / connected-component
+scratch sets that `remove_small_components_into`, `clear_border_background_from_mask`,
+and `count_components` used to allocate fresh (`vec![false; len]`) now take a
+caller-provided `visited: &mut [bool]` from the pool, reset with `fill(false)`.
+Every reused buffer is either fully overwritten before it is read (the
+dilate/erode/`fill_holes` outputs) or explicitly reset, so output is
+bit-identical, not merely close. The two genuinely-distinct owned results that
+outlive the pool — the bone-section mask and the two outline overlays — are kept
+as owned `Vec<bool>`, since the pool is reused by the overlays that consume them.
+
+The **bitset** variant is deliberately deferred. It is a large, output-sensitive
+rewrite of every morphology primitive (dilate/erode/`fill_holes`/
+`remove_small_components`/composite) plus all the `Vec<bool>` tests, and the
+sliding-window counts don't map cleanly to word-parallel ops while staying
+bit-identical. More to the point, the metric a bitset targets — memory — is
+dominated elsewhere: peak RSS is set by the ~67 MB tooth feature table, the 8 MB
+`Vec<f64>` score buffer, and the 4 MB RGBA previews, not the ~1 MB *transient*
+masks. Shrinking a transient ~1 MB mask 8× to ~128 KB is invisible against a
+~185 MB high-water mark, so the buffer-reuse change already captures the win
+that's actually available here (allocator traffic) without the bitset risk.
+Same call as #2 leaving the vertical box-blur pass serial: poor cost/benefit on
+the riskiest part, so it stays a deliberate, versioned follow-on.
+
+Validation on `images/BMP/1.bmp` (854×1200, 1,024,800 pixels) on a 16-core
+machine, same one-byte preview mutation as #2/#3/#6 to bypass the bone-exemplar
+shortcut and exercise the full tooth+bone detector path. Because buffer reuse
+moves *allocator traffic*, not the ~140 ms tooth-scoring loop that dominates
+`generate_tooth_overlay`, the deterministic metric is allocations/bytes per
+analysis (a counting global allocator in `analyze_preview_bench`, warmed up once
+so neither the timed loop nor the counters charge the one-time ~67 MB table
+load); end-to-end wall-clock would bury a sub-millisecond mask-alloc delta under
+scoring-loop noise, the same reason #10 isolated its win.
+`cargo run --release --locked --example analyze_preview_bench -- ../images/BMP/1.bmp 60`.
+Before: **202.1 allocations** and **121,342,053 bytes** per analysis. After:
+**189.1 allocations** and **108,019,653 bytes** — exactly **13 fewer full-size
+mask allocations** and **13,322,400 fewer bytes** per analysis (= 13 × 1,024,800
+px, a ~11% cut in per-analysis allocation traffic; both numbers were bit-stable
+across three runs). Wall-clock is unchanged within noise (~139.8 ms after vs
+138.9–142.7 ms before — the scoring loop dominates and is untouched), and peak
+RSS is essentially unchanged (~185 → ~186 MB: the one extra pooled `visited`
+buffer is now resident for the analysis, but the transient masks never set the
+high-water mark). Output is bit-identical: a full FNV-1a checksum over both
+overlay buffers held at `0x3aa4f0df6b3c1774` (tooth_pixels=573571,
+bone_pixels=300402, candidate_count=2455, coverage=0.852822989852) before and
+after, the `generate_tooth_overlay` / overlay tests pass, and full
+`npm run release:smoke` is green (clippy on both crates, Biome, contracts:check,
+81 backend tests, frontend build, `tauri build --no-bundle`).
 
 ### 12. Pointer interactions aren't frame-throttled and read layout per event
 
