@@ -23,6 +23,15 @@ const TOOTH_TABLE_Y_BINS: usize = 512;
 const TOOTH_TABLE_NORMALIZED_BINS: usize = 64;
 const TOOTH_TABLE_SCORE_BINS: usize = 32;
 const TOOTH_TABLE_PROBABILITY_THRESHOLD: u8 = 192;
+// Bucket the sorted tooth feature-table keys by their high bits so the per-pixel
+// lookup binary-searches a small, cache-resident slice instead of probing the
+// whole ~53.7 MB key array. The key packs `xb` in bits 0..8, `yb` in bits 8..17,
+// `nb` in bits 17..23, and `sb` in bits 23..28 (`tooth_feature_table_key`), so a
+// >>12 bucket fixes (sb, nb, yb>>4) and ranges only over (yb&15, xb): on the
+// shipped 13.4 M-entry table that is ~205 keys / bucket on average (a ≤16 KB
+// search window that fits L1/L2) with a ~256 KB bucket index, negligible against
+// the 67 MB table.
+const TOOTH_TABLE_BUCKET_SHIFT: u32 = 12;
 const BONE_TABLE_X_BINS: usize = 160;
 const BONE_TABLE_Y_BINS: usize = 224;
 const BONE_TABLE_NORMALIZED_BINS: usize = 32;
@@ -63,14 +72,58 @@ struct LearnedNode {
 struct FeatureProbabilityTable {
     keys: Vec<u32>,
     probabilities: Vec<u8>,
+    // High-bit bucket index over the sorted `keys`: bucket `b` occupies the
+    // contiguous range `keys[bucket_starts[b]..bucket_starts[b + 1]]`, i.e. every
+    // key with `key >> TOOTH_TABLE_BUCKET_SHIFT == b`. Built once at load time from
+    // the same sorted keys, so the serialized asset is unchanged and every lookup
+    // resolves to the identical (key, probability) a full-array binary search
+    // would have.
+    bucket_starts: Vec<u32>,
 }
 
 impl FeatureProbabilityTable {
+    fn new(keys: Vec<u32>, probabilities: Vec<u8>) -> Self {
+        debug_assert!(
+            keys.windows(2).all(|pair| pair[0] < pair[1]),
+            "feature table keys must be strictly ascending for bucketed lookup"
+        );
+        // `keys` is sorted, so keys sharing a high-bit bucket are contiguous: a
+        // single forward pass records where each bucket begins. Sizing by the
+        // largest key keeps the index exactly as wide as the data needs.
+        let bucket_count = keys
+            .last()
+            .map_or(0, |&max| (max >> TOOTH_TABLE_BUCKET_SHIFT) as usize + 1);
+        let mut bucket_starts = vec![0_u32; bucket_count + 1];
+        let mut bucket = 0_usize;
+        for (index, &key) in keys.iter().enumerate() {
+            let target = (key >> TOOTH_TABLE_BUCKET_SHIFT) as usize;
+            while bucket < target {
+                bucket += 1;
+                bucket_starts[bucket] = index as u32;
+            }
+        }
+        for slot in &mut bucket_starts[bucket + 1..] {
+            *slot = keys.len() as u32;
+        }
+        Self {
+            keys,
+            probabilities,
+            bucket_starts,
+        }
+    }
+
     fn probability(&self, key: u32) -> Option<u8> {
-        self.keys
+        let bucket = (key >> TOOTH_TABLE_BUCKET_SHIFT) as usize;
+        // Bucket `b` spans `[bucket_starts[b], bucket_starts[b + 1])`. Reading the
+        // upper bound first rejects any key past the last populated bucket (a key
+        // larger than the table's maximum) without a separate bounds check.
+        let &end = self.bucket_starts.get(bucket + 1)?;
+        let start = self.bucket_starts[bucket] as usize;
+        let end = end as usize;
+        self.keys[start..end]
             .binary_search(&key)
             .ok()
-            .and_then(|index| self.probabilities.get(index).copied())
+            .and_then(|offset| self.probabilities.get(start + offset).copied())
     }
 
     #[cfg(test)]
@@ -1223,10 +1276,7 @@ fn decode_feature_probability_table(
             .map_err(|error| format!("read feature table probability: {error}"))?;
         probabilities.push(probability[0]);
     }
-    Ok(FeatureProbabilityTable {
-        keys,
-        probabilities,
-    })
+    Ok(FeatureProbabilityTable::new(keys, probabilities))
 }
 
 fn loaded_learned_model() -> Option<&'static [Vec<LearnedNode>]> {

@@ -26,7 +26,7 @@ not. That, plus a size-optimized release profile, is where the largest wins are.
 | 13 | Decode source once; derive render & analysis previews from it | app | ★★ | medium |
 | 14 | Fast-path progress/clock updates (skip full HTML rebuild) | frontend | ★ | medium |
 | 15 | Misc micro-allocs (compare buffer, RGBA fill, byte pushes) (COMPLETE) | various | ★ | low |
-| 16 | Tooth feature table: 67 MB + per-pixel binary search (locality) | analysis | note | high |
+| 16 | Tooth feature table: 67 MB + per-pixel binary search (locality) (COMPLETE) | analysis | note | high |
 
 ---
 
@@ -710,7 +710,7 @@ The output checksum remained bit-identical at `0x3aa4f0df6b3c1774`
 
 ## Tier 4 — Notes / informational
 
-### 16. Tooth feature table: ~67 MB resident + per-pixel binary search
+### 16. Tooth feature table: ~67 MB resident + per-pixel binary search (COMPLETE)
 
 `analysis.rs:61-79`, `:1046`, test asserts **13,441,673 entries**
 (`analysis.rs:1599`).
@@ -734,6 +734,70 @@ order of effort:
   (`"sections-reference-mask-v16"`, `app.rs:728`); any change to scoring/binning
   precision (e.g., `f64`→`f32` scores) alters outputs, invalidates caches, and
   will move the model-loading tests. Treat as a deliberate, versioned change.
+
+**Done (locality):** took the cache-friendly-lookup sub-point — and did it
+*without* touching the serialized asset, the scoring/binning precision, or the
+output. `FeatureProbabilityTable` gains a `bucket_starts: Vec<u32>` index built
+once in `FeatureProbabilityTable::new` at load time: the key packs `xb`∈bits 0..8,
+`yb`∈bits 8..17, `nb`∈bits 17..23, `sb`∈bits 23..28 (`tooth_feature_table_key`),
+and because `keys` is sorted, all keys sharing a high-bit bucket
+(`key >> TOOTH_TABLE_BUCKET_SHIFT`, shift 12) are contiguous. A single forward
+pass records each bucket's start; `bucket_starts[b]..bucket_starts[b + 1]` is then
+the slice for bucket `b`. `probability` reads the upper bound first
+(`bucket_starts.get(bucket + 1)?`, which also rejects any key past the table's
+maximum) and binary-searches only that slice instead of the whole array. On the
+shipped 13.4 M-entry table that narrows each per-pixel search from ~24
+comparisons striding across 53.7 MB to ~8 over a ≤16 KB, L1/L2-resident window.
+
+Output is **bit-identical** by construction: the bucketed search finds the same
+key at the same probability the full-array search would, so nothing is coupled to
+the `sections-reference-mask-v16` fingerprint — it is unchanged, no cache
+invalidation, no model-loading test moves. The only added state is the ~256 KB
+`bucket_starts` index (one `u32` per high-bit bucket, ~65.5 K buckets), negligible
+against the 67 MB table; the keys/probabilities arrays and the serialized
+`feature_table_model.bin.gz` are untouched. A `debug_assert!` in `new` pins the
+strictly-ascending-keys invariant the bucketing (and the original `binary_search`)
+relies on.
+
+The larger memory-reduction angle from the note — a perfect hash or re-serialized
+bucketed asset to shrink the 67 MB resident footprint — is deliberately **deferred**.
+That one *does* require changing the asset format and is the genuinely high-effort,
+versioned change the note flags; the resident high-water mark is also set by this
+table regardless of lookup structure, so it's a separable follow-on. This change
+captures the available *locality* win (per-pixel cache misses) at zero format/output
+risk.
+
+Validation isolates the lookup with a focused microbenchmark, since end-to-end the
+per-pixel lookup is one component of the ~140 ms `generate_tooth_overlay` that the
+tooth-scoring loop dominates (the same reason #10 isolated the bone-exemplar hash).
+`backend-rs/examples/tooth_feature_table_bench.rs` decodes the real shipped table
+(its decode, `tooth_feature_table_key`, bucket index, and both lookups are verbatim
+mirrors of `analysis.rs`, asserted against the **13,441,673**-entry and
+**0x0841_0080** key-layout fingerprints), builds one query key per pixel of
+`images/BMP/1.bmp` in raster order (real `(x, y, normalized)`, score swept across
+all `sb` bins), asserts the bucketed lookup equals the plain binary search for
+every one of the 1,024,800 queries, then times both:
+`cargo run --release --locked --example tooth_feature_table_bench -- ../images/BMP/1.bmp 8`.
+Across three runs the full-array binary search averaged **25.5–26.5 ns/lookup**
+versus **7.2–7.4 ns/lookup** bucketed — a **~3.5× speedup** (3.51–3.66×) on the
+per-pixel lookup — at ~96 MB peak RSS (table + 256 KB index), with a 19.3% hit rate
+over the query stream.
+
+End-to-end on the same fixture (854×1200, 1,024,800 pixels) on a 16-core machine,
+same methodology as #2/#3/#6/#11 (one-byte preview mutation to bypass the
+bone-exemplar shortcut and exercise the full tooth+bone detector path):
+`cargo run --release --locked --example analyze_preview_bench -- ../images/BMP/1.bmp 40`.
+Before, `generate_tooth_overlay` averaged **140.1–142.8 ms** (three runs) at
+~185.8–186.2 MB peak RSS; after it averaged **135.5–137.7 ms** at ~185.9–186.2 MB —
+a **~3.5% / ~5 ms** end-to-end improvement with non-overlapping ranges (the parallel
+lookup loop also relieves shared-L3 / memory-bandwidth pressure across all cores, so
+the wall-clock win exceeds the serial per-lookup delta). Peak RSS is unchanged: the
+256 KB index never approaches the high-water mark set by the 67 MB table and the
+score/mask buffers. Output is bit-identical: the overlay checksum held at
+`0x3aa4f0df6b3c1774` (tooth_pixels=573571, bone_pixels=300402, candidate_count=2455,
+coverage=0.852822989852) before and after, and full `npm run release:smoke` is green
+(clippy `-D warnings` on both crates incl. the new example, Biome, contracts:check,
+backend tests, frontend build, `tauri build --no-bundle`).
 
 ### Build/frontend minor
 
