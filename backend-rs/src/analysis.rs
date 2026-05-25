@@ -45,7 +45,6 @@ const TOOTH_MASK_CLOSE_RADIUS_PIXELS: usize = 2;
 const BONE_TOOTH_CUTOUT_BRIDGE_RADIUS_PIXELS: usize = 24;
 const BONE_IMAGE_FRAME_CLEARANCE_PIXELS: usize = 12;
 const RADIOGRAPH_BACKGROUND_MAX_GRAY: u8 = 2;
-const SECTION_FRAME_BACKGROUND_MIN_GRAY: u8 = 64;
 const LEARNED_MODEL_LEARNING_RATE: f64 = 0.1;
 const LEARNED_MODEL_THRESHOLD: f64 = 0.1;
 
@@ -213,12 +212,10 @@ pub fn generate_tooth_overlay(preview: &PreviewImage) -> Result<ToothOverlayResu
         mode.push_str("; no reliable bone level found");
     }
 
-    // The bone-section mask is a pure function of (gray, bone_mask, tooth_mask)
-    // and is the heaviest post-processing step (two dilations, a morphological
-    // close, fill_holes, remove_small_components). Compute it once and share it
-    // between the outline and filled overlays instead of rebuilding it twice.
-    // The detector masks are now owned and complete, so the shared scratch pool
-    // is free to be reused for the post-processing morphology.
+    // The outline needs a smoothed section contour so cutouts near the tooth mask
+    // do not punch holes through the red border. The filled Sections preview is
+    // a class map, so it uses the detector's bone mask directly to preserve the
+    // red regions encoded by the colored reference fixtures.
     let bone_section = bone_section_mask_with_ignored_cutouts(
         &preview.pixels,
         &bone_mask,
@@ -247,7 +244,7 @@ pub fn generate_tooth_overlay(preview: &PreviewImage) -> Result<ToothOverlayResu
             preview.width,
             preview.height,
             &tooth_mask,
-            &bone_section,
+            &bone_mask,
         ),
         tooth_pixels,
         bone_pixels,
@@ -492,16 +489,10 @@ fn overlay_filled_preview(
     width: u32,
     height: u32,
     tooth_mask: &[bool],
-    bone_section: &[bool],
+    bone_fill_mask: &[bool],
 ) -> PreviewImage {
-    let mut pixels = section_background_rgba(
-        gray,
-        width as usize,
-        height as usize,
-        tooth_mask,
-        bone_section,
-    );
-    fill_solid_mask(&mut pixels, bone_section, BONE_RED, Some(tooth_mask));
+    let mut pixels = grayscale_rgba(gray);
+    fill_solid_mask(&mut pixels, bone_fill_mask, BONE_RED, Some(tooth_mask));
     fill_solid_mask(&mut pixels, tooth_mask, TOOTH_GREEN, None);
     PreviewImage::rgba(width, height, pixels)
 }
@@ -511,76 +502,6 @@ fn grayscale_rgba(gray: &[u8]) -> Vec<u8> {
     for value in gray {
         pixels.extend_from_slice(&[*value, *value, *value, 255]);
     }
-    pixels
-}
-
-fn section_background_rgba(
-    gray: &[u8],
-    width: usize,
-    height: usize,
-    tooth_mask: &[bool],
-    bone_section: &[bool],
-) -> Vec<u8> {
-    let mut pixels = grayscale_rgba(gray);
-    if width == 0 || height == 0 || gray.len() != width * height {
-        return pixels;
-    }
-
-    let mut visited = vec![false; gray.len()];
-    let mut queue = Vec::new();
-    let push =
-        |index: usize, visited: &mut [bool], pixels: &mut [u8], queue: &mut Vec<usize>| {
-            if index >= gray.len()
-                || visited[index]
-                || tooth_mask.get(index).copied().unwrap_or(false)
-                || bone_section.get(index).copied().unwrap_or(false)
-                || gray[index] < SECTION_FRAME_BACKGROUND_MIN_GRAY
-            {
-                return;
-            }
-            visited[index] = true;
-            let base = index * 4;
-            pixels[base] = 0;
-            pixels[base + 1] = 0;
-            pixels[base + 2] = 0;
-            pixels[base + 3] = 255;
-            queue.push(index);
-        };
-
-    for x in 0..width {
-        push(x, &mut visited, &mut pixels, &mut queue);
-        push((height - 1) * width + x, &mut visited, &mut pixels, &mut queue);
-    }
-    for y in 1..height {
-        push(y * width, &mut visited, &mut pixels, &mut queue);
-        push(
-            y * width + width - 1,
-            &mut visited,
-            &mut pixels,
-            &mut queue,
-        );
-    }
-
-    let mut head = 0;
-    while head < queue.len() {
-        let index = queue[head];
-        head += 1;
-        let x = index % width;
-        let y = index / width;
-        if x > 0 {
-            push(index - 1, &mut visited, &mut pixels, &mut queue);
-        }
-        if x + 1 < width {
-            push(index + 1, &mut visited, &mut pixels, &mut queue);
-        }
-        if y > 0 {
-            push(index - width, &mut visited, &mut pixels, &mut queue);
-        }
-        if y + 1 < height {
-            push(index + width, &mut visited, &mut pixels, &mut queue);
-        }
-    }
-
     pixels
 }
 
@@ -1859,11 +1780,12 @@ mod tests {
     }
 
     #[test]
-    fn overlay_filled_preview_keeps_interior_gaps_but_clears_border_background() {
+    fn overlay_filled_preview_preserves_grayscale_background_and_mask_precedence() {
         const WIDTH: usize = 5;
         const HEIGHT: usize = 5;
 
         let mut gray = vec![0_u8; WIDTH * HEIGHT];
+        gray[0] = 12;
         gray[3] = 96;
         gray[12] = 24;
         let mut tooth_mask = vec![false; WIDTH * HEIGHT];
@@ -1879,13 +1801,13 @@ mod tests {
         let preview =
             overlay_filled_preview(&gray, WIDTH as u32, HEIGHT as u32, &tooth_mask, &bone_mask);
 
-        assert_eq!(rgb_at(&preview, 0), [0, 0, 0]);
+        assert_eq!(rgb_at(&preview, 0), [12, 12, 12]);
         assert_eq!(rgb_at(&preview, 1), [BONE_RED[0], BONE_RED[1], BONE_RED[2]]);
         assert_eq!(
             rgb_at(&preview, 2),
             [TOOTH_GREEN[0], TOOTH_GREEN[1], TOOTH_GREEN[2]]
         );
-        assert_eq!(rgb_at(&preview, 3), [0, 0, 0]);
+        assert_eq!(rgb_at(&preview, 3), [96, 96, 96]);
         assert_eq!(
             rgb_at(&preview, 7),
             [TOOTH_GREEN[0], TOOTH_GREEN[1], TOOTH_GREEN[2]]

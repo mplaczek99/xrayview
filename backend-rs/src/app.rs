@@ -729,7 +729,7 @@ impl App {
     fn analyze_fingerprint(&self, study: &StudyRecord) -> Result<String, BackendError> {
         fingerprint_json(&serde_json::json!({
             "namespace": "analyze-study",
-            "outputVersion": "sections-reference-mask-v21",
+            "outputVersion": "sections-reference-mask-v22",
             "sessionId": self.cache_session_id,
             "inputPath": study.input_path,
             "inputIdentity": current_input_file_identity(&study.input_path),
