@@ -493,22 +493,13 @@ fn overlay_filled_preview(
     tooth_mask: &[bool],
     bone_section: &[bool],
 ) -> PreviewImage {
-    let output_len = gray.len() * 4;
-    let mut pixels: Vec<u8> = Vec::with_capacity(output_len);
-    unsafe {
-        let output = pixels.as_mut_ptr();
-        for index in 0..gray.len() {
-            let base = index * 4;
-            output.add(base).write(0);
-            output.add(base + 1).write(0);
-            output.add(base + 2).write(0);
-            output.add(base + 3).write(255);
-        }
-        // SAFETY: the initialization loop writes all `output_len` bytes before
-        // exposing them through the vector length.
-        pixels.set_len(output_len);
-    }
-    fill_solid_mask(&mut pixels, bone_section, BONE_RED, Some(tooth_mask));
+    let mut pixels = section_mask_rgba(
+        gray,
+        width as usize,
+        height as usize,
+        tooth_mask,
+        bone_section,
+    );
     fill_solid_mask(&mut pixels, tooth_mask, TOOTH_GREEN, None);
     PreviewImage::rgba(width, height, pixels)
 }
@@ -517,6 +508,34 @@ fn grayscale_rgba(gray: &[u8]) -> Vec<u8> {
     let mut pixels = Vec::with_capacity(gray.len() * 4);
     for value in gray {
         pixels.extend_from_slice(&[*value, *value, *value, 255]);
+    }
+    pixels
+}
+
+fn section_mask_rgba(
+    gray: &[u8],
+    width: usize,
+    height: usize,
+    tooth_mask: &[bool],
+    bone_section: &[bool],
+) -> Vec<u8> {
+    let threshold = radiograph_background_threshold(gray);
+    let tooth_bottom_y = tooth_mask
+        .iter()
+        .enumerate()
+        .filter_map(|(index, value)| value.then_some(index / width.max(1)))
+        .max()
+        .unwrap_or(height.saturating_sub(1));
+    let mut pixels = Vec::with_capacity(gray.len() * 4);
+    for (index, value) in gray.iter().enumerate() {
+        let y = index / width.max(1);
+        let is_bone_section = bone_section.get(index).copied().unwrap_or(false);
+        let is_radiograph_content_near_teeth = *value > threshold && y <= tooth_bottom_y;
+        if is_bone_section || is_radiograph_content_near_teeth {
+            pixels.extend_from_slice(&BONE_RED);
+        } else {
+            pixels.extend_from_slice(&[0, 0, 0, 255]);
+        }
     }
     pixels
 }
@@ -1771,7 +1790,7 @@ mod tests {
         const WIDTH: usize = 9;
         const HEIGHT: usize = 9;
 
-        let gray = vec![0_u8; WIDTH * HEIGHT];
+        let gray = vec![96_u8; WIDTH * HEIGHT];
         let mut tooth_mask = vec![false; WIDTH * HEIGHT];
         let mut bone_mask = vec![false; WIDTH * HEIGHT];
         fill_mask_rect(&mut tooth_mask, WIDTH, 1, 1, 7, 7);
@@ -1796,11 +1815,13 @@ mod tests {
     }
 
     #[test]
-    fn overlay_filled_preview_uses_reference_palette_and_black_background() {
+    fn overlay_filled_preview_marks_radiograph_content_as_bone_section() {
         const WIDTH: usize = 5;
         const HEIGHT: usize = 3;
 
-        let gray = vec![96_u8; WIDTH * HEIGHT];
+        let mut gray = vec![0_u8; WIDTH * HEIGHT];
+        gray[3] = 96;
+        gray[13] = 96;
         let mut tooth_mask = vec![false; WIDTH * HEIGHT];
         let mut bone_mask = vec![false; WIDTH * HEIGHT];
         bone_mask[1] = true;
@@ -1817,10 +1838,12 @@ mod tests {
             rgb_at(&preview, 2),
             [TOOTH_GREEN[0], TOOTH_GREEN[1], TOOTH_GREEN[2]]
         );
+        assert_eq!(rgb_at(&preview, 3), [BONE_RED[0], BONE_RED[1], BONE_RED[2]]);
         assert_eq!(
             rgb_at(&preview, 7),
             [TOOTH_GREEN[0], TOOTH_GREEN[1], TOOTH_GREEN[2]]
         );
+        assert_eq!(rgb_at(&preview, 13), [0, 0, 0]);
     }
 
     #[test]
