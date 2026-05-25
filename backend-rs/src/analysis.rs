@@ -38,8 +38,10 @@ const BONE_TABLE_NORMALIZED_BINS: usize = 32;
 const BONE_TABLE_GRADIENT_BINS: usize = 16;
 const BONE_TABLE_PROBABILITY_THRESHOLD: u8 = 96;
 const MINIMUM_BONE_AREA_FLOOR_PIXELS: usize = 24;
+const MINIMUM_TOOTH_AREA_FLOOR_PIXELS: usize = 4;
 const TOOTH_OUTLINE_THICKNESS_PIXELS: usize = 2;
 const BONE_OUTLINE_THICKNESS_PIXELS: usize = 2;
+const TOOTH_MASK_CLOSE_RADIUS_PIXELS: usize = 2;
 const BONE_TOOTH_CUTOUT_BRIDGE_RADIUS_PIXELS: usize = 24;
 const BONE_IMAGE_FRAME_CLEARANCE_PIXELS: usize = 12;
 const RADIOGRAPH_BACKGROUND_MAX_GRAY: u8 = 2;
@@ -183,7 +185,13 @@ pub fn generate_tooth_overlay(preview: &PreviewImage) -> Result<ToothOverlayResu
 
     let normalized = normalize_gray(&preview.pixels);
     let mut mask_buffers = MaskBuffers::new(width * height);
-    let tooth_mask = detect_tooth_mask(&preview.pixels, &normalized, width, height);
+    let tooth_mask = detect_tooth_mask(
+        &preview.pixels,
+        &normalized,
+        width,
+        height,
+        &mut mask_buffers,
+    );
     let bone_mask = detect_bone_line_mask(
         &preview.pixels,
         &normalized,
@@ -248,13 +256,21 @@ pub fn generate_tooth_overlay(preview: &PreviewImage) -> Result<ToothOverlayResu
     })
 }
 
-fn detect_tooth_mask(gray: &[u8], normalized: &[u8], width: usize, height: usize) -> Vec<bool> {
-    if let Some(mask) = detect_learned_tooth_mask(normalized, width, height) {
-        return mask;
-    }
+fn detect_tooth_mask(
+    gray: &[u8],
+    normalized: &[u8],
+    width: usize,
+    height: usize,
+    buffers: &mut MaskBuffers,
+) -> Vec<bool> {
+    let mask = if let Some(mask) = detect_learned_tooth_mask(normalized, width, height) {
+        mask
+    } else {
+        let threshold = percentile(gray, 68).max(24);
+        gray.iter().map(|value| *value >= threshold).collect()
+    };
 
-    let threshold = percentile(gray, 68).max(24);
-    gray.iter().map(|value| *value >= threshold).collect()
+    clean_tooth_mask(&mask, width, height, buffers)
 }
 
 fn detect_learned_tooth_mask(normalized: &[u8], width: usize, height: usize) -> Option<Vec<bool>> {
@@ -287,6 +303,53 @@ fn detect_learned_tooth_mask(normalized: &[u8], width: usize, height: usize) -> 
         }
     });
     Some(mask)
+}
+
+fn clean_tooth_mask(
+    mask: &[bool],
+    width: usize,
+    height: usize,
+    buffers: &mut MaskBuffers,
+) -> Vec<bool> {
+    if width == 0 || height == 0 || mask.len() != width * height {
+        return mask.to_vec();
+    }
+
+    let min_area = minimum_tooth_area_pixels(width, height);
+    remove_small_components_into(
+        mask,
+        width,
+        height,
+        min_area,
+        &mut buffers.a,
+        &mut buffers.visited,
+    );
+    let mut cleaned = buffers.a.clone();
+
+    let close_radius = tooth_mask_close_radius(width, height);
+    if close_radius > 0 {
+        close_mask_into(&cleaned, width, height, close_radius, buffers);
+        cleaned.copy_from_slice(&buffers.b);
+    }
+
+    fill_holes_into(&cleaned, width, height, &mut buffers.a);
+    remove_small_components_into(
+        &buffers.a,
+        width,
+        height,
+        min_area,
+        &mut buffers.b,
+        &mut buffers.visited,
+    );
+    buffers.b.clone()
+}
+
+fn tooth_mask_close_radius(width: usize, height: usize) -> usize {
+    TOOTH_MASK_CLOSE_RADIUS_PIXELS.min(width.min(height) / 24)
+}
+
+fn minimum_tooth_area_pixels(width: usize, height: usize) -> usize {
+    (width * height / 1000).clamp(MINIMUM_TOOTH_AREA_FLOOR_PIXELS, 2048)
 }
 
 fn detect_bone_line_mask(
@@ -1615,12 +1678,7 @@ fn count_mask(mask: &[bool]) -> usize {
     mask.iter().filter(|value| **value).count()
 }
 
-fn count_components(
-    mask: &[bool],
-    width: usize,
-    height: usize,
-    visited: &mut [bool],
-) -> usize {
+fn count_components(mask: &[bool], width: usize, height: usize, visited: &mut [bool]) -> usize {
     if width == 0 || height == 0 || mask.len() != width * height || visited.len() != mask.len() {
         return 0;
     }
@@ -1688,6 +1746,24 @@ mod tests {
                 .mode
                 .starts_with("dynamic tooth and bone level overlay")
         );
+    }
+
+    #[test]
+    fn clean_tooth_mask_removes_small_islands_and_fills_internal_holes() {
+        const WIDTH: usize = 80;
+        const HEIGHT: usize = 60;
+
+        let mut mask = vec![false; WIDTH * HEIGHT];
+        fill_mask_rect(&mut mask, WIDTH, 20, 10, 22, 40);
+        mask[30 * WIDTH + 30] = false;
+        mask[6 * WIDTH + 66] = true;
+
+        let mut buffers = MaskBuffers::new(WIDTH * HEIGHT);
+        let cleaned = clean_tooth_mask(&mask, WIDTH, HEIGHT, &mut buffers);
+
+        assert!(cleaned[30 * WIDTH + 30]);
+        assert!(cleaned[25 * WIDTH + 30]);
+        assert!(!cleaned[6 * WIDTH + 66]);
     }
 
     #[test]
