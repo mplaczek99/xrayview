@@ -1,0 +1,52 @@
+- generic [ref=e617]:
+  - heading "XRayView" [level=1] [ref=e618]
+  - tablist "Main tabs" [ref=e619]:
+    - tab "View" [active] [selected] [ref=e620] [cursor=pointer]
+    - tab "Processing" [ref=e621] [cursor=pointer]
+  - tabpanel "View" [ref=e622]:
+    - generic [ref=e623]:
+      - heading "View" [level=2] [ref=e624]
+      - generic [ref=e625]:
+        - button "Open Study" [ref=e627] [cursor=pointer]:
+          - img [ref=e628]
+          - text: Open Study
+        - generic [ref=e631]:
+          - button "Pan" [ref=e632] [cursor=pointer]:
+            - img [ref=e633]
+            - text: Pan
+          - button "Measure line" [ref=e635] [cursor=pointer]:
+            - img [ref=e636]
+            - text: Measure line
+        - generic [ref=e641]:
+          - button "Analyze" [ref=e642] [cursor=pointer]:
+            - img [ref=e643]
+            - generic [ref=e646]: Analyze
+          - group "Analysis overlay" [ref=e647]:
+            - button "Outline" [ref=e648] [cursor=pointer]
+            - button "Sections" [pressed] [ref=e649] [cursor=pointer]
+          - button "Remove selected" [disabled] [ref=e650]:
+            - img [ref=e651]
+            - text: Remove selected
+        - generic [ref=e653]: 1.bmp
+      - generic [ref=e654]:
+        - generic [ref=e656]:
+          - generic [ref=e657]:
+            - generic [ref=e658]: 100%
+            - button "Reset view" [ref=e659] [cursor=pointer]
+          - generic [ref=e660]:
+            - img "X-ray preview"
+            - img [ref=e661]
+        - complementary [ref=e662]:
+          - generic [ref=e663]:
+            - heading "Viewer Tools" [level=3] [ref=e664]
+            - paragraph [ref=e665]: Drag to pan, use the mouse wheel to zoom, then switch to Measure line to place calibrated annotations in source pixel space.
+          - generic [ref=e666]:
+            - heading "Line Annotations" [level=3] [ref=e667]
+            - paragraph [ref=e668]: No manual line annotations yet. Draw one to store a measurement.
+  - status [ref=e669]:
+    - img [ref=e670]
+    - generic [ref=e672]: Processing complete.
+  - region "Background jobs" [ref=e673]:
+    - button "▶ Jobs" [ref=e675] [cursor=pointer]:
+      - generic [ref=e676]: ▶
+      - generic [ref=e677]: Jobs

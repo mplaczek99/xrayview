@@ -1,0 +1,52 @@
+- generic [ref=e144]:
+  - heading "XRayView" [level=1] [ref=e145]
+  - tablist "Main tabs" [ref=e146]:
+    - tab "View" [selected] [ref=e147] [cursor=pointer]
+    - tab "Processing" [ref=e148] [cursor=pointer]
+  - tabpanel "View" [ref=e149]:
+    - generic [ref=e150]:
+      - heading "View" [level=2] [ref=e151]
+      - generic [ref=e152]:
+        - button "Open Study" [ref=e154] [cursor=pointer]:
+          - img [ref=e155]
+          - text: Open Study
+        - generic [ref=e158]:
+          - button "Pan" [ref=e159] [cursor=pointer]:
+            - img [ref=e160]
+            - text: Pan
+          - button "Measure line" [ref=e162] [cursor=pointer]:
+            - img [ref=e163]
+            - text: Measure line
+        - generic [ref=e168]:
+          - button "Analyze" [ref=e169] [cursor=pointer]:
+            - img [ref=e170]
+            - generic [ref=e173]: Analyze
+          - group "Analysis overlay" [ref=e174]:
+            - button "Outline" [ref=e175] [cursor=pointer]
+            - button "Sections" [pressed] [ref=e176] [cursor=pointer]
+          - button "Remove selected" [disabled] [ref=e177]:
+            - img [ref=e178]
+            - text: Remove selected
+        - generic [ref=e180]: 1.bmp
+      - generic [ref=e181]:
+        - generic [ref=e183]:
+          - generic [ref=e184]:
+            - generic [ref=e185]: 100%
+            - button "Reset view" [ref=e186] [cursor=pointer]
+          - generic [ref=e187]:
+            - img "X-ray preview"
+            - img [ref=e188]
+        - complementary [ref=e189]:
+          - generic [ref=e190]:
+            - heading "Viewer Tools" [level=3] [ref=e191]
+            - paragraph [ref=e192]: Drag to pan, use the mouse wheel to zoom, then switch to Measure line to place calibrated annotations in source pixel space.
+          - generic [ref=e193]:
+            - heading "Line Annotations" [level=3] [ref=e194]
+            - paragraph [ref=e195]: No manual line annotations yet. Draw one to store a measurement.
+  - status [ref=e196]:
+    - img [ref=e197]
+    - generic [ref=e200]: Tooth and bone level overlay generated.
+  - region "Background jobs" [ref=e201]:
+    - button "▶ Jobs" [ref=e203] [cursor=pointer]:
+      - generic [ref=e204]: ▶
+      - generic [ref=e205]: Jobs

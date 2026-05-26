@@ -1,0 +1,84 @@
+- generic [ref=e617]:
+  - heading "XRayView" [level=1] [ref=e618]
+  - tablist "Main tabs" [ref=e786]:
+    - tab "View" [selected] [ref=e787] [cursor=pointer]
+    - tab "Processing" [ref=e788] [cursor=pointer]
+  - tabpanel "View" [ref=e622]:
+    - generic [ref=e623]:
+      - heading "View" [level=2] [ref=e624]
+      - generic [ref=e625]:
+        - button "Open Study" [ref=e790] [cursor=pointer]:
+          - img [ref=e791]
+          - text: Open Study
+        - generic [ref=e794]:
+          - button "Pan" [ref=e795] [cursor=pointer]:
+            - img [ref=e796]
+            - text: Pan
+          - button "Measure line" [ref=e798] [cursor=pointer]:
+            - img [ref=e799]
+            - text: Measure line
+        - generic [ref=e804]:
+          - button "Analyze" [ref=e805] [cursor=pointer]:
+            - img [ref=e806]
+            - generic [ref=e809]: Analyze
+          - group "Analysis overlay" [ref=e810]:
+            - button "Outline" [ref=e811] [cursor=pointer]
+            - button "Sections" [pressed] [ref=e812] [cursor=pointer]
+          - button "Remove selected" [ref=e813] [cursor=pointer]:
+            - img [ref=e814]
+            - text: Remove selected
+        - generic [ref=e816]: 1.bmp
+      - generic [ref=e654]:
+        - generic [ref=e656]:
+          - generic [ref=e657]:
+            - generic [ref=e658]: 100%
+            - button "Reset view" [ref=e659] [cursor=pointer]
+          - generic [ref=e660]:
+            - img "X-ray preview"
+            - img [ref=e661]:
+              - generic [ref=e758]:
+                - generic: Measurement 1 - 522.0 px
+        - complementary [ref=e817]:
+          - generic [ref=e818]:
+            - heading "Viewer Tools" [level=3] [ref=e819]
+            - paragraph [ref=e820]: Drag to pan, use the mouse wheel to zoom, then switch to Measure line to place calibrated annotations in source pixel space.
+            - generic [ref=e821]:
+              - generic [ref=e822]: Selected line
+              - generic [ref=e823]: 522.0 px
+          - generic [ref=e824]:
+            - heading "Line Annotations" [level=3] [ref=e825]
+            - button "Measurement 1" [pressed] [ref=e827]:
+              - generic [ref=e828]: Measurement 1
+              - generic [ref=e829]: Manual
+              - generic [ref=e830]: 522.0 px
+  - status [ref=e831]:
+    - img [ref=e832]
+    - generic [ref=e835]: Saved manual measurement.
+  - region "Background jobs" [ref=e836]:
+    - generic [ref=e837]:
+      - button "▶ Jobs" [expanded] [ref=e838] [cursor=pointer]:
+        - generic [ref=e839]: ▶
+        - generic [ref=e840]: Jobs
+      - button "Clear finished" [ref=e841] [cursor=pointer]
+    - generic [ref=e842]:
+      - article [ref=e843]:
+        - generic [ref=e844]:
+          - generic [ref=e845]:
+            - generic [ref=e846]: Process Study
+            - generic [ref=e847]: Completed - 1.bmp
+          - button "Dismiss" [ref=e848] [cursor=pointer]
+        - paragraph [ref=e851]: Completed
+      - article [ref=e852]:
+        - generic [ref=e853]:
+          - generic [ref=e854]:
+            - generic [ref=e855]: Analyze Teeth And Bone
+            - generic [ref=e856]: Completed - 1.bmp
+          - button "Dismiss" [ref=e857] [cursor=pointer]
+        - paragraph [ref=e860]: Completed
+      - article [ref=e861]:
+        - generic [ref=e862]:
+          - generic [ref=e863]:
+            - generic [ref=e864]: Render Preview
+            - generic [ref=e865]: Completed - 1.bmp
+          - button "Dismiss" [ref=e866] [cursor=pointer]
+        - paragraph [ref=e869]: Completed
