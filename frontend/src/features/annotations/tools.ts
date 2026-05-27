@@ -9,6 +9,13 @@ export type ViewerTool = "pan" | "measureLine";
 
 let manualLineSequence = 0;
 
+// Id used by the in-progress draft line while it is being drawn. It is never
+// persisted: the draft is given a real, numbered id only once it is committed
+// (see finalizeManualLineAnnotation). Drawing in measureLine mode renders a
+// line node by coordinates only, so the draft needs a stable id for node reuse
+// but does not need — and must not consume — a measurement number.
+const DRAFT_MANUAL_LINE_ID = "manual-line-draft";
+
 export function emptyAnnotationBundle(): AnnotationBundle {
   return {
     lines: [],
@@ -21,17 +28,28 @@ export function createManualLineAnnotation(
   start: AnnotationPoint,
   end: AnnotationPoint,
 ): LineAnnotation {
-  manualLineSequence += 1;
-
   return {
-    id: `manual-line-${manualLineSequence}`,
-    label: `Measurement ${manualLineSequence}`,
+    id: DRAFT_MANUAL_LINE_ID,
+    label: "Measurement",
     source: "manual",
     start,
     end,
     editable: true,
     confidence: null,
     measurement: null,
+  };
+}
+
+// Stamp a committed measurement with the next sequential id and label. Called
+// only when a draft survives the discard check on pointer-up, so aborted
+// gestures (clicks / sub-threshold drags) never burn a number.
+export function finalizeManualLineAnnotation(draft: LineAnnotation): LineAnnotation {
+  manualLineSequence += 1;
+
+  return {
+    ...draft,
+    id: `manual-line-${manualLineSequence}`,
+    label: `Measurement ${manualLineSequence}`,
   };
 }
 

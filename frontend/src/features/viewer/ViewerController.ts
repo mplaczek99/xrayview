@@ -5,7 +5,11 @@ import type {
   AnnotationPoint,
   LineAnnotation,
 } from "../../lib/generated/contracts";
-import { createManualLineAnnotation, getLineAnnotation } from "../annotations/tools";
+import {
+  createManualLineAnnotation,
+  finalizeManualLineAnnotation,
+  getLineAnnotation,
+} from "../annotations/tools";
 import {
   clampPointToImage,
   createViewport,
@@ -426,8 +430,9 @@ export class ViewerController {
     }
 
     if (interaction.kind === "draw") {
-      void workbenchActions.createLineAnnotation(draft);
-      workbenchActions.selectAnnotation(draft.id);
+      const measurement = finalizeManualLineAnnotation(draft);
+      void workbenchActions.createLineAnnotation(measurement);
+      workbenchActions.selectAnnotation(measurement.id);
       return;
     }
 
