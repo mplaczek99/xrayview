@@ -121,6 +121,7 @@ fn fnv_hash(gray: &[u8], width: u32, height: u32) -> u64 {
     hash
 }
 
+// Linux-only RSS reader, mirroring the other benches.
 fn peak_resident_set_kb() -> Option<usize> {
     let status = fs::read_to_string("/proc/self/status").ok()?;
     let line = status.lines().find(|line| line.starts_with("VmHWM:"))?;

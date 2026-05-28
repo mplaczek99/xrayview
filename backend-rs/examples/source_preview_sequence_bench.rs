@@ -1,3 +1,10 @@
+// Comparative benchmark: does the source-preview-cache pattern (decode once,
+// render N variants from the same source) actually beat the "just call each
+// render variant from scratch" pattern? This bench answers that quantitatively.
+//
+// Reports a speedup factor — if shared-source ever stops beating legacy by a
+// solid margin, something has regressed in render_grayscale_preview_from_source.
+
 use std::{env, fs, hint::black_box, time::Instant};
 
 fn main() {
@@ -10,6 +17,9 @@ fn main() {
         .map(|value| value.parse::<usize>().expect("iterations must be a number"))
         .unwrap_or(200);
 
+    // Correctness gate: prove the two paths produce byte-identical output
+    // before we report timings. A 5× speedup is meaningless if the answers
+    // differ.
     assert_matching_outputs(&path).expect("matching preview outputs");
 
     let mut legacy_pixels = 0;
@@ -49,6 +59,7 @@ fn main() {
     assert_eq!(legacy_pixels, shared_pixels);
 }
 
+// Two separate file-based render calls — what we used to do.
 fn render_legacy_sequence(path: &str) -> Result<usize, String> {
     let render = xrayview_backend_rs::bmp::render_grayscale_preview_file(path)?;
     let analysis =
@@ -70,6 +81,8 @@ fn assert_matching_outputs(path: &str) -> Result<(), String> {
     Ok(())
 }
 
+// Single decode → render both variants from the shared source. This is the
+// pattern App actually uses (via load_source_preview / load_analysis_preview).
 fn render_shared_source_sequence(path: &str) -> Result<usize, String> {
     let source = xrayview_backend_rs::bmp::decode_source_preview_file(path)?;
     let render = xrayview_backend_rs::bmp::render_grayscale_preview_from_source(&source);
@@ -78,6 +91,7 @@ fn render_shared_source_sequence(path: &str) -> Result<usize, String> {
     Ok(render.pixels.len() + analysis.pixels.len())
 }
 
+// Linux-only RSS reader (no-op everywhere else).
 fn peak_resident_set_kb() -> Option<usize> {
     let status = fs::read_to_string("/proc/self/status").ok()?;
     let line = status.lines().find(|line| line.starts_with("VmHWM:"))?;

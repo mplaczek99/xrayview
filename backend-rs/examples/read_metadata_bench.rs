@@ -1,3 +1,11 @@
+// Microbenchmark: how fast can we re-read BMP metadata from disk? Used when
+// tuning the open_study path — read_file is on the hot path the first time
+// the UI sees a study, and we want it to feel instant.
+//
+// Run: `cargo run --release --example read_metadata_bench -- path/to.bmp 1000`
+// Default fixture path assumes images/BMP/ has been populated locally — the
+// directory is gitignored, so on CI you'll have to pass an explicit path.
+
 use std::{env, hint::black_box, time::Instant};
 
 fn main() {
@@ -12,6 +20,8 @@ fn main() {
 
     let start = Instant::now();
     for _ in 0..iterations {
+        // black_box on the input prevents LLVM from hoisting the read out
+        // of the loop and on the output prevents it being optimized away.
         let metadata = xrayview_backend_rs::bmp::read_file(black_box(&path)).unwrap();
         black_box(metadata);
     }

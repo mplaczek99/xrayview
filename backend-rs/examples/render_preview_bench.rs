@@ -1,3 +1,10 @@
+// Microbenchmark for the render pipeline (decode + grayscale stretch).
+// Reads the BMP once outside the timing loop so we measure render only,
+// not file I/O. Also reports peak RSS — useful when comparing memory
+// optimizations (the engineering-priorities memory we care about).
+//
+// Default iterations=100 (decode is more expensive than read_file).
+
 use std::{env, fs, hint::black_box, time::Instant};
 
 fn main() {
@@ -10,6 +17,7 @@ fn main() {
         .map(|value| value.parse::<usize>().expect("iterations must be a number"))
         .unwrap_or(100);
 
+    // Load bytes once — we're measuring render, not disk.
     let bytes = fs::read(&path).expect("read BMP fixture");
 
     let mut pixel_count = 0;
@@ -30,6 +38,9 @@ fn main() {
     );
 }
 
+// Linux-only: parse VmHWM (peak resident set size) out of /proc/self/status.
+// Returns None on non-Linux or if the format ever changes — falls back to
+// printing 0 in the report.
 fn peak_resident_set_kb() -> Option<usize> {
     let status = fs::read_to_string("/proc/self/status").ok()?;
     let line = status.lines().find(|line| line.starts_with("VmHWM:"))?;

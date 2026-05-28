@@ -1,3 +1,16 @@
+// Recent-studies catalog. The single file (`catalog.json`) is the source of
+// truth for the "Recent" panel in the UI. It's small (≤10 entries), pretty-
+// printed JSON, hand-editable if you really need to.
+//
+// Two key behaviors worth knowing about:
+//   1. Corrupt-file recovery: if catalog.json is unparseable, we rename it
+//      to catalog.corrupt.json and start over with an empty list. The next
+//      record_opened_study call succeeds, and the user keeps working.
+//   2. Lock ordering: every public method takes operation_lock for the
+//      entire op (load + mutate + save). state_lock is short-held only for
+//      the cache copy. Don't invert this — it's serialized on purpose so
+//      concurrent open_study calls can't interleave bad state.
+
 use std::{
     fs, io,
     path::{Path, PathBuf},
@@ -9,8 +22,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::contracts::{BackendError, BackendErrorCode, MeasurementScale, StudyRecord};
 
+// Hard cap on the recent list. UI shows them in a fixed-height panel so
+// growing this would require frontend work too.
 pub const RECENT_STUDY_LIMIT: usize = 10;
 
+// One row of the recent list. Lenient on the wire — every field has
+// #[serde(default)] so older catalog.json files (missing newer fields)
+// still parse. This is the "lenient unmarshal" behavior the tests pin down.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RecentStudyEntry {
@@ -20,10 +38,13 @@ pub struct RecentStudyEntry {
     pub input_name: String,
     #[serde(default)]
     pub measurement_scale: Option<MeasurementScale>,
+    // RFC 3339 string, second-precision. Not parsed back out — it's display-only.
     #[serde(default)]
     pub last_opened_at: String,
 }
 
+// Top-level on-disk shape. Note we don't `deny_unknown_fields` here on
+// purpose — we want forward-compat with future catalog versions.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StudyCatalog {
@@ -31,14 +52,24 @@ pub struct StudyCatalog {
     pub recent_studies: Vec<RecentStudyEntry>,
 }
 
+// The runtime catalog handle. Holds the path it persists to, two mutexes
+// (operation + state), and a `now` clock that tests can override.
 pub struct Catalog {
     root_dir: PathBuf,
     path: PathBuf,
+    // Serializes whole-operation critical sections (load → modify → save).
+    // Coarse but fine here — catalog ops are rare and small.
     operation_lock: Mutex<()>,
+    // Holds the in-memory snapshot + a flag saying whether we've ever loaded.
+    // Locked briefly to read/write the cache between disk ops.
     state: Mutex<CatalogState>,
+    // Injectable clock — tests override this with set_now to get
+    // deterministic timestamps. Production uses Utc::now.
     now: Mutex<Box<dyn Fn() -> DateTime<Utc> + Send + Sync>>,
 }
 
+// In-memory cache so repeated reads after a successful load don't hit disk.
+// `loaded=false` triggers a re-read on next access.
 #[derive(Debug, Clone)]
 struct CatalogState {
     loaded: bool,
@@ -46,10 +77,14 @@ struct CatalogState {
 }
 
 impl Catalog {
+    // The common ctor: catalog.json gets placed inside the persistence dir.
     pub fn new(root_dir: impl Into<PathBuf>) -> Self {
         Self::new_at_path(root_dir.into().join("catalog.json"))
     }
 
+    // Explicit-path ctor for tests and exotic layouts. root_dir is derived
+    // from the parent — falls back to "." if path has no parent (very weird
+    // edge case but better than panicking).
     pub fn new_at_path(path: impl Into<PathBuf>) -> Self {
         let path = path.into();
         let root_dir = path
@@ -78,6 +113,8 @@ impl Catalog {
         &self.path
     }
 
+    // Clock override only available under #[cfg(test)] — keep production
+    // builds from accidentally injecting a frozen clock.
     #[cfg(test)]
     pub fn set_now<F>(&self, now: F)
     where
@@ -86,6 +123,9 @@ impl Catalog {
         *self.now.lock() = Box::new(now);
     }
 
+    // Create the directory on disk if missing. Idempotent — safe to call
+    // every operation. We do call it lazily, only from save(), to avoid
+    // creating empty dirs on read-only access.
     pub fn ensure(&self) -> Result<(), BackendError> {
         fs::create_dir_all(&self.root_dir).map_err(|error| {
             BackendError::internal(format!(
@@ -95,6 +135,12 @@ impl Catalog {
         })
     }
 
+    // Forced reload from disk. Unlike load_or_default this doesn't fall back
+    // to empty on corrupt input — the caller (probably the UI) wants to see
+    // the error so it can show a "recover?" prompt.
+    //
+    // On error we also wipe the cache so subsequent operations re-read from
+    // disk rather than serving a stale value.
     pub fn load(&self) -> Result<StudyCatalog, BackendError> {
         let _operation_guard = self.operation_lock.lock();
         let value = match self.load_from_disk() {
@@ -107,33 +153,52 @@ impl Catalog {
             }
         };
 
+        // Update cache only after a successful read so we don't accidentally
+        // promote a partial result.
         let mut state = self.state.lock();
         state.loaded = true;
         state.cache = value.clone();
         Ok(value)
     }
 
+    // Record a study open: move-to-front, dedupe by input_path, truncate to
+    // RECENT_STUDY_LIMIT, persist. The dedupe + insert-at-0 + truncate idiom
+    // gives us LRU semantics without a dedicated data structure.
     pub fn record_opened_study(&self, study: &StudyRecord) -> Result<(), BackendError> {
         let _operation_guard = self.operation_lock.lock();
+        // load_or_default not load — if the file is corrupt, we start fresh
+        // (the corrupt file has already been moved aside by load_from_disk).
         let mut value = self.load_or_default()?;
+        // Dedupe: remove any pre-existing entry for the same path.
         value
             .recent_studies
             .retain(|entry| entry.input_path != study.input_path);
 
+        // Insert at the front (most recent first).
         value.recent_studies.insert(
             0,
             RecentStudyEntry {
                 input_path: study.input_path.clone(),
                 input_name: study.input_name.clone(),
                 measurement_scale: study.measurement_scale.clone(),
+                // RFC 3339 with second precision and trailing 'Z'. Stable
+                // enough for the tests to byte-compare.
                 last_opened_at: self.now.lock()().to_rfc3339_opts(SecondsFormat::Secs, true),
             },
         );
+        // truncate is cheap when len() is already ≤ limit.
         value.recent_studies.truncate(RECENT_STUDY_LIMIT);
 
         self.save(value)
     }
 
+    // Raw disk read + parse. Three outcomes:
+    //   * File missing → empty catalog (first run is the obvious case).
+    //   * I/O error → internal error, surfaced as-is.
+    //   * Parse error → CacheCorrupted, AND the bad file is renamed to
+    //     catalog.corrupt.json so the user can still inspect it. The
+    //     `let _ =` swallows the rename error on purpose — if we can't
+    //     even rename, we still want to report the parse failure.
     fn load_from_disk(&self) -> Result<StudyCatalog, BackendError> {
         let contents = match fs::read(&self.path) {
             Ok(contents) => contents,
@@ -149,6 +214,10 @@ impl Catalog {
         };
 
         serde_json::from_slice::<StudyCatalog>(&contents).map_err(|error| {
+            // Side-step the corrupt file so the next save() doesn't overwrite
+            // it. We deliberately don't propagate the rename error — losing
+            // the corruption forensics is less bad than losing the user's
+            // ability to record new studies.
             let _ = fs::rename(&self.path, self.corrupt_path());
             BackendError::new(
                 BackendErrorCode::CacheCorrupted,
@@ -160,7 +229,12 @@ impl Catalog {
         })
     }
 
+    // Cache-aware load used inside record_opened_study. The double-check
+    // pattern: peek at state first (cheap), only hit disk if we've never
+    // loaded. Corrupt-file errors map silently to empty here because the
+    // caller is about to overwrite the file anyway.
     fn load_or_default(&self) -> Result<StudyCatalog, BackendError> {
+        // Scoped block so the state lock drops before the disk read below.
         {
             let state = self.state.lock();
             if state.loaded {
@@ -175,6 +249,8 @@ impl Catalog {
                 state.cache = value.clone();
                 Ok(value)
             }
+            // Corrupt is recoverable from this caller's perspective — the
+            // file's been moved aside, and we're about to write a fresh one.
             Err(error) if error.code == BackendErrorCode::CacheCorrupted => {
                 Ok(empty_study_catalog())
             }
@@ -182,10 +258,17 @@ impl Catalog {
         }
     }
 
+    // Atomic-ish write: serialize, then fs::write (which is single-syscall
+    // on most platforms). No fsync — catalog.json is a convenience cache,
+    // not durable state.
     fn save(&self, mut value: StudyCatalog) -> Result<(), BackendError> {
         self.ensure()?;
+        // Drop reserved capacity so the JSON we emit doesn't blow up if the
+        // Vec was pre-grown — purely cosmetic, doesn't affect correctness.
         value.recent_studies.shrink_to_fit();
 
+        // Pretty-printed for human readability (the file is small enough
+        // that the size cost doesn't matter).
         let payload = serde_json::to_vec_pretty(&value)
             .map_err(|error| BackendError::internal(format!("serialize study catalog: {error}")))?;
         fs::write(&self.path, payload).map_err(|error| {
@@ -195,12 +278,18 @@ impl Catalog {
             ))
         })?;
 
+        // Update cache to match disk so the next load_or_default hits memory.
         let mut state = self.state.lock();
         state.loaded = true;
         state.cache = value;
         Ok(())
     }
 
+    // Compute the sidecar name for a corrupt file:
+    //   /foo/catalog.json → /foo/catalog.corrupt.json
+    //   /foo/catalog (no extension) → /foo/catalog.corrupt
+    // Done with OsString manipulation so we don't lose non-UTF-8 path bytes
+    // (Windows paths can be weird).
     fn corrupt_path(&self) -> PathBuf {
         match (self.path.file_stem(), self.path.extension()) {
             (Some(stem), Some(extension)) => {
@@ -218,6 +307,8 @@ impl Catalog {
     }
 }
 
+// Shorthand for the "empty list" catalog. Pulled out so we don't end up with
+// subtly-different empty defaults scattered across the file.
 fn empty_study_catalog() -> StudyCatalog {
     StudyCatalog {
         recent_studies: Vec::new(),
@@ -228,6 +319,9 @@ fn empty_study_catalog() -> StudyCatalog {
 mod tests {
     use super::*;
 
+    // Test helper — every test needs a StudyRecord and only ever varies the
+    // path and name. Default study_id="study-1" is fine because the catalog
+    // dedupes by input_path, not study_id.
     fn study(input_path: impl Into<String>, input_name: impl Into<String>) -> StudyRecord {
         StudyRecord {
             study_id: "study-1".to_string(),
@@ -237,6 +331,9 @@ mod tests {
         }
     }
 
+    // Insert-at-front semantics: second study should land first in the list.
+    // Each test uses a unique tempdir keyed on PID so parallel cargo-test
+    // runs don't collide.
     #[test]
     fn record_opened_study_keeps_most_recent_entry_first() {
         let root =
@@ -264,6 +361,8 @@ mod tests {
         let _ = fs::remove_dir_all(root);
     }
 
+    // First-run path: directory doesn't even exist yet, load should succeed
+    // with an empty list rather than erroring.
     #[test]
     fn load_missing_catalog_returns_empty_recent_studies_array() {
         let root = std::env::temp_dir().join(format!(
@@ -279,6 +378,8 @@ mod tests {
         let _ = fs::remove_dir_all(root);
     }
 
+    // Corrupt JSON → CacheCorrupted error AND the bad file gets renamed to
+    // catalog.corrupt.json (visible side-effect we assert on).
     #[test]
     fn load_treats_invalid_catalog_as_corrupted_cache() {
         let root = std::env::temp_dir().join(format!(
@@ -301,6 +402,9 @@ mod tests {
         let _ = fs::remove_dir_all(root);
     }
 
+    // Forward-compat: a future catalog with extra fields and partial entries
+    // should still parse cleanly. This is the test that enforces the
+    // "no deny_unknown_fields here" policy on StudyCatalog/RecentStudyEntry.
     #[test]
     fn load_tolerates_unknown_and_missing_entry_fields_like_lenient_json_unmarshal() {
         let root = std::env::temp_dir().join(format!(
@@ -335,6 +439,9 @@ mod tests {
         let _ = fs::remove_dir_all(root);
     }
 
+    // End-to-end recovery: starting from a corrupt file, calling
+    // record_opened_study should succeed (because load_or_default swallows
+    // CacheCorrupted) AND leave a .corrupt.json sidecar.
     #[test]
     fn record_opened_study_recovers_from_corrupt_catalog() {
         let root = std::env::temp_dir().join(format!(
@@ -361,6 +468,8 @@ mod tests {
         let _ = fs::remove_dir_all(root);
     }
 
+    // Re-opening "one.bmp" after "two.bmp" should bump it back to the front,
+    // not append it as a duplicate. This is the dedupe-by-input_path behavior.
     #[test]
     fn record_opened_study_reorders_existing_study_without_duplicate() {
         let root =
@@ -385,6 +494,9 @@ mod tests {
         let _ = fs::remove_dir_all(root);
     }
 
+    // RECENT_STUDY_LIMIT enforcement: insert 12, expect 10 remaining with
+    // the most recent ones kept. study-11 is newest (last inserted), study-02
+    // is oldest survivor (study-00 and study-01 got dropped).
     #[test]
     fn record_opened_study_truncates_to_ten_entries() {
         let root =
@@ -409,6 +521,9 @@ mod tests {
         let _ = fs::remove_dir_all(root);
     }
 
+    // Byte-level check of the on-disk JSON shape — pins both the camelCase
+    // field names and the second-precision RFC 3339 timestamp format. If
+    // anyone switches to ISO nanos or `Z` → `+00:00`, this fires.
     #[test]
     fn record_opened_study_persists_measurement_scale_and_rfc3339_timestamp() {
         let root =

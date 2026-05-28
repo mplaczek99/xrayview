@@ -1,3 +1,10 @@
+// Benchmark for the tooth/bone analyzer. The interesting metric here isn't
+// wall-clock — the ~170 ms scoring loop dominates that and varies session to
+// session — but allocator traffic, because the cleanup work in analysis.rs
+// is all about reusing scratch buffers.
+//
+// Usage: `cargo run --release --example analyze_preview_bench -- path.bmp 10`
+
 use std::{
     alloc::{GlobalAlloc, Layout, System},
     env, fs,
@@ -44,6 +51,9 @@ fn main() {
         xrayview_backend_rs::bmp::render_grayscale_preview_file_for_tooth_analysis(&path)
             .expect("render analysis preview");
     let mut pixels = Vec::from(rendered.pixels.as_ref());
+    // Perturb the first pixel by +1 so the preview we feed the analyzer isn't
+    // byte-identical to anything else cached in this process — guarantees the
+    // analyzer runs the full pipeline every iteration, not a cache shortcut.
     if let Some(pixel) = pixels.first_mut() {
         *pixel = pixel.wrapping_add(1);
     }
@@ -107,6 +117,7 @@ fn main() {
     );
 }
 
+// VmHWM peak resident set — same Linux-only impl as in render_preview_bench.
 fn peak_resident_set_kb() -> Option<usize> {
     let status = fs::read_to_string("/proc/self/status").ok()?;
     let line = status.lines().find(|line| line.starts_with("VmHWM:"))?;

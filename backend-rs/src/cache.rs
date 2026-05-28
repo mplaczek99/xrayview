@@ -1,3 +1,15 @@
+// Two caches live in this file:
+//
+//   * `Store` — on-disk artifact cache (rendered BMPs, analysis outputs).
+//     Lives under cache_dir/artifacts/<namespace>/<key>.<ext>. Eviction is
+//     LRU by mtime, debounced to once every 30s so high-throughput job
+//     runs don't thrash the directory walk.
+//
+//   * `SourcePreviewCache` — in-memory decoded source previews keyed by
+//     study fingerprint. Bounded by both entry count *and* byte budget;
+//     evictions are pure LRU. Has a single-flight `get_or_try_insert_with`
+//     so concurrent decodes of the same key only ever run one decoder.
+
 use std::{
     collections::{HashMap, VecDeque},
     fs, io,
@@ -10,27 +22,48 @@ use crate::bmp::DecodedSourcePreview;
 use crate::contracts::BackendError;
 use parking_lot::{Condvar, Mutex};
 
+// Path-name constants. Pub because the desktop shell uses them when computing
+// paths to surface in dialogs.
 pub const DEFAULT_ROOT_DIR_NAME: &str = "xrayview";
 pub const CACHE_DIR_NAME: &str = "cache";
 pub const ARTIFACT_DIR_NAME: &str = "artifacts";
 pub const STATE_DIR_NAME: &str = "state";
+
+// Eviction debounce — 30s picked to be longer than a typical interactive
+// burst (slider drags, repeated process runs) but shorter than a coffee
+// break. If the user just clicked through 20 presets, we don't want to walk
+// the artifacts dir 20 times.
 pub const EVICT_DEBOUNCE_INTERVAL: Duration = Duration::from_secs(30);
+
+// Source preview cache defaults. 4 entries × 512 MB ≈ enough for a few
+// large bitewings in flight without ballooning RSS. Tunable per-instance
+// via SourcePreviewCache::new.
 pub const DEFAULT_SOURCE_PREVIEW_CACHE_CAPACITY: usize = 4;
 pub const DEFAULT_SOURCE_PREVIEW_CACHE_MAX_BYTES: usize = 512 * 1024 * 1024;
 
+// Disk-backed artifact cache. State is tiny (just the eviction bookkeeping);
+// everything else is derived from the filesystem.
 pub struct Store {
     root_dir: PathBuf,
     persistence_dir: PathBuf,
     evict_state: Mutex<EvictState>,
 }
 
+// In-memory shadow of "do we need to evict?" so most calls can be answered
+// without touching disk.
 #[derive(Debug, Clone)]
 struct EvictState {
+    // True while an eviction is in flight — second concurrent caller bails.
     evicting: bool,
+    // When the last eviction finished. Used for the 30s debounce.
     last_eviction: Option<Instant>,
+    // Sum of artifact bytes on disk. None means "we haven't measured yet, so
+    // we don't know" — add_artifact_bytes only updates if Some(_).
     tracked_bytes: Option<u64>,
 }
 
+// Per-file info collected during the artifact walk. mod_time_nanos is used
+// as the LRU key (older files get evicted first).
 #[derive(Debug, Clone)]
 struct ArtifactFileInfo {
     path: PathBuf,
@@ -39,6 +72,8 @@ struct ArtifactFileInfo {
 }
 
 impl Store {
+    // Given a cache directory, derive its sibling state directory (../state).
+    // This is the ctor used when CACHE_DIR env var is set explicitly.
     pub fn new(root_dir: impl Into<PathBuf>) -> Self {
         let root_dir = root_dir.into();
         let persistence_dir = root_dir
@@ -48,11 +83,15 @@ impl Store {
         Self::new_with_paths(root_dir, persistence_dir)
     }
 
+    // Given the *common parent*, build cache+state subdirs. This is the ctor
+    // used when only BASE_DIR is set (the common case).
     pub fn new_with_root(root_dir: impl Into<PathBuf>) -> Self {
         let root_dir = root_dir.into();
         Self::new_with_paths(root_dir.join(CACHE_DIR_NAME), root_dir.join(STATE_DIR_NAME))
     }
 
+    // The explicit-paths ctor — tests reach for this one to put cache and
+    // state in unrelated directories.
     pub fn new_with_paths(
         cache_dir: impl Into<PathBuf>,
         persistence_dir: impl Into<PathBuf>,
@@ -63,6 +102,7 @@ impl Store {
             evict_state: Mutex::new(EvictState {
                 evicting: false,
                 last_eviction: None,
+                // tracked_bytes starts as None — first eviction populates it.
                 tracked_bytes: None,
             }),
         }
@@ -78,6 +118,9 @@ impl Store {
         &self.persistence_dir
     }
 
+    // Create both cache and state directories. Idempotent. Called once at
+    // App::prepare() time, but also implicitly by artifact_path on the cache
+    // side so the directories never go missing mid-session.
     pub fn ensure(&self) -> Result<(), BackendError> {
         fs::create_dir_all(&self.root_dir).map_err(|error| {
             BackendError::internal(format!(
@@ -93,6 +136,10 @@ impl Store {
         })
     }
 
+    // Build the on-disk path for a (namespace, key, extension) triple and
+    // make sure the parent dir exists. Doesn't create the file itself —
+    // that's the caller's job. Namespace is one of "render", "process",
+    // "analyze" etc.; key is usually a fingerprint hash.
     pub fn artifact_path(
         &self,
         namespace: &str,
@@ -109,6 +156,12 @@ impl Store {
         Ok(directory.join(format!("{key}.{extension}")))
     }
 
+    // Incremental byte-count update. Called by the job machinery after
+    // writing an artifact so we can short-circuit eviction without re-walking
+    // the directory.
+    //
+    // Only updates the count if we've already measured (Some(_)). If
+    // tracked_bytes is None we just no-op — first eviction will measure.
     pub fn add_artifact_bytes(&self, delta: u64) {
         if delta == 0 {
             return;
@@ -119,37 +172,54 @@ impl Store {
         }
     }
 
+    // The main entry point. Returns Ok(0) without doing any work in three
+    // cases: we're already under budget, we evicted recently, or another
+    // thread is currently evicting. Otherwise we mark `evicting=true`, do
+    // the walk + delete, then update bookkeeping under the lock again.
+    //
+    // The lock is dropped during walk_and_evict because that's the slow
+    // part (recursive readdir + remove_file) and we don't want add_artifact_bytes
+    // calls to stall behind it.
     pub fn evict_artifacts_over_limit(&self, max_total_bytes: u64) -> Result<usize, BackendError> {
         {
             let mut state = self.evict_state.lock();
+            // Fast path: tracked size says we're fine.
             if state
                 .tracked_bytes
                 .is_some_and(|tracked_bytes| tracked_bytes <= max_total_bytes)
             {
                 return Ok(0);
             }
+            // Debounce: don't walk again so soon.
             if state
                 .last_eviction
                 .is_some_and(|last| last.elapsed() < EVICT_DEBOUNCE_INTERVAL)
             {
                 return Ok(0);
             }
+            // Concurrent eviction — let the existing one win.
             if state.evicting {
                 return Ok(0);
             }
             state.evicting = true;
         }
 
+        // Lock is dropped here on purpose — walk_and_evict can take a while.
         let result = self.walk_and_evict(max_total_bytes);
         let mut state = self.evict_state.lock();
         state.evicting = false;
         state.last_eviction = Some(Instant::now());
+        // Even on error we update last_eviction so we still honor the debounce.
+        // tracked_bytes only gets refreshed on success.
         state.tracked_bytes = result.as_ref().ok().map(|(_, bytes)| *bytes);
         result.map(|(removed, _)| removed)
     }
 
+    // The actual filesystem walk + delete. Returns (removed_count, remaining_bytes).
+    // If the artifact dir doesn't exist, that's fine — return (0, 0) without error.
     fn walk_and_evict(&self, max_total_bytes: u64) -> Result<(usize, u64), BackendError> {
         let artifact_dir = self.root_dir.join(ARTIFACT_DIR_NAME);
+        // Treat "missing" and "not a directory" the same — nothing to evict.
         if fs::metadata(&artifact_dir)
             .map(|metadata| !metadata.is_dir())
             .unwrap_or(true)
@@ -164,17 +234,21 @@ impl Store {
                 artifact_dir.display()
             ))
         })?;
+        // Quick check post-walk — we may have measured the dir down under budget.
         let mut total_size = files.iter().map(|file| file.size).sum::<u64>();
         if total_size <= max_total_bytes {
             return Ok((0, total_size));
         }
 
+        // Oldest mtime first → LRU eviction order.
         files.sort_by_key(|file| file.mod_time_nanos);
         let mut removed = 0;
         for file in files {
             if total_size <= max_total_bytes {
                 break;
             }
+            // Tolerate remove_file failures — file may have been deleted out
+            // from under us, or be on a read-only mount.
             if fs::remove_file(&file.path).is_ok() {
                 total_size = total_size.saturating_sub(file.size);
                 removed += 1;
@@ -184,6 +258,8 @@ impl Store {
         Ok((removed, total_size))
     }
 
+    // Test-only override: jam the eviction bookkeeping into a known state.
+    // Used to assert that the fast-path checks fire correctly.
     #[cfg(test)]
     fn force_evict_state(&self, tracked_bytes: Option<u64>, last_eviction: Option<Instant>) {
         let mut state = self.evict_state.lock();
@@ -198,6 +274,10 @@ impl Store {
     }
 }
 
+// Recursive directory walk. Tolerant of per-entry errors — skip the entry
+// rather than failing the whole walk, so a single bad file doesn't break
+// eviction. UNIX_EPOCH conversion may fail on pre-1970 mtimes (very rare);
+// those get sorted to oldest (0), which is the safe default.
 fn collect_artifact_files(root: &Path, files: &mut Vec<ArtifactFileInfo>) -> io::Result<()> {
     for entry in fs::read_dir(root)? {
         let entry = match entry {
@@ -209,6 +289,7 @@ fn collect_artifact_files(root: &Path, files: &mut Vec<ArtifactFileInfo>) -> io:
             Err(_) => continue,
         };
         if metadata.is_dir() {
+            // Recurse into subdirs (namespace dirs live here).
             let _ = collect_artifact_files(&entry.path(), files);
             continue;
         }
@@ -221,23 +302,35 @@ fn collect_artifact_files(root: &Path, files: &mut Vec<ArtifactFileInfo>) -> io:
                 .ok()
                 .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
                 .map(|duration| duration.as_nanos())
+                // unwrap_or_default → 0 → sorts as "oldest possible", evicted first.
                 .unwrap_or_default(),
         });
     }
     Ok(())
 }
 
+// In-memory LRU cache for decoded source previews. The whole state lives
+// under a single mutex — this is fine because operations are short (HashMap
+// + VecDeque manipulation) and contention is low (decoders are rare).
 pub struct SourcePreviewCache {
     state: Mutex<SourcePreviewCacheState>,
 }
 
+// The protected innards. Note `inflight` runs alongside `entries` — keys can
+// only be in one or the other at any moment (either being decoded, or done).
+// The single-flight contract in get_or_try_insert_with depends on that.
 struct SourcePreviewCacheState {
     capacity: usize,
     max_bytes: usize,
     total_bytes: usize,
     entries: HashMap<String, SourcePreviewEntry>,
+    // In-flight decoders so concurrent callers for the same key block on a
+    // Condvar instead of racing to decode the same BMP twice.
     inflight: HashMap<String, Arc<SourcePreviewInflight>>,
+    // LRU order — front is most recent. push_front on touch, pop_back on evict.
     lru: VecDeque<String>,
+    // Telemetry counters — only exist under #[cfg(test)] so production builds
+    // don't pay for them.
     #[cfg(test)]
     hits: usize,
     #[cfg(test)]
@@ -246,17 +339,23 @@ struct SourcePreviewCacheState {
     inflight_waits: usize,
 }
 
+// We track byte_size separately rather than recomputing pixels.len() on
+// every eviction check — keeps total_bytes math O(1).
 #[derive(Debug, Clone)]
 struct SourcePreviewEntry {
     preview: DecodedSourcePreview,
     byte_size: usize,
 }
 
+// Rendezvous primitive for single-flight decode. The first caller fills in
+// `result` and signals `ready`; everyone else waits on the condvar.
 struct SourcePreviewInflight {
     result: Mutex<Option<Result<DecodedSourcePreview, BackendError>>>,
     ready: Condvar,
 }
 
+// Test-only stats snapshot. Used by integration tests to assert hit/miss
+// ratios and single-flight coalescing without poking at internals.
 #[cfg(test)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SourcePreviewCacheStats {
@@ -268,6 +367,8 @@ pub struct SourcePreviewCacheStats {
 }
 
 impl SourcePreviewCache {
+    // capacity.max(1) and max_bytes.max(1) — zero would be nonsensical and
+    // would also break evict_over_limits' termination condition.
     pub fn new(capacity: usize, max_bytes: usize) -> Self {
         Self {
             state: Mutex::new(SourcePreviewCacheState {
@@ -287,6 +388,7 @@ impl SourcePreviewCache {
         }
     }
 
+    // Convenience ctor using the module-level defaults. App::new picks this.
     pub fn default_session_cache() -> Self {
         Self::new(
             DEFAULT_SOURCE_PREVIEW_CACHE_CAPACITY,
@@ -294,6 +396,9 @@ impl SourcePreviewCache {
         )
     }
 
+    // Simple get/insert. Returned DecodedSourcePreview is a clone (cheap —
+    // pixels are Arc<[u8]>), so the caller can hand it around without
+    // holding the cache lock.
     #[must_use]
     pub fn get(&self, key: &str) -> Option<DecodedSourcePreview> {
         self.state.lock().get(key)
@@ -303,11 +408,20 @@ impl SourcePreviewCache {
         self.state.lock().insert(key, preview);
     }
 
+    // The single-flight entry point. Three cases:
+    //   (a) Cache hit → return immediately.
+    //   (b) Already decoding → wait on the existing Inflight.
+    //   (c) Otherwise → register an Inflight, run the closure, broadcast.
+    //
+    // We *don't* hold the state mutex while running `load`. Otherwise a slow
+    // BMP decode would block every other cache lookup in the system.
     pub fn get_or_try_insert_with(
         &self,
         key: String,
         load: impl FnOnce() -> Result<DecodedSourcePreview, BackendError>,
     ) -> Result<DecodedSourcePreview, BackendError> {
+        // Scoped lock — figure out which of the three branches we're in,
+        // then release before doing work.
         let inflight = {
             let mut state = self.state.lock();
             if let Some(preview) = state.get(&key) {
@@ -320,6 +434,7 @@ impl SourcePreviewCache {
                 }
                 SourcePreviewLoad::Wait(inflight)
             } else {
+                // Claim the key — any concurrent caller now lands in the Wait branch.
                 let inflight = Arc::new(SourcePreviewInflight::new());
                 state.inflight.insert(key.clone(), Arc::clone(&inflight));
                 SourcePreviewLoad::Decode(inflight)
@@ -329,14 +444,19 @@ impl SourcePreviewCache {
         match inflight {
             SourcePreviewLoad::Wait(inflight) => inflight.wait(),
             SourcePreviewLoad::Decode(inflight) => {
+                // Slow path — actually decode.
                 let result = load();
+                // Re-acquire the lock to publish + clean up inflight.
                 {
                     let mut state = self.state.lock();
                     if let Ok(preview) = &result {
                         state.insert(key.clone(), preview.clone());
                     }
+                    // Always remove inflight, even on Err — otherwise stuck forever.
                     state.inflight.remove(&key);
                 }
+                // Broadcast to anyone waiting. Note we share the Err too —
+                // identical decoders would fail identically anyway.
                 inflight.complete(result.clone());
                 result
             }
@@ -356,6 +476,8 @@ impl SourcePreviewCache {
     }
 }
 
+// Tiny tagged union returned by the locked branch of get_or_try_insert_with.
+// Splitting it out keeps the match arms ergonomic and the lock scope tight.
 enum SourcePreviewLoad {
     Wait(Arc<SourcePreviewInflight>),
     Decode(Arc<SourcePreviewInflight>),
@@ -369,6 +491,9 @@ impl SourcePreviewInflight {
         }
     }
 
+    // Block until the in-flight decoder publishes a result. The `while None`
+    // loop guards against spurious wakeups (parking_lot's Condvar can wake
+    // without notify on some platforms).
     fn wait(&self) -> Result<DecodedSourcePreview, BackendError> {
         let mut result = self.result.lock();
         loop {
@@ -379,6 +504,8 @@ impl SourcePreviewInflight {
         }
     }
 
+    // Publish and broadcast. notify_all (not notify_one) because there can
+    // be many waiters.
     fn complete(&self, result: Result<DecodedSourcePreview, BackendError>) {
         *self.result.lock() = Some(result);
         self.ready.notify_all();
@@ -386,6 +513,9 @@ impl SourcePreviewInflight {
 }
 
 impl SourcePreviewCacheState {
+    // Internal get — also handles LRU touch + hit/miss counters. Returned
+    // Option<DecodedSourcePreview> is owned (cloned out) so callers can
+    // release the cache lock.
     fn get(&mut self, key: &str) -> Option<DecodedSourcePreview> {
         let Some(preview) = self.entries.get(key).map(|entry| entry.preview.clone()) else {
             #[cfg(test)]
@@ -394,6 +524,8 @@ impl SourcePreviewCacheState {
             }
             return None;
         };
+        // touch *after* the clone — touch mutably borrows self, conflicts
+        // with the entries borrow above.
         self.touch(key);
         #[cfg(test)]
         {
@@ -402,10 +534,14 @@ impl SourcePreviewCacheState {
         Some(preview)
     }
 
+    // Insert with re-insertion semantics: if the key already exists, drop
+    // the old entry first so byte accounting stays accurate. Then push to
+    // the front of the LRU and trim if we're over budget.
     fn insert(&mut self, key: String, preview: DecodedSourcePreview) {
         let byte_size = preview.pixels.len();
         if let Some(existing) = self.entries.remove(&key) {
             self.total_bytes = self.total_bytes.saturating_sub(existing.byte_size);
+            // O(n) removal from VecDeque — n is small (capacity defaults to 4).
             self.lru.retain(|candidate| candidate != &key);
         }
 
@@ -416,14 +552,21 @@ impl SourcePreviewCacheState {
         self.evict_over_limits();
     }
 
+    // Move `key` to the front of the LRU queue. O(n) but n ≤ capacity so
+    // this is fine for the default size of 4.
     fn touch(&mut self, key: &str) {
         self.lru.retain(|candidate| candidate != key);
         self.lru.push_front(key.to_string());
     }
 
+    // Drop entries from the back of the LRU until *both* limits are
+    // satisfied. The loop check is `||` not `&&` — we need to be under
+    // BOTH the capacity AND the byte budget.
     fn evict_over_limits(&mut self) {
         while self.entries.len() > self.capacity || self.total_bytes > self.max_bytes {
             let Some(victim) = self.lru.pop_back() else {
+                // No more entries to evict — shouldn't happen if the cache
+                // is consistent, but guard against an empty LRU loop.
                 break;
             };
             if let Some(entry) = self.entries.remove(&victim) {
@@ -445,6 +588,9 @@ mod tests {
         thread,
     };
 
+    // new_with_root variant — builds cache+state under a common parent.
+    // Pinning the artifact path layout (artifacts/<namespace>/<key>.<ext>)
+    // because external tools sometimes inspect the cache directly.
     #[test]
     fn new_with_root_builds_stable_artifact_and_state_paths() {
         let root =
@@ -473,6 +619,8 @@ mod tests {
         let _ = fs::remove_dir_all(root);
     }
 
+    // The `new` ctor (not new_with_root): explicit cache path, state is
+    // its sibling. Used when CACHE_DIR env var is set.
     #[test]
     fn new_uses_sibling_state_directory_for_explicit_cache_root() {
         let root =
@@ -484,6 +632,8 @@ mod tests {
         assert_eq!(store.persistence_dir(), root.join("state"));
     }
 
+    // Smoke test for ensure() — both dirs should be created from a fresh
+    // root. App::prepare relies on this being idempotent.
     #[test]
     fn ensure_creates_cache_and_state_directories() {
         let root =
@@ -498,6 +648,10 @@ mod tests {
         let _ = fs::remove_dir_all(root);
     }
 
+    // Pins LRU-by-mtime: write a, b, c with 2ms gaps; budget 1000 bytes
+    // forces eviction of a and b (oldest), keeping c. The thread::sleep
+    // is the ugly-but-necessary bit — mtime resolution on some filesystems
+    // is millisecond-coarse.
     #[test]
     fn evict_artifacts_over_limit_removes_oldest_files() {
         let root =
@@ -521,6 +675,8 @@ mod tests {
         let _ = fs::remove_dir_all(root);
     }
 
+    // Two no-op cases in one: (a) artifact dir doesn't exist yet, (b) total
+    // size is comfortably under budget. Both must return 0 removed.
     #[test]
     fn evict_artifacts_over_limit_noops_when_under_budget_or_missing() {
         let root = std::env::temp_dir().join(format!(
@@ -539,6 +695,9 @@ mod tests {
         let _ = fs::remove_dir_all(root);
     }
 
+    // The fast-path test: tracked_bytes says we're at 500 (under the 1000
+    // limit), so even though there's a 2000-byte file on disk, eviction
+    // skips the walk. Proves the tracked_bytes shortcut works.
     #[test]
     fn evict_artifacts_skips_walk_when_tracked_bytes_are_under_limit() {
         let root = std::env::temp_dir().join(format!(
@@ -556,6 +715,9 @@ mod tests {
         let _ = fs::remove_dir_all(root);
     }
 
+    // add_artifact_bytes is a no-op when tracked_bytes is None (we don't
+    // know the baseline yet). Once force_evict_state primes it to Some(5000),
+    // subsequent adds accumulate. Zero-delta calls also no-op.
     #[test]
     fn add_artifact_bytes_accumulates_only_when_total_is_known() {
         let root = std::env::temp_dir().join(format!(
@@ -574,6 +736,9 @@ mod tests {
         assert_eq!(store.tracked_bytes(), Some(6500));
     }
 
+    // Error path: parent path exists but is a *file*, not a directory.
+    // create_dir_all fails, and we want the error mapped to Internal with
+    // a message that names what we tried to create.
     #[test]
     fn artifact_path_wraps_directory_creation_errors() {
         let root =
@@ -591,6 +756,9 @@ mod tests {
         let _ = fs::remove_file(root);
     }
 
+    // Clone semantics + counter accounting. Mutating the returned clone
+    // must NOT affect the cached entry — verifies our Arc::make_mut path
+    // really does CoW on the way out.
     #[test]
     fn source_preview_cache_returns_clones_and_tracks_hits() {
         let cache = SourcePreviewCache::new(2, 1024);
@@ -620,6 +788,9 @@ mod tests {
         );
     }
 
+    // Capacity-driven eviction: capacity=2, insert a,b, touch a (so b is
+    // now LRU), insert c → b evicted, a and c survive. The get("a") in the
+    // middle is the touch.
     #[test]
     fn source_preview_cache_evicts_least_recently_used_by_capacity() {
         let cache = SourcePreviewCache::new(2, 1024);
@@ -639,6 +810,9 @@ mod tests {
         assert!(cache.get("c").is_some());
     }
 
+    // Byte-budget eviction: max_bytes=5, two 3-byte entries → only the
+    // second fits, the first gets evicted even though capacity (10) allows
+    // both. Pins the `||` (not `&&`) condition in evict_over_limits.
     #[test]
     fn source_preview_cache_evicts_by_byte_budget() {
         let cache = SourcePreviewCache::new(10, 5);
@@ -656,6 +830,11 @@ mod tests {
         assert_eq!(cache.stats().total_bytes, 3);
     }
 
+    // Single-flight: two threads call get_or_try_insert_with for the same
+    // key. Thread 1 holds the loader closure open via release_loader_rx.
+    // Thread 2 should land in the Wait branch (inflight_waits bumps to 1).
+    // When thread 1 finally returns, both threads see the same preview AND
+    // load_count is still 1 — the second loader closure never ran.
     #[test]
     fn source_preview_cache_coalesces_concurrent_loads_for_same_key() {
         let cache = Arc::new(SourcePreviewCache::new(4, 1024));

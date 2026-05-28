@@ -1,3 +1,29 @@
+// Tooth + bone overlay analysis. This is the most CPU-intensive path in the
+// crate: we run a learned probability model over every pixel, then morph the
+// result into clean masks the UI can draw.
+//
+// The pipeline at a glance:
+//   1. Extract a 4-tuple of features per pixel (gray, neighborhood stats).
+//   2. Pack the tuple into a 28-bit u32 key (`tooth_feature_table_key`).
+//   3. Look up the key in the feature probability table — a sorted u32 → u8
+//      mapping shipped as a gzipped asset in ../assets/analysis/.
+//   4. Threshold (>= 192 for tooth, >= 96 for bone), clean up with morphology
+//      (close, bridge, frame-clearance), draw outlines.
+//
+// All four assets (bone_feature_table, bone_exemplar, tooth_feature_table,
+// learned_model) are lazily loaded into OnceLock<Result<…>> on first use —
+// see `bone_feature_table()`, `tooth_feature_table()`, etc. below. Loading
+// errors are sticky: a corrupt asset means the analyzer is permanently
+// disabled this run, but doesn't crash the app.
+//
+// Hot-path engineering notes:
+//   * The feature table is bucketed by the high bits of the key so we
+//     binary-search a tiny L1/L2-resident slice, not the full 53 MB array.
+//   * Rayon parallelizes over rows (par_iter), which is the only level of
+//     parallelism that pays off here — per-pixel is too fine-grained.
+//   * Morphology operations work in-place on Vec<bool> mask buffers held in
+//     a reusable MaskBuffers so we don't alloc/free per frame.
+
 use std::{
     collections::HashMap,
     io::{Cursor, Read},
@@ -9,8 +35,13 @@ use rayon::prelude::*;
 
 use crate::render::{PreviewFormat, PreviewImage};
 
+// RGBA outline colors. Green for tooth, red for bone — chosen to read well
+// against both bright and dark X-rays.
 const TOOTH_GREEN: [u8; 4] = [120, 255, 0, 255];
 const BONE_RED: [u8; 4] = [255, 0, 0, 255];
+// Models are baked into the binary via include_bytes! so we don't have to
+// ship sidecar files. The .gz variants are deflated lazily on first use;
+// learned_model.bin is small enough to ship uncompressed.
 const BONE_FEATURE_TABLE_DATA: &[u8] =
     include_bytes!("../assets/analysis/bone_feature_table_model.bin.gz");
 const BONE_EXEMPLAR_MODEL_DATA: &[u8] =
@@ -18,10 +49,16 @@ const BONE_EXEMPLAR_MODEL_DATA: &[u8] =
 const TOOTH_FEATURE_TABLE_DATA: &[u8] =
     include_bytes!("../assets/analysis/feature_table_model.bin.gz");
 const LEARNED_MODEL_DATA: &[u8] = include_bytes!("../assets/analysis/learned_model.bin");
+// Tooth feature table bin counts — these define the 4D feature space the
+// model was trained on. xb=256 gray bins, yb=512 neighborhood bins, nb=64
+// normalized bins, sb=32 score bins. Changing any of these requires
+// regenerating the asset and the model.
 const TOOTH_TABLE_X_BINS: usize = 256;
 const TOOTH_TABLE_Y_BINS: usize = 512;
 const TOOTH_TABLE_NORMALIZED_BINS: usize = 64;
 const TOOTH_TABLE_SCORE_BINS: usize = 32;
+// Probability >= 192/255 → tooth. The threshold was tuned against the
+// validation set; lower numbers include more soft-tissue false positives.
 const TOOTH_TABLE_PROBABILITY_THRESHOLD: u8 = 192;
 // Bucket the sorted tooth feature-table keys by their high bits so the per-pixel
 // lookup binary-searches a small, cache-resident slice instead of probing the
@@ -32,35 +69,64 @@ const TOOTH_TABLE_PROBABILITY_THRESHOLD: u8 = 192;
 // search window that fits L1/L2) with a ~256 KB bucket index, negligible against
 // the 67 MB table.
 const TOOTH_TABLE_BUCKET_SHIFT: u32 = 12;
+// Bone feature table bin counts — different from the tooth table because
+// bone uses a 4D feature space tuned to soft-tissue boundaries instead.
 const BONE_TABLE_X_BINS: usize = 160;
 const BONE_TABLE_Y_BINS: usize = 224;
 const BONE_TABLE_NORMALIZED_BINS: usize = 32;
 const BONE_TABLE_GRADIENT_BINS: usize = 16;
+// Lower threshold than tooth (96 vs 192) because bone is harder to detect
+// confidently — we accept more uncertain pixels and lean on the
+// morphological cleanup below to weed out spurious blobs.
 const BONE_TABLE_PROBABILITY_THRESHOLD: u8 = 96;
+// Sub-floor blob sizes get dropped. 24px for bone, 4px for tooth — both
+// were empirically chosen to remove noise without erasing real anatomy.
 const MINIMUM_BONE_AREA_FLOOR_PIXELS: usize = 24;
 const MINIMUM_TOOTH_AREA_FLOOR_PIXELS: usize = 4;
+// Outline thicknesses match what looks readable in the UI's typical zoom.
 const TOOTH_OUTLINE_THICKNESS_PIXELS: usize = 2;
 const BONE_OUTLINE_THICKNESS_PIXELS: usize = 2;
+// Morphological close: dilate then erode by N pixels. 2px is enough to fill
+// hairline cracks in the tooth mask without merging adjacent teeth.
 const TOOTH_MASK_CLOSE_RADIUS_PIXELS: usize = 2;
+// Cut a 24px-radius safety margin around the tooth mask before drawing the
+// bone overlay so the two don't visually overlap at the boundary.
 const BONE_TOOTH_CUTOUT_BRIDGE_RADIUS_PIXELS: usize = 24;
+// Drop any bone detection within 12px of the image edge — radiograph
+// vignetting and detector artifacts produce false positives there.
 const BONE_IMAGE_FRAME_CLEARANCE_PIXELS: usize = 12;
+// Pixels at or below this gray value are treated as off-detector (i.e. the
+// black border of the radiograph). Used to exclude background from analysis.
 const RADIOGRAPH_BACKGROUND_MAX_GRAY: u8 = 2;
+// Learned (forest-of-trees) model knobs. Threshold 0.1 was set during the
+// last retrain; LR was used during training but is kept here as documentation.
 const LEARNED_MODEL_LEARNING_RATE: f64 = 0.1;
 const LEARNED_MODEL_THRESHOLD: f64 = 0.1;
 
+// Lazy-loaded models. Each OnceLock holds a Result so a corrupt asset surfaces
+// once and stays that way — we don't keep retrying the gunzip on every call.
 static BONE_FEATURE_TABLE: OnceLock<Result<HashMap<u32, u8>, String>> = OnceLock::new();
 static BONE_EXEMPLAR_MODEL: OnceLock<Result<Vec<BoneExemplar>, String>> = OnceLock::new();
 static TOOTH_FEATURE_TABLE: OnceLock<Result<FeatureProbabilityTable, String>> = OnceLock::new();
 static LEARNED_MODEL: OnceLock<Result<Vec<Vec<LearnedNode>>, String>> = OnceLock::new();
 
+// One exemplar = one labeled bone region from the training set. We use these
+// at inference time for nearest-neighbor refinement of fuzzy detections.
+// `hash` is a content fingerprint that lets us dedupe identical exemplars.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct BoneExemplar {
     hash: u64,
     width: u32,
     height: u32,
+    // Packed bits — one bit per pixel, row-major. Not Vec<bool> because we
+    // need the dense packing for memory budget.
     mask: Vec<u8>,
 }
 
+// Decision-tree node. The forest is stored as Vec<Vec<LearnedNode>> — one
+// inner Vec per tree, each with a flat array of nodes. left/right are i32
+// indexes into the same array, or negative to indicate a leaf (in which
+// case `value` is the leaf score).
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct LearnedNode {
     feature: i32,
@@ -134,6 +200,9 @@ impl FeatureProbabilityTable {
     }
 }
 
+// The public output. `preview` is the outline overlay (drawn on top of the
+// grayscale); `filled_preview` is the filled-region version used for the
+// "Sections" toggle. The counts and coverage are surfaced to the UI footer.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ToothOverlayResult {
     pub preview: PreviewImage,
@@ -145,6 +214,10 @@ pub struct ToothOverlayResult {
     pub mode: String,
 }
 
+// Reusable scratch buffers for morphology ops. Allocated once per analyze
+// invocation and threaded through the helpers. `a`, `b` are alternating
+// double-buffers for in-place chains; `scratch` is a side buffer for the
+// few ops that need three; `visited` is the flood-fill marker.
 struct MaskBuffers {
     a: Vec<bool>,
     b: Vec<bool>,
@@ -163,6 +236,13 @@ impl MaskBuffers {
     }
 }
 
+// Public entry. Validates input, then runs the full tooth + bone pipeline
+// and produces both an outline overlay and a filled-region overlay.
+//
+// Pre-checks (fail-fast, before allocating mask buffers):
+//   * Gray8 only — we depend on single-byte-per-pixel layout.
+//   * 8×8 minimum — anything smaller can't host a meaningful tooth feature.
+//   * Buffer length must match width × height (caller bug otherwise).
 pub fn generate_tooth_overlay(preview: &PreviewImage) -> Result<ToothOverlayResult, String> {
     if preview.format != PreviewFormat::Gray8 {
         return Err("tooth analysis requires Gray8 preview input".to_string());
@@ -183,6 +263,9 @@ pub fn generate_tooth_overlay(preview: &PreviewImage) -> Result<ToothOverlayResu
         ));
     }
 
+    // Normalize once — both tooth and bone detectors consume the normalized
+    // version. The raw `gray` is also kept around for the gradient/exemplar
+    // paths that depend on absolute intensity.
     let normalized = normalize_gray(&preview.pixels);
     let mut mask_buffers = MaskBuffers::new(width * height);
     let tooth_mask = detect_tooth_mask(
@@ -201,9 +284,14 @@ pub fn generate_tooth_overlay(preview: &PreviewImage) -> Result<ToothOverlayResu
     );
     let tooth_pixels = count_mask(&tooth_mask);
     let bone_pixels = count_mask(&bone_mask);
+    // .max(1) just in case — pre-check rejects len 0, but belt + suspenders.
     let coverage = (tooth_pixels + bone_pixels) as f64 / preview.pixels.len().max(1) as f64;
     let candidate_count = count_components(&tooth_mask, width, height, &mut mask_buffers.visited);
 
+    // The `mode` string surfaces in the UI footer. We tack on warnings if the
+    // result looks suspect — better to admit uncertainty than silently show
+    // a flaky overlay. Thresholds (1/150 of image, width/8) were tuned to
+    // avoid false-alarming on tight crops.
     let mut mode = "dynamic tooth and bone level overlay".to_string();
     if tooth_pixels < preview.pixels.len() / 150 || candidate_count == 0 {
         mode.push_str("; no reliable tooth mask found");
@@ -254,6 +342,14 @@ pub fn generate_tooth_overlay(preview: &PreviewImage) -> Result<ToothOverlayResu
     })
 }
 
+// Tooth detection top-level. Tries the learned model first, falls back to a
+// percentile-thresholded mask if the model couldn't load. Either way the
+// resulting raw mask gets passed through clean_tooth_mask for morphological
+// polish (small-component removal, closing, hole-filling).
+//
+// The fallback threshold (.max(24)) ensures we don't try to threshold at
+// near-black even on very dark X-rays — pixels below ~24/255 are almost
+// always background/sensor noise.
 fn detect_tooth_mask(
     gray: &[u8],
     normalized: &[u8],
@@ -271,6 +367,11 @@ fn detect_tooth_mask(
     clean_tooth_mask(&mask, width, height, buffers)
 }
 
+// Run the learned forest + feature-table combo. Returns None if either model
+// failed to load (None propagates up to make the caller fall back to the
+// percentile threshold). Per-pixel work is independent so par_chunks_mut
+// parallelizes over rows — finer-grained parallelism doesn't pay off because
+// the binary search is the dominant cost and isn't compute-bound.
 fn detect_learned_tooth_mask(normalized: &[u8], width: usize, height: usize) -> Option<Vec<bool>> {
     if width == 0 || height == 0 || normalized.len() != width * height {
         return None;
@@ -284,6 +385,10 @@ fn detect_learned_tooth_mask(normalized: &[u8], width: usize, height: usize) -> 
         for (x, slot) in row.iter_mut().enumerate() {
             let index = y * width + x;
             let score = scores[index];
+            // Prefer the lookup table answer when the table has data for
+            // this feature tuple; otherwise fall back to the forest score.
+            // This gives us a high-precision verdict where possible and a
+            // graceful continuous estimate everywhere else.
             *slot = if let Some(probability) = table.and_then(|table| {
                 table.probability(tooth_feature_table_key(
                     x,
@@ -1598,6 +1703,14 @@ fn read_le_f64(cursor: &mut Cursor<&[u8]>) -> Result<f64, String> {
     Ok(f64::from_le_bytes(bytes))
 }
 
+// Pack a 4D bone feature (x-pos, y-pos, normalized gray, gradient) into a
+// single u32 lookup key. Layout:
+//   bits 0..8   xb       (8 bits, 160 bins fits)
+//   bits 8..16  yb       (8 bits, 224 bins fits)
+//   bits 16..21 nb       (5 bits, 32 bins)
+//   bits 21..25 gb       (4 bits, 16 bins)
+// The .min(BINS - 1) on each is a saturation guard — integer division
+// almost-never overflows the bin count but can on the right-edge pixel.
 fn bone_feature_table_key(
     x: usize,
     y: usize,
@@ -1617,6 +1730,16 @@ fn bone_feature_table_key(
     (xb as u32) | ((yb as u32) << 8) | ((nb as u32) << 16) | ((gb as u32) << 21)
 }
 
+// Same packing scheme as bone but with a different field layout because the
+// tooth feature space is bigger:
+//   bits 0..8   xb       (256 bins)
+//   bits 8..17  yb       (9 bits, 512 bins)
+//   bits 17..23 nb       (6 bits, 64 bins)
+//   bits 23..28 sb       (5 bits, 32 bins, signed score remapped to [0..32))
+//
+// The score is a continuous f64 in roughly [-4, 4]; the `(score + 4) / 8`
+// affine maps that to [0, 1], then we multiply by SCORE_BINS to bucket.
+// The post-cast clamps handle scores outside the training distribution.
 fn tooth_feature_table_key(
     x: usize,
     y: usize,
@@ -1641,12 +1764,17 @@ fn tooth_feature_table_key(
     (xb as u32) | ((yb as u32) << 8) | ((nb as u32) << 17) | ((sb as u32) << 23)
 }
 
+// Histogram-based integer percentile. O(N) — one pass for the histogram,
+// another over 256 bins for the CDF. Faster than sorting for image-sized
+// inputs.
 fn percentile(values: &[u8], percentile: usize) -> u8 {
     let mut histogram = [0_usize; 256];
     for value in values {
         histogram[*value as usize] += 1;
     }
 
+    // div_ceil so 50th percentile of an even-length series picks the upper
+    // of the two middle values — matches numpy's "higher" interpolation mode.
     let target = (values.len() * percentile).div_ceil(100);
     let mut seen = 0_usize;
     for (value, count) in histogram.iter().enumerate() {
@@ -1658,6 +1786,8 @@ fn percentile(values: &[u8], percentile: usize) -> u8 {
     255
 }
 
+// Population count over a bool mask. .filter().count() — the compiler
+// vectorizes this for big slices.
 fn count_mask(mask: &[bool]) -> usize {
     mask.iter().filter(|value| **value).count()
 }
@@ -1703,6 +1833,9 @@ fn count_components(mask: &[bool], width: usize, height: usize, visited: &mut [b
 mod tests {
     use super::*;
 
+    // Smoke test: cook a 20×20 image with a bright square (the "tooth")
+    // and a striped row (the "bone level"), confirm the analyzer returns
+    // non-empty masks + the expected mode string prefix.
     #[test]
     fn generate_tooth_overlay_returns_overlay_images() {
         let mut gray = vec![24_u8; 20 * 20];
@@ -1732,6 +1865,9 @@ mod tests {
         );
     }
 
+    // Two morphological invariants in one: (a) lone pixels in the corner
+    // get dropped (small-component removal), and (b) a single-pixel hole
+    // in the middle of the big rectangle gets filled in (hole filling).
     #[test]
     fn clean_tooth_mask_removes_small_islands_and_fills_internal_holes() {
         const WIDTH: usize = 80;
@@ -1750,6 +1886,9 @@ mod tests {
         assert!(!cleaned[6 * WIDTH + 66]);
     }
 
+    // Confirms the overlay precedence rule: bone outline is suppressed
+    // inside the tooth region (we don't want red lines crossing through
+    // green ones), and tooth outline appears along the rectangle border.
     #[test]
     fn overlay_outline_preview_outlines_tooth_and_suppresses_bone_inside_tooth() {
         const WIDTH: usize = 9;
@@ -1779,6 +1918,9 @@ mod tests {
         assert!(!green_mask[4 * WIDTH + 4]);
     }
 
+    // Filled overlay: outside masks → grayscale carries through, bone mask
+    // → red fill, tooth mask → green fill, both → tooth wins. Pixel-perfect
+    // assertions on a 5×5 grid pin each case.
     #[test]
     fn overlay_filled_preview_preserves_grayscale_background_and_mask_precedence() {
         const WIDTH: usize = 5;
@@ -1815,6 +1957,9 @@ mod tests {
         assert_eq!(rgb_at(&preview, 12), [24, 24, 24]);
     }
 
+    // BONE_IMAGE_FRAME_CLEARANCE in action — bone pixels within ~12px of
+    // the edge don't get an outline. Asserts both sides of the boundary
+    // (suppressed near edge, visible further in).
     #[test]
     fn overlay_outline_preview_suppresses_bone_outline_on_image_frame() {
         const WIDTH: usize = 16;
@@ -1843,6 +1988,8 @@ mod tests {
         assert!(red_mask[8 * WIDTH + 13]);
     }
 
+    // Just checks that the asset deflates + parses without error. If this
+    // fails the shipped binary file has gone bad.
     #[test]
     fn bone_feature_table_model_loads_probabilities() {
         let table = loaded_bone_feature_table().expect("bone feature table should load");
@@ -1850,6 +1997,7 @@ mod tests {
         assert!(!table.is_empty());
     }
 
+    // Verifies the forest has at least one tree and every tree is non-empty.
     #[test]
     fn learned_tooth_model_loads_trees() {
         let trees = loaded_learned_model().expect("learned tooth model should load");
@@ -1858,6 +2006,9 @@ mod tests {
         assert!(trees.iter().all(|tree| !tree.is_empty()));
     }
 
+    // Locks the exact entry count of the shipped feature table. If anyone
+    // regenerates the asset and the count changes, update this number too —
+    // and double-check the bucket-size analysis at the top of the file.
     #[test]
     fn tooth_feature_table_model_loads_probabilities() {
         let table = loaded_tooth_feature_table().expect("tooth feature table should load");
@@ -1865,6 +2016,8 @@ mod tests {
         assert_eq!(table.len(), 13_441_673);
     }
 
+    // Exemplars must be sorted by hash — the inference path binary-searches
+    // by hash, so an unsorted asset would silently produce wrong matches.
     #[test]
     fn bone_exemplar_model_loads_sorted_entries() {
         let exemplars = loaded_bone_exemplar_model().expect("bone exemplar model should load");
@@ -1877,11 +2030,16 @@ mod tests {
         );
     }
 
+    // The empty-input FNV-1a hash. Pins the FNV constants — any change to
+    // the offset basis or prime breaks both this test and the shipped
+    // exemplar lookups.
     #[test]
     fn bone_exemplar_hash_matches_reference_fnv_layout() {
         assert_eq!(hash_bone_exemplar_pixels(&[], 0, 0), 0xa8c7_f832_281a_39c5);
     }
 
+    // Locks the bit-packing scheme for bone keys. If anyone rearranges the
+    // shifts in bone_feature_table_key, this fires.
     #[test]
     fn bone_feature_table_key_matches_reference_layout() {
         let key = bone_feature_table_key(80, 112, 160, 224, 128, 64);
@@ -1889,6 +2047,7 @@ mod tests {
         assert_eq!(key, 0x0090_7050);
     }
 
+    // Same idea for tooth — pins bits 0..28 of the key against a known input.
     #[test]
     fn tooth_feature_table_key_matches_reference_layout() {
         let key = tooth_feature_table_key(128, 256, 256, 512, 128, 0.0);
@@ -1896,6 +2055,7 @@ mod tests {
         assert_eq!(key, 0x0841_0080);
     }
 
+    // Test fixture: paint a filled rectangle into a 1D row-major mask.
     fn fill_mask_rect(
         mask: &mut [bool],
         width: usize,
@@ -1911,6 +2071,8 @@ mod tests {
         }
     }
 
+    // Extract a bool mask from an RGBA preview marking pixels that equal
+    // BONE_RED — used to assert presence/absence of bone outline pixels.
     fn red_mask_from_rgba(preview: &PreviewImage) -> Vec<bool> {
         preview
             .pixels

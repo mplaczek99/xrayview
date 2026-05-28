@@ -1,7 +1,25 @@
+// BMP decode + grayscale render. The file is the heart of the input pipeline:
+// every study eventually passes through here. We support uncompressed BMPs in
+// 8-bit (indexed or grayscale), 24-bit BGR, and 32-bit BGRA. Anything else is
+// rejected at parse time. Compressed BMPs (RLE) are out of scope — bitewing
+// captures are always raw uncompressed.
+//
+// "Source preview" vs "rendered preview":
+//   * source = the raw 8-bit grayscale (or grayscale-projected from RGB) as
+//     decoded from the file. This is what the cache stores.
+//   * rendered = the source after a linear min/max stretch to fill the 0..255
+//     range. Better contrast for display; not what analysis wants.
+// The `preserve_eight_bit_range` / "tooth analysis" variant skips the stretch
+// because the analyzer depends on the raw values being comparable across
+// images.
+
 use std::{fs, path::Path, sync::Arc};
 
 use crate::contracts::MeasurementScale;
 
+// Metadata mirrors the DICOM tag names we used to surface. With BMP there's
+// no real PixelSpacing, so measurement_scale() always returns None for now —
+// kept as a method so callers compose the same way they used to.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Metadata {
     pub rows: u16,
@@ -9,16 +27,22 @@ pub struct Metadata {
     pub samples_per_pixel: u16,
     pub bits_allocated: u16,
     pub bits_stored: u16,
+    // "MONOCHROME2" for grayscale (white = high) or "RGB" for color. Inherited
+    // vocabulary from when this also read DICOM.
     pub photometric_interpretation: String,
 }
 
 impl Metadata {
+    // BMP has no pixel-spacing metadata — always None. Left in place so the
+    // upstream code can stay format-agnostic.
     #[must_use]
     pub fn measurement_scale(&self) -> Option<MeasurementScale> {
         None
     }
 }
 
+// The cached, decoded source pixels. Arc<[u8]> for cheap fan-out into
+// processing/analysis without copying.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DecodedSourcePreview {
     pub width: u32,
@@ -27,6 +51,8 @@ pub struct DecodedSourcePreview {
     pub measurement_scale: Option<MeasurementScale>,
 }
 
+// Render-ready preview — same shape as DecodedSourcePreview but the pixels
+// have been (potentially) stretched to fill the 0..255 range.
 #[derive(Debug, Clone, PartialEq)]
 pub struct RenderedPreview {
     pub width: u32,
@@ -35,12 +61,17 @@ pub struct RenderedPreview {
     pub measurement_scale: Option<MeasurementScale>,
 }
 
+// Reserved for an upcoming feature — clinicians sometimes want to see the
+// raw 8-bit values directly without the auto-stretch. Wired through the
+// public API surface but ignored by the renderer today.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RenderWindowMode {
     Default,
     FullRange,
 }
 
+// Path-based public entry — reads just enough of the file to fill out
+// Metadata. Doesn't decode pixel data, so it's fast on huge files.
 pub fn read_file(path: &str) -> Result<Metadata, String> {
     let path = Path::new(path);
     let bytes = fs::read(path).map_err(|error| format!("open source file: {error}"))?;
@@ -54,10 +85,13 @@ pub fn read_file(path: &str) -> Result<Metadata, String> {
         .map_err(|error| format!("read BMP metadata from {}: {error}", path.display()))
 }
 
+// In-memory variant for the (already-buffered) bytes case.
 pub fn read(bytes: &[u8]) -> Result<Metadata, String> {
     read_header(bytes)
 }
 
+// The actual metadata extractor. Note we hardcode bits_allocated/stored = 8;
+// BMP can technically express 1/4/16-bit depths but we don't ship support.
 pub fn read_header(bytes: &[u8]) -> Result<Metadata, String> {
     let header = parse_bmp_header(bytes)?;
     Ok(Metadata {
@@ -70,6 +104,8 @@ pub fn read_header(bytes: &[u8]) -> Result<Metadata, String> {
     })
 }
 
+// Default rendering: read file, decode, stretch. The window_mode-variant
+// version is exposed for forward-compat — today both modes do the same thing.
 pub fn render_grayscale_preview_file(path: impl AsRef<Path>) -> Result<RenderedPreview, String> {
     render_grayscale_preview_file_with_window_mode(path, RenderWindowMode::Default)
 }
@@ -81,12 +117,17 @@ pub fn render_grayscale_preview_file_with_window_mode(
     render_grayscale_preview_file_inner(path, false)
 }
 
+// "For tooth analysis" = preserve the raw 8-bit range. The analyzer uses
+// absolute pixel values for thresholding, so a stretched preview would break
+// the cross-image consistency assumption.
 pub fn render_grayscale_preview_file_for_tooth_analysis(
     path: impl AsRef<Path>,
 ) -> Result<RenderedPreview, String> {
     render_grayscale_preview_file_inner(path, true)
 }
 
+// Decode without stretching — this is what gets put in the source preview cache.
+// Stretched variants are derived from this on demand.
 pub fn decode_source_preview_file(path: impl AsRef<Path>) -> Result<DecodedSourcePreview, String> {
     let path = path.as_ref();
     let bytes = fs::read(path).map_err(|error| format!("open source file: {error}"))?;
@@ -100,6 +141,7 @@ pub fn decode_source_preview_file(path: impl AsRef<Path>) -> Result<DecodedSourc
         .map_err(|error| format!("decode BMP image from {}: {error}", path.display()))
 }
 
+// Shared file-loading prelude for the two file-based render variants.
 fn render_grayscale_preview_file_inner(
     path: impl AsRef<Path>,
     preserve_eight_bit_range: bool,
@@ -116,6 +158,8 @@ fn render_grayscale_preview_file_inner(
         .map_err(|error| format!("decode BMP image from {}: {error}", path.display()))
 }
 
+// In-memory render entry points — same dispatch as the file versions but
+// taking pre-loaded bytes.
 pub fn render_grayscale_preview(bytes: &[u8]) -> Result<RenderedPreview, String> {
     render_grayscale_preview_with_options(bytes, false)
 }
@@ -138,21 +182,30 @@ fn render_grayscale_preview_with_options(
     ))
 }
 
+// Decode-only path: hand the raw DecodedSourcePreview back to the caller
+// without applying any tone mapping. App uses this to populate the source
+// preview cache.
 pub fn decode_source_preview(bytes: &[u8]) -> Result<DecodedSourcePreview, String> {
     let image = decode_bmp(bytes)?;
     Ok(DecodedSourcePreview {
         width: image.width,
         height: image.height,
+        // Convert Vec<u8> → Arc<[u8]> once at the boundary — every consumer
+        // beyond this point just clones the Arc.
         pixels: image.pixels.into(),
         measurement_scale: None,
     })
 }
 
+// Public render-from-decoded entry. Used when the source is already in the
+// cache and we don't want to re-decode.
 #[must_use]
 pub fn render_grayscale_preview_from_source(source: &DecodedSourcePreview) -> RenderedPreview {
     render_grayscale_preview_from_source_with_options(source, false)
 }
 
+// Tooth-analysis variant: skip the auto-stretch and Arc::clone the source
+// pixels straight through. Zero-copy fast path.
 #[must_use]
 pub fn render_grayscale_preview_from_source_for_tooth_analysis(
     source: &DecodedSourcePreview,
@@ -160,6 +213,10 @@ pub fn render_grayscale_preview_from_source_for_tooth_analysis(
     render_grayscale_preview_from_source_with_options(source, true)
 }
 
+// The actual implementation. Two paths:
+//   * preserve_eight_bit_range=true: Arc::clone, no work, no allocation.
+//   * default: scan min/max, build a 256-entry stretch LUT, apply.
+// LUT is 256 entries because input is u8 — we only need a tiny table.
 fn render_grayscale_preview_from_source_with_options(
     source: &DecodedSourcePreview,
     preserve_eight_bit_range: bool,
@@ -168,11 +225,14 @@ fn render_grayscale_preview_from_source_with_options(
         return RenderedPreview {
             width: source.width,
             height: source.height,
+            // Free clone — just bumps the refcount on the underlying buffer.
             pixels: Arc::clone(&source.pixels),
             measurement_scale: source.measurement_scale.clone(),
         };
     }
 
+    // Find min/max in one pass. We initialize from pixels[0] (safe — caller
+    // never hands us an empty preview because BMP enforces non-zero dims).
     let mut min = source.pixels[0];
     let mut max = source.pixels[0];
     for value in &source.pixels[1..] {
@@ -180,6 +240,8 @@ fn render_grayscale_preview_from_source_with_options(
         max = max.max(*value);
     }
 
+    // Build a small LUT then map every pixel through it. Way cheaper than
+    // calling map_linear once per pixel — 256 calls vs N (typically millions).
     let lut: [u8; 256] = std::array::from_fn(|value| {
         let value = value as u8;
         map_linear(f32::from(value), f32::from(min), f32::from(max))
@@ -199,6 +261,9 @@ fn render_grayscale_preview_from_source_with_options(
     }
 }
 
+// Same stretch logic but operating on the post-decode owned Vec<u8> (not
+// Arc'd yet). The duplication with above is intentional — this variant gets
+// to consume the buffer with `into_iter`, no allocation past the result.
 fn render_decoded_bmp_with_options(
     image: DecodedBmp,
     preserve_eight_bit_range: bool,
@@ -237,6 +302,9 @@ fn render_decoded_bmp_with_options(
     }
 }
 
+// Reject anything that isn't *.bmp at the path level. We do an explicit
+// extension check rather than just trying to parse the bytes so the error
+// message points the user at the obvious problem.
 fn supports_bmp_path(path: &Path) -> bool {
     matches!(
         path.extension()
@@ -247,12 +315,18 @@ fn supports_bmp_path(path: &Path) -> bool {
     )
 }
 
+// Decoder's intermediate representation. Always 8-bit grayscale (palette/BGR
+// inputs get grayscale-projected during decode).
 struct DecodedBmp {
     width: u32,
     height: u32,
     pixels: Vec<u8>,
 }
 
+// Parsed BMP header fields we care about.
+//   top_down=true is the rare positive-height-equivalent (BMP signals it as
+//   a negative height in the header) — in that case we iterate rows in
+//   source order. Otherwise (the common case) we flip bottom-up to top-down.
 #[derive(Debug, Clone, Copy)]
 struct BmpHeader {
     pixel_offset: usize,
@@ -264,6 +338,8 @@ struct BmpHeader {
 }
 
 impl BmpHeader {
+    // 8-bit means we get one byte per pixel (palette or grayscale).
+    // 24/32-bit means three color samples. Used only in Metadata population.
     fn samples_per_pixel(self) -> u16 {
         if self.bits_per_pixel == 8 {
             1
@@ -272,6 +348,8 @@ impl BmpHeader {
         }
     }
 
+    // MONOCHROME2 in DICOM-speak means "white = high value". RGB is the
+    // obvious color case. We don't have a path for MONOCHROME1 (inverted).
     fn photometric_interpretation(self) -> &'static str {
         if self.samples_per_pixel() == 1 {
             "MONOCHROME2"
@@ -280,10 +358,13 @@ impl BmpHeader {
         }
     }
 
+    // 1, 3, or 4 — depending on bit depth. Used for row_stride computation.
     fn bytes_per_pixel(self) -> usize {
         usize::from(self.bits_per_pixel / 8)
     }
 
+    // BMP rows are always padded out to a 4-byte boundary. div_ceil(4)*4
+    // is the standard idiom; overflow-checked because width*bpp can be huge.
     fn row_stride(self) -> Result<usize, String> {
         self.width
             .checked_mul(self.bytes_per_pixel())
@@ -292,6 +373,9 @@ impl BmpHeader {
     }
 }
 
+// The pixel-format dispatch. Palette8 carries the resolved palette → gray LUT
+// so we don't recompute it per row. Boxed because [u8; 256] on the stack
+// every recursion would be a lot of stack traffic.
 enum BmpPixelFormat {
     Gray8,
     Palette8(Box<[u8; 256]>),
@@ -299,7 +383,17 @@ enum BmpPixelFormat {
     Bgra32,
 }
 
+// Parse the 14-byte file header + the (variable but ≥40 byte) DIB header.
+// We refuse:
+//   * Anything not starting "BM" (BMP magic).
+//   * DIB headers < 40 bytes (the old OS/2 format — not supported).
+//   * Compressed BMPs (compression != 0, i.e. anything but BI_RGB).
+//   * Bit depths other than 8/24/32.
+//   * Width/height beyond u16::MAX — that's our internal dimension cap.
+// All reads are little-endian; see read_le_u{16,32}_at helpers.
 fn parse_bmp_header(bytes: &[u8]) -> Result<BmpHeader, String> {
+    // 54 = 14 (file header) + 40 (minimum DIB header). Anything smaller
+    // can't possibly be a valid BMP.
     if bytes.len() < 54 || &bytes[..2] != b"BM" {
         return Err("unsupported BMP header".to_string());
     }
@@ -309,10 +403,13 @@ fn parse_bmp_header(bytes: &[u8]) -> Result<BmpHeader, String> {
     if dib_size < 40 {
         return Err(format!("unsupported BMP DIB header size: {dib_size}"));
     }
+    // Make sure the DIB header is actually present in full.
     if bytes.len() < 14 + dib_size as usize {
         return Err("truncated BMP DIB header".to_string());
     }
 
+    // Width is i32 in the spec but a negative value is invalid (unlike height).
+    // Height is the *signed* trick: negative = top-down row order.
     let width = read_le_i32_at(bytes, 18)?;
     let raw_height = read_le_i32_at(bytes, 22)?;
     if width <= 0 || raw_height == 0 {
@@ -324,12 +421,15 @@ fn parse_bmp_header(bytes: &[u8]) -> Result<BmpHeader, String> {
         ));
     }
 
+    // Planes must always be 1 per the spec — multi-plane BMPs were never
+    // really a thing in practice.
     let planes = read_le_u16_at(bytes, 26)?;
     if planes != 1 {
         return Err(format!("unsupported BMP plane count: {planes}"));
     }
     let bits_per_pixel = read_le_u16_at(bytes, 28)?;
     let compression = read_le_u32_at(bytes, 30)?;
+    // 0 = BI_RGB (uncompressed). RLE and BITFIELDS variants aren't supported.
     if compression != 0 {
         return Err(format!("unsupported BMP compression: {compression}"));
     }
@@ -341,17 +441,25 @@ fn parse_bmp_header(bytes: &[u8]) -> Result<BmpHeader, String> {
         pixel_offset,
         dib_size,
         width: width as usize,
+        // unsigned_abs handles negative height (top-down) and zero (already
+        // rejected above) without wrapping.
         height: raw_height.unsigned_abs() as usize,
         top_down: raw_height < 0,
         bits_per_pixel,
     })
 }
 
+// Top-level decode: parse header → check buffer length → dispatch on pixel
+// format. Always produces an 8-bit grayscale buffer regardless of input
+// format (color sources get grayscale-projected via gray_from_rgb8).
 fn decode_bmp(bytes: &[u8]) -> Result<DecodedBmp, String> {
     let header = parse_bmp_header(bytes)?;
     let width = header.width;
     let height = header.height;
     let row_stride = header.row_stride()?;
+    // Confirm the buffer is long enough to hold the pixel data we expect.
+    // checked_add/mul guard against any malformed header trying to coax us
+    // into a huge slice index.
     let required = header
         .pixel_offset
         .checked_add(
@@ -368,6 +476,7 @@ fn decode_bmp(bytes: &[u8]) -> Result<DecodedBmp, String> {
     }
 
     let pixel_format = bmp_pixel_format(bytes, header, row_stride)?;
+    // Pre-allocated grayscale buffer — every decoder branch fills this in.
     let mut pixels = vec![0; width * height];
     match pixel_format {
         BmpPixelFormat::Gray8 => decode_gray8_rows(bytes, header, row_stride, &mut pixels),
@@ -385,6 +494,9 @@ fn decode_bmp(bytes: &[u8]) -> Result<DecodedBmp, String> {
     })
 }
 
+// Dispatch on bit depth. 8-bit needs a palette inspection (it could be
+// indexed-color, indexed-gray, or "identity gray"); 24/32 are straightforward.
+// unreachable!() is safe because parse_bmp_header already filtered the values.
 fn bmp_pixel_format(
     bytes: &[u8],
     header: BmpHeader,
@@ -398,12 +510,20 @@ fn bmp_pixel_format(
     }
 }
 
+// Read + analyze the palette for an 8-bit BMP.
+//
+// The fast-path optimization: if every palette entry maps to its own index
+// (palette[i] = (i,i,i)), we can skip the palette LUT entirely and treat
+// it as plain Gray8. Saves a per-pixel indirection on the (very common)
+// identity-grayscale-palette case.
 fn bmp_8bit_pixel_format(
     bytes: &[u8],
     header: BmpHeader,
     row_stride: usize,
 ) -> Result<BmpPixelFormat, String> {
     let palette_start = 14 + header.dib_size as usize;
+    // BMP stores "colors used" at offset 46. 0 means "all 256". Some files
+    // omit this field; default to 0 → 256.
     let color_count = read_le_u32_at(bytes, 46).unwrap_or(0);
     let palette_entries = if color_count == 0 {
         256
@@ -426,14 +546,21 @@ fn bmp_8bit_pixel_format(
 
     let palette = &bytes[palette_start..palette_start + palette_bytes];
     let mut palette_lut = Box::new([0; 256]);
+    // identity_gray starts true only if we have all 256 entries — a truncated
+    // palette can't be the identity (some indexes would be unmapped).
     let mut identity_gray = palette_entries == 256;
     for index in 0..palette_entries {
         let offset = index * 4;
+        // Palette entries are stored BGRA (last byte reserved/alpha).
         let gray = gray_from_rgb8(palette[offset + 2], palette[offset + 1], palette[offset]);
         palette_lut[index] = gray;
+        // Track whether every entry is gray(i,i,i) — short-circuits below.
         identity_gray &= gray == index as u8;
     }
 
+    // Partial palette → validate that every pixel index actually points to a
+    // valid entry. Skipped when full because indexing into a 256-entry LUT
+    // is always in bounds.
     if palette_entries < 256 {
         validate_8bit_palette_indexes(bytes, header, row_stride, palette_entries)?;
     }
@@ -445,6 +572,9 @@ fn bmp_8bit_pixel_format(
     }
 }
 
+// For palettes with fewer than 256 entries, walk every row and confirm no
+// pixel byte references an out-of-bounds index. Done up-front so the row
+// decoders can use the LUT without bounds checks.
 fn validate_8bit_palette_indexes(
     bytes: &[u8],
     header: BmpHeader,
@@ -452,6 +582,7 @@ fn validate_8bit_palette_indexes(
     palette_entries: usize,
 ) -> Result<(), String> {
     for output_y in 0..header.height {
+        // BMP row order: bottom-up unless top_down, in which case as-stored.
         let source_y = if header.top_down {
             output_y
         } else {
@@ -474,6 +605,15 @@ fn validate_8bit_palette_indexes(
     Ok(())
 }
 
+// Four row-decoder variants below — Gray8, Palette8, BGR24, BGRA32. They
+// share the same shape: walk output rows, compute the corresponding source
+// row (handling bottom-up vs top-down), and fill in pixel bytes.
+//
+// All of them are hot paths for big bitewing files. Inner loops avoid bounds
+// checks via iter pairs (.zip(.iter_mut()).chunks_exact) where possible.
+
+// Trivial: source bytes are already grayscale, just copy. row_start/output
+// math handles the row-flip.
 fn decode_gray8_rows(bytes: &[u8], header: BmpHeader, row_stride: usize, pixels: &mut [u8]) {
     for output_y in 0..header.height {
         let source_y = if header.top_down {
@@ -488,6 +628,9 @@ fn decode_gray8_rows(bytes: &[u8], header: BmpHeader, row_stride: usize, pixels:
     }
 }
 
+// Palette indexed: every source byte is an index into palette_lut, which we
+// pre-computed in bmp_8bit_pixel_format. The LUT is [u8; 256] so bounds
+// checks should optimize away.
 fn decode_palette8_rows(
     bytes: &[u8],
     header: BmpHeader,
@@ -513,6 +656,8 @@ fn decode_palette8_rows(
     }
 }
 
+// 24-bit BGR (no alpha). chunks_exact(3) gives us [B,G,R] triples; we pass
+// them to gray_from_rgb8 in R,G,B order (note the source[2], [1], [0]).
 fn decode_bgr24_rows(bytes: &[u8], header: BmpHeader, row_stride: usize, pixels: &mut [u8]) {
     for output_y in 0..header.height {
         let source_y = if header.top_down {
@@ -532,6 +677,8 @@ fn decode_bgr24_rows(bytes: &[u8], header: BmpHeader, row_stride: usize, pixels:
     }
 }
 
+// 32-bit BGRA — same as BGR24 but with an alpha byte we ignore. chunks_exact(4)
+// instead of (3). We deliberately don't honor alpha — bitewings don't use it.
 fn decode_bgra32_rows(bytes: &[u8], header: BmpHeader, row_stride: usize, pixels: &mut [u8]) {
     for output_y in 0..header.height {
         let source_y = if header.top_down {
@@ -551,6 +698,12 @@ fn decode_bgra32_rows(bytes: &[u8], header: BmpHeader, row_stride: usize, pixels
     }
 }
 
+// Rec. 601 luma weights (approximate): 0.299 R + 0.587 G + 0.114 B, scaled
+// up to 16-bit and shifted back. The `(1 << 15)` adds half a bit for
+// round-to-nearest. Integer math throughout for speed and bitwise determinism.
+//
+// The `u32::from(red) | (u32::from(red) << 8)` trick doubles the 8-bit input
+// into a 16-bit value (so 0xFF → 0xFFFF), keeping the multiply precision tight.
 fn gray_from_rgb8(red: u8, green: u8, blue: u8) -> u8 {
     let red = u32::from(red) | (u32::from(red) << 8);
     let green = u32::from(green) | (u32::from(green) << 8);
@@ -558,6 +711,8 @@ fn gray_from_rgb8(red: u8, green: u8, blue: u8) -> u8 {
     ((19_595 * red + 38_470 * green + 7_471 * blue + (1 << 15)) >> 24) as u8
 }
 
+// Linear stretch: maps `value` from [min, max] to [0, 255]. When max == min
+// the input is flat — return 0 rather than divide-by-zero.
 fn map_linear(value: f32, min: f32, max: f32) -> u8 {
     if max <= min {
         return 0;
@@ -566,6 +721,8 @@ fn map_linear(value: f32, min: f32, max: f32) -> u8 {
     clamp_to_byte((value - min) * (255.0 / (max - min)))
 }
 
+// f32 → u8 with saturation. `+ 0.5` before the cast gives round-to-nearest
+// (since `as u8` truncates toward zero on positives).
 fn clamp_to_byte(value: f32) -> u8 {
     if value <= 0.0 {
         0
@@ -576,6 +733,9 @@ fn clamp_to_byte(value: f32) -> u8 {
     }
 }
 
+// Little-endian byte readers with bounds checking. The .get() returns None on
+// out-of-range, which we map to a labeled error. Used everywhere we touch the
+// BMP header.
 fn read_le_u16_at(bytes: &[u8], offset: usize) -> Result<u16, String> {
     let value = bytes
         .get(offset..offset + 2)
@@ -590,6 +750,7 @@ fn read_le_u32_at(bytes: &[u8], offset: usize) -> Result<u32, String> {
     Ok(u32::from_le_bytes([value[0], value[1], value[2], value[3]]))
 }
 
+// Signed variant for the height field (negative = top-down).
 fn read_le_i32_at(bytes: &[u8], offset: usize) -> Result<i32, String> {
     let value = bytes
         .get(offset..offset + 4)
@@ -601,6 +762,8 @@ fn read_le_i32_at(bytes: &[u8], offset: usize) -> Result<i32, String> {
 pub mod tests {
     use super::*;
 
+    // End-to-end: write a 2×2 32-bit BMP, parse the metadata back. Pins
+    // RGB photometric, samples=3 for color BMPs.
     #[test]
     fn read_file_reads_bmp_metadata() {
         let path = unique_temp_path("metadata", "bmp");
@@ -624,6 +787,9 @@ pub mod tests {
         let _ = std::fs::remove_file(path);
     }
 
+    // Confirms read_file only touches the header — a 54-byte truncated
+    // file still gives us valid dimensions. Important: lets us probe huge
+    // files quickly without paging in pixel data.
     #[test]
     fn read_file_reads_metadata_without_pixel_data() {
         let path = unique_temp_path("metadata-header-only", "bmp");
@@ -643,6 +809,8 @@ pub mod tests {
         let _ = std::fs::remove_file(path);
     }
 
+    // Symmetric to the above — the *render* path must NOT accept a
+    // header-only file; it needs real pixels.
     #[test]
     fn render_still_rejects_missing_pixel_data() {
         let mut bmp = build_bmp_32(
@@ -657,6 +825,9 @@ pub mod tests {
         assert!(error.contains("BMP pixel data length"));
     }
 
+    // Full render pipeline on a tiny 2×2 color BMP. Compares against the
+    // full-range-stretched grayscale we expect after gray_from_rgb8 + linear
+    // stretch.
     #[test]
     fn render_grayscale_preview_file_reads_bmp_pixels() {
         let path = unique_temp_path("render", "bmp");
@@ -687,6 +858,9 @@ pub mod tests {
         let _ = std::fs::remove_file(path);
     }
 
+    // Direct comparison: default (stretched) vs tooth-analysis (raw) on the
+    // same input. Default maps the [10,40] range to [0,255]; tooth-analysis
+    // keeps the original values verbatim.
     #[test]
     fn render_tooth_analysis_preview_preserves_bmp_8bit_range() {
         let path = unique_temp_path("analysis-render", "bmp");
@@ -709,6 +883,9 @@ pub mod tests {
         let _ = std::fs::remove_file(path);
     }
 
+    // Algebraic identity: rendering from a decoded source == rendering from
+    // the raw bytes, for both default and tooth-analysis variants. Proves
+    // we don't drift between the two code paths.
     #[test]
     fn decoded_source_preview_derives_matching_render_variants() {
         let bmp = build_bmp_32(
@@ -728,6 +905,8 @@ pub mod tests {
         );
     }
 
+    // Palette path: 2-entry palette mapping black→0, white→255, source
+    // pixels are indices [0, 1]. Output should be [0, 255].
     #[test]
     fn render_bmp_supports_palette_pixels() {
         let bmp = build_bmp_8_palette(2, 1, &[(0, 0, 0), (255, 255, 255)], &[0, 1]);
@@ -736,6 +915,8 @@ pub mod tests {
         assert_eq!(preview.pixels.as_ref(), [0, 255]);
     }
 
+    // Extension guard: even if the bytes are a valid BMP, a .tif suffix
+    // means we refuse. Required because CLAUDE.md says we're BMP-only.
     #[test]
     fn rejects_non_bmp_extension() {
         let path = unique_temp_path("metadata", "tif");
@@ -747,6 +928,8 @@ pub mod tests {
         let _ = std::fs::remove_file(path);
     }
 
+    // Temp path generator: PID + nanos so concurrent test runs don't collide.
+    // Pub because example benches in ../examples/ pull from this module.
     pub fn unique_temp_path(name: &str, extension: &str) -> std::path::PathBuf {
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -758,6 +941,8 @@ pub mod tests {
         ))
     }
 
+    // Hand-build a 32-bit BGRA BMP from a top-down row-major RGB list.
+    // Note we reverse the rows on write — BMP files store bottom-up.
     pub fn build_bmp_32(width: u32, height: u32, rgb_top_down: &[(u8, u8, u8)]) -> Vec<u8> {
         assert_eq!(rgb_top_down.len(), width as usize * height as usize);
         let row_stride = width as usize * 4;
@@ -788,6 +973,10 @@ pub mod tests {
         bmp
     }
 
+    // Build an 8-bit palette BMP. palette_rgb's length is the entry count
+    // (stored in the "colors used" header field), indexes_top_down is the
+    // pixel-index grid. Both row stride padding and the bottom-up flip are
+    // applied to match what real BMPs look like on disk.
     pub fn build_bmp_8_palette(
         width: u32,
         height: u32,
@@ -827,6 +1016,9 @@ pub mod tests {
         bmp
     }
 
+    // Reference impl of the full-range linear stretch used by the renderer.
+    // Tests reach for this to compute the expected output without going
+    // through the production map_linear path.
     fn full_range_mapped_u8(values: &[u8]) -> Vec<u8> {
         let min = values.iter().copied().min().unwrap();
         let max = values.iter().copied().max().unwrap();

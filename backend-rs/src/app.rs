@@ -1,3 +1,23 @@
+// The application orchestrator. This is the biggest file in the crate
+// because it knits together everything else: caches, persistence, the BMP
+// decoder, the analyzer, the processing pipeline, and the job system.
+//
+// Mental model:
+//   * App is the singleton. The desktop shell wraps one in an Arc and hands
+//     it to every IPC command handler.
+//   * Studies open synchronously (open_study) — they're cheap.
+//   * Render / Analyze / Process all run asynchronously via the job system.
+//     The frontend gets back a StartedJob with a job_id and subscribes to
+//     "job-update" events for progress.
+//   * Jobs are fingerprinted (FNV-1a over the relevant input identity +
+//     params); identical fingerprints return cached results immediately.
+//   * Cancellation is cooperative — workers check is_cancelled() between
+//     stages.
+//
+// Locking discipline: each Mutex inside App is short-held. There's no
+// global "app lock" — that would serialize the IPC layer. The locks are
+// independent and short critical sections; do NOT take two simultaneously.
+
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::{
@@ -37,37 +57,69 @@ use crate::{
 pub struct App {
     config: Config,
     started_at: DateTime<Utc>,
+    // Unique-per-process cache key — included in every fingerprint so we don't
+    // mistakenly hit a cached artifact from a different run with stale state.
     cache_session_id: String,
     cache: Store,
+    // study_id → StudyRecord. Arc so callers can hold a snapshot without
+    // pinning the lock.
     studies: Mutex<HashMap<String, Arc<StudyRecord>>>,
+    // job_id → current snapshot. Updated on every state transition.
     jobs: Mutex<HashMap<String, JobSnapshot>>,
+    // fingerprint → job_id, only for jobs currently running. Lets dedup
+    // logic find an in-flight job for a given fingerprint without scanning.
     active_fingerprints: Mutex<HashMap<String, String>>,
+    // fingerprint → completed JobResult. The "cached job" fast path serves
+    // out of this. Arc again so we can hand snapshots to subscribers cheaply.
     result_cache: Mutex<HashMap<String, Arc<JobResult>>>,
+    // In-memory decoded BMP cache. Avoids re-parsing the same file across
+    // back-to-back render/process/analyze on one study.
     source_preview_cache: SourcePreviewCache,
+    // subscriber_id → channel. The desktop shell registers one; tests can
+    // register multiple. publish_job_update walks this and try_sends on each.
     job_update_subscribers: Mutex<HashMap<u64, SyncSender<JobSnapshot>>>,
     persistence: persistence::Catalog,
+    // Three monotonic counters for stable IDs. Relaxed ordering is fine —
+    // we just need uniqueness, not happens-before.
     next_study_number: AtomicU64,
     next_job_number: AtomicU64,
     next_subscriber_number: AtomicU64,
 }
 
+// Bounded sync_channel size for per-subscriber job updates. 16 is enough to
+// absorb a typical burst (one stage transition per progress tick) without
+// blocking the publisher; full channels get dropped (see publish_job_update).
 pub const JOB_UPDATE_BUFFER_SIZE: usize = 16;
+// Soft cap on the on-disk artifact cache (256 MB). Eviction kicks in once
+// we cross this.
 const MAX_ARTIFACT_BYTES: u64 = 256 * 1024 * 1024;
+// Cap on completed/failed/cancelled jobs we keep around. Older terminal
+// jobs get evicted FIFO so the jobs HashMap doesn't grow forever.
 const MAX_TERMINAL_JOBS: usize = 64;
 
+// Handed back to subscribe_job_updates callers. Hold the receiver to keep
+// the subscription alive; drop it (or call unsubscribe_job_updates) to stop.
 pub struct JobUpdateSubscription {
     pub id: u64,
     pub receiver: Receiver<JobSnapshot>,
 }
 
+// Outcome of the dedup check at the start of an async job. Existing means
+// "there's already a job running for this fingerprint, return its id";
+// Created means "I just registered this fingerprint, go ahead and run".
 enum AsyncJobReservation {
     Existing(String),
     Created(String),
 }
 
 impl App {
+    // Construct the App but don't touch disk yet — prepare() does that.
+    // Splitting it out so tests can build an App with a tempdir config
+    // without creating the dirs.
     pub fn new(config: Config) -> Result<Self, BackendError> {
         let started_at = Utc::now();
+        // session id = pid + start nanos. Unique even across rapid restarts
+        // because the nanos always tick.
         let cache_session_id = format!(
             "{}-{}",
             std::process::id(),
@@ -87,6 +139,8 @@ impl App {
             source_preview_cache: SourcePreviewCache::default_session_cache(),
             job_update_subscribers: Mutex::new(HashMap::new()),
             persistence,
+            // IDs start at 1 — keeps 0 reserved as "not set" for any future
+            // sparse encoding.
             next_study_number: AtomicU64::new(1),
             next_job_number: AtomicU64::new(1),
             next_subscriber_number: AtomicU64::new(1),
@@ -103,6 +157,8 @@ impl App {
         self.started_at
     }
 
+    // Actually create cache + persistence directories on disk. Idempotent;
+    // called once at app boot from the Tauri setup hook.
     pub fn prepare(&self) -> Result<(), BackendError> {
         self.cache.ensure()?;
         self.persistence.ensure()
@@ -128,6 +184,10 @@ impl App {
         self.source_preview_cache.stats()
     }
 
+    // Register a subscriber. Returns a handle holding the receiver — when the
+    // caller drops it, the bound sender in the map dies and publish_job_update
+    // gets TrySendError::Disconnected on the next emit, at which point we
+    // garbage-collect the entry.
     pub fn subscribe_job_updates(&self) -> JobUpdateSubscription {
         let id = self.next_subscriber_number.fetch_add(1, Ordering::Relaxed);
         let (sender, receiver) = sync_channel(JOB_UPDATE_BUFFER_SIZE);
@@ -135,6 +195,8 @@ impl App {
         JobUpdateSubscription { id, receiver }
     }
 
+    // Eager unsubscribe. Optional — letting the receiver drop also works, but
+    // this gets the entry out of the map immediately.
     pub fn unsubscribe_job_updates(&self, subscription_id: u64) {
         self.job_update_subscribers.lock().remove(&subscription_id);
     }
@@ -515,12 +577,18 @@ impl App {
         })
     }
 
+    // Mint a study_id and stash the record. Pub so test code can register
+    // studies directly without going through open_study (which insists on
+    // a real file on disk).
     pub fn register_study(
         &self,
         input_path: impl Into<String>,
         measurement_scale: Option<MeasurementScale>,
     ) -> Result<StudyRecord, BackendError> {
         let input_path = input_path.into();
+        // input_name is the basename for display. If the path is a single
+        // segment with no separator, file_name returns None and we fall
+        // back to the full path string.
         let input_name = Path::new(&input_path)
             .file_name()
             .and_then(|name| name.to_str())
@@ -537,6 +605,7 @@ impl App {
             measurement_scale,
         };
 
+        // Store an Arc so subsequent lookups can hand out cheap clones.
         self.studies
             .lock()
             .insert(study_id, Arc::new(study.clone()));
@@ -679,6 +748,11 @@ impl App {
         ))
     }
 
+    // Broadcast `snapshot` to every live subscriber. `retain` doubles as a
+    // garbage collector — dropped Receivers cause TrySendError::Disconnected
+    // which removes the subscriber from the map. Full channels are kept
+    // (we drop the update rather than blocking) because a slow consumer
+    // shouldn't pause job progress for everyone.
     fn publish_job_update(&self, snapshot: &JobSnapshot) {
         let mut subscribers = self.job_update_subscribers.lock();
         subscribers.retain(|_, sender| match sender.try_send(snapshot.clone()) {
@@ -687,6 +761,9 @@ impl App {
         });
     }
 
+    // Get a decoded source preview, hitting the in-memory cache via single-
+    // flight. The wrapped closure only runs when the key isn't already cached
+    // *and* no other thread is currently decoding it.
     fn load_source_preview(
         &self,
         study: &StudyRecord,
@@ -702,6 +779,8 @@ impl App {
         Ok(bmp::render_grayscale_preview_from_source(&source))
     }
 
+    // Same as load_source_preview but applies the tooth-analysis stretch
+    // variant (preserves 8-bit range so analyzer thresholds work).
     fn load_analysis_preview(
         &self,
         study: &StudyRecord,
@@ -717,6 +796,10 @@ impl App {
         Ok(bmp::render_grayscale_preview_from_source_for_tooth_analysis(&source))
     }
 
+    // Fingerprint = "what makes two jobs identical for caching". For render
+    // it's just (input path + file identity). The namespace prefix means a
+    // render fingerprint can never collide with an analyze fingerprint, even
+    // if the rest of the inputs match.
     fn render_fingerprint(&self, study: &StudyRecord) -> Result<String, BackendError> {
         fingerprint_json(&serde_json::json!({
             "namespace": "render-study",
@@ -726,6 +809,9 @@ impl App {
         }))
     }
 
+    // Analyze adds `outputVersion`: bump that string whenever the analyzer's
+    // output shape changes so existing cached results invalidate cleanly.
+    // The "v22" suffix is the current schema generation.
     fn analyze_fingerprint(&self, study: &StudyRecord) -> Result<String, BackendError> {
         fingerprint_json(&serde_json::json!({
             "namespace": "analyze-study",
@@ -736,6 +822,9 @@ impl App {
         }))
     }
 
+    // Process is the only one that depends on user knobs — every adjustable
+    // value gets serialized in, so adjusting brightness produces a different
+    // fingerprint and a cache miss.
     fn process_fingerprint(
         &self,
         study: &StudyRecord,
@@ -756,6 +845,14 @@ impl App {
         }))
     }
 
+    // Cache fast path: if the fingerprint is in result_cache AND the artifact
+    // files still exist on disk, mint a new job that's "completed from cache"
+    // immediately. Returns Some(StartedJob) → caller short-circuits.
+    //
+    // The result_artifacts_exist() check matters because cache eviction can
+    // delete the BMP file while the in-memory result still claims it exists.
+    // Detecting this here means we cleanly invalidate and re-run rather than
+    // handing the frontend a path to nothing.
     fn start_cached_job(
         &self,
         fingerprint: &str,
@@ -767,6 +864,8 @@ impl App {
             return Ok(None);
         };
         if !result_artifacts_exist(&result) {
+            // Stale entry — file was evicted out from under us. Drop it and
+            // tell the caller to actually run the job.
             self.result_cache.lock().remove(fingerprint);
             return Ok(None);
         }
@@ -780,6 +879,13 @@ impl App {
         Ok(Some(StartedJob { job_id }))
     }
 
+    // Dedup gate for async jobs. Takes both locks because we need to atomically
+    // check `active_fingerprints` *and* the job's state in `jobs` — if a
+    // previous job for this fingerprint exists but is terminal, we want to
+    // run a fresh one rather than refer to the old completed snapshot.
+    //
+    // Locking order: jobs first, then active. Don't invert this — other
+    // call sites in this file assume the same order.
     fn reserve_async_job(
         &self,
         fingerprint: &str,
@@ -790,12 +896,16 @@ impl App {
         let mut active = self.active_fingerprints.lock();
 
         if let Some(job_id) = active.get(fingerprint).cloned() {
+            // The fingerprint maps to a job — is it still running?
             if jobs
                 .get(&job_id)
                 .is_some_and(|snapshot| !is_terminal_state(&snapshot.state))
             {
                 return Ok(AsyncJobReservation::Existing(job_id));
             }
+            // Stale active_fingerprints entry — the job finished but cleanup
+            // didn't run yet (or we crashed between snapshot write and cleanup).
+            // Drop it and fall through to create a new one.
             active.remove(fingerprint);
         }
 
@@ -805,8 +915,12 @@ impl App {
         );
         let snapshot = queued_job_snapshot(job_id.clone(), job_kind, Some(study_id));
         jobs.insert(job_id.clone(), snapshot.clone());
+        // Bound the jobs map — drop oldest terminal entries past MAX_TERMINAL_JOBS.
         evict_old_terminal_jobs(&mut jobs, &job_id);
         active.insert(fingerprint.to_string(), job_id.clone());
+        // Explicit drops so we release the locks before publish_job_update,
+        // which can call into subscriber channels and shouldn't be done
+        // while holding any App lock.
         drop(active);
         drop(jobs);
         self.publish_job_update(&snapshot);
@@ -814,6 +928,9 @@ impl App {
         Ok(AsyncJobReservation::Created(job_id))
     }
 
+    // Store a snapshot + trim old terminal jobs. The trim is here, not in
+    // publish_job_update, so synchronous (non-async) job paths also get
+    // bounded.
     fn store_job_snapshot(&self, snapshot: JobSnapshot) {
         let job_id = snapshot.job_id.clone();
         let mut jobs = self.jobs.lock();
@@ -1355,6 +1472,16 @@ impl App {
         self.publish_job_update(&snapshot);
     }
 
+    // The cancellation-gated stage helper. Every async-job stage runs through
+    // this. The three cancellation checks bracket the actual `work` so we:
+    //   * abort before announcing progress (skip stale work),
+    //   * abort after announcing but before working (cancel during the gap),
+    //   * abort after the work but before declaring it the result (cancel
+    //     racing the completion).
+    //
+    // Returns None when cancelled (caller bails); Some(Result) otherwise.
+    // The `cleanup_paths` are partial-artifact files that should be deleted
+    // if we cancel mid-way (e.g. a half-written BMP).
     #[allow(clippy::too_many_arguments)]
     fn run_job_stage<T>(
         &self,
@@ -1461,6 +1588,12 @@ impl App {
         self.publish_job_update(&snapshot);
     }
 
+    // Promote a freshly-completed snapshot into the result_cache. Returns
+    // true iff we actually stored something — caller uses that as the cue to
+    // run eviction (we may have just added a big new artifact on disk).
+    //
+    // We deliberately skip from_cache snapshots — they're already in the
+    // cache by construction, no point re-inserting.
     fn store_completed_result(&self, fingerprint: &str, snapshot: &JobSnapshot) -> bool {
         if snapshot.state != JobState::Completed || snapshot.from_cache {
             return false;
@@ -1474,17 +1607,25 @@ impl App {
         true
     }
 
+    // Tell the cache "we wrote a file at this path". Ignored if we can't
+    // stat it — the next eviction walk will catch up.
     fn track_artifact_bytes(&self, path: &Path) {
         if let Ok(metadata) = fs::metadata(path) {
             self.cache.add_artifact_bytes(metadata.len());
         }
     }
 
+    // Fire-and-forget eviction. Errors are swallowed because eviction is a
+    // best-effort housekeeping pass; nothing the user requested depends on it.
     fn evict_artifacts_if_needed(&self) {
         let _ = self.cache.evict_artifacts_over_limit(MAX_ARTIFACT_BYTES);
     }
 }
 
+// "What we know about the input file right now." Goes into the fingerprint
+// so editing the file or replacing it invalidates the cache without us
+// needing to hash the contents. size + mtime is good enough for our use
+// case — bitewing files don't change in place during a session.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct InputFileIdentity {
@@ -1497,6 +1638,9 @@ struct InputFileIdentity {
     mod_time_unix_nano: Option<u128>,
 }
 
+// Snapshot the file identity. "unavailable" state means we couldn't even
+// stat — caller still gets a fingerprint, just one that won't match any
+// previously-cached identity (so we'll re-run).
 fn current_input_file_identity(input_path: &str) -> InputFileIdentity {
     let Ok(metadata) = fs::metadata(input_path) else {
         return InputFileIdentity {
@@ -1523,6 +1667,10 @@ fn current_input_file_identity(input_path: &str) -> InputFileIdentity {
     }
 }
 
+// Key used by the source preview cache. NUL-separated because no filesystem
+// allows NUL in paths — guarantees no field-injection ambiguity. (Two paths
+// with the same hash but different size would otherwise collide if we joined
+// with, say, ":".)
 fn input_cache_key(input_path: &str) -> String {
     let identity = current_input_file_identity(input_path);
     format!(
@@ -1535,22 +1683,32 @@ fn input_cache_key(input_path: &str) -> String {
     )
 }
 
+// Unix file mode (rwx bits). Included in the cache key so a chmod of the
+// input file invalidates cached renders.
 #[cfg(unix)]
 fn file_mode(metadata: &fs::Metadata) -> u32 {
     metadata.permissions().mode()
 }
 
+// Windows has no equivalent — always 0, so the field is constant per file.
 #[cfg(not(unix))]
 fn file_mode(_metadata: &fs::Metadata) -> u32 {
     0
 }
 
+// Serialize to JSON and hash — same input shape produces the same
+// fingerprint across runs. Format is hex (16 chars, 64 bits).
 fn fingerprint_json<T: Serialize>(value: &T) -> Result<String, BackendError> {
     let payload = serde_json::to_vec(value)
         .map_err(|error| BackendError::internal(format!("serialize job fingerprint: {error}")))?;
     Ok(format!("{:016x}", fnv1a64(&payload)))
 }
 
+// FNV-1a 64-bit. Picked because it's cheap, stable across runs and platforms,
+// and we don't need cryptographic strength — just a low-collision fingerprint
+// for cache dedup. The constants 0xcbf29ce484222325 (offset basis) and
+// 0x100000001b3 (prime) are the canonical FNV-1a 64-bit values; don't ask
+// where the magic comes from, just trust the wiki page.
 fn fnv1a64(bytes: &[u8]) -> u64 {
     let mut hash = 0xcbf29ce484222325_u64;
     for byte in bytes {
@@ -1724,6 +1882,8 @@ fn cleanup<P: AsRef<Path>>(paths: impl IntoIterator<Item = P>) {
     }
 }
 
+// "Done" in the state-machine sense. Cancelling is NOT terminal — the worker
+// might still be unwinding. Queued/Running aren't either.
 fn is_terminal_state(state: &JobState) -> bool {
     matches!(
         state,
@@ -1731,6 +1891,11 @@ fn is_terminal_state(state: &JobState) -> bool {
     )
 }
 
+// Bound the jobs map by evicting the oldest terminal entries when we go past
+// MAX_TERMINAL_JOBS. `keep_job_id` is the just-inserted job — we never evict
+// it even if it's already terminal. HashMap iteration order isn't FIFO but
+// for capacity-bounding it doesn't really matter; we just need to drop *some*
+// terminal job each pass.
 fn evict_old_terminal_jobs(jobs: &mut HashMap<String, JobSnapshot>, keep_job_id: &str) {
     while jobs.len() > MAX_TERMINAL_JOBS {
         let Some(evict_job_id) = jobs
@@ -1740,6 +1905,9 @@ fn evict_old_terminal_jobs(jobs: &mut HashMap<String, JobSnapshot>, keep_job_id:
             })
             .map(|(job_id, _)| job_id.clone())
         else {
+            // No more terminal jobs to evict and we're still over the cap —
+            // means every remaining job is active. Live with it; cap will
+            // resolve as soon as a job completes.
             return;
         };
         jobs.remove(&evict_job_id);
@@ -1751,6 +1919,8 @@ mod tests {
     use super::*;
     use crate::contracts::{AnnotationPoint, AnnotationSource, LineAnnotation};
 
+    // Smoke test for the happy-path open: file exists, study record gets
+    // a non-empty id, input_name is the basename, study_count goes up.
     #[test]
     fn open_study_registers_existing_file() {
         let temp_dir =
@@ -1775,6 +1945,9 @@ mod tests {
         let _ = fs::remove_dir(temp_dir);
     }
 
+    // Side-effect check: opening a study should land it in the on-disk
+    // recent-studies catalog. Verifies persistence integration without
+    // mocking — the catalog is loaded back from disk after.
     #[test]
     fn open_study_records_recent_study_catalog() {
         let temp_dir = std::env::temp_dir().join(format!(
@@ -1812,6 +1985,8 @@ mod tests {
         let _ = fs::remove_dir_all(temp_dir);
     }
 
+    // measure_line_annotation should pick up the study's measurement_scale
+    // and produce calibrated_length_mm. End-to-end across App + annotations.
     #[test]
     fn measure_line_annotation_uses_registered_measurement_scale() {
         let app = App::new(Config::default()).unwrap();
@@ -1847,6 +2022,9 @@ mod tests {
         assert_eq!(measurement.calibrated_length_mm, Some(1.3));
     }
 
+    // Full sync render path: kicks off, runs to completion, checks that
+    // the artifact BMP exists on disk AND the job snapshot stored in the
+    // jobs map reflects Completed state.
     #[test]
     fn start_render_job_writes_preview_and_stores_completed_snapshot() {
         let temp_dir =
@@ -1895,6 +2073,8 @@ mod tests {
         let _ = fs::remove_dir_all(temp_dir);
     }
 
+    // Subscriber sees the Completed snapshot — pins the broadcast wiring.
+    // If publish_job_update breaks, this fires before any UI does.
     #[test]
     fn start_render_job_broadcasts_completed_job_update() {
         let temp_dir =
@@ -1937,6 +2117,9 @@ mod tests {
         let _ = fs::remove_dir_all(temp_dir);
     }
 
+    // The async path emits a sequence of progress updates with stage names
+    // the frontend can match on. Pins that sequence — adding a stage means
+    // updating this test AND the TS-side stage handling.
     #[test]
     fn start_render_job_async_publishes_contract_compatible_stage_updates() {
         let (temp_dir, app, study) =
@@ -1982,6 +2165,8 @@ mod tests {
         let _ = fs::remove_dir_all(temp_dir);
     }
 
+    // The same render request fired twice should hit the result_cache the
+    // second time — the cached snapshot has from_cache=true.
     #[test]
     fn start_render_job_reuses_in_session_cached_result_for_same_input() {
         let (temp_dir, app, first_study) =
@@ -2029,6 +2214,9 @@ mod tests {
         let _ = fs::remove_dir_all(temp_dir);
     }
 
+    // The result_artifacts_exist guard in start_cached_job — delete the
+    // BMP out from under the cache, confirm the next request re-runs the
+    // job instead of returning a dangling path.
     #[test]
     fn render_cache_misses_when_cached_artifact_was_deleted() {
         let (temp_dir, app, study) =
@@ -2065,6 +2253,8 @@ mod tests {
         let _ = fs::remove_dir_all(temp_dir);
     }
 
+    // Robustness: get_jobs should silently skip empty strings and unknown
+    // ids rather than erroring on the whole batch.
     #[test]
     fn get_jobs_skips_blank_and_unknown_ids() {
         let app = App::new(Config::default()).unwrap();
@@ -2091,6 +2281,11 @@ mod tests {
         assert_eq!(snapshots[0].job_id, "job-1");
     }
 
+    // Walks the JobState machine on a fake job:
+    //   Queued → cancel → Cancelled
+    //   Running → cancel → Cancelling (worker not yet notified)
+    //   Cancelled → cancel → stays Cancelled (idempotent)
+    //   Completed → cancel → stays Completed (no-op)
     #[test]
     fn cancel_job_matches_registry_state_transitions() {
         let app = App::new(Config::default()).unwrap();
@@ -2147,6 +2342,8 @@ mod tests {
         app.unsubscribe_job_updates(subscription.id);
     }
 
+    // The MAX_TERMINAL_JOBS bound in action: insert > cap, confirm we
+    // evicted old terminal jobs and that the just-inserted one survived.
     #[test]
     fn store_job_snapshot_caps_terminal_job_retention_and_keeps_latest() {
         let app = App::new(Config::default()).unwrap();
@@ -2170,6 +2367,9 @@ mod tests {
         );
     }
 
+    // The dedup path: two reserve_async_job calls with the same fingerprint
+    // return the same job_id (Existing variant). After cancellation the
+    // fingerprint frees up and a third call gets a fresh job_id (Created).
     #[test]
     fn reserve_async_job_deduplicates_active_fingerprint_until_cancelled() {
         let app = App::new(Config::default()).unwrap();
@@ -2212,6 +2412,9 @@ mod tests {
         }
     }
 
+    // If a job finishes work but was cancelled mid-flight, finish_async_job
+    // must store Cancelled (not Completed) and delete the half-written
+    // artifacts. This is the race-resolution path.
     #[test]
     fn finish_async_job_preserves_cancelled_terminal_state_and_cleans_artifacts() {
         let temp_dir = std::env::temp_dir().join(format!(
@@ -2282,6 +2485,8 @@ mod tests {
         let _ = fs::remove_dir_all(temp_dir);
     }
 
+    // Process job happy path — writes the processed BMP and returns the
+    // expected mode string in the snapshot payload.
     #[test]
     fn start_process_job_writes_preview_snapshot() {
         let temp_dir =
@@ -2338,6 +2543,9 @@ mod tests {
         let _ = fs::remove_dir_all(temp_dir);
     }
 
+    // Same input + same knobs → same fingerprint → cache hit on the
+    // second call. Tweaking any knob (brightness etc) would miss; pinned
+    // here so process_fingerprint stays sensitive to every field.
     #[test]
     fn start_process_job_reuses_in_session_cached_result_for_same_controls() {
         let (temp_dir, app, study) =
@@ -2378,6 +2586,9 @@ mod tests {
         let _ = fs::remove_dir_all(temp_dir);
     }
 
+    // Tests the source preview cache *across* different process knobs:
+    // changing brightness should *not* re-decode the BMP (decoder runs
+    // once, processing runs twice).
     #[test]
     fn source_preview_cache_reuses_decode_for_different_process_jobs() {
         let (temp_dir, app, study) =
@@ -2424,6 +2635,9 @@ mod tests {
         let _ = fs::remove_dir_all(temp_dir);
     }
 
+    // Cross-job-type cache reuse: render and analyze both go through
+    // load_source_preview / load_analysis_preview, which share the same
+    // cache_key. One decode should serve both.
     #[test]
     fn source_preview_cache_reuses_decode_between_render_and_analysis() {
         let (temp_dir, app, study) = app_with_renderable_study(
@@ -2467,6 +2681,8 @@ mod tests {
         let _ = fs::remove_dir_all(temp_dir);
     }
 
+    // Analyze produces two BMP outputs — outline preview and filled
+    // preview. Both must exist on disk for the result to be valid.
     #[test]
     fn start_analyze_job_writes_overlay_previews() {
         let temp_dir =
@@ -2525,6 +2741,8 @@ mod tests {
         let _ = fs::remove_dir_all(temp_dir);
     }
 
+    // Analyze cache hit on second call. Mirror of the render/process tests
+    // above but for the analyze fingerprint path.
     #[test]
     fn start_analyze_job_reuses_in_session_cached_result() {
         let (temp_dir, app, study) =
@@ -2567,6 +2785,9 @@ mod tests {
         let _ = fs::remove_dir_all(temp_dir);
     }
 
+    // Test helper that wires up a fresh App with config pointing at a
+    // tempdir, then opens a study against a hand-built BMP. Lots of tests
+    // need this exact setup — pulled out to keep them readable.
     fn app_with_renderable_study(
         test_name: &str,
         bytes: Vec<u8>,
@@ -2599,6 +2820,8 @@ mod tests {
         (temp_dir, app, study)
     }
 
+    // Tiny synthetic BMP for the non-analyze tests — gradient strip,
+    // enough variety that the renderer/processor produces non-trivial output.
     fn build_renderable_test_bmp() -> Vec<u8> {
         bmp::tests::build_bmp_32(
             4,
@@ -2616,6 +2839,9 @@ mod tests {
         )
     }
 
+    // Larger 20×20 BMP used by analyze tests — needs to be big enough that
+    // the analyzer's 8×8 minimum doesn't reject it, and have a realistic
+    // tooth/bone pattern.
     fn build_analysis_test_bmp() -> Vec<u8> {
         let pixels = analyze_fixture_pixels()
             .iter()
@@ -2669,6 +2895,9 @@ mod tests {
         }
     }
 
+    // Helper for the stage-update test — confirms the actual sequence of
+    // job stage strings starts with the expected prefix (later stages may
+    // follow but the order to-this-point must match).
     fn assert_ordered_stages(actual: &[String], expected: &[&str]) {
         let mut cursor = 0;
         for stage in actual {

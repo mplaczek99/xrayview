@@ -1,3 +1,17 @@
+// CLI entry. Two argv shapes are accepted:
+//
+//   * Modern subcommand form:  xrayview <subcommand> [args...]
+//     e.g.  xrayview render-preview --input foo.bmp --output bar.bmp
+//
+//   * Legacy flag form:  xrayview --input foo.bmp --preset xray ...
+//     A single positional-less command that does everything the old Go
+//     binary did. Triggered when argv[0] starts with '-'. Kept around for
+//     CI scripts and dental-suite integrations that haven't migrated.
+//
+// The two paths fork in `run_args`, share helpers only where shape is
+// identical (BMP loading, processing dispatch). When you're editing this
+// file, ask yourself: "does this belong in modern, legacy, or both?"
+
 use std::{fs, io::Write, path::PathBuf};
 
 use serde::Serialize;
@@ -15,8 +29,15 @@ use crate::{
     render::{self, PreviewImage},
 };
 
+// Sentinel value used as a CliError::Message payload to signal "the user
+// asked for legacy --help; we printed it; return Ok". A real ControlFlow
+// type would be cleaner but this is the legacy path — we make do.
 const LEGACY_HELP_SENTINEL: &str = "__xrayview_legacy_help__";
 
+// CLI error type — wraps everything that can go wrong into a single Result.
+// Message is the catch-all "string error" variant the legacy code emits;
+// the others are #[from] conversions so `?` works against all the upstream
+// error types without manual mapping.
 #[derive(Debug, thiserror::Error)]
 pub enum CliError {
     #[error("{0}")]
@@ -55,11 +76,19 @@ impl From<BackendError> for CliError {
 
 type CliResult<T> = Result<T, CliError>;
 
+// Public entry. The wrapper here only exists so callers don't see the
+// internal function name and so we can swap implementations someday without
+// a breaking API change.
 pub fn run(args: &[&str], stdout: &mut dyn Write, stderr: &mut dyn Write) -> CliResult<()> {
     run_args(args, stdout, stderr)
 }
 
+// Subcommand dispatcher. The legacy-vs-modern fork happens *before* the
+// match — anything starting with `-` is legacy. Note --help is special-cased
+// in both arms.
 fn run_args(args: &[&str], stdout: &mut dyn Write, stderr: &mut dyn Write) -> CliResult<()> {
+    // Some shell wrappers like to insert -- between argv[0] and the rest;
+    // strip those before we look at args[0].
     let args = trim_leading_separators(args);
     if args.is_empty() {
         print_usage(stderr)?;
@@ -77,6 +106,8 @@ fn run_args(args: &[&str], stdout: &mut dyn Write, stderr: &mut dyn Write) -> Cl
         "analyze-preview" => analyze_preview(&args[1..], stdout),
         "list-commands" => list_commands(stdout),
         "version" => {
+            // Format must remain "<service> contract-v<n>" — external tools
+            // grep for this exact shape.
             writeln!(
                 stdout,
                 "{SERVICE_NAME} contract-v{BACKEND_CONTRACT_VERSION}"
@@ -91,6 +122,9 @@ fn run_args(args: &[&str], stdout: &mut dyn Write, stderr: &mut dyn Write) -> Cl
     }
 }
 
+// Legacy entry — parse flags, then execute. The sentinel-match on
+// LEGACY_HELP_SENTINEL is how we tell "user asked for help, parse short-
+// circuited, all good" apart from a real error.
 fn run_legacy_args(args: &[&str], stdout: &mut dyn Write, stderr: &mut dyn Write) -> CliResult<()> {
     let options = match parse_legacy_args(args, stderr) {
         Ok(options) => options,
@@ -100,8 +134,15 @@ fn run_legacy_args(args: &[&str], stdout: &mut dyn Write, stderr: &mut dyn Write
     execute_legacy(options, stdout)
 }
 
+// Manual flag parser. We don't use clap here because the legacy shape
+// historically supports `--flag=value`, `--flag value`, and bare bool flags
+// (`--invert` meaning `--invert true`), and clap configured to accept all
+// three turned out to be more code than this loop. Hand-rolling argv parsing
+// in 2026 is a choice, but it's the right one for this particular mess.
 fn parse_legacy_args(args: &[&str], stderr: &mut dyn Write) -> CliResult<LegacyOptions> {
     let mut options = LegacyOptions {
+        // Preset defaults to "default" so non-preset legacy invocations still
+        // produce a sensible image.
         preset: "default".to_string(),
         ..LegacyOptions::default()
     };
@@ -110,13 +151,18 @@ fn parse_legacy_args(args: &[&str], stderr: &mut dyn Write) -> CliResult<LegacyO
         let arg = args[index];
         if matches!(arg, "-h" | "--help") {
             print_legacy_usage(stderr)?;
+            // Surfaced as Ok() in the caller via the sentinel match.
             return Err(LEGACY_HELP_SENTINEL.into());
         }
         if !arg.starts_with('-') {
             return Err(format!("unexpected positional arguments: {arg}").into());
         }
 
+        // split_flag_value handles "--flag=value" form; inline_value is Some
+        // in that case, None when the value is in the next argv slot.
         let (flag, inline_value) = split_flag_value(arg);
+        // canonical_legacy_flag normalizes -input and --input to --input,
+        // accepts both single- and double-dash spellings.
         let flag = canonical_legacy_flag(flag);
         match flag.as_str() {
             "--input" => {
@@ -296,21 +342,32 @@ fn process_legacy_study(
     Ok(())
 }
 
+// Translate parsed legacy flags into the modern ProcessStudyCommand shape.
+// The merge order is important and matches the manifest semantics:
+//   1. Start with empty defaults.
+//   2. Layer in the preset's defaults (so e.g. --preset xray brings invert/equalize).
+//   3. Layer in any explicit user overrides on top.
+// This ordering means a user passing `--preset xray --invert false` wins
+// even though the preset would have set invert=true.
 fn legacy_process_command(options: &LegacyOptions) -> CliResult<ProcessStudyCommand> {
     let mut command = ProcessStudyCommand {
+        // Legacy doesn't have study_ids — synthesized when needed downstream.
         study_id: String::new(),
         preset_id: options.preset.clone(),
         invert: false,
+        // OptionalInt/Float carry the user's explicit value (or None for "use preset").
         brightness: options.brightness.value,
         contrast: options.contrast.value,
         equalize: false,
         compare: options.compare,
         palette: parse_palette_name(&options.palette)?,
     };
+    // Preset defaults for the bool-typed knobs.
     if let Some(controls) = legacy_preset_controls(&options.preset) {
         command.invert = controls.invert;
         command.equalize = controls.equalize;
     }
+    // User overrides win over the preset defaults set above.
     if let Some(value) = options.invert.value {
         command.invert = value;
     }
@@ -339,6 +396,9 @@ fn parse_palette_name(value: &str) -> CliResult<Option<PaletteName>> {
     })
 }
 
+// "Plain preview" = the user only wants render_grayscale_preview (no
+// processing applied). True if every knob is at its default. Lets us
+// take the faster path that skips the processing pipeline entirely.
 fn is_plain_preview_request(options: &LegacyOptions) -> bool {
     !options.preview_output.trim().is_empty()
         && options.preset.trim().eq_ignore_ascii_case("default")
@@ -350,6 +410,9 @@ fn is_plain_preview_request(options: &LegacyOptions) -> bool {
         && options.palette.trim().is_empty()
 }
 
+// When --preview-output isn't given but processing was requested, fall back
+// to `<stem>_processed.bmp` next to the input. The .or_else gymnastics handle
+// weird path shapes (dotfiles, no-extension, etc.).
 fn default_legacy_preview_output_path(input_path: &str) -> String {
     let path = std::path::Path::new(input_path);
     let stem = path
@@ -365,12 +428,16 @@ fn default_legacy_preview_output_path(input_path: &str) -> String {
         .to_string()
 }
 
+// "--flag=value" → ("--flag", Some("value"))
+// "--flag"       → ("--flag", None)
 fn split_flag_value(arg: &str) -> (&str, Option<&str>) {
     arg.split_once('=')
         .map(|(flag, value)| (flag, Some(value)))
         .unwrap_or((arg, None))
 }
 
+// Normalize "-flag" → "--flag" so the match arm below doesn't have to list
+// both spellings. Anything not starting with a dash passes through unchanged.
 fn canonical_legacy_flag(flag: &str) -> String {
     if flag.starts_with("--") {
         flag.to_string()
@@ -381,6 +448,9 @@ fn canonical_legacy_flag(flag: &str) -> String {
     }
 }
 
+// Read a flag's value from either inline (after =) or the next argv slot.
+// Bumps `index` when it consumes the next slot — caller adds 1 more in the
+// outer loop to step past it.
 fn required_flag_value<'a>(
     args: &'a [&str],
     index: &mut usize,
@@ -397,6 +467,9 @@ fn required_flag_value<'a>(
         .ok_or_else(|| format!("workflow flag {flag} requires a value"))?)
 }
 
+// Three-state bool: None (flag absent), Some(true) (--flag or --flag=true),
+// Some(false) (--flag=false). Bare-flag-no-value is handled by the caller
+// via `.unwrap_or(true)`.
 fn parse_bool_flag(flag: &str, inline_value: Option<&str>) -> CliResult<Option<bool>> {
     Ok(inline_value
         .map(|value| {
@@ -408,6 +481,8 @@ fn parse_bool_flag(flag: &str, inline_value: Option<&str>) -> CliResult<Option<b
         .transpose()?)
 }
 
+// Strip any leading `--` separators (some wrappers insert these between
+// the executable name and the real flags). Idempotent.
 fn trim_leading_separators<'a>(mut args: &'a [&'a str]) -> &'a [&'a str] {
     while matches!(args.first(), Some(&"--")) {
         args = &args[1..];
@@ -836,6 +911,11 @@ impl DecodeSourceSummary {
     }
 }
 
+// Parsed legacy flag state. invert/brightness/contrast/equalize use the
+// OptionalX wrappers below to carry "user didn't set this" vs "user set this
+// to false/0". Without that distinction we couldn't tell `--preset xray`
+// from `--preset xray --equalize=false` (the preset wants equalize=true,
+// the user wants it off).
 #[derive(Debug, Clone, Default, PartialEq)]
 struct LegacyOptions {
     input: String,
@@ -851,6 +931,9 @@ struct LegacyOptions {
     palette: String,
 }
 
+// Three-state bool: None = "not set, fall back to preset"; Some(true/false)
+// = "user explicitly set this". Could be `Option<bool>` directly, but a
+// named type lets `.set(...)` read naturally at call sites.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 struct OptionalBool {
     value: Option<bool>,
@@ -862,6 +945,8 @@ impl OptionalBool {
     }
 }
 
+// Same three-state pattern for i32. Used for --brightness, where 0 is a
+// valid user-chosen value distinct from "not set".
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 struct OptionalInt {
     value: Option<i32>,
@@ -873,6 +958,7 @@ impl OptionalInt {
     }
 }
 
+// And for f64. No Eq because f64 isn't Eq (NaN). Used for --contrast.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 struct OptionalFloat {
     value: Option<f64>,
@@ -962,6 +1048,8 @@ mod tests {
         time::{SystemTime, UNIX_EPOCH},
     };
 
+    // Pins the exact output format of `xrayview version` — external scripts
+    // grep for this string, so a typo here is a breaking change.
     #[test]
     fn run_version_prints_contract_metadata() {
         let mut stdout = Vec::new();
@@ -976,6 +1064,9 @@ mod tests {
         assert!(stderr.is_empty());
     }
 
+    // Smoke test for the process-preview flag parser: every knob set on the
+    // command line should land in the parsed options struct, with palette
+    // case-insensitive ("BONE" → "bone").
     #[test]
     fn parse_process_preview_args_accepts_controls() {
         let options = parse_process_preview_args(&[
@@ -1005,6 +1096,9 @@ mod tests {
         assert_eq!(options.output_path, Path::new("output.bmp"));
     }
 
+    // End-to-end: run render-preview and process-preview, confirm both
+    // write valid BMP files (b"BM" magic) and that process-preview emits
+    // the expected JSON summary on stdout.
     #[test]
     fn render_and_process_preview_write_bmps() {
         let root = unique_temp_dir("preview");
@@ -1049,6 +1143,8 @@ mod tests {
         let _ = fs::remove_dir_all(root);
     }
 
+    // decode-source should round-trip width/height + omit measurementScale
+    // when there isn't one (this BMP has no PixelSpacing).
     #[test]
     fn decode_source_reports_bmp_metadata() {
         let root = unique_temp_dir("decode-source");
@@ -1072,6 +1168,8 @@ mod tests {
         let _ = fs::remove_dir_all(root);
     }
 
+    // Legacy --describe-* paths emit compact JSON (one line). The assertion
+    // on the single newline-or-EOF is the "compact, not pretty" guard.
     #[test]
     fn legacy_describe_commands_return_compact_json() {
         let root = unique_temp_dir("legacy-describe");
@@ -1100,6 +1198,10 @@ mod tests {
         let _ = fs::remove_dir_all(root);
     }
 
+    // End-to-end legacy: bare --input/--preview-output writes a plain
+    // grayscale preview; adding --preset xray --invert=false runs the full
+    // processing pipeline. Verifies stdout has the expected human-readable
+    // lines too (some scripts grep these).
     #[test]
     fn legacy_preview_and_process_write_expected_artifacts() {
         let root = unique_temp_dir("legacy-artifacts");
@@ -1153,6 +1255,9 @@ mod tests {
         let _ = fs::remove_dir_all(root);
     }
 
+    // Pins the default output naming: <stem>_processed.bmp next to the
+    // input. Tested in isolation because it's easy to break when refactoring
+    // default_legacy_preview_output_path.
     #[test]
     fn legacy_process_uses_default_preview_path_when_no_outputs_are_given() {
         let root = unique_temp_dir("legacy-default-output");
@@ -1179,6 +1284,10 @@ mod tests {
         let _ = fs::remove_dir_all(root);
     }
 
+    // Pins the override-on-top-of-preset merge order. xray preset gives
+    // invert=false + equalize=true; user OptionalBool::set(...) should
+    // overwrite both. The two-call structure is "preset defaults" vs
+    // "preset + overrides" and exercises both sides of legacy_process_command.
     #[test]
     fn legacy_process_command_preserves_and_overrides_preset_booleans() {
         let default = legacy_process_command(&LegacyOptions {
@@ -1200,6 +1309,7 @@ mod tests {
         assert!(!overridden.equalize);
     }
 
+    // PID + nanos so parallel cargo-test runs don't collide on the same dir.
     fn unique_temp_dir(name: &str) -> PathBuf {
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -1211,6 +1321,9 @@ mod tests {
         ))
     }
 
+    // Build a tiny 4×2 grayscale ramp BMP that the renderer can chew on.
+    // Pulled from the bmp::tests module rather than duplicating the BMP
+    // construction code here.
     fn build_renderable_test_bmp() -> Vec<u8> {
         crate::bmp::tests::build_bmp_32(
             4,

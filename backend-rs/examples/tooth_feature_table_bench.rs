@@ -253,6 +253,9 @@ fn tooth_feature_table_key(
     (xb as u32) | ((yb as u32) << 8) | ((nb as u32) << 17) | ((sb as u32) << 23)
 }
 
+// Little-endian u32 reader — the asset format is straight u32-pairs (key,
+// probability) preceded by a count header. Panic on read failure because
+// this is a bench: corrupt asset means we have nothing useful to time.
 fn read_le_u32(reader: &mut impl Read) -> u32 {
     let mut bytes = [0_u8; 4];
     reader.read_exact(&mut bytes).expect("read little-endian u32");
@@ -270,6 +273,7 @@ fn fnv_step(mut hash: u64, value: Option<u8>) -> u64 {
     hash
 }
 
+// Same Linux-only VmHWM reader as the other benches.
 fn peak_resident_set_kb() -> Option<usize> {
     let status = fs::read_to_string("/proc/self/status").ok()?;
     let line = status.lines().find(|line| line.starts_with("VmHWM:"))?;

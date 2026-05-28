@@ -1,3 +1,13 @@
+// Microbench triplet for the allocation-heavy hot paths:
+//   * process_compare — biggest single-shot allocator load (output is 2× wide).
+//   * encode_rgba_bmp — BMP encoder allocates one big Vec per call.
+//   * clone_job_snapshot — what the publish_job_update fan-out costs us.
+//
+// Uses a counting global allocator so the report is allocations + bytes per
+// iteration (deterministic, beats wall-clock for catching regressions).
+//
+// Usage: `cargo run --release --example micro_alloc_bench -- 100 2048 1536`
+
 use std::{
     alloc::{GlobalAlloc, Layout, System},
     hint::black_box,
@@ -15,6 +25,9 @@ use xrayview_backend_rs::{
     render::{self, PreviewImage},
 };
 
+// Global allocator wrapper that tallies count+bytes. Single-threaded
+// fetch_add with Relaxed is fine — we're not synchronizing anything, just
+// counting. Numbers are read at the start/end of each measure() block.
 struct CountingAllocator;
 static ALLOC_COUNT: AtomicUsize = AtomicUsize::new(0);
 static ALLOC_BYTES: AtomicU64 = AtomicU64::new(0);
@@ -54,6 +67,8 @@ fn main() {
     bench_clone_job_snapshot(iterations, 8, 256 * 1024);
 }
 
+// Side-by-side compare path — output buffer is 2× source width × 4 bytes
+// per pixel, the largest single allocation in the pipeline.
 fn bench_process_compare(iterations: usize, width: u32, height: u32) {
     let controls = GrayscaleControls {
         invert: false,
@@ -82,6 +97,8 @@ fn bench_process_compare(iterations: usize, width: u32, height: u32) {
     );
 }
 
+// BMP encode is dominated by a single big Vec::with_capacity + a write loop;
+// we want to confirm the capacity reservation actually sticks (no realloc).
 fn bench_encode_rgba_bmp(iterations: usize, width: u32, height: u32) {
     let preview = PreviewImage::rgba(width, height, synthetic_rgba(width, height));
 
@@ -102,6 +119,10 @@ fn bench_encode_rgba_bmp(iterations: usize, width: u32, height: u32) {
     );
 }
 
+// Simulates the publish_job_update fan-out: every subscriber gets a snapshot
+// clone. With Arc<JobResult> the payload itself isn't copied, but everything
+// else in JobSnapshot still is. Use this to measure the cost of adding more
+// subscribers.
 fn bench_clone_job_snapshot(iterations: usize, subscribers: usize, payload_bytes: usize) {
     let snapshot = JobSnapshot {
         job_id: "job-bench".to_string(),
@@ -148,6 +169,10 @@ fn bench_clone_job_snapshot(iterations: usize, subscribers: usize, payload_bytes
     );
 }
 
+// Shared timing harness. Runs `run` once as warmup (page faults, etc),
+// then `iterations` times under the timer + allocator counter. Returns
+// (elapsed, allocs, bytes, last_output) — last_output gets handed to
+// black_box by the caller to keep LLVM from optimizing it away.
 fn measure<T>(
     iterations: usize,
     mut run: impl FnMut() -> T,
@@ -185,6 +210,8 @@ fn print_result(
     );
 }
 
+// Deterministic gray noise — wrapping_mul prevents overflow panics on huge
+// dimensions and gives us a different-looking pattern per (x, y).
 fn synthetic_gray(width: u32, height: u32) -> Vec<u8> {
     let mut pixels = Vec::with_capacity(width as usize * height as usize);
     for y in 0..height {
@@ -195,6 +222,8 @@ fn synthetic_gray(width: u32, height: u32) -> Vec<u8> {
     pixels
 }
 
+// RGBA variant. The four channels get distinct seed multipliers so the
+// pattern isn't accidentally monochromatic.
 fn synthetic_rgba(width: u32, height: u32) -> Vec<u8> {
     let mut pixels = Vec::with_capacity(width as usize * height as usize * 4);
     for y in 0..height {

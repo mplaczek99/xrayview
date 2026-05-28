@@ -1,11 +1,25 @@
+// Data contracts between the backend and the HTMX/TS frontend. Every
+// struct/enum here has a counterpart in contracts/backend-contract-v1.schema.json
+// and frontend/src/lib/generated/contracts.ts — if you change one, you have to
+// hand-sync the Rust side and re-run `npm run contracts:generate` for TS.
+//
+// All field shapes use camelCase on the wire (see #[serde(rename_all)]) and
+// most reject unknown fields (deny_unknown_fields) so wire-format drift gets
+// caught at deserialize time rather than silently ignored.
+
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 pub const SERVICE_NAME: &str = "xrayview-backend";
+// Bump this whenever the schema breaks compatibility — the desktop shell
+// refuses to talk to a backend with a different major version.
 pub const BACKEND_CONTRACT_VERSION: u32 = 2;
+// Identifier for the schema document itself; never resolved as an actual URL.
 pub const BACKEND_CONTRACT_SCHEMA_ID: &str =
     "https://xrayview.local/contracts/backend-contract-v1.schema.json";
 
+// Command name constants. Frontend invoke() calls use these literal strings;
+// keeping them as named constants here means a rename only happens in one place.
 pub const COMMAND_GET_PROCESSING_MANIFEST: &str = "get_processing_manifest";
 pub const COMMAND_OPEN_STUDY: &str = "open_study";
 pub const COMMAND_START_RENDER_JOB: &str = "start_render_job";
@@ -16,6 +30,8 @@ pub const COMMAND_GET_JOBS: &str = "get_jobs";
 pub const COMMAND_CANCEL_JOB: &str = "cancel_job";
 pub const COMMAND_MEASURE_LINE_ANNOTATION: &str = "measure_line_annotation";
 
+// Order here matches the contract schema's enumeration order — the test below
+// pins this down. Don't reorder casually.
 pub const SUPPORTED_COMMANDS: [&str; 9] = [
     COMMAND_GET_PROCESSING_MANIFEST,
     COMMAND_OPEN_STUDY,
@@ -28,10 +44,15 @@ pub const SUPPORTED_COMMANDS: [&str; 9] = [
     COMMAND_MEASURE_LINE_ANNOTATION,
 ];
 
+// Used by the CLI to validate `--command <name>` arguments before dispatching.
+// O(n) but n=9, so a HashSet would be slower in practice.
 pub fn is_supported_command(command: &str) -> bool {
     SUPPORTED_COMMANDS.contains(&command)
 }
 
+// Pseudocolor palette identifier on the wire. Note this is the *contract*
+// enum — `processing::Palette` is the internal representation.
+// Mirror in contracts.ts as a string union.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum PaletteName {
@@ -40,6 +61,8 @@ pub enum PaletteName {
     Bone,
 }
 
+// Snapshot of every adjustable processing knob. Used inside a preset and as
+// the resolved set after merging user input.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ProcessingControls {
@@ -50,6 +73,8 @@ pub struct ProcessingControls {
     pub palette: PaletteName,
 }
 
+// A named preset (e.g. "default", "xray"). The `id` is the wire identifier
+// the frontend sends in ProcessStudyCommand.preset_id.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ProcessingPreset {
@@ -57,6 +82,9 @@ pub struct ProcessingPreset {
     pub controls: ProcessingControls,
 }
 
+// The full menu of presets the backend offers, plus which one is the default.
+// Fetched by the frontend at startup and re-fetched only on backend version
+// change.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ProcessingManifest {
@@ -64,10 +92,16 @@ pub struct ProcessingManifest {
     pub presets: Vec<ProcessingPreset>,
 }
 
+// Hardcoded preset list. If you change the numbers here, update the test
+// `default_processing_manifest_matches_contract_payload` below to match.
+// "xray" is the curated bitewing default — brightness +10 lifts low-mid
+// values, contrast 1.4 sharpens the bone/tissue boundary, equalize on,
+// bone palette tints toward the warm/cool spectrum clinicians prefer.
 pub fn default_processing_manifest() -> ProcessingManifest {
     ProcessingManifest {
         default_preset_id: "default".to_string(),
         presets: vec![
+            // Identity preset — applies nothing. Useful as a control / reset.
             ProcessingPreset {
                 id: "default".to_string(),
                 controls: ProcessingControls {
@@ -78,6 +112,7 @@ pub fn default_processing_manifest() -> ProcessingManifest {
                     palette: PaletteName::None,
                 },
             },
+            // The opinionated bitewing preset.
             ProcessingPreset {
                 id: "xray".to_string(),
                 controls: ProcessingControls {
@@ -88,6 +123,7 @@ pub fn default_processing_manifest() -> ProcessingManifest {
                     palette: PaletteName::Bone,
                 },
             },
+            // For dark/underexposed images — push contrast hard, no palette.
             ProcessingPreset {
                 id: "high-contrast".to_string(),
                 controls: ProcessingControls {
@@ -102,6 +138,10 @@ pub fn default_processing_manifest() -> ProcessingManifest {
     }
 }
 
+// Per-axis pixel spacing in millimeters. Bitewings can have non-square pixels
+// (row vs column spacing differ), so we keep them separate. `source` is the
+// metadata field this came from — e.g. "PixelSpacing" for DICOM-style — kept
+// for traceability in the UI footer.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct MeasurementScale {
@@ -110,12 +150,15 @@ pub struct MeasurementScale {
     pub source: String,
 }
 
+// Currently only one source ("Manual" = user drew it). Adding ML-sourced
+// annotations would extend this enum — and likely flip `editable` to false.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum AnnotationSource {
     Manual,
 }
 
+// f64 coords because the frontend draws fractional positions when zoomed.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AnnotationPoint {
@@ -123,6 +166,9 @@ pub struct AnnotationPoint {
     pub y: f64,
 }
 
+// Result of a line measurement. pixel_length always present; mm only if a
+// scale was available. skip_serializing_if keeps the JSON tidy when there's
+// no calibration.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct LineMeasurement {
@@ -131,6 +177,8 @@ pub struct LineMeasurement {
     pub calibrated_length_mm: Option<f64>,
 }
 
+// User-drawn line. `confidence` is reserved for the day we add ML-suggested
+// annotations; today it's always None for manual lines.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct LineAnnotation {
@@ -146,6 +194,7 @@ pub struct LineAnnotation {
     pub measurement: Option<LineMeasurement>,
 }
 
+// Axis-aligned rectangle annotation. Width/height are in image pixels.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RectangleAnnotation {
@@ -161,6 +210,8 @@ pub struct RectangleAnnotation {
     pub confidence: Option<f64>,
 }
 
+// Open or closed polyline. `closed=true` means the last point connects back
+// to the first (a polygon outline).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PolylineAnnotation {
@@ -174,6 +225,9 @@ pub struct PolylineAnnotation {
     pub confidence: Option<f64>,
 }
 
+// All annotations for a single study, separated by shape. Bundled this way
+// (rather than a single tagged enum) so the frontend can render each type
+// with a dedicated component without a discriminant switch.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AnnotationBundle {
@@ -182,28 +236,44 @@ pub struct AnnotationBundle {
     pub polylines: Vec<PolylineAnnotation>,
 }
 
+// Coarse error taxonomy. The frontend uses these to decide on UI treatment
+// (toast vs modal vs silent retry). Keep them small and add a new variant
+// rather than overloading an existing one.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum BackendErrorCode {
+    // User input we won't process — e.g. bad preset id, out-of-range brightness.
     InvalidInput,
+    // Specific resource missing — usually a study_id or job_id.
     NotFound,
+    // Caller invoked cancel on a still-running job and we honored it.
     Cancelled,
+    // State conflict — e.g. two start_*_job calls racing for the same fingerprint.
     Conflict,
+    // Cache file on disk is unreadable; user can usually just retry.
     CacheCorrupted,
+    // Programmer bug or unrecoverable I/O. `recoverable` is forced to false.
     Internal,
 }
 
+// The error payload the frontend sees. `recoverable` lets the UI offer a
+// retry button only when it makes sense.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct BackendError {
     pub code: BackendErrorCode,
     pub message: String,
+    // Optional extra context lines (file paths, header values, etc).
+    // Empty vec serializes away to keep payloads small.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub details: Vec<String>,
     pub recoverable: bool,
 }
 
 impl BackendError {
+    // Rule of thumb: Internal is always non-recoverable, everything else is.
+    // If you ever invent a Code variant that breaks that, the rule needs to
+    // become a match.
     pub fn new(code: BackendErrorCode, message: impl Into<String>) -> Self {
         let recoverable = code != BackendErrorCode::Internal;
         Self {
@@ -214,6 +284,7 @@ impl BackendError {
         }
     }
 
+    // The most common error type — almost every command can produce these.
     pub fn invalid_input(message: impl Into<String>) -> Self {
         Self::new(BackendErrorCode::InvalidInput, message)
     }
@@ -226,6 +297,8 @@ impl BackendError {
         Self::new(BackendErrorCode::Internal, message)
     }
 
+    // Builder-style detail attachment so callers don't have to do
+    // `let mut err = ...; err.details = ...`.
     pub fn with_details<I, S>(mut self, details: I) -> Self
     where
         I: IntoIterator<Item = S>,
@@ -236,6 +309,8 @@ impl BackendError {
     }
 }
 
+// Display just emits the message — useful for log lines and `?` propagation
+// when the caller doesn't care about the code.
 impl std::fmt::Display for BackendError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(&self.message)
@@ -244,12 +319,15 @@ impl std::fmt::Display for BackendError {
 
 impl std::error::Error for BackendError {}
 
+// open_study payloads — input_path is filesystem path on disk (absolute).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct OpenStudyCommand {
     pub input_path: String,
 }
 
+// A study's identity in this session. study_id is the stable key the frontend
+// uses for every subsequent command. input_name is the basename for display.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct StudyRecord {
@@ -265,6 +343,11 @@ pub struct StudyRecord {
 pub struct OpenStudyCommandResult {
     pub study: StudyRecord,
 }
+
+// Three command pairs follow — Render, Analyze, Process. All take study_id;
+// results all include preview_path (the cache-resident BMP they produced) +
+// loaded dimensions + the measurement scale (so the frontend can label
+// annotations without re-fetching).
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -289,6 +372,8 @@ pub struct AnalyzeStudyCommand {
     pub study_id: String,
 }
 
+// Analyze produces two outputs — the raw analyzed preview and a "filled"
+// version with overlay shading applied. Frontend can toggle between them.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AnalyzeStudyCommandResult {
@@ -297,11 +382,15 @@ pub struct AnalyzeStudyCommandResult {
     pub filled_preview_path: String,
     pub loaded_width: u32,
     pub loaded_height: u32,
+    // Human-readable description of what analysis was done — surfaces in UI.
     pub mode: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub measurement_scale: Option<MeasurementScale>,
 }
 
+// Process is the heavy one — preset id + per-knob overrides. None on a knob
+// means "use the preset value", Some means "override it". invert/equalize/
+// compare are always sent (bool, no override semantics needed).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ProcessStudyCommand {
@@ -330,6 +419,8 @@ pub struct ProcessStudyCommandResult {
     pub measurement_scale: Option<MeasurementScale>,
 }
 
+// Synchronous (non-job) command + result for line measurement. The annotation
+// goes in and comes back with its `measurement` field populated.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct MeasureLineAnnotationCommand {
@@ -344,18 +435,22 @@ pub struct MeasureLineAnnotationCommandResult {
     pub annotation: LineAnnotation,
 }
 
+// Generic single-job lookup/cancel payload.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct JobCommand {
     pub job_id: String,
 }
 
+// Bulk lookup — the UI refreshes its jobs panel using this rather than N
+// get_job calls.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct GetJobsCommand {
     pub job_ids: Vec<String>,
 }
 
+// Tagged-by-string job discriminator. Mirrors the three start_*_job commands.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum JobKind {
@@ -364,6 +459,12 @@ pub enum JobKind {
     ProcessStudy,
 }
 
+// Job state machine. Legal transitions:
+//   Queued → Running → Completed | Failed
+//   Running → Cancelling → Cancelled
+//   Queued → Cancelled (if cancelled before start)
+// "Cancelling" exists as a distinct state because cancellation is cooperative —
+// the worker may still be unwinding when the UI asks for status.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum JobState {
@@ -375,6 +476,9 @@ pub enum JobState {
     Cancelled,
 }
 
+// Progress payload published on every stage transition. `stage` is a short
+// machine token ("decoding", "rendering", "writing"), `message` is the
+// human-readable companion shown in the UI.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct JobProgress {
@@ -383,12 +487,18 @@ pub struct JobProgress {
     pub message: String,
 }
 
+// Returned synchronously from start_*_job — just the id so the frontend can
+// start subscribing to updates immediately.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct StartedJob {
     pub job_id: String,
 }
 
+// Job result payload. The shape is union-of-three (RenderStudyCommandResult,
+// AnalyzeStudyCommandResult, ProcessStudyCommandResult) so we keep it as
+// untyped JSON here and let the frontend narrow on `kind`. Keeps this enum
+// from ballooning with every new job type.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct JobResult {
@@ -396,6 +506,9 @@ pub struct JobResult {
     pub payload: serde_json::Value,
 }
 
+// What `get_job` / the job-update event sends. Arc on result because the same
+// snapshot gets fanned out to every subscriber and we don't want to clone
+// the (potentially large) payload N times.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct JobSnapshot {
@@ -405,9 +518,12 @@ pub struct JobSnapshot {
     pub study_id: Option<String>,
     pub state: JobState,
     pub progress: JobProgress,
+    // True when the result was served from cache — frontend uses this to
+    // suppress the "rendering..." spinner for already-known results.
     pub from_cache: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub result: Option<Arc<JobResult>>,
+    // Mutually exclusive with `result`. State machine enforces that.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<BackendError>,
 }
@@ -416,6 +532,9 @@ pub struct JobSnapshot {
 mod tests {
     use super::*;
 
+    // Locks down both the *order* and *names* of commands. Re-ordering would
+    // break the schema enum's positional check; renaming would break the
+    // frontend's literal invoke() calls.
     #[test]
     fn supported_commands_match_contract_order() {
         assert_eq!(
@@ -434,6 +553,10 @@ mod tests {
         );
     }
 
+    // Serialize the manifest and check it byte-for-byte against the expected
+    // JSON. This is the integration boundary with the TS-generated types —
+    // if this drifts, contracts:check will catch it on the schema side too,
+    // but this test fires earlier (during cargo test, no node needed).
     #[test]
     fn default_processing_manifest_matches_contract_payload() {
         let payload = serde_json::to_value(default_processing_manifest()).unwrap();
