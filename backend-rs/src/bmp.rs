@@ -407,6 +407,12 @@ fn parse_bmp_header(bytes: &[u8]) -> Result<BmpHeader, String> {
     if bytes.len() < 14 + dib_size as usize {
         return Err("truncated BMP DIB header".to_string());
     }
+    let minimum_pixel_offset = 14 + dib_size as usize;
+    if pixel_offset < minimum_pixel_offset {
+        return Err(format!(
+            "invalid BMP pixel data offset: {pixel_offset}, want at least {minimum_pixel_offset}"
+        ));
+    }
 
     // Width is i32 in the spec but a negative value is invalid (unlike height).
     // Height is the *signed* trick: negative = top-down row order.
@@ -823,6 +829,16 @@ pub mod tests {
         let error = render_grayscale_preview(&bmp).unwrap_err();
 
         assert!(error.contains("BMP pixel data length"));
+    }
+
+    #[test]
+    fn render_rejects_pixel_offset_inside_header() {
+        let mut bmp = build_bmp_32(1, 1, &[(255, 255, 255)]);
+        bmp[10..14].copy_from_slice(&14_u32.to_le_bytes());
+
+        let error = render_grayscale_preview(&bmp).unwrap_err();
+
+        assert!(error.contains("invalid BMP pixel data offset"));
     }
 
     // Full render pipeline on a tiny 2×2 color BMP. Compares against the
