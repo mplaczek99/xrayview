@@ -50,7 +50,7 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "brightness": { "type": "number" },
+        "brightness": { "type": "integer" },
         "contrast": { "type": "number" },
         "invert": { "type": "boolean" },
         "equalize": { "type": "boolean" },
@@ -349,7 +349,7 @@
         "presetId": { "type": "string" },
         "invert": { "type": "boolean" },
         "brightness": {
-          "type": ["number", "null"]
+          "type": ["integer", "null"]
         },
         "contrast": {
           "type": ["number", "null"]
