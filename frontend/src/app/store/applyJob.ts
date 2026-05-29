@@ -56,11 +56,21 @@ function applyAnalyzeJob(study: WorkbenchStudy, job: JobSnapshot): WorkbenchStud
         return study;
       }
 
-      const status = job.result.payload.mode.includes("no reliable tooth mask")
-        ? "Analysis completed, but no reliable tooth mask was found."
-        : job.fromCache
-          ? "Tooth and bone level overlay loaded from cache."
-          : "Tooth and bone level overlay generated.";
+      const mode = job.result.payload.mode;
+      const toothUnreliable = mode.includes("no reliable tooth mask");
+      const boneUnreliable = mode.includes("no reliable bone level");
+      let status: string;
+      if (toothUnreliable && boneUnreliable) {
+        status = "Analysis completed, but no reliable tooth mask or bone level was found.";
+      } else if (toothUnreliable) {
+        status = "Analysis completed, but no reliable tooth mask was found.";
+      } else if (boneUnreliable) {
+        status = "Analysis completed, but no reliable bone level was found.";
+      } else if (job.fromCache) {
+        status = "Tooth and bone level overlay loaded from cache.";
+      } else {
+        status = "Tooth and bone level overlay generated.";
+      }
 
       return {
         ...study,
