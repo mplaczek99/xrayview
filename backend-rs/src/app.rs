@@ -875,7 +875,10 @@ impl App {
             self.next_job_number.fetch_add(1, Ordering::Relaxed)
         );
         let snapshot = cached_job_snapshot(job_id.clone(), job_kind, Some(study_id), result);
-        self.store_job_snapshot(snapshot);
+        self.store_job_snapshot(snapshot.clone());
+        // Cache hits are terminal immediately, but subscribers still need the
+        // same job-update event they receive from worker-completed jobs.
+        self.publish_job_update(&snapshot);
         Ok(Some(StartedJob { job_id }))
     }
 
@@ -2117,6 +2120,48 @@ mod tests {
         let _ = fs::remove_dir_all(temp_dir);
     }
 
+    // Cache hits skip worker execution, but they still represent a completed
+    // job and must notify event subscribers like any other terminal job.
+    #[test]
+    fn start_render_job_broadcasts_cached_completed_job_update() {
+        let (temp_dir, app, study) =
+            app_with_renderable_study("render-cache-hit-event", build_renderable_test_bmp());
+
+        let first_started = app
+            .start_render_job(RenderStudyCommand {
+                study_id: study.study_id.clone(),
+            })
+            .unwrap();
+        let first_snapshot = app
+            .get_job(JobCommand {
+                job_id: first_started.job_id,
+            })
+            .unwrap();
+        assert_eq!(first_snapshot.state, JobState::Completed);
+        assert!(!first_snapshot.from_cache);
+
+        let subscription = app.subscribe_job_updates();
+        let second_started = app
+            .start_render_job(RenderStudyCommand {
+                study_id: study.study_id.clone(),
+            })
+            .unwrap();
+        let snapshot = subscription
+            .receiver
+            .recv_timeout(std::time::Duration::from_millis(500))
+            .unwrap();
+        app.unsubscribe_job_updates(subscription.id);
+
+        assert_eq!(snapshot.job_id, second_started.job_id);
+        assert_eq!(snapshot.job_kind, JobKind::RenderStudy);
+        assert_eq!(snapshot.state, JobState::Completed);
+        assert!(snapshot.from_cache);
+        assert_eq!(snapshot.progress.stage, "cacheHit");
+        assert_eq!(snapshot.study_id, Some(study.study_id));
+
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
     // The async path emits a sequence of progress updates with stage names
     // the frontend can match on. Pins that sequence — adding a stage means
     // updating this test AND the TS-side stage handling.
@@ -2161,6 +2206,65 @@ mod tests {
                 "completed",
             ],
         );
+
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    // Production routes start_render_job → start_render_job_async, so the
+    // cache-hit broadcast added in start_cached_job must also fire when the
+    // async entry point short-circuits to the cached result. Drives a full
+    // async run first (which populates result_cache via finish_async_job),
+    // then asserts the next async call publishes a from_cache=true snapshot
+    // without spawning a worker.
+    #[test]
+    fn start_render_job_async_broadcasts_cached_completed_job_update() {
+        let (temp_dir, app, study) = app_with_renderable_study(
+            "render-async-cache-hit-event",
+            build_renderable_test_bmp(),
+        );
+        let app = std::sync::Arc::new(app);
+
+        // Drive the first run end-to-end through the async pipeline so its
+        // terminal snapshot lands in result_cache before we re-subscribe.
+        let warmup_subscription = app.subscribe_job_updates();
+        let first_started = app
+            .start_render_job_async(RenderStudyCommand {
+                study_id: study.study_id.clone(),
+            })
+            .unwrap();
+        let first_terminal = loop {
+            let snapshot = warmup_subscription
+                .receiver
+                .recv_timeout(std::time::Duration::from_secs(1))
+                .unwrap();
+            if snapshot.job_id == first_started.job_id && is_terminal_state(&snapshot.state) {
+                break snapshot;
+            }
+        };
+        app.unsubscribe_job_updates(warmup_subscription.id);
+        assert_eq!(first_terminal.state, JobState::Completed);
+        assert!(!first_terminal.from_cache);
+
+        // Fresh subscription so the cache-hit event is the only one in flight.
+        let subscription = app.subscribe_job_updates();
+        let second_started = app
+            .start_render_job_async(RenderStudyCommand {
+                study_id: study.study_id.clone(),
+            })
+            .unwrap();
+        let snapshot = subscription
+            .receiver
+            .recv_timeout(std::time::Duration::from_millis(500))
+            .unwrap();
+        app.unsubscribe_job_updates(subscription.id);
+
+        assert_eq!(snapshot.job_id, second_started.job_id);
+        assert_ne!(snapshot.job_id, first_terminal.job_id);
+        assert_eq!(snapshot.job_kind, JobKind::RenderStudy);
+        assert_eq!(snapshot.state, JobState::Completed);
+        assert!(snapshot.from_cache);
+        assert_eq!(snapshot.progress.stage, "cacheHit");
+        assert_eq!(snapshot.study_id, Some(study.study_id));
 
         let _ = fs::remove_dir_all(temp_dir);
     }
