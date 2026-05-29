@@ -503,6 +503,14 @@ impl App {
                 snapshot.progress.message = "Cancellation requested".to_string();
                 snapshot.result = None;
                 snapshot.error = None;
+                // Free the fingerprint immediately so a follow-up start_*_job_async
+                // can mint a fresh job instead of being deduped onto this dying one.
+                // The worker's finish_cancelled_if_requested only removes when the
+                // active entry still points at this job_id, so a replacement
+                // reservation that has since claimed the fingerprint is safe.
+                self.active_fingerprints
+                    .lock()
+                    .retain(|_, active_job_id| active_job_id != job_id);
                 true
             } else {
                 false
@@ -2512,6 +2520,51 @@ mod tests {
             AsyncJobReservation::Created(job_id) => assert_eq!(job_id, "job-2"),
             AsyncJobReservation::Existing(job_id) => {
                 panic!("replacement reservation unexpectedly reused {job_id}")
+            }
+        }
+    }
+
+    // Cancelling a Running job must release its fingerprint immediately so a
+    // user who cancels and retries gets a fresh job instead of being deduped
+    // onto the dying one. The worker still has cleanup to do, but the next
+    // reservation should not wait on it.
+    #[test]
+    fn cancel_running_job_frees_fingerprint_for_immediate_retry() {
+        let app = App::new(Config::default()).unwrap();
+
+        let first = app
+            .reserve_async_job("fingerprint-1", JobKind::RenderStudy, "study-1".to_string())
+            .unwrap();
+        let first_job_id = match first {
+            AsyncJobReservation::Created(job_id) => job_id,
+            AsyncJobReservation::Existing(job_id) => {
+                panic!("first reservation unexpectedly reused {job_id}")
+            }
+        };
+
+        // Worker would normally drive this; simulate it landing in Running.
+        app.update_job_progress(
+            &first_job_id,
+            JobState::Running,
+            50,
+            "loadingStudy",
+            "Loading source pixels",
+        );
+
+        let cancelling = app
+            .cancel_job(JobCommand {
+                job_id: first_job_id.clone(),
+            })
+            .unwrap();
+        assert_eq!(cancelling.state, JobState::Cancelling);
+
+        let replacement = app
+            .reserve_async_job("fingerprint-1", JobKind::RenderStudy, "study-1".to_string())
+            .unwrap();
+        match replacement {
+            AsyncJobReservation::Created(job_id) => assert_ne!(job_id, first_job_id),
+            AsyncJobReservation::Existing(job_id) => {
+                panic!("replacement reservation unexpectedly reused dying job {job_id}")
             }
         }
     }
