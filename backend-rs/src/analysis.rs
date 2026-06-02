@@ -95,12 +95,14 @@ const TOOTH_MASK_CLOSE_RADIUS_PIXELS: usize = 2;
 // Cut a 24px-radius safety margin around the tooth mask before drawing the
 // bone overlay so the two don't visually overlap at the boundary.
 const BONE_TOOTH_CUTOUT_BRIDGE_RADIUS_PIXELS: usize = 24;
-// Drop any bone detection within 12px of the image edge — radiograph
-// vignetting and detector artifacts produce false positives there.
-const BONE_IMAGE_FRAME_CLEARANCE_PIXELS: usize = 12;
 // Pixels at or below this gray value are treated as off-detector (i.e. the
 // black border of the radiograph). Used to exclude background from analysis.
 const RADIOGRAPH_BACKGROUND_MAX_GRAY: u8 = 2;
+// Width of the image-edge strip used to snap the bone-section mask outward
+// to the image border. Wherever the detected bone sits within this many
+// pixels of an edge, the strip is filled so the outline ends up *at* the
+// edge instead of tracing the thin dark-vignette gap as a rectangle.
+const BONE_EDGE_SNAP_RADIUS_PIXELS: usize = 14;
 // Learned (forest-of-trees) model knobs. Threshold 0.1 was set during the
 // last retrain; LR was used during training but is kept here as documentation.
 const LEARNED_MODEL_LEARNING_RATE: f64 = 0.1;
@@ -303,11 +305,11 @@ pub fn generate_tooth_overlay(preview: &PreviewImage) -> Result<ToothOverlayResu
         mode.push_str("; no reliable bone level found");
     }
 
-    // The outline needs a smoothed section contour so cutouts near the tooth mask
-    // do not punch holes through the red border. The filled Sections preview is
-    // a class map, so it uses the detector's bone mask directly to preserve the
-    // red regions encoded by the colored reference fixtures.
-    let bone_section = bone_section_mask_with_ignored_cutouts(
+    // Outline + Sections share one bone shape — the smoothed contour — so the
+    // red border and the red shading always trace the same boundary. We let
+    // the bone reach the image edge: when the detector finds bone there, the
+    // outline should sit at the edge, not be pushed inward.
+    let mut bone_section = bone_section_mask_with_ignored_cutouts(
         &preview.pixels,
         &bone_mask,
         &tooth_mask,
@@ -315,25 +317,36 @@ pub fn generate_tooth_overlay(preview: &PreviewImage) -> Result<ToothOverlayResu
         height,
         &mut mask_buffers,
     );
-
-    // Both overlays now share mask_buffers for morphology scratch, so build
-    // them into locals first and let each borrow drop before the result
-    // struct is assembled.
-    let outline_preview = overlay_outline_preview(
-        &preview.pixels,
-        preview.width,
-        preview.height,
-        &tooth_mask,
-        &bone_section,
+    // The radiograph has a dark vignette strip at its edges; the detector
+    // (correctly) doesn't claim bone there, which leaves a thin gap between
+    // the bone region and the image edge. Without this, the outline traces
+    // that gap as a rectangle hugging the frame. Snap the section out to the
+    // image edge wherever it's already close so the outline collapses onto
+    // the edge.
+    snap_mask_to_image_edge(
+        &mut bone_section,
+        width,
+        height,
+        BONE_EDGE_SNAP_RADIUS_PIXELS,
         &mut mask_buffers,
     );
-    let filled_preview = overlay_filled_preview(
+
+    let outline_preview = overlay_preview(
         &preview.pixels,
         preview.width,
         preview.height,
         &tooth_mask,
-        &bone_mask,
         &bone_section,
+        false,
+        &mut mask_buffers,
+    );
+    let filled_preview = overlay_preview(
+        &preview.pixels,
+        preview.width,
+        preview.height,
+        &tooth_mask,
+        &bone_section,
+        true,
         &mut mask_buffers,
     );
 
@@ -550,101 +563,48 @@ fn detect_bone_feature_table_mask(
     }
 }
 
-fn overlay_outline_preview(
+// Single rendering path for both Outline (`fill_sections = false`) and
+// Sections (`fill_sections = true`). When shading is on, the alpha fills are
+// drawn from the same masks the outlines are derived from, so the two layers
+// always agree by construction. `bone_mask` is expected to already have any
+// background/frame cleanup applied by the caller.
+fn overlay_preview(
     gray: &[u8],
     width: u32,
     height: u32,
     tooth_mask: &[bool],
-    bone_section: &[bool],
-    buffers: &mut MaskBuffers,
-) -> PreviewImage {
-    let width_usize = width as usize;
-    let height_usize = height as usize;
-    let mut pixels = grayscale_rgba(gray);
-    let mut bone_outline = centered_outline_mask(
-        bone_section,
-        width_usize,
-        height_usize,
-        BONE_OUTLINE_THICKNESS_PIXELS,
-        buffers,
-    );
-    clear_border_background_from_mask(
-        &mut bone_outline,
-        gray,
-        width_usize,
-        height_usize,
-        &mut buffers.visited,
-    );
-    clear_image_frame_outline(
-        &mut bone_outline,
-        width_usize,
-        height_usize,
-        BONE_OUTLINE_THICKNESS_PIXELS,
-    );
-    composite_mask_fill(&mut pixels, &bone_outline, BONE_RED, Some(tooth_mask));
-
-    let tooth_outline = inner_outline_mask(
-        tooth_mask,
-        width_usize,
-        height_usize,
-        TOOTH_OUTLINE_THICKNESS_PIXELS,
-        buffers,
-    );
-    composite_mask_fill(&mut pixels, &tooth_outline, TOOTH_GREEN, None);
-
-    PreviewImage::rgba(width, height, pixels)
-}
-
-fn overlay_filled_preview(
-    gray: &[u8],
-    width: u32,
-    height: u32,
-    tooth_mask: &[bool],
-    bone_fill_mask: &[bool],
-    bone_section: &[bool],
+    bone_mask: &[bool],
+    fill_sections: bool,
     buffers: &mut MaskBuffers,
 ) -> PreviewImage {
     let width_usize = width as usize;
     let height_usize = height as usize;
     let mut pixels = grayscale_rgba(gray);
 
-    // Translucent fills first so the outlines drawn next sit crisply on top.
-    blend_mask_fill(
-        &mut pixels,
-        bone_fill_mask,
-        BONE_RED,
-        SECTION_FILL_ALPHA,
-        Some(tooth_mask),
-    );
-    blend_mask_fill(
-        &mut pixels,
-        tooth_mask,
-        TOOTH_GREEN,
-        SECTION_FILL_ALPHA,
-        None,
-    );
+    if fill_sections {
+        // Translucent fills first so the outlines drawn next sit crisply on top.
+        blend_mask_fill(
+            &mut pixels,
+            bone_mask,
+            BONE_RED,
+            SECTION_FILL_ALPHA,
+            Some(tooth_mask),
+        );
+        blend_mask_fill(
+            &mut pixels,
+            tooth_mask,
+            TOOTH_GREEN,
+            SECTION_FILL_ALPHA,
+            None,
+        );
+    }
 
-    // Same outlines as overlay_outline_preview, drawn solid so the section
-    // boundaries stay readable through the wash.
-    let mut bone_outline = centered_outline_mask(
-        bone_section,
+    let bone_outline = centered_outline_mask(
+        bone_mask,
         width_usize,
         height_usize,
         BONE_OUTLINE_THICKNESS_PIXELS,
         buffers,
-    );
-    clear_border_background_from_mask(
-        &mut bone_outline,
-        gray,
-        width_usize,
-        height_usize,
-        &mut buffers.visited,
-    );
-    clear_image_frame_outline(
-        &mut bone_outline,
-        width_usize,
-        height_usize,
-        BONE_OUTLINE_THICKNESS_PIXELS,
     );
     composite_mask_fill(&mut pixels, &bone_outline, BONE_RED, Some(tooth_mask));
 
@@ -778,6 +738,71 @@ fn bone_section_mask_with_ignored_cutouts(
     cleaned
 }
 
+// Push the mask out to the image edge along a thin strip. Only pixels within
+// `snap_radius` of an edge are touched; each such pixel becomes true if the
+// dilated mask is true there, which means the original mask had a true pixel
+// within `snap_radius` (Chebyshev). Interior pixels are untouched.
+//
+// This bridges the dark vignette gap between the detected bone region and the
+// image border so a downstream outline doesn't trace the gap as a rectangle.
+fn snap_mask_to_image_edge(
+    mask: &mut [bool],
+    width: usize,
+    height: usize,
+    snap_radius: usize,
+    buffers: &mut MaskBuffers,
+) {
+    if snap_radius == 0
+        || width == 0
+        || height == 0
+        || mask.len() != width * height
+        || buffers.a.len() != mask.len()
+    {
+        return;
+    }
+
+    dilate_mask_into(
+        mask,
+        width,
+        height,
+        snap_radius,
+        &mut buffers.scratch,
+        &mut buffers.a,
+    );
+
+    let strip = snap_radius.min(height);
+    for y in 0..strip {
+        let row = y * width;
+        for x in 0..width {
+            if buffers.a[row + x] {
+                mask[row + x] = true;
+            }
+        }
+    }
+    for y in height.saturating_sub(strip)..height {
+        let row = y * width;
+        for x in 0..width {
+            if buffers.a[row + x] {
+                mask[row + x] = true;
+            }
+        }
+    }
+    let h_strip = snap_radius.min(width);
+    for y in 0..height {
+        let row = y * width;
+        for x in 0..h_strip {
+            if buffers.a[row + x] {
+                mask[row + x] = true;
+            }
+        }
+        for x in width.saturating_sub(h_strip)..width {
+            if buffers.a[row + x] {
+                mask[row + x] = true;
+            }
+        }
+    }
+}
+
 fn bone_tooth_cutout_bridge_radius(width: usize, height: usize) -> usize {
     BONE_TOOTH_CUTOUT_BRIDGE_RADIUS_PIXELS
         .min(BONE_OUTLINE_THICKNESS_PIXELS.max(width.min(height) / 32))
@@ -787,6 +812,15 @@ fn minimum_bone_outline_area_pixels(width: usize, height: usize) -> usize {
     (width * height / 1000).clamp(16, 128)
 }
 
+// Both outline helpers treat the image boundary as if the mask continued
+// past the edge: an outline pixel must straddle a true→false transition that
+// occurs *inside* the image. We rely on De Morgan duality —
+// `erode'(M) = NOT dilate(NOT M)` where erode' treats out-of-bounds as true —
+// so the existing dilate (which treats out-of-bounds as false) is enough.
+//
+// Concretely: NOT erode'(M) = dilate(NOT M), so
+//   inner_outline    = M AND NOT erode'(M)        = M AND dilate(NOT M)
+//   centered_outline = dilate(M) AND NOT erode'(M) = dilate(M) AND dilate(NOT M).
 fn inner_outline_mask(
     mask: &[bool],
     width: usize,
@@ -797,8 +831,9 @@ fn inner_outline_mask(
     if thickness == 0 || mask.is_empty() {
         return mask.to_vec();
     }
-    erode_mask_into(
-        mask,
+    let not_mask: Vec<bool> = mask.iter().map(|v| !*v).collect();
+    dilate_mask_into(
+        &not_mask,
         width,
         height,
         thickness,
@@ -807,7 +842,7 @@ fn inner_outline_mask(
     );
     mask.iter()
         .zip(&buffers.a)
-        .map(|(value, eroded)| *value && !eroded)
+        .map(|(value, dilated_complement)| *value && *dilated_complement)
         .collect()
 }
 
@@ -829,8 +864,9 @@ fn centered_outline_mask(
         &mut buffers.scratch,
         &mut buffers.a,
     );
-    erode_mask_into(
-        mask,
+    let not_mask: Vec<bool> = mask.iter().map(|v| !*v).collect();
+    dilate_mask_into(
+        &not_mask,
         width,
         height,
         thickness,
@@ -841,7 +877,7 @@ fn centered_outline_mask(
         .a
         .iter()
         .zip(&buffers.b)
-        .map(|(dilated, eroded)| *dilated && !eroded)
+        .map(|(dilated, dilated_complement)| *dilated && *dilated_complement)
         .collect()
 }
 
@@ -909,40 +945,6 @@ fn radiograph_background_threshold(gray: &[u8]) -> u8 {
     } else {
         RADIOGRAPH_BACKGROUND_MAX_GRAY
     }
-}
-
-fn clear_image_frame_outline(mask: &mut [bool], width: usize, height: usize, thickness: usize) {
-    if mask.is_empty()
-        || width == 0
-        || height == 0
-        || mask.len() != width * height
-        || thickness == 0
-    {
-        return;
-    }
-
-    let clearance = bone_image_frame_clearance(width, height, thickness);
-    let limit_x = clearance.min(width);
-    let limit_y = clearance.min(height);
-    for y in 0..height {
-        let row = y * width;
-        for x in 0..limit_x {
-            mask[row + x] = false;
-            mask[row + width - 1 - x] = false;
-        }
-    }
-    for y in 0..limit_y {
-        let top_row = y * width;
-        let bottom_row = (height - 1 - y) * width;
-        for x in 0..width {
-            mask[top_row + x] = false;
-            mask[bottom_row + x] = false;
-        }
-    }
-}
-
-fn bone_image_frame_clearance(width: usize, height: usize, thickness: usize) -> usize {
-    BONE_IMAGE_FRAME_CLEARANCE_PIXELS.min(thickness.max(width.min(height) / 64))
 }
 
 fn dilate_mask_into(
@@ -1970,7 +1972,7 @@ mod tests {
     // inside the tooth region (we don't want red lines crossing through
     // green ones), and tooth outline appears along the rectangle border.
     #[test]
-    fn overlay_outline_preview_outlines_tooth_and_suppresses_bone_inside_tooth() {
+    fn overlay_preview_outlines_tooth_and_suppresses_bone_inside_tooth() {
         const WIDTH: usize = 9;
         const HEIGHT: usize = 9;
 
@@ -1981,12 +1983,13 @@ mod tests {
         bone_mask[4 * WIDTH + 4] = true;
 
         let mut buffers = MaskBuffers::new(WIDTH * HEIGHT);
-        let preview = overlay_outline_preview(
+        let preview = overlay_preview(
             &gray,
             WIDTH as u32,
             HEIGHT as u32,
             &tooth_mask,
             &bone_mask,
+            false,
             &mut buffers,
         );
         let red_mask = red_mask_from_rgba(&preview);
@@ -1998,39 +2001,34 @@ mod tests {
         assert!(!green_mask[4 * WIDTH + 4]);
     }
 
-    // Filled overlay: outside masks → grayscale carries through; bone-only
-    // edge pixels keep the blended red fill (their outline is suppressed by
-    // frame clearance); tooth pixels are sparse so every one is its own
-    // boundary and gets the solid green outline drawn on top of the blend;
-    // the only pixel far enough from the frame to keep a bone outline (the
-    // center) lands as solid red. Tooth still wins over bone at overlaps.
+    // Filled overlay invariants: outside both masks → untouched grayscale;
+    // strict interior of either mask (the eroded core, not on the outline
+    // band) → alpha-blended fill; the outline band → solid color overlaying
+    // the blend. Bone outline is suppressed inside the tooth region by the
+    // exclude_mask, so tooth wins on overlap.
     #[test]
-    fn overlay_filled_preview_draws_outlines_over_blended_fills() {
-        const WIDTH: usize = 5;
-        const HEIGHT: usize = 5;
+    fn overlay_preview_draws_outlines_over_blended_fills() {
+        const WIDTH: usize = 30;
+        const HEIGHT: usize = 30;
 
-        let mut gray = vec![0_u8; WIDTH * HEIGHT];
-        gray[0] = 12;
-        gray[3] = 96;
-        gray[12] = 24;
+        let gray = vec![0_u8; WIDTH * HEIGHT];
         let mut tooth_mask = vec![false; WIDTH * HEIGHT];
         let mut bone_mask = vec![false; WIDTH * HEIGHT];
-        bone_mask[1] = true;
-        bone_mask[2] = true;
-        tooth_mask[2] = true;
-        tooth_mask[7] = true;
-        tooth_mask[11] = true;
-        tooth_mask[13] = true;
-        tooth_mask[17] = true;
+        // 10×10 tooth at (5..15, 5..15). 2-px erosion leaves a 6×6 strict
+        // interior at (7..13, 7..13).
+        fill_mask_rect(&mut tooth_mask, WIDTH, 5, 5, 10, 10);
+        // 10×6 bone at (5..15, 20..26). Centered outline strips around
+        // the rect; eroded core is rows 22..24, cols 7..13.
+        fill_mask_rect(&mut bone_mask, WIDTH, 5, 20, 10, 6);
 
         let mut buffers = MaskBuffers::new(WIDTH * HEIGHT);
-        let preview = overlay_filled_preview(
+        let preview = overlay_preview(
             &gray,
             WIDTH as u32,
             HEIGHT as u32,
             &tooth_mask,
             &bone_mask,
-            &bone_mask,
+            true,
             &mut buffers,
         );
 
@@ -2040,50 +2038,25 @@ mod tests {
             let ch = |s: u8| -> u8 { ((s as u32 * a + dst as u32 * inv + 127) / 255) as u8 };
             [ch(src[0]), ch(src[1]), ch(src[2])]
         };
+        let idx = |y: usize, x: usize| y * WIDTH + x;
 
-        assert_eq!(rgb_at(&preview, 0), [12, 12, 12]);
-        assert_eq!(rgb_at(&preview, 1), expect_blend(0, BONE_RED));
+        // Outside both masks → grayscale untouched.
+        assert_eq!(rgb_at(&preview, idx(0, 0)), [0, 0, 0]);
+        // Tooth strict interior (in eroded → not on inner outline) → alpha green.
+        assert_eq!(rgb_at(&preview, idx(10, 10)), expect_blend(0, TOOTH_GREEN));
+        // Tooth boundary pixel (in mask, outside eroded) → solid outline green.
         assert_eq!(
-            rgb_at(&preview, 2),
+            rgb_at(&preview, idx(5, 5)),
             [TOOTH_GREEN[0], TOOTH_GREEN[1], TOOTH_GREEN[2]]
         );
-        assert_eq!(rgb_at(&preview, 3), [96, 96, 96]);
+        // Bone strict interior (in eroded core) → alpha red, no outline overlay.
+        assert_eq!(rgb_at(&preview, idx(22, 8)), expect_blend(0, BONE_RED));
+        // Bone boundary pixel (in mask, outside eroded → in centered outline)
+        // and outside tooth_mask → solid outline red.
         assert_eq!(
-            rgb_at(&preview, 7),
-            [TOOTH_GREEN[0], TOOTH_GREEN[1], TOOTH_GREEN[2]]
+            rgb_at(&preview, idx(20, 5)),
+            [BONE_RED[0], BONE_RED[1], BONE_RED[2]]
         );
-        assert_eq!(rgb_at(&preview, 12), [BONE_RED[0], BONE_RED[1], BONE_RED[2]]);
-    }
-
-    // BONE_IMAGE_FRAME_CLEARANCE in action — bone pixels within ~12px of
-    // the edge don't get an outline. Asserts both sides of the boundary
-    // (suppressed near edge, visible further in).
-    #[test]
-    fn overlay_outline_preview_suppresses_bone_outline_on_image_frame() {
-        const WIDTH: usize = 16;
-        const HEIGHT: usize = 14;
-
-        let gray = vec![96_u8; WIDTH * HEIGHT];
-        let tooth_mask = vec![false; WIDTH * HEIGHT];
-        let mut bone_mask = vec![false; WIDTH * HEIGHT];
-        fill_mask_rect(&mut bone_mask, WIDTH, 0, 2, 14, 12);
-
-        let mut buffers = MaskBuffers::new(WIDTH * HEIGHT);
-        let preview = overlay_outline_preview(
-            &gray,
-            WIDTH as u32,
-            HEIGHT as u32,
-            &tooth_mask,
-            &bone_mask,
-            &mut buffers,
-        );
-        let red_mask = red_mask_from_rgba(&preview);
-
-        assert!(!red_mask[8 * WIDTH]);
-        assert!(!red_mask[8 * WIDTH + 1]);
-        assert!(!red_mask[(HEIGHT - 1) * WIDTH + 8]);
-        assert!(!red_mask[(HEIGHT - 2) * WIDTH + 8]);
-        assert!(red_mask[8 * WIDTH + 13]);
     }
 
     // Just checks that the asset deflates + parses without error. If this
