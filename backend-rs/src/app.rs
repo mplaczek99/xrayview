@@ -1729,23 +1729,27 @@ fn fnv1a64(bytes: &[u8]) -> u64 {
     hash
 }
 
-fn result_artifacts_exist(result: &JobResult) -> bool {
+// Pull the on-disk artifact paths out of a job result payload. Empty if the
+// payload doesn't deserialize — treated by callers as "nothing to check /
+// nothing to clean up", same as an unparseable cache entry.
+fn result_artifact_paths(result: &JobResult) -> Vec<String> {
+    let payload = result.payload.clone();
     match result.kind {
-        JobKind::RenderStudy => {
-            serde_json::from_value::<RenderStudyCommandResult>(result.payload.clone())
-                .is_ok_and(|payload| artifact_exists(&payload.preview_path))
-        }
-        JobKind::AnalyzeStudy => serde_json::from_value::<AnalyzeStudyCommandResult>(
-            result.payload.clone(),
-        )
-        .is_ok_and(|payload| {
-            artifact_exists(&payload.preview_path) && artifact_exists(&payload.filled_preview_path)
-        }),
-        JobKind::ProcessStudy => {
-            serde_json::from_value::<ProcessStudyCommandResult>(result.payload.clone())
-                .is_ok_and(|payload| artifact_exists(&payload.preview_path))
-        }
+        JobKind::RenderStudy => serde_json::from_value::<RenderStudyCommandResult>(payload)
+            .map(|payload| vec![payload.preview_path])
+            .unwrap_or_default(),
+        JobKind::AnalyzeStudy => serde_json::from_value::<AnalyzeStudyCommandResult>(payload)
+            .map(|payload| vec![payload.preview_path, payload.filled_preview_path])
+            .unwrap_or_default(),
+        JobKind::ProcessStudy => serde_json::from_value::<ProcessStudyCommandResult>(payload)
+            .map(|payload| vec![payload.preview_path])
+            .unwrap_or_default(),
     }
+}
+
+fn result_artifacts_exist(result: &JobResult) -> bool {
+    let paths = result_artifact_paths(result);
+    !paths.is_empty() && paths.iter().all(|path| artifact_exists(path))
 }
 
 fn artifact_exists(path: &str) -> bool {
@@ -1862,29 +1866,7 @@ fn cancelled_job_snapshot(mut snapshot: JobSnapshot, message: &str) -> JobSnapsh
 }
 
 fn cleanup_result_artifacts(result: &JobResult) {
-    match result.kind {
-        JobKind::RenderStudy => {
-            if let Ok(payload) =
-                serde_json::from_value::<RenderStudyCommandResult>(result.payload.clone())
-            {
-                cleanup([payload.preview_path]);
-            }
-        }
-        JobKind::AnalyzeStudy => {
-            if let Ok(payload) =
-                serde_json::from_value::<AnalyzeStudyCommandResult>(result.payload.clone())
-            {
-                cleanup([payload.preview_path, payload.filled_preview_path]);
-            }
-        }
-        JobKind::ProcessStudy => {
-            if let Ok(payload) =
-                serde_json::from_value::<ProcessStudyCommandResult>(result.payload.clone())
-            {
-                cleanup([payload.preview_path]);
-            }
-        }
-    }
+    cleanup(result_artifact_paths(result));
 }
 
 fn cleanup<P: AsRef<Path>>(paths: impl IntoIterator<Item = P>) {
