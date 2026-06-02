@@ -77,20 +77,10 @@ struct CatalogState {
 }
 
 impl Catalog {
-    // The common ctor: catalog.json gets placed inside the persistence dir.
+    // catalog.json is placed inside the persistence dir.
     pub fn new(root_dir: impl Into<PathBuf>) -> Self {
-        Self::new_at_path(root_dir.into().join("catalog.json"))
-    }
-
-    // Explicit-path ctor for tests and exotic layouts. root_dir is derived
-    // from the parent — falls back to "." if path has no parent (very weird
-    // edge case but better than panicking).
-    pub fn new_at_path(path: impl Into<PathBuf>) -> Self {
-        let path = path.into();
-        let root_dir = path
-            .parent()
-            .unwrap_or_else(|| Path::new("."))
-            .to_path_buf();
+        let root_dir = root_dir.into();
+        let path = root_dir.join("catalog.json");
         Self {
             root_dir,
             path,
