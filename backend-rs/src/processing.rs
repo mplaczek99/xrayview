@@ -127,14 +127,8 @@ pub fn resolve_process_study_command(
         )));
     }
 
-    // Fall back to the preset's palette if the user didn't choose one,
-    // then re-normalize through the string form to catch typos.
-    let palette = command
-        .palette
-        .unwrap_or(preset.controls.palette)
-        .contract_name();
-    let palette = normalize_palette_name(palette)
-        .map_err(|error| BackendError::invalid_input(error.to_string()))?;
+    // Fall back to the preset's palette if the user didn't choose one.
+    let palette = Palette::from(command.palette.unwrap_or(preset.controls.palette));
 
     Ok(ResolvedProcessStudy {
         controls: GrayscaleControls {
@@ -492,19 +486,12 @@ fn bone_color(value: u8) -> [u8; 4] {
     ]
 }
 
-// Adapter from the schema-defined PaletteName enum to the string that
-// normalize_palette_name expects. Kept as a trait so we don't have to expose
-// a free function with a misleading name.
-trait PaletteContractName {
-    fn contract_name(self) -> &'static str;
-}
-
-impl PaletteContractName for PaletteName {
-    fn contract_name(self) -> &'static str {
-        match self {
-            PaletteName::None => "none",
-            PaletteName::Hot => "hot",
-            PaletteName::Bone => "bone",
+impl From<PaletteName> for Palette {
+    fn from(name: PaletteName) -> Self {
+        match name {
+            PaletteName::None => Self::None,
+            PaletteName::Hot => Self::Hot,
+            PaletteName::Bone => Self::Bone,
         }
     }
 }
