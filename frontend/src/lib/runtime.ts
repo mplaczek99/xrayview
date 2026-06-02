@@ -141,11 +141,7 @@ function createRuntimeAdapter(
     getJob: async (jobId) => normalizeJobSnapshot(await backend.getJob(jobId), mode),
     getJobs: async (jobIds) => {
       const snapshots = await backend.getJobs(jobIds);
-      const jobs = new Array<JobSnapshot>(snapshots.length);
-      for (let index = 0; index < snapshots.length; index += 1) {
-        jobs[index] = normalizeJobSnapshot(snapshots[index], mode);
-      }
-      return jobs;
+      return snapshots.map((snapshot) => normalizeJobSnapshot(snapshot, mode));
     },
     forEachJob: async (jobIds, visitor) => {
       const snapshots = await backend.getJobs(jobIds);
