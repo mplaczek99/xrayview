@@ -75,11 +75,11 @@ impl Config {
         F: Fn(&str) -> Option<String>,
     {
         let mut config = Self::default();
+        let lookup_non_empty = |key| lookup(key).filter(|value| !value.is_empty());
 
-        // Note the `.filter(|value| !value.is_empty())` chain on every lookup:
-        // an empty string explicitly set is treated as "unset", which is the
-        // sane Unix-y behavior (FOO= shouldn't break the app).
-        if let Some(value) = lookup(LOG_LEVEL_ENV_KEY).filter(|value| !value.is_empty()) {
+        // Empty strings are treated as "unset", which is the sane Unix-y
+        // behavior (FOO= shouldn't break the app).
+        if let Some(value) = lookup_non_empty(LOG_LEVEL_ENV_KEY) {
             let lower = value.to_ascii_lowercase();
             // Validate the level *before* storing it — otherwise we'd silently
             // log nothing if a typo'd level slipped through.
@@ -94,7 +94,7 @@ impl Config {
         // Precedence: BASE_DIR resets cache/persistence to its subdirs first,
         // then specific overrides win. So `BASE_DIR=/foo CACHE_DIR=/bar` lands
         // base=/foo, cache=/bar, persistence=/foo/state. Order matters here.
-        if let Some(value) = lookup(BASE_DIR_ENV_KEY).filter(|value| !value.is_empty()) {
+        if let Some(value) = lookup_non_empty(BASE_DIR_ENV_KEY) {
             config.paths.base_dir = PathBuf::from(value);
             config.paths.cache_dir = config.paths.base_dir.join("cache");
             config.paths.persistence_dir = config.paths.base_dir.join("state");
@@ -102,11 +102,11 @@ impl Config {
 
         // Cache-specific override applies *after* BASE_DIR's defaults so the
         // user can pin cache somewhere different from persistence.
-        if let Some(value) = lookup(CACHE_DIR_ENV_KEY).filter(|value| !value.is_empty()) {
+        if let Some(value) = lookup_non_empty(CACHE_DIR_ENV_KEY) {
             config.paths.cache_dir = PathBuf::from(value);
         }
 
-        if let Some(value) = lookup(PERSISTENCE_DIR_ENV_KEY).filter(|value| !value.is_empty()) {
+        if let Some(value) = lookup_non_empty(PERSISTENCE_DIR_ENV_KEY) {
             config.paths.persistence_dir = PathBuf::from(value);
         }
 
