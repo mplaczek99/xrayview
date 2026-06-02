@@ -39,6 +39,9 @@ use crate::render::{PreviewFormat, PreviewImage};
 // against both bright and dark X-rays.
 const TOOTH_GREEN: [u8; 4] = [120, 255, 0, 255];
 const BONE_RED: [u8; 4] = [255, 0, 0, 255];
+// Sections view blends fills over the grayscale so anatomy stays readable
+// beneath the color wash and the mode is visually distinct from Outlines.
+const SECTION_FILL_ALPHA: u8 = 115;
 // Models are baked into the binary via include_bytes! so we don't have to
 // ship sidecar files. The .gz variants are deflated lazily on first use;
 // learned_model.bin is small enough to ship uncompressed.
@@ -313,9 +316,9 @@ pub fn generate_tooth_overlay(preview: &PreviewImage) -> Result<ToothOverlayResu
         &mut mask_buffers,
     );
 
-    // Build the outline overlay into a local first so the pool's mutable borrow
-    // ends before the result struct is assembled; the filled overlay needs no
-    // morphology scratch.
+    // Both overlays now share mask_buffers for morphology scratch, so build
+    // them into locals first and let each borrow drop before the result
+    // struct is assembled.
     let outline_preview = overlay_outline_preview(
         &preview.pixels,
         preview.width,
@@ -324,16 +327,19 @@ pub fn generate_tooth_overlay(preview: &PreviewImage) -> Result<ToothOverlayResu
         &bone_section,
         &mut mask_buffers,
     );
+    let filled_preview = overlay_filled_preview(
+        &preview.pixels,
+        preview.width,
+        preview.height,
+        &tooth_mask,
+        &bone_mask,
+        &bone_section,
+        &mut mask_buffers,
+    );
 
     Ok(ToothOverlayResult {
         preview: outline_preview,
-        filled_preview: overlay_filled_preview(
-            &preview.pixels,
-            preview.width,
-            preview.height,
-            &tooth_mask,
-            &bone_mask,
-        ),
+        filled_preview,
         tooth_pixels,
         bone_pixels,
         coverage,
@@ -595,10 +601,62 @@ fn overlay_filled_preview(
     height: u32,
     tooth_mask: &[bool],
     bone_fill_mask: &[bool],
+    bone_section: &[bool],
+    buffers: &mut MaskBuffers,
 ) -> PreviewImage {
+    let width_usize = width as usize;
+    let height_usize = height as usize;
     let mut pixels = grayscale_rgba(gray);
-    fill_solid_mask(&mut pixels, bone_fill_mask, BONE_RED, Some(tooth_mask));
-    fill_solid_mask(&mut pixels, tooth_mask, TOOTH_GREEN, None);
+
+    // Translucent fills first so the outlines drawn next sit crisply on top.
+    blend_mask_fill(
+        &mut pixels,
+        bone_fill_mask,
+        BONE_RED,
+        SECTION_FILL_ALPHA,
+        Some(tooth_mask),
+    );
+    blend_mask_fill(
+        &mut pixels,
+        tooth_mask,
+        TOOTH_GREEN,
+        SECTION_FILL_ALPHA,
+        None,
+    );
+
+    // Same outlines as overlay_outline_preview, drawn solid so the section
+    // boundaries stay readable through the wash.
+    let mut bone_outline = centered_outline_mask(
+        bone_section,
+        width_usize,
+        height_usize,
+        BONE_OUTLINE_THICKNESS_PIXELS,
+        buffers,
+    );
+    clear_border_background_from_mask(
+        &mut bone_outline,
+        gray,
+        width_usize,
+        height_usize,
+        &mut buffers.visited,
+    );
+    clear_image_frame_outline(
+        &mut bone_outline,
+        width_usize,
+        height_usize,
+        BONE_OUTLINE_THICKNESS_PIXELS,
+    );
+    composite_mask_fill(&mut pixels, &bone_outline, BONE_RED, Some(tooth_mask));
+
+    let tooth_outline = inner_outline_mask(
+        tooth_mask,
+        width_usize,
+        height_usize,
+        TOOTH_OUTLINE_THICKNESS_PIXELS,
+        buffers,
+    );
+    composite_mask_fill(&mut pixels, &tooth_outline, TOOTH_GREEN, None);
+
     PreviewImage::rgba(width, height, pixels)
 }
 
@@ -633,13 +691,35 @@ fn composite_mask_fill(
     }
 }
 
-fn fill_solid_mask(
+fn blend_mask_fill(
     pixels: &mut [u8],
     mask: &[bool],
     color: [u8; 4],
+    alpha: u8,
     exclude_mask: Option<&[bool]>,
 ) {
-    composite_mask_fill(pixels, mask, color, exclude_mask);
+    if mask.len() * 4 != pixels.len() {
+        return;
+    }
+    let a = alpha as u32;
+    let inv = 255 - a;
+    for (index, value) in mask.iter().enumerate() {
+        if !*value
+            || exclude_mask.is_some_and(|exclude| exclude.get(index).copied().unwrap_or(false))
+        {
+            continue;
+        }
+        let base = index * 4;
+        pixels[base] = blend_channel(pixels[base], color[0], a, inv);
+        pixels[base + 1] = blend_channel(pixels[base + 1], color[1], a, inv);
+        pixels[base + 2] = blend_channel(pixels[base + 2], color[2], a, inv);
+        pixels[base + 3] = 255;
+    }
+}
+
+fn blend_channel(dst: u8, src: u8, alpha: u32, inv_alpha: u32) -> u8 {
+    let num = src as u32 * alpha + dst as u32 * inv_alpha;
+    ((num + 127) / 255) as u8
 }
 
 fn bone_section_mask_with_ignored_cutouts(
@@ -1918,11 +1998,14 @@ mod tests {
         assert!(!green_mask[4 * WIDTH + 4]);
     }
 
-    // Filled overlay: outside masks → grayscale carries through, bone mask
-    // → red fill, tooth mask → green fill, both → tooth wins. Pixel-perfect
-    // assertions on a 5×5 grid pin each case.
+    // Filled overlay: outside masks → grayscale carries through; bone-only
+    // edge pixels keep the blended red fill (their outline is suppressed by
+    // frame clearance); tooth pixels are sparse so every one is its own
+    // boundary and gets the solid green outline drawn on top of the blend;
+    // the only pixel far enough from the frame to keep a bone outline (the
+    // center) lands as solid red. Tooth still wins over bone at overlaps.
     #[test]
-    fn overlay_filled_preview_preserves_grayscale_background_and_mask_precedence() {
+    fn overlay_filled_preview_draws_outlines_over_blended_fills() {
         const WIDTH: usize = 5;
         const HEIGHT: usize = 5;
 
@@ -1940,11 +2023,26 @@ mod tests {
         tooth_mask[13] = true;
         tooth_mask[17] = true;
 
-        let preview =
-            overlay_filled_preview(&gray, WIDTH as u32, HEIGHT as u32, &tooth_mask, &bone_mask);
+        let mut buffers = MaskBuffers::new(WIDTH * HEIGHT);
+        let preview = overlay_filled_preview(
+            &gray,
+            WIDTH as u32,
+            HEIGHT as u32,
+            &tooth_mask,
+            &bone_mask,
+            &bone_mask,
+            &mut buffers,
+        );
+
+        let expect_blend = |dst: u8, src: [u8; 4]| -> [u8; 3] {
+            let a = SECTION_FILL_ALPHA as u32;
+            let inv = 255 - a;
+            let ch = |s: u8| -> u8 { ((s as u32 * a + dst as u32 * inv + 127) / 255) as u8 };
+            [ch(src[0]), ch(src[1]), ch(src[2])]
+        };
 
         assert_eq!(rgb_at(&preview, 0), [12, 12, 12]);
-        assert_eq!(rgb_at(&preview, 1), [BONE_RED[0], BONE_RED[1], BONE_RED[2]]);
+        assert_eq!(rgb_at(&preview, 1), expect_blend(0, BONE_RED));
         assert_eq!(
             rgb_at(&preview, 2),
             [TOOTH_GREEN[0], TOOTH_GREEN[1], TOOTH_GREEN[2]]
@@ -1954,7 +2052,7 @@ mod tests {
             rgb_at(&preview, 7),
             [TOOTH_GREEN[0], TOOTH_GREEN[1], TOOTH_GREEN[2]]
         );
-        assert_eq!(rgb_at(&preview, 12), [24, 24, 24]);
+        assert_eq!(rgb_at(&preview, 12), [BONE_RED[0], BONE_RED[1], BONE_RED[2]]);
     }
 
     // BONE_IMAGE_FRAME_CLEARANCE in action — bone pixels within ~12px of
