@@ -37,7 +37,6 @@ export interface RuntimeAdapter {
   startProcessStudyJob(studyId: string, request: ProcessingRequest): Promise<StartedJob>;
   getJob(jobId: string): Promise<JobSnapshot>;
   getJobs(jobIds: string[]): Promise<JobSnapshot[]>;
-  forEachJob(jobIds: string[], visitor: (job: JobSnapshot) => void): Promise<void>;
   cancelJob(jobId: string): Promise<JobSnapshot>;
   measureLineAnnotation(studyId: string, annotation: LineAnnotation): Promise<LineAnnotation>;
 }

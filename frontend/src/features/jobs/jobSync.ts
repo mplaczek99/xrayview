@@ -97,11 +97,12 @@ export function startJobSync(): () => void {
     }
 
     try {
-      await runtime.forEachJob(pendingJobIds, (job) => {
+      const jobs = await runtime.getJobs(pendingJobIds);
+      for (const job of jobs) {
         if (!cancelled) {
           applyJobUpdate(job);
         }
-      });
+      }
     } catch {
       // Keep the previous snapshots until the next poll cycle.
     }
