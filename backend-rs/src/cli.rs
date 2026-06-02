@@ -378,11 +378,11 @@ fn legacy_process_command(options: &LegacyOptions) -> CliResult<ProcessStudyComm
 }
 
 fn legacy_preset_controls(preset_id: &str) -> Option<crate::contracts::ProcessingControls> {
-    let normalized = preset_id.trim().to_ascii_lowercase();
+    let preset_id = preset_id.trim();
     default_processing_manifest()
         .presets
         .into_iter()
-        .find(|preset| preset.id == normalized)
+        .find(|preset| preset.id.eq_ignore_ascii_case(preset_id))
         .map(|preset| preset.controls)
 }
 
@@ -1307,6 +1307,14 @@ mod tests {
         .unwrap();
         assert!(overridden.invert);
         assert!(!overridden.equalize);
+    }
+
+    #[test]
+    fn legacy_preset_controls_trim_and_match_case_insensitively() {
+        let controls = legacy_preset_controls(" XRAY ").unwrap();
+
+        assert!(!controls.invert);
+        assert!(controls.equalize);
     }
 
     // PID + nanos so parallel cargo-test runs don't collide on the same dir.
