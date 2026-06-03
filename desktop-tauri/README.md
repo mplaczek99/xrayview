@@ -50,7 +50,12 @@ for scripted inspection of BMP studies.
 
 ## Platform support
 
-- **Linux:** webkit2gtk-4.1 (preferred) or 4.0.
+- **Linux:** source builds require WebKitGTK/GTK development packages and
+  `patchelf` for AppImage bundling. Release AppImages bundle the media framework
+  dependencies needed by WebKitGTK so users do not have to install the media
+  stack separately first. Build release AppImages on the oldest supported Linux
+  baseline, because bundled shared libraries inherit the builder's glibc
+  requirement.
 - **Windows:** WebView2 (auto-installed by the Tauri bundler).
 - **macOS:** the Tauri stack supports it but the icons in `icons/` are
   placeholders and there is no signed-bundle CI yet.
