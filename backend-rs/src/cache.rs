@@ -12,7 +12,7 @@
 
 use std::{
     collections::{HashMap, VecDeque},
-    fs, io,
+    fs,
     path::{Path, PathBuf},
     sync::Arc,
     time::{Duration, Instant, UNIX_EPOCH},
@@ -21,6 +21,7 @@ use std::{
 use crate::bmp::DecodedSourcePreview;
 use crate::contracts::BackendError;
 use parking_lot::{Condvar, Mutex};
+use walkdir::WalkDir;
 
 // Path-name constants. Pub because the desktop shell uses them when computing
 // paths to surface in dialogs.
@@ -227,13 +228,7 @@ impl Store {
             return Ok((0, 0));
         }
 
-        let mut files = Vec::new();
-        collect_artifact_files(&artifact_dir, &mut files).map_err(|error| {
-            BackendError::internal(format!(
-                "walk artifacts directory {}: {error}",
-                artifact_dir.display()
-            ))
-        })?;
+        let mut files = collect_artifact_files(&artifact_dir);
         // Quick check post-walk — we may have measured the dir down under budget.
         let mut total_size = files.iter().map(|file| file.size).sum::<u64>();
         if total_size <= max_total_bytes {
@@ -277,36 +272,32 @@ impl Store {
 // Recursive directory walk. Tolerant of per-entry errors — skip the entry
 // rather than failing the whole walk, so a single bad file doesn't break
 // eviction. UNIX_EPOCH conversion may fail on pre-1970 mtimes (very rare);
-// those get sorted to oldest (0), which is the safe default.
-fn collect_artifact_files(root: &Path, files: &mut Vec<ArtifactFileInfo>) -> io::Result<()> {
-    for entry in fs::read_dir(root)? {
-        let entry = match entry {
-            Ok(entry) => entry,
-            Err(_) => continue,
-        };
-        let metadata = match entry.metadata() {
-            Ok(metadata) => metadata,
-            Err(_) => continue,
-        };
-        if metadata.is_dir() {
-            // Recurse into subdirs (namespace dirs live here).
-            let _ = collect_artifact_files(&entry.path(), files);
-            continue;
-        }
-
-        files.push(ArtifactFileInfo {
-            path: entry.path(),
-            size: metadata.len(),
-            mod_time_nanos: metadata
-                .modified()
-                .ok()
-                .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
-                .map(|duration| duration.as_nanos())
-                // unwrap_or_default → 0 → sorts as "oldest possible", evicted first.
-                .unwrap_or_default(),
-        });
-    }
-    Ok(())
+// those get sorted to oldest (0), which is the safe default. `follow_links`
+// is set false explicitly so a symlinked subtree can't cause a cycle or pull
+// in files outside the artifacts dir.
+fn collect_artifact_files(root: &Path) -> Vec<ArtifactFileInfo> {
+    WalkDir::new(root)
+        .follow_links(false)
+        .into_iter()
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            let metadata = entry.metadata().ok()?;
+            if !metadata.is_file() {
+                return None;
+            }
+            Some(ArtifactFileInfo {
+                path: entry.into_path(),
+                size: metadata.len(),
+                mod_time_nanos: metadata
+                    .modified()
+                    .ok()
+                    .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+                    .map(|duration| duration.as_nanos())
+                    // unwrap_or_default → 0 → sorts as "oldest possible", evicted first.
+                    .unwrap_or_default(),
+            })
+        })
+        .collect()
 }
 
 // In-memory LRU cache for decoded source previews. The whole state lives
