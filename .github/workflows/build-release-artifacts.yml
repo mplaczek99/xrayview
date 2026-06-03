@@ -20,13 +20,9 @@ jobs:
           - os: ubuntu-latest
             label: Linux
             artifact_name: xrayview-linux-desktop-archive
-            archive_platform: linux
-            archive_extension: tar.gz
           - os: windows-latest
             label: Windows
             artifact_name: xrayview-windows-desktop-archive
-            archive_platform: windows
-            archive_extension: zip
 
     defaults:
       run:
@@ -47,56 +43,42 @@ jobs:
         with:
           node-version: lts/*
           cache: npm
-          cache-dependency-path: frontend/package-lock.json
+          cache-dependency-path: |
+            package-lock.json
+            frontend/package-lock.json
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: desktop/go.mod
-          cache-dependency-path: desktop/go.sum
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install root dependencies
+        run: npm ci --ignore-scripts
 
       - name: Install frontend dependencies
         run: npm ci
         working-directory: frontend
 
-      - name: Build and smoke-test desktop release
-        if: runner.os != 'Windows'
-        run: npm run release:smoke
+      - name: Build and smoke-test desktop bundles
+        run: npm run release:smoke:bundle
 
-      - name: Build Windows desktop release
-        if: runner.os == 'Windows'
+      - name: Collect desktop bundles
         run: |
-          npm run contracts:check
-          npm run wails:build
+          asset_dir="$RUNNER_TEMP/release-assets"
+          mkdir -p "$asset_dir"
 
-      - name: Archive desktop payload
-        run: |
-          version="$(node -p "require('./package.json').version")"
-          if [ "${{ runner.os }}" = "Linux" ]; then
-            arch="$(uname -m)"
-            payload_dir="$RUNNER_TEMP/xrayview-v${version}-${{ matrix.archive_platform }}-${arch}"
-            archive_name="$(basename "$payload_dir").${{ matrix.archive_extension }}"
-          else
-            payload_dir="$RUNNER_TEMP/xrayview-v${version}-${{ matrix.archive_platform }}-x64"
-            archive_name="$(basename "$payload_dir").${{ matrix.archive_extension }}"
-          fi
-          archive_path="$RUNNER_TEMP/$archive_name"
+          find desktop-tauri/target/release/bundle -type f \
+            \( -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' -o -name '*.msi' -o -name '*.exe' \) \
+            -exec cp {} "$asset_dir/" \;
 
-          node ./desktop/scripts/stage-release-payload.mjs --output "$payload_dir"
-
-          if [ "${{ runner.os }}" = "Linux" ]; then
-            tar -C "$RUNNER_TEMP" -czf "$archive_path" "$(basename "$payload_dir")"
-          else
-            runner_temp_posix="$(cygpath -u "$RUNNER_TEMP")"
-            archive_path_posix="$(cygpath -u "$archive_path")"
-            tar -a -C "$runner_temp_posix" -cf "$archive_path_posix" "$(basename "$payload_dir")"
+          if ! find "$asset_dir" -type f | grep -q .; then
+            printf 'No Tauri bundle assets found\n' >&2
+            exit 1
           fi
 
-          printf 'ARCHIVE_PATH=%s\n' "$archive_path" >> "$GITHUB_ENV"
+          printf 'ASSET_DIR=%s\n' "$asset_dir" >> "$GITHUB_ENV"
 
-      - name: Upload desktop archive artifact
+      - name: Upload desktop bundle artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact_name }}
-          path: ${{ env.ARCHIVE_PATH }}
+          path: ${{ env.ASSET_DIR }}/*
           if-no-files-found: error
