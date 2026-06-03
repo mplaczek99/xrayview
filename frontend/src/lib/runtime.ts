@@ -12,7 +12,7 @@ import type {
 import { createMockBackendAPI } from "./mockBackend";
 import { MOCK_PROCESSING_MANIFEST } from "./mockProcessingManifest";
 import { resolveRuntimeConfiguration } from "./runtimeConfig";
-import type { BackendAPI, RuntimeAdapter, ShellAPI } from "./runtimeTypes";
+import type { RuntimeAdapter } from "./runtimeTypes";
 import { createDesktopShellAPI, createMockShellAPI } from "./shell";
 import type {
   AnalysisResult,
@@ -114,24 +114,11 @@ function createRuntimeAdapter(
   configuration: ReturnType<typeof resolveRuntimeConfiguration>,
 ): RuntimeAdapter {
   const { mode } = configuration;
-
-  let shell: ShellAPI;
-  let backend: BackendAPI;
-  switch (mode) {
-    case "mock":
-      shell = createMockShellAPI();
-      backend = createMockBackendAPI();
-      break;
-    default:
-      shell = createDesktopShellAPI();
-      backend = createDesktopBackendAPI();
-      break;
-  }
+  const shell = mode === "mock" ? createMockShellAPI() : createDesktopShellAPI();
+  const backend = mode === "mock" ? createMockBackendAPI() : createDesktopBackendAPI();
 
   return {
     mode,
-    shell,
-    backend,
     loadProcessingManifest: () => backend.loadProcessingManifest(),
     pickBmpFile: () => shell.pickBmpFile(),
     openStudy: async (inputPath) => asOpenedStudy(await backend.openStudy(inputPath), mode),

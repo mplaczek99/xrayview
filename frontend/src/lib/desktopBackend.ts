@@ -15,7 +15,6 @@ import type {
   RenderStudyCommand,
   StartedJob,
 } from "./generated/contracts";
-import { uniqueJobIds } from "./jobIds";
 import type { BackendAPI } from "./runtimeTypes";
 
 async function invokeCommand<TResult>(
@@ -55,7 +54,7 @@ export function createDesktopBackendAPI(): BackendAPI {
       }),
     getJobs: (jobIds) =>
       invokeCommand<JobSnapshot[]>("get_jobs", {
-        command: { jobIds: uniqueJobIds(jobIds) },
+        command: { jobIds: [...new Set(jobIds)] },
       }),
     cancelJob: (jobId) =>
       invokeCommand<JobSnapshot>("cancel_job", {

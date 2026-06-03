@@ -27,8 +27,6 @@ export interface BackendAPI {
 
 export interface RuntimeAdapter {
   mode: RuntimeMode;
-  shell: ShellAPI;
-  backend: BackendAPI;
   loadProcessingManifest(): Promise<ProcessingManifest>;
   pickBmpFile(): Promise<string | null>;
   openStudy(inputPath: string): Promise<OpenedStudy>;

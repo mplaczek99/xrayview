@@ -8,7 +8,6 @@ import type {
   ProcessingManifest,
   StartedJob,
 } from "./generated/contracts";
-import { uniqueJobIds } from "./jobIds";
 import { MOCK_PROCESSING_MANIFEST } from "./mockProcessingManifest";
 import { createMockPreview, measureMockLineAnnotation } from "./mockStudy";
 import type { BackendAPI } from "./runtimeTypes";
@@ -199,8 +198,7 @@ export function createMockBackendAPI(): BackendAPI {
       return snapshot;
     },
     getJobs: async (jobIds): Promise<ContractJobSnapshot[]> => {
-      const unique = uniqueJobIds(jobIds);
-      return unique.flatMap((jobId) => {
+      return [...new Set(jobIds)].flatMap((jobId) => {
         const snapshot = mockJobs.get(jobId);
         return snapshot ? [snapshot] : [];
       });
