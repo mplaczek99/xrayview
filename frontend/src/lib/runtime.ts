@@ -135,23 +135,18 @@ function createRuntimeAdapter(
 }
 
 let activeRuntime: RuntimeAdapter | null = null;
-let loggedRuntimeConfiguration = false;
 
 export function getRuntimeAdapter(): RuntimeAdapter {
   if (!activeRuntime) {
     const configuration = resolveRuntimeConfiguration(isTauriRuntime());
     activeRuntime = createRuntimeAdapter(configuration);
 
-    if (!loggedRuntimeConfiguration) {
-      for (const warning of configuration.warnings) {
-        console.warn("[xrayview] runtime configuration:", warning);
-      }
-
-      console.info(
-        `[xrayview] backend runtime: ${configuration.mode} (${configuration.selectionSource})`,
-      );
-      loggedRuntimeConfiguration = true;
+    for (const warning of configuration.warnings) {
+      console.warn("[xrayview] runtime configuration:", warning);
     }
+    console.info(
+      `[xrayview] backend runtime: ${configuration.mode} (${configuration.selectionSource})`,
+    );
   }
 
   return activeRuntime;
