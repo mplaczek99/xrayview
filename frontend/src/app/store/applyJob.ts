@@ -99,19 +99,6 @@ function applyProcessJob(study: WorkbenchStudy, job: JobSnapshot): WorkbenchStud
   switch (job.state) {
     case "queued":
     case "running":
-      return {
-        ...study,
-        status: job.progress.message,
-        processing: {
-          ...study.processing,
-          runStatus: {
-            state: "running",
-            jobId: job.jobId,
-            progress: job.progress,
-            timing: job.timing,
-          },
-        },
-      };
     case "cancelling":
       return {
         ...study,
@@ -119,7 +106,7 @@ function applyProcessJob(study: WorkbenchStudy, job: JobSnapshot): WorkbenchStud
         processing: {
           ...study.processing,
           runStatus: {
-            state: "cancelling",
+            state: job.state === "cancelling" ? "cancelling" : "running",
             jobId: job.jobId,
             progress: job.progress,
             timing: job.timing,
