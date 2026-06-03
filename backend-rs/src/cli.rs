@@ -45,27 +45,21 @@ pub enum CliError {
     Processing(#[from] processing::ProcessingError),
 }
 
-impl CliError {
-    fn message(message: impl Into<String>) -> Self {
-        Self::Message(message.into())
-    }
-}
-
 impl From<String> for CliError {
     fn from(message: String) -> Self {
-        Self::message(message)
+        Self::Message(message)
     }
 }
 
 impl From<&str> for CliError {
     fn from(message: &str) -> Self {
-        Self::message(message)
+        Self::Message(message.to_string())
     }
 }
 
 impl From<BackendError> for CliError {
     fn from(error: BackendError) -> Self {
-        Self::message(error.message)
+        Self::Message(error.message)
     }
 }
 
@@ -234,11 +228,7 @@ fn execute_legacy(options: LegacyOptions, stdout: &mut dyn Write) -> CliResult<(
 }
 
 fn validate_legacy_mode_selection(options: &LegacyOptions) -> CliResult<()> {
-    let mode_count = [options.describe_presets, options.describe_study]
-        .into_iter()
-        .filter(|enabled| *enabled)
-        .count();
-    if mode_count > 1 {
+    if options.describe_presets && options.describe_study {
         return Err(
             "choose only one backend mode: --describe-presets or --describe-study"
                 .to_string()
