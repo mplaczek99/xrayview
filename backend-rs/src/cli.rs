@@ -29,11 +29,6 @@ use crate::{
     render::{self, PreviewImage},
 };
 
-// Sentinel value used as a CliError::Message payload to signal "the user
-// asked for legacy --help; we printed it; return Ok". A real ControlFlow
-// type would be cleaner but this is the legacy path — we make do.
-const LEGACY_HELP_SENTINEL: &str = "__xrayview_legacy_help__";
-
 // CLI error type — wraps everything that can go wrong into a single Result.
 // Message is the catch-all "string error" variant the legacy code emits;
 // the others are #[from] conversions so `?` works against all the upstream
@@ -115,14 +110,11 @@ pub fn run(args: &[&str], stdout: &mut dyn Write, stderr: &mut dyn Write) -> Cli
     }
 }
 
-// Legacy entry — parse flags, then execute. The sentinel-match on
-// LEGACY_HELP_SENTINEL is how we tell "user asked for help, parse short-
-// circuited, all good" apart from a real error.
+// Legacy entry — parse flags, then execute. A `None` result means help was
+// printed and the command should exit successfully.
 fn run_legacy_args(args: &[&str], stdout: &mut dyn Write, stderr: &mut dyn Write) -> CliResult<()> {
-    let options = match parse_legacy_args(args, stderr) {
-        Ok(options) => options,
-        Err(CliError::Message(error)) if error == LEGACY_HELP_SENTINEL => return Ok(()),
-        Err(error) => return Err(error),
+    let Some(options) = parse_legacy_args(args, stderr)? else {
+        return Ok(());
     };
     execute_legacy(options, stdout)
 }
@@ -132,7 +124,7 @@ fn run_legacy_args(args: &[&str], stdout: &mut dyn Write, stderr: &mut dyn Write
 // (`--invert` meaning `--invert true`), and clap configured to accept all
 // three turned out to be more code than this loop. Hand-rolling argv parsing
 // in 2026 is a choice, but it's the right one for this particular mess.
-fn parse_legacy_args(args: &[&str], stderr: &mut dyn Write) -> CliResult<LegacyOptions> {
+fn parse_legacy_args(args: &[&str], stderr: &mut dyn Write) -> CliResult<Option<LegacyOptions>> {
     let mut options = LegacyOptions {
         // Preset defaults to "default" so non-preset legacy invocations still
         // produce a sensible image.
@@ -144,8 +136,7 @@ fn parse_legacy_args(args: &[&str], stderr: &mut dyn Write) -> CliResult<LegacyO
         let arg = args[index];
         if matches!(arg, "-h" | "--help") {
             print_legacy_usage(stderr)?;
-            // Surfaced as Ok() in the caller via the sentinel match.
-            return Err(LEGACY_HELP_SENTINEL.into());
+            return Ok(None);
         }
         if !arg.starts_with('-') {
             return Err(format!("unexpected positional arguments: {arg}").into());
@@ -210,7 +201,7 @@ fn parse_legacy_args(args: &[&str], stderr: &mut dyn Write) -> CliResult<LegacyO
         index += 1;
     }
 
-    Ok(options)
+    Ok(Some(options))
 }
 
 fn execute_legacy(options: LegacyOptions, stdout: &mut dyn Write) -> CliResult<()> {
@@ -1013,6 +1004,21 @@ mod tests {
             "xrayview-backend contract-v2\n"
         );
         assert!(stderr.is_empty());
+    }
+
+    #[test]
+    fn legacy_help_prints_usage_and_exits_successfully() {
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+
+        run(&["--help"], &mut stdout, &mut stderr).unwrap();
+
+        assert!(stdout.is_empty());
+        assert!(
+            String::from_utf8(stderr)
+                .unwrap()
+                .starts_with("usage: xrayview-backend-rs [workflow flags]\n")
+        );
     }
 
     // Smoke test for the process-preview flag parser: every knob set on the
