@@ -2,7 +2,7 @@ use crate::{
     contracts::{BackendError, PaletteName, ProcessStudyCommand, default_processing_manifest},
     render::{PreviewFormat, PreviewImage},
 };
-use std::{borrow::Cow, sync::Arc};
+use std::sync::Arc;
 
 // The four knobs the user can flip on a study. Order of application matters
 // and is set in process_grayscale_pixels — see comments there.
@@ -174,10 +174,7 @@ pub fn process_rendered_preview(
         mode = format!("{mode} with {} palette", palette.label());
         source_preview = apply_named_palette(&source_preview, palette)?;
     }
-    if compare {
-        // Unwrap is safe because we only populated source_for_compare iff
-        // `compare` was true — these two branches gate together.
-        let source_for_compare = source_for_compare.expect("compare source captured");
+    if let Some(source_for_compare) = source_for_compare {
         source_preview = combine_comparison(&source_for_compare, &source_preview)?;
         mode = format!("comparison of grayscale and {mode}");
     }
@@ -197,8 +194,8 @@ pub fn process_rendered_preview(
 // so we flush the pending LUT first if equalize is on.
 pub fn process_grayscale_pixels(pixels: &mut [u8], controls: GrayscaleControls) -> String {
     // Capacity 4 covers the worst case (invert + brightness + contrast + equalize).
-    let mut mode_parts: Vec<Cow<'static, str>> = Vec::with_capacity(4);
-    mode_parts.push("grayscale".into());
+    let mut mode_parts = Vec::with_capacity(4);
+    mode_parts.push("grayscale".to_string());
     let mut lookup = identity_lookup_table();
     // pending_lookup tracks whether the LUT diverges from identity — saves us
     // from doing a no-op pass over the pixel buffer.
@@ -211,7 +208,7 @@ pub fn process_grayscale_pixels(pixels: &mut [u8], controls: GrayscaleControls) 
         pending_lookup = true;
         // Rewrite "grayscale" → "inverted grayscale" rather than appending,
         // so the mode string reads naturally.
-        mode_parts[0] = "inverted grayscale".into();
+        mode_parts[0] = "inverted grayscale".to_string();
     }
     if controls.brightness != 0 {
         for value in &mut lookup {
@@ -221,7 +218,7 @@ pub fn process_grayscale_pixels(pixels: &mut [u8], controls: GrayscaleControls) 
         }
         pending_lookup = true;
         // {:+} forces a leading sign; "brightness +10" / "brightness -5".
-        mode_parts.push(format!("brightness {:+}", controls.brightness).into());
+        mode_parts.push(format!("brightness {:+}", controls.brightness));
     }
     if controls.contrast != 1.0 {
         for value in &mut lookup {
@@ -232,7 +229,7 @@ pub fn process_grayscale_pixels(pixels: &mut [u8], controls: GrayscaleControls) 
             *value = clamp_lookup_value(adjusted.round() as i32);
         }
         pending_lookup = true;
-        mode_parts.push(format!("contrast {}", controls.contrast).into());
+        mode_parts.push(format!("contrast {}", controls.contrast));
     }
     if controls.equalize {
         // Equalize needs the *post-LUT* histogram, so flush first.
@@ -242,7 +239,7 @@ pub fn process_grayscale_pixels(pixels: &mut [u8], controls: GrayscaleControls) 
             pending_lookup = false;
         }
         equalize_histogram_in_place(pixels);
-        mode_parts.push("histogram equalization".into());
+        mode_parts.push("histogram equalization".to_string());
     }
 
     // Single final pass through pixels if there's still an unapplied LUT.
