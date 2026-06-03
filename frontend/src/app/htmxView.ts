@@ -1,5 +1,4 @@
 import {
-  annotationSourceLabel,
   formatLineMeasurement,
   formatSecondaryMeasurement,
   type ViewerTool,
@@ -17,7 +16,7 @@ import type {
   MeasurementScale,
 } from "../lib/generated/contracts";
 import type { ActiveTab } from "../lib/types";
-import { selectActiveStudy, selectJobs, selectStudies } from "./store/selectors";
+import { selectActiveStudy } from "./store/selectors";
 
 const CUSTOM_PRESET_ID = "__custom";
 
@@ -313,7 +312,7 @@ function renderViewSidebar(
                 data-annotation-id="${attr(annotation.id)}"
               >
                 <span class="annotation-list__title">${escapeHtml(annotation.label)}</span>
-                <span class="annotation-list__meta">${escapeHtml(annotationSourceLabel(annotation.source))}</span>
+                <span class="annotation-list__meta">Manual</span>
                 <span class="annotation-list__value">${escapeHtml(formatLineMeasurement(annotation.measurement))}</span>
                 ${
                   formatSecondaryMeasurement(annotation.measurement)
@@ -364,8 +363,7 @@ function renderViewTab(state: WorkbenchState): string {
   }
 
   const model = selectViewerRenderModel(state);
-  const jobs = selectJobs(state);
-  const analysisJob = study.analysisJobId ? (jobs[study.analysisJobId] ?? null) : null;
+  const analysisJob = study.analysisJobId ? (state.jobs[study.analysisJobId] ?? null) : null;
   const isAnalyzing =
     analysisJob?.state === "queued" ||
     analysisJob?.state === "running" ||
@@ -874,10 +872,8 @@ function isTerminal(state: string): boolean {
 }
 
 function renderJobCenter(state: WorkbenchState, ui: HtmxUiState, nowMs: number): string {
-  const jobMap = selectJobs(state);
-  const studies = selectStudies(state);
   const jobs = state.jobOrder
-    .map((jobId) => jobMap[jobId])
+    .map((jobId) => state.jobs[jobId])
     .filter((job): job is JobSnapshot => Boolean(job))
     .filter((job) => !ui.dismissedJobIds.has(job.jobId))
     .slice(0, 6);
@@ -919,7 +915,9 @@ function renderJobCenter(state: WorkbenchState, ui: HtmxUiState, nowMs: number):
         <div class="job-center__list">
           ${jobs
             .map((job) => {
-              const studyName = job.studyId ? (studies[job.studyId]?.inputName ?? null) : null;
+              const studyName = job.studyId
+                ? (state.studies[job.studyId]?.inputName ?? null)
+                : null;
               const canCancel = job.state === "queued" || job.state === "running";
               const terminal = isTerminal(job.state);
               const progressView = describeProgress(job, nowMs);

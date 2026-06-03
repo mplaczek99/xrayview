@@ -1,3 +1,4 @@
+import { clamp } from "../../lib/math";
 import type { JobProgressTiming } from "./model";
 
 const ETA_MIN_ELAPSED_MS = 3_000;
@@ -207,5 +208,3 @@ function rateAgreement(overallRate: number | null, recentRate: number | null): n
 
   return lower / higher;
 }
-
-import { clamp } from "../../lib/math";

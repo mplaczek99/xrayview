@@ -110,7 +110,3 @@ export function formatSecondaryMeasurement(
 
   return null;
 }
-
-export function annotationSourceLabel(source: LineAnnotation["source"]): string {
-  return source === "manual" ? "Manual" : source;
-}
