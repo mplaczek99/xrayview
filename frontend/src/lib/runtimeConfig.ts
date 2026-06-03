@@ -12,10 +12,6 @@ function isRuntimeMode(value: string): value is RuntimeMode {
   return value === "mock" || value === "desktop";
 }
 
-function normalizeRuntimeMode(value: string): RuntimeMode | null {
-  return isRuntimeMode(value) ? value : null;
-}
-
 export function resolveRuntimeConfiguration(isDesktopRuntime: boolean): RuntimeConfiguration {
   const warnings: string[] = [];
   const defaultMode: RuntimeMode = isDesktopRuntime ? "desktop" : "mock";
@@ -28,8 +24,8 @@ export function resolveRuntimeConfiguration(isDesktopRuntime: boolean): RuntimeC
 
   if (rawMode?.trim()) {
     selectionSource = "env";
-    const modeOverride = normalizeRuntimeMode(rawMode.trim().toLowerCase());
-    if (!modeOverride) {
+    const modeOverride = rawMode.trim().toLowerCase();
+    if (!isRuntimeMode(modeOverride)) {
       warnings.push(
         `${BACKEND_RUNTIME_ENV_KEY} must be one of mock or desktop. Falling back to ${defaultMode}.`,
       );
