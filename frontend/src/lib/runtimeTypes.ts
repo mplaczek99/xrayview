@@ -8,10 +8,6 @@ import type {
 } from "./generated/contracts";
 import type { OpenedStudy, ProcessingRequest, RuntimeMode } from "./types";
 
-export interface ShellAPI {
-  pickBmpFile(): Promise<string | null>;
-}
-
 export interface BackendAPI {
   mode: RuntimeMode;
   loadProcessingManifest(): Promise<ProcessingManifest>;

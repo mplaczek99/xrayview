@@ -1,6 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
 import { normalizeBackendError } from "./backendErrors";
-import { buildProcessStudyCommand } from "./commandBuilders";
 import type {
   AnalyzeStudyCommand,
   JobCommand,
@@ -16,6 +15,7 @@ import type {
   StartedJob,
 } from "./generated/contracts";
 import type { BackendAPI } from "./runtimeTypes";
+import type { ProcessingRequest } from "./types";
 
 async function invokeCommand<TResult>(
   command: string,
@@ -26,6 +26,23 @@ async function invokeCommand<TResult>(
   } catch (error) {
     throw normalizeBackendError(error);
   }
+}
+
+function buildProcessStudyCommand(
+  studyId: string,
+  request: ProcessingRequest,
+): ProcessStudyCommand {
+  const { controls, presetControls } = request;
+  return {
+    studyId,
+    presetId: request.presetId,
+    invert: controls.invert,
+    brightness: controls.brightness !== presetControls.brightness ? controls.brightness : null,
+    contrast: controls.contrast !== presetControls.contrast ? controls.contrast : null,
+    equalize: controls.equalize,
+    compare: request.compare,
+    palette: controls.palette !== presetControls.palette ? controls.palette : null,
+  };
 }
 
 export function createDesktopBackendAPI(): BackendAPI {

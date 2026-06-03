@@ -1,5 +1,5 @@
+import { convertFileSrc } from "@tauri-apps/api/core";
 import type { JobResultPayload, JobSnapshot } from "../features/jobs/model";
-import { buildDesktopPreviewUrl, isDesktopRuntime } from "./desktop";
 import { createDesktopBackendAPI } from "./desktopBackend";
 import type {
   AnalyzeStudyCommandResult,
@@ -13,7 +13,7 @@ import { createMockBackendAPI } from "./mockBackend";
 import { MOCK_PROCESSING_MANIFEST } from "./mockProcessingManifest";
 import { resolveRuntimeConfiguration } from "./runtimeConfig";
 import type { RuntimeAdapter } from "./runtimeTypes";
-import { createDesktopShellAPI, createMockShellAPI } from "./shell";
+import { isTauriRuntime, pickTauriBmpFile } from "./tauri";
 import type {
   AnalysisResult,
   OpenedStudy,
@@ -24,12 +24,10 @@ import type {
 
 export const FALLBACK_PROCESSING_MANIFEST = MOCK_PROCESSING_MANIFEST;
 
-function resolvePreviewUrl(previewPath: string, runtime: RuntimeMode): string {
-  if (runtime === "desktop") {
-    return buildDesktopPreviewUrl(previewPath);
-  }
+const MOCK_BMP_PATH = "images/BMP/1.bmp";
 
-  return previewPath;
+function resolvePreviewUrl(previewPath: string, runtime: RuntimeMode): string {
+  return runtime === "desktop" ? convertFileSrc(previewPath) : previewPath;
 }
 
 function asOpenedStudy(payload: OpenStudyCommandResult, runtime: RuntimeMode): OpenedStudy {
@@ -114,13 +112,13 @@ function createRuntimeAdapter(
   configuration: ReturnType<typeof resolveRuntimeConfiguration>,
 ): RuntimeAdapter {
   const { mode } = configuration;
-  const shell = mode === "mock" ? createMockShellAPI() : createDesktopShellAPI();
   const backend = mode === "mock" ? createMockBackendAPI() : createDesktopBackendAPI();
+  const pickBmpFile = mode === "mock" ? async () => MOCK_BMP_PATH : () => pickTauriBmpFile();
 
   return {
     mode,
     loadProcessingManifest: () => backend.loadProcessingManifest(),
-    pickBmpFile: () => shell.pickBmpFile(),
+    pickBmpFile,
     openStudy: async (inputPath) => asOpenedStudy(await backend.openStudy(inputPath), mode),
     startRenderStudyJob: (studyId) => backend.startRenderStudyJob(studyId),
     startAnalyzeStudyJob: (studyId) => backend.startAnalyzeStudyJob(studyId),
@@ -141,7 +139,7 @@ let loggedRuntimeConfiguration = false;
 
 export function getRuntimeAdapter(): RuntimeAdapter {
   if (!activeRuntime) {
-    const configuration = resolveRuntimeConfiguration(isDesktopRuntime());
+    const configuration = resolveRuntimeConfiguration(isTauriRuntime());
     activeRuntime = createRuntimeAdapter(configuration);
 
     if (!loggedRuntimeConfiguration) {
