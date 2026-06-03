@@ -15,6 +15,8 @@
 
 use std::{fs, path::Path, sync::Arc};
 
+use byteorder::{ByteOrder, LittleEndian};
+
 use crate::contracts::MeasurementScale;
 
 // Metadata mirrors the DICOM tag names we used to surface. With BMP there's
@@ -361,7 +363,6 @@ enum BmpPixelFormat {
 //   * Compressed BMPs (compression != 0, i.e. anything but BI_RGB).
 //   * Bit depths other than 8/24/32.
 //   * Width/height beyond u16::MAX — that's our internal dimension cap.
-// All reads are little-endian; see read_le_u{16,32}_at helpers.
 fn parse_bmp_header(bytes: &[u8]) -> Result<BmpHeader, String> {
     // 54 = 14 (file header) + 40 (minimum DIB header). Anything smaller
     // can't possibly be a valid BMP.
@@ -369,8 +370,8 @@ fn parse_bmp_header(bytes: &[u8]) -> Result<BmpHeader, String> {
         return Err("unsupported BMP header".to_string());
     }
 
-    let pixel_offset = read_le_u32_at(bytes, 10)? as usize;
-    let dib_size = read_le_u32_at(bytes, 14)?;
+    let pixel_offset = LittleEndian::read_u32(&bytes[10..14]) as usize;
+    let dib_size = LittleEndian::read_u32(&bytes[14..18]);
     if dib_size < 40 {
         return Err(format!("unsupported BMP DIB header size: {dib_size}"));
     }
@@ -387,8 +388,8 @@ fn parse_bmp_header(bytes: &[u8]) -> Result<BmpHeader, String> {
 
     // Width is i32 in the spec but a negative value is invalid (unlike height).
     // Height is the *signed* trick: negative = top-down row order.
-    let width = read_le_i32_at(bytes, 18)?;
-    let raw_height = read_le_i32_at(bytes, 22)?;
+    let width = LittleEndian::read_i32(&bytes[18..22]);
+    let raw_height = LittleEndian::read_i32(&bytes[22..26]);
     if width <= 0 || raw_height == 0 {
         return Err(format!("invalid BMP dimensions: {width}x{raw_height}"));
     }
@@ -400,12 +401,12 @@ fn parse_bmp_header(bytes: &[u8]) -> Result<BmpHeader, String> {
 
     // Planes must always be 1 per the spec — multi-plane BMPs were never
     // really a thing in practice.
-    let planes = read_le_u16_at(bytes, 26)?;
+    let planes = LittleEndian::read_u16(&bytes[26..28]);
     if planes != 1 {
         return Err(format!("unsupported BMP plane count: {planes}"));
     }
-    let bits_per_pixel = read_le_u16_at(bytes, 28)?;
-    let compression = read_le_u32_at(bytes, 30)?;
+    let bits_per_pixel = LittleEndian::read_u16(&bytes[28..30]);
+    let compression = LittleEndian::read_u32(&bytes[30..34]);
     // 0 = BI_RGB (uncompressed). RLE and BITFIELDS variants aren't supported.
     if compression != 0 {
         return Err(format!("unsupported BMP compression: {compression}"));
@@ -499,9 +500,10 @@ fn bmp_8bit_pixel_format(
     row_stride: usize,
 ) -> Result<BmpPixelFormat, String> {
     let palette_start = 14 + header.dib_size as usize;
-    // BMP stores "colors used" at offset 46. 0 means "all 256". Some files
-    // omit this field; default to 0 → 256.
-    let color_count = read_le_u32_at(bytes, 46).unwrap_or(0);
+    // BMP stores "colors used" at offset 46. 0 means "all 256". parse_bmp_header
+    // already ensured bytes.len() >= 14 + dib_size >= 54, so bytes[46..50] is
+    // always in-bounds here.
+    let color_count = LittleEndian::read_u32(&bytes[46..50]);
     let palette_entries = if color_count == 0 {
         256
     } else {
@@ -708,31 +710,6 @@ fn clamp_to_byte(value: f32) -> u8 {
     } else {
         (value + 0.5) as u8
     }
-}
-
-// Little-endian byte readers with bounds checking. The .get() returns None on
-// out-of-range, which we map to a labeled error. Used everywhere we touch the
-// BMP header.
-fn read_le_u16_at(bytes: &[u8], offset: usize) -> Result<u16, String> {
-    let value = bytes
-        .get(offset..offset + 2)
-        .ok_or_else(|| format!("read u16 at byte offset {offset}: truncated input"))?;
-    Ok(u16::from_le_bytes([value[0], value[1]]))
-}
-
-fn read_le_u32_at(bytes: &[u8], offset: usize) -> Result<u32, String> {
-    let value = bytes
-        .get(offset..offset + 4)
-        .ok_or_else(|| format!("read u32 at byte offset {offset}: truncated input"))?;
-    Ok(u32::from_le_bytes([value[0], value[1], value[2], value[3]]))
-}
-
-// Signed variant for the height field (negative = top-down).
-fn read_le_i32_at(bytes: &[u8], offset: usize) -> Result<i32, String> {
-    let value = bytes
-        .get(offset..offset + 4)
-        .ok_or_else(|| format!("read i32 at byte offset {offset}: truncated input"))?;
-    Ok(i32::from_le_bytes([value[0], value[1], value[2], value[3]]))
 }
 
 #[cfg(test)]

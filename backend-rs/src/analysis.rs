@@ -30,6 +30,7 @@ use std::{
     sync::OnceLock,
 };
 
+use byteorder::{LittleEndian, ReadBytesExt};
 use flate2::read::GzDecoder;
 use rayon::prelude::*;
 
@@ -1499,11 +1500,11 @@ fn decode_feature_probability_table(
         ));
     }
 
-    let count = read_le_u32_from(&mut decoder)? as usize;
+    let count = read_le_u32(&mut decoder)? as usize;
     let mut keys = Vec::with_capacity(count);
     let mut probabilities = Vec::with_capacity(count);
     for _ in 0..count {
-        keys.push(read_le_u32_from(&mut decoder)?);
+        keys.push(read_le_u32(&mut decoder)?);
         let mut probability = [0_u8; 1];
         decoder
             .read_exact(&mut probability)
@@ -1745,44 +1746,28 @@ fn decode_bone_feature_table(data: &[u8]) -> Result<HashMap<u32, u8>, String> {
     Ok(table)
 }
 
-fn read_le_u32(cursor: &mut Cursor<&[u8]>) -> Result<u32, String> {
-    let mut bytes = [0_u8; 4];
-    cursor
-        .read_exact(&mut bytes)
-        .map_err(|error| format!("read little-endian u32: {error}"))?;
-    Ok(u32::from_le_bytes(bytes))
-}
-
-fn read_le_u32_from(reader: &mut impl Read) -> Result<u32, String> {
-    let mut bytes = [0_u8; 4];
+fn read_le_u32(reader: &mut impl Read) -> Result<u32, String> {
     reader
-        .read_exact(&mut bytes)
-        .map_err(|error| format!("read little-endian u32: {error}"))?;
-    Ok(u32::from_le_bytes(bytes))
+        .read_u32::<LittleEndian>()
+        .map_err(|error| format!("read little-endian u32: {error}"))
 }
 
-fn read_le_i32(cursor: &mut Cursor<&[u8]>) -> Result<i32, String> {
-    let mut bytes = [0_u8; 4];
-    cursor
-        .read_exact(&mut bytes)
-        .map_err(|error| format!("read little-endian i32: {error}"))?;
-    Ok(i32::from_le_bytes(bytes))
+fn read_le_i32(reader: &mut impl Read) -> Result<i32, String> {
+    reader
+        .read_i32::<LittleEndian>()
+        .map_err(|error| format!("read little-endian i32: {error}"))
 }
 
-fn read_le_u64(cursor: &mut Cursor<&[u8]>) -> Result<u64, String> {
-    let mut bytes = [0_u8; 8];
-    cursor
-        .read_exact(&mut bytes)
-        .map_err(|error| format!("read little-endian u64: {error}"))?;
-    Ok(u64::from_le_bytes(bytes))
+fn read_le_u64(reader: &mut impl Read) -> Result<u64, String> {
+    reader
+        .read_u64::<LittleEndian>()
+        .map_err(|error| format!("read little-endian u64: {error}"))
 }
 
-fn read_le_f64(cursor: &mut Cursor<&[u8]>) -> Result<f64, String> {
-    let mut bytes = [0_u8; 8];
-    cursor
-        .read_exact(&mut bytes)
-        .map_err(|error| format!("read little-endian f64: {error}"))?;
-    Ok(f64::from_le_bytes(bytes))
+fn read_le_f64(reader: &mut impl Read) -> Result<f64, String> {
+    reader
+        .read_f64::<LittleEndian>()
+        .map_err(|error| format!("read little-endian f64: {error}"))
 }
 
 // Pack a 4D bone feature (x-pos, y-pos, normalized gray, gradient) into a
