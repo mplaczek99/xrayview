@@ -45,7 +45,7 @@ pub struct RecentStudyEntry {
 
 // Top-level on-disk shape. Note we don't `deny_unknown_fields` here on
 // purpose — we want forward-compat with future catalog versions.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StudyCatalog {
     #[serde(default)]
@@ -87,7 +87,7 @@ impl Catalog {
             operation_lock: Mutex::new(()),
             state: Mutex::new(CatalogState {
                 loaded: false,
-                cache: empty_study_catalog(),
+                cache: StudyCatalog::default(),
             }),
             now: Mutex::new(Box::new(Utc::now)),
         }
@@ -138,7 +138,7 @@ impl Catalog {
             Err(error) => {
                 let mut state = self.state.lock();
                 state.loaded = false;
-                state.cache = empty_study_catalog();
+                state.cache = StudyCatalog::default();
                 return Err(error);
             }
         };
@@ -193,7 +193,7 @@ impl Catalog {
         let contents = match fs::read(&self.path) {
             Ok(contents) => contents,
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                return Ok(empty_study_catalog());
+                return Ok(StudyCatalog::default());
             }
             Err(error) => {
                 return Err(BackendError::internal(format!(
@@ -242,7 +242,7 @@ impl Catalog {
             // Corrupt is recoverable from this caller's perspective — the
             // file's been moved aside, and we're about to write a fresh one.
             Err(error) if error.code == BackendErrorCode::CacheCorrupted => {
-                Ok(empty_study_catalog())
+                Ok(StudyCatalog::default())
             }
             Err(error) => Err(error),
         }
@@ -294,14 +294,6 @@ impl Catalog {
                 PathBuf::from(path)
             }
         }
-    }
-}
-
-// Shorthand for the "empty list" catalog. Pulled out so we don't end up with
-// subtly-different empty defaults scattered across the file.
-fn empty_study_catalog() -> StudyCatalog {
-    StudyCatalog {
-        recent_studies: Vec::new(),
     }
 }
 
