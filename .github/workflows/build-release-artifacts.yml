@@ -29,6 +29,10 @@ jobs:
         shell: bash
 
     steps:
+      - name: Preserve repository line endings
+        if: runner.os == 'Windows'
+        run: git config --global core.autocrlf false
+
       - name: Check out repository
         uses: actions/checkout@v4
 
