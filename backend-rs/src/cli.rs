@@ -19,7 +19,7 @@ use serde_json::json;
 
 use crate::{
     analysis,
-    bmp::{self, Metadata, RenderWindowMode, RenderedPreview},
+    bmp::{self, Metadata, RenderedPreview},
     config::Config,
     contracts::{
         BACKEND_CONTRACT_VERSION, BackendError, MeasurementScale, PaletteName, ProcessStudyCommand,
@@ -507,10 +507,7 @@ fn decode_source(args: &[&str], stdout: &mut dyn Write) -> CliResult<()> {
 
 fn render_preview(args: &[&str], stdout: &mut dyn Write) -> CliResult<()> {
     let options = parse_render_preview_args(args)?;
-    let rendered = bmp::render_grayscale_preview_file_with_window_mode(
-        &options.input_path,
-        render_window_mode(options.full_range),
-    )?;
+    let rendered = bmp::render_grayscale_preview_file(&options.input_path)?;
     render::save_gray_bmp(
         &options.output_path,
         rendered.width,
@@ -537,10 +534,7 @@ fn render_preview(args: &[&str], stdout: &mut dyn Write) -> CliResult<()> {
 
 fn process_preview(args: &[&str], stdout: &mut dyn Write) -> CliResult<()> {
     let options = parse_process_preview_args(args)?;
-    let rendered = bmp::render_grayscale_preview_file_with_window_mode(
-        &options.input_path,
-        render_window_mode(options.full_range),
-    )?;
+    let rendered = bmp::render_grayscale_preview_file(&options.input_path)?;
     let source = rendered_preview_image(&rendered);
     let palette = processing::normalize_palette_name(&options.palette)?;
     let processed =
@@ -730,14 +724,6 @@ fn parse_analyze_preview_args(args: &[&str]) -> CliResult<AnalyzePreviewOptions>
         input_path: PathBuf::from(positional[0]),
         output_path: PathBuf::from(positional[1]),
     })
-}
-
-fn render_window_mode(full_range: bool) -> RenderWindowMode {
-    if full_range {
-        RenderWindowMode::FullRange
-    } else {
-        RenderWindowMode::Default
-    }
 }
 
 fn rendered_preview_image(rendered: &RenderedPreview) -> PreviewImage {

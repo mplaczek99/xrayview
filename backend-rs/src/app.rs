@@ -776,15 +776,9 @@ impl App {
         &self,
         study: &StudyRecord,
     ) -> Result<bmp::RenderedPreview, BackendError> {
-        let cache_key = input_cache_key(&study.input_path);
-        let source = self
-            .source_preview_cache
-            .get_or_try_insert_with(cache_key, || {
-                bmp::decode_source_preview_file(&study.input_path).map_err(|error| {
-                    BackendError::invalid_input(format!("failed to render study: {error}"))
-                })
-            })?;
-        Ok(bmp::render_grayscale_preview_from_source(&source))
+        Ok(bmp::render_grayscale_preview_from_source(
+            &self.cached_source_preview(study)?,
+        ))
     }
 
     // Same as load_source_preview but applies the tooth-analysis stretch
@@ -793,15 +787,21 @@ impl App {
         &self,
         study: &StudyRecord,
     ) -> Result<bmp::RenderedPreview, BackendError> {
-        let cache_key = input_cache_key(&study.input_path);
-        let source = self
-            .source_preview_cache
-            .get_or_try_insert_with(cache_key, || {
+        Ok(bmp::render_grayscale_preview_from_source_for_tooth_analysis(
+            &self.cached_source_preview(study)?,
+        ))
+    }
+
+    fn cached_source_preview(
+        &self,
+        study: &StudyRecord,
+    ) -> Result<bmp::DecodedSourcePreview, BackendError> {
+        self.source_preview_cache
+            .get_or_try_insert_with(input_cache_key(&study.input_path), || {
                 bmp::decode_source_preview_file(&study.input_path).map_err(|error| {
                     BackendError::invalid_input(format!("failed to render study: {error}"))
                 })
-            })?;
-        Ok(bmp::render_grayscale_preview_from_source_for_tooth_analysis(&source))
+            })
     }
 
     // Fingerprint = "what makes two jobs identical for caching". For render

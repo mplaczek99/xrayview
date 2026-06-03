@@ -61,15 +61,6 @@ pub struct RenderedPreview {
     pub measurement_scale: Option<MeasurementScale>,
 }
 
-// Reserved for an upcoming feature — clinicians sometimes want to see the
-// raw 8-bit values directly without the auto-stretch. Wired through the
-// public API surface but ignored by the renderer today.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RenderWindowMode {
-    Default,
-    FullRange,
-}
-
 // Path-based public entry — reads just enough of the file to fill out
 // Metadata. Doesn't decode pixel data, so it's fast on huge files.
 pub fn read_file(path: &str) -> Result<Metadata, String> {
@@ -83,11 +74,6 @@ pub fn read_file(path: &str) -> Result<Metadata, String> {
     }
     read_header(&bytes)
         .map_err(|error| format!("read BMP metadata from {}: {error}", path.display()))
-}
-
-// In-memory variant for the (already-buffered) bytes case.
-pub fn read(bytes: &[u8]) -> Result<Metadata, String> {
-    read_header(bytes)
 }
 
 // The actual metadata extractor. Note we hardcode bits_allocated/stored = 8;
@@ -104,16 +90,8 @@ pub fn read_header(bytes: &[u8]) -> Result<Metadata, String> {
     })
 }
 
-// Default rendering: read file, decode, stretch. The window_mode-variant
-// version is exposed for forward-compat — today both modes do the same thing.
+// Default rendering: read file, decode, stretch.
 pub fn render_grayscale_preview_file(path: impl AsRef<Path>) -> Result<RenderedPreview, String> {
-    render_grayscale_preview_file_with_window_mode(path, RenderWindowMode::Default)
-}
-
-pub fn render_grayscale_preview_file_with_window_mode(
-    path: impl AsRef<Path>,
-    _window_mode: RenderWindowMode,
-) -> Result<RenderedPreview, String> {
     render_grayscale_preview_file_inner(path, false)
 }
 
@@ -158,17 +136,10 @@ fn render_grayscale_preview_file_inner(
         .map_err(|error| format!("decode BMP image from {}: {error}", path.display()))
 }
 
-// In-memory render entry points — same dispatch as the file versions but
+// In-memory render entry point — same dispatch as the file version but
 // taking pre-loaded bytes.
 pub fn render_grayscale_preview(bytes: &[u8]) -> Result<RenderedPreview, String> {
     render_grayscale_preview_with_options(bytes, false)
-}
-
-pub fn render_grayscale_preview_with_window_mode(
-    bytes: &[u8],
-    _window_mode: RenderWindowMode,
-) -> Result<RenderedPreview, String> {
-    render_grayscale_preview(bytes)
 }
 
 fn render_grayscale_preview_with_options(
