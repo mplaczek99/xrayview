@@ -10,10 +10,10 @@ export interface JobProgressTiming {
   startedAtMs: number;
   lastUpdatedAtMs: number;
   lastProgressAtMs: number;
+  lastProgressPercent: number;
   firstMeasuredSample: JobProgressSample | null;
   measuredSampleCount: number;
   smoothedRate: number | null;
-  samples: JobProgressSample[];
 }
 
 export type JobResultPayload =

@@ -15,12 +15,7 @@ export type EtaConfidence = "none" | "low" | "medium" | "high";
 
 export interface RateEstimate {
   confidence: EtaConfidence;
-  effectiveRate: number | null;
-  overallRate: number | null;
-  recentRate: number | null;
-  recentWeight: number;
   remainingMs: number | null;
-  staleMs: number | null;
   stalled: boolean;
 }
 
@@ -32,12 +27,7 @@ export function estimateRate(
   if (percent <= 0 || percent >= 100) {
     return {
       confidence: "none",
-      effectiveRate: null,
-      overallRate: null,
-      recentRate: null,
-      recentWeight: 0,
       remainingMs: null,
-      staleMs: null,
       stalled: false,
     };
   }
@@ -63,12 +53,7 @@ export function estimateRate(
 
   return {
     confidence,
-    effectiveRate,
-    overallRate,
-    recentRate: timing.smoothedRate,
-    recentWeight,
     remainingMs,
-    staleMs,
     stalled: staleMs >= STALL_HIDE_ETA_MS,
   };
 }

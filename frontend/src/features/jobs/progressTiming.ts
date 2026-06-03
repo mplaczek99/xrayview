@@ -1,9 +1,7 @@
 import type { JobProgress, JobState } from "../../lib/generated/contracts";
 import { clamp } from "../../lib/math";
-import type { JobProgressSample, JobProgressTiming } from "./model";
+import type { JobProgressTiming } from "./model";
 
-const MAX_SAMPLES = 8;
-const ROLLING_WINDOW_MS = 20_000;
 const MIN_PERCENT_DELTA = 0.5;
 const MIN_RATE_WINDOW_MS = 250;
 const RATE_EMA_ALPHA = 0.35;
@@ -40,22 +38,22 @@ export function advanceJobProgressTiming(
     return freshTiming(nowMs, nowMs, percent);
   }
 
-  const lastSample = previous.samples[previous.samples.length - 1];
-  // Backend reset its percent — start a new sample buffer but keep
-  // startedAtMs so elapsed time continues from job start.
-  if (percent + MIN_PERCENT_DELTA < lastSample.percent) {
+  // Backend reset its percent; keep startedAtMs so elapsed time continues from job start.
+  if (percent + MIN_PERCENT_DELTA < previous.lastProgressPercent) {
     return freshTiming(previous.startedAtMs, nowMs, percent);
   }
 
-  if (Math.abs(lastSample.percent - percent) < MIN_PERCENT_DELTA) {
+  if (Math.abs(previous.lastProgressPercent - percent) < MIN_PERCENT_DELTA) {
     return { ...previous, lastUpdatedAtMs: nowMs };
   }
 
-  const deltaMs = nowMs - lastSample.atMs;
-  const deltaPercent = percent - lastSample.percent;
-  const nextSample = { atMs: nowMs, percent };
+  const deltaMs = nowMs - previous.lastProgressAtMs;
+  const deltaPercent = percent - previous.lastProgressPercent;
+  const progressSample = { atMs: nowMs, percent };
   const measuredRate =
-    lastSample.percent > 0 && deltaMs >= MIN_RATE_WINDOW_MS && deltaPercent >= MIN_PERCENT_DELTA
+    previous.lastProgressPercent > 0 &&
+    deltaMs >= MIN_RATE_WINDOW_MS &&
+    deltaPercent >= MIN_PERCENT_DELTA
       ? deltaPercent / deltaMs
       : null;
 
@@ -63,12 +61,12 @@ export function advanceJobProgressTiming(
     startedAtMs: previous.startedAtMs,
     lastUpdatedAtMs: nowMs,
     lastProgressAtMs: nowMs,
-    firstMeasuredSample: previous.firstMeasuredSample ?? (percent > 0 ? nextSample : null),
+    lastProgressPercent: percent,
+    firstMeasuredSample: previous.firstMeasuredSample ?? (percent > 0 ? progressSample : null),
     measuredSampleCount: previous.measuredSampleCount + (percent > 0 ? 1 : 0),
     smoothedRate: measuredRate
       ? smoothRate(previous.smoothedRate, measuredRate)
       : previous.smoothedRate,
-    samples: trimSamples([...previous.samples, nextSample], nowMs),
   };
 }
 
@@ -78,10 +76,10 @@ function freshTiming(startedAtMs: number, nowMs: number, percent: number): JobPr
     startedAtMs,
     lastUpdatedAtMs: nowMs,
     lastProgressAtMs: nowMs,
+    lastProgressPercent: percent,
     firstMeasuredSample: percent > 0 ? sample : null,
     measuredSampleCount: percent > 0 ? 1 : 0,
     smoothedRate: null,
-    samples: [sample],
   };
 }
 
@@ -91,18 +89,6 @@ function smoothRate(previousRate: number | null, nextRate: number): number {
   }
 
   return previousRate + (nextRate - previousRate) * RATE_EMA_ALPHA;
-}
-
-function trimSamples(samples: JobProgressSample[], nowMs: number): JobProgressSample[] {
-  const recent = samples.filter((sample, index) => {
-    if (index === samples.length - 1) {
-      return true;
-    }
-
-    return nowMs - sample.atMs <= ROLLING_WINDOW_MS;
-  });
-
-  return recent.slice(-MAX_SAMPLES);
 }
 
 export function clampPercent(percent: number): number {

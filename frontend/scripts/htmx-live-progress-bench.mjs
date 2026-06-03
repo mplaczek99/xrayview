@@ -45,16 +45,10 @@ try {
             startedAtMs: now - 14_000,
             lastUpdatedAtMs: now,
             lastProgressAtMs: now - 600,
+            lastProgressPercent: 61,
             firstMeasuredSample: { atMs: now - 12_000, percent: 5 },
             measuredSampleCount: 5,
             smoothedRate: 0.0048,
-            samples: [
-              { atMs: now - 12_000, percent: 5 },
-              { atMs: now - 9_000, percent: 18 },
-              { atMs: now - 5_500, percent: 34 },
-              { atMs: now - 2_000, percent: 50 },
-              { atMs: now, percent: 61 },
-            ],
           };
           const makeJob = (jobId, jobKind, percent, message) => ({
             jobId,
