@@ -32,55 +32,23 @@ export function advanceJobProgressTiming(
   }
 
   if (!isPendingJobState(snapshot.state)) {
-    return previous
-      ? {
-          ...previous,
-          lastUpdatedAtMs: nowMs,
-        }
-      : null;
+    return previous ? { ...previous, lastUpdatedAtMs: nowMs } : null;
   }
 
   const percent = clampPercent(snapshot.progress.percent);
-  const base = previous ?? {
-    startedAtMs: nowMs,
-    lastUpdatedAtMs: nowMs,
-    lastProgressAtMs: nowMs,
-    firstMeasuredSample: percent > 0 ? { atMs: nowMs, percent } : null,
-    measuredSampleCount: percent > 0 ? 1 : 0,
-    smoothedRate: null,
-    samples: [{ atMs: nowMs, percent }],
-  };
-  const lastSample = base.samples[base.samples.length - 1];
-
-  if (!lastSample) {
-    return {
-      startedAtMs: base.startedAtMs,
-      lastUpdatedAtMs: nowMs,
-      lastProgressAtMs: nowMs,
-      firstMeasuredSample: percent > 0 ? { atMs: nowMs, percent } : null,
-      measuredSampleCount: percent > 0 ? 1 : 0,
-      smoothedRate: null,
-      samples: [{ atMs: nowMs, percent }],
-    };
+  if (!previous) {
+    return freshTiming(nowMs, nowMs, percent);
   }
 
+  const lastSample = previous.samples[previous.samples.length - 1];
+  // Backend reset its percent — start a new sample buffer but keep
+  // startedAtMs so elapsed time continues from job start.
   if (percent + MIN_PERCENT_DELTA < lastSample.percent) {
-    return {
-      startedAtMs: base.startedAtMs,
-      lastUpdatedAtMs: nowMs,
-      lastProgressAtMs: nowMs,
-      firstMeasuredSample: percent > 0 ? { atMs: nowMs, percent } : null,
-      measuredSampleCount: percent > 0 ? 1 : 0,
-      smoothedRate: null,
-      samples: [{ atMs: nowMs, percent }],
-    };
+    return freshTiming(previous.startedAtMs, nowMs, percent);
   }
 
   if (Math.abs(lastSample.percent - percent) < MIN_PERCENT_DELTA) {
-    return {
-      ...base,
-      lastUpdatedAtMs: nowMs,
-    };
+    return { ...previous, lastUpdatedAtMs: nowMs };
   }
 
   const deltaMs = nowMs - lastSample.atMs;
@@ -92,13 +60,28 @@ export function advanceJobProgressTiming(
       : null;
 
   return {
-    startedAtMs: base.startedAtMs,
+    startedAtMs: previous.startedAtMs,
     lastUpdatedAtMs: nowMs,
     lastProgressAtMs: nowMs,
-    firstMeasuredSample: base.firstMeasuredSample ?? (percent > 0 ? nextSample : null),
-    measuredSampleCount: base.measuredSampleCount + (percent > 0 ? 1 : 0),
-    smoothedRate: measuredRate ? smoothRate(base.smoothedRate, measuredRate) : base.smoothedRate,
-    samples: trimSamples([...base.samples, nextSample], nowMs),
+    firstMeasuredSample: previous.firstMeasuredSample ?? (percent > 0 ? nextSample : null),
+    measuredSampleCount: previous.measuredSampleCount + (percent > 0 ? 1 : 0),
+    smoothedRate: measuredRate
+      ? smoothRate(previous.smoothedRate, measuredRate)
+      : previous.smoothedRate,
+    samples: trimSamples([...previous.samples, nextSample], nowMs),
+  };
+}
+
+function freshTiming(startedAtMs: number, nowMs: number, percent: number): JobProgressTiming {
+  const sample = { atMs: nowMs, percent };
+  return {
+    startedAtMs,
+    lastUpdatedAtMs: nowMs,
+    lastProgressAtMs: nowMs,
+    firstMeasuredSample: percent > 0 ? sample : null,
+    measuredSampleCount: percent > 0 ? 1 : 0,
+    smoothedRate: null,
+    samples: [sample],
   };
 }
 
@@ -122,7 +105,7 @@ function trimSamples(samples: JobProgressSample[], nowMs: number): JobProgressSa
   return recent.slice(-MAX_SAMPLES);
 }
 
-function clampPercent(percent: number): number {
+export function clampPercent(percent: number): number {
   if (!Number.isFinite(percent)) {
     return 0;
   }

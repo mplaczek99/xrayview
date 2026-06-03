@@ -8,7 +8,7 @@
 //     binary did. Triggered when argv[0] starts with '-'. Kept around for
 //     CI scripts and dental-suite integrations that haven't migrated.
 //
-// The two paths fork in `run_args`, share helpers only where shape is
+// The two paths fork in `run`, share helpers only where shape is
 // identical (BMP loading, processing dispatch). When you're editing this
 // file, ask yourself: "does this belong in modern, legacy, or both?"
 
@@ -76,17 +76,10 @@ impl From<BackendError> for CliError {
 
 type CliResult<T> = Result<T, CliError>;
 
-// Public entry. The wrapper here only exists so callers don't see the
-// internal function name and so we can swap implementations someday without
-// a breaking API change.
-pub fn run(args: &[&str], stdout: &mut dyn Write, stderr: &mut dyn Write) -> CliResult<()> {
-    run_args(args, stdout, stderr)
-}
-
 // Subcommand dispatcher. The legacy-vs-modern fork happens *before* the
 // match — anything starting with `-` is legacy. Note --help is special-cased
 // in both arms.
-fn run_args(args: &[&str], stdout: &mut dyn Write, stderr: &mut dyn Write) -> CliResult<()> {
+pub fn run(args: &[&str], stdout: &mut dyn Write, stderr: &mut dyn Write) -> CliResult<()> {
     // Some shell wrappers like to insert -- between argv[0] and the rest;
     // strip those before we look at args[0].
     let args = trim_leading_separators(args);
@@ -1013,7 +1006,7 @@ mod tests {
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
 
-        run_args(&["version"], &mut stdout, &mut stderr).unwrap();
+        run(&["version"], &mut stdout, &mut stderr).unwrap();
 
         assert_eq!(
             String::from_utf8(stdout).unwrap(),
@@ -1068,7 +1061,7 @@ mod tests {
 
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
-        run_args(
+        run(
             &[
                 "render-preview",
                 input.to_str().unwrap(),
@@ -1081,7 +1074,7 @@ mod tests {
         assert!(fs::read(&render_output).unwrap().starts_with(b"BM"));
 
         stdout.clear();
-        run_args(
+        run(
             &[
                 "process-preview",
                 "--invert",
@@ -1112,7 +1105,7 @@ mod tests {
 
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
-        run_args(
+        run(
             &["decode-source", input.to_str().unwrap()],
             &mut stdout,
             &mut stderr,
@@ -1137,7 +1130,7 @@ mod tests {
 
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
-        run_args(&["--describe-presets"], &mut stdout, &mut stderr).unwrap();
+        run(&["--describe-presets"], &mut stdout, &mut stderr).unwrap();
         let manifest_stdout = String::from_utf8(stdout.clone()).unwrap();
         assert!(manifest_stdout.contains(r#""defaultPresetId":"default""#));
         assert!(!manifest_stdout.contains('\n') || manifest_stdout.ends_with('\n'));
@@ -1145,7 +1138,7 @@ mod tests {
         assert_eq!(manifest["presets"].as_array().unwrap().len(), 3);
 
         stdout.clear();
-        run_args(
+        run(
             &["--input", input.to_str().unwrap(), "--describe-study"],
             &mut stdout,
             &mut stderr,
@@ -1171,7 +1164,7 @@ mod tests {
 
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
-        run_args(
+        run(
             &[
                 "--input",
                 input.to_str().unwrap(),
@@ -1188,7 +1181,7 @@ mod tests {
         assert!(preview_stdout.contains("saved grayscale preview image:"));
 
         stdout.clear();
-        run_args(
+        run(
             &[
                 "--input",
                 input.to_str().unwrap(),
@@ -1226,7 +1219,7 @@ mod tests {
 
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
-        run_args(
+        run(
             &["--input", input.to_str().unwrap()],
             &mut stdout,
             &mut stderr,

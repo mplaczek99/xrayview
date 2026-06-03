@@ -1,8 +1,7 @@
 import type { JobProgress, JobState } from "../../lib/generated/contracts";
-import { clamp } from "../../lib/math";
 import type { JobProgressTiming } from "./model";
 import { type EtaConfidence, estimateRate, type RateEstimate } from "./progressEstimator";
-import { isPendingJobState, isTerminalJobState } from "./progressTiming";
+import { clampPercent, isPendingJobState, isTerminalJobState } from "./progressTiming";
 
 const FAST_TASK_MS = 1_000;
 
@@ -166,14 +165,6 @@ function bucketRemainingMs(remainingMs: number): number {
 
 function bucketCeil(value: number, bucketSize: number): number {
   return Math.max(bucketSize, Math.ceil(value / bucketSize) * bucketSize);
-}
-
-function clampPercent(percent: number): number {
-  if (!Number.isFinite(percent)) {
-    return 0;
-  }
-
-  return clamp(percent, 0, 100);
 }
 
 function formatDuration(durationMs: number): string {
