@@ -1,0 +1,90 @@
+- generic [ref=e1147]:
+  - heading "XRayView" [level=1] [ref=e1148]
+  - tablist "Main tabs" [ref=e1149]:
+    - tab "View" [ref=e1150] [cursor=pointer]
+    - tab "Processing" [selected] [ref=e1151] [cursor=pointer]
+  - tabpanel "Processing" [ref=e1152]:
+    - heading "Processing" [level=2] [ref=e1153]
+    - generic [ref=e1154]:
+      - generic [ref=e1155]:
+        - generic [ref=e1156]:
+          - button "Original" [ref=e1157] [cursor=pointer]
+          - button "Processed" [ref=e1158] [cursor=pointer]
+          - button "Split" [ref=e1159] [cursor=pointer]
+        - generic [ref=e1160]:
+          - generic [ref=e1161]:
+            - generic [ref=e1162]: Original
+            - img "X-ray preview" [ref=e1165]
+          - generic [ref=e1166]:
+            - generic [ref=e1167]: Processed
+            - img "X-ray preview" [ref=e1170]
+      - generic [ref=e1171]:
+        - generic [ref=e1172]:
+          - generic [ref=e1173]: Preset
+          - combobox "Preset" [ref=e1174]:
+            - option "Neutral"
+            - option "Bone Focus"
+            - option "High Contrast"
+            - option "Custom" [selected]
+          - paragraph [ref=e1175]: Custom controls. The backend will use the default preset plus the explicit overrides shown below.
+        - generic [ref=e1176]:
+          - generic [ref=e1177]: Grayscale Controls
+          - generic [ref=e1178] [cursor=pointer]:
+            - checkbox "Invert" [checked] [ref=e1179]
+            - generic [ref=e1180]: Invert
+          - generic [ref=e1181]:
+            - generic [ref=e1182]: Brightness
+            - slider [ref=e1183]: "100"
+            - spinbutton "Brightness" [ref=e1184]: "100"
+          - generic [ref=e1185]:
+            - generic [ref=e1186]: Contrast
+            - slider [ref=e1187]: "1"
+            - spinbutton "Contrast" [ref=e1188]: "1"
+          - generic [ref=e1189] [cursor=pointer]:
+            - checkbox "Equalize" [ref=e1190]
+            - generic [ref=e1191]: Equalize
+        - generic [ref=e1192]:
+          - generic [ref=e1193]: Palette
+          - combobox "Palette" [ref=e1194]:
+            - option "none"
+            - option "hot" [selected]
+            - option "bone"
+        - generic [ref=e1195]:
+          - generic [ref=e1196] [cursor=pointer]:
+            - checkbox "Compare" [checked] [ref=e1197]
+            - generic [ref=e1198]: Compare
+          - paragraph [ref=e1199]: Generate a side-by-side comparison preview.
+        - generic [ref=e1200]:
+          - button "Run Processing" [ref=e1201] [cursor=pointer]
+          - generic [ref=e1202]: Processing complete.
+  - status [ref=e1203]:
+    - img [ref=e1204]
+    - generic [ref=e1207]: Saved manual measurement.
+  - region "Background jobs" [ref=e1208]:
+    - generic [ref=e1209]:
+      - button "▶ Jobs" [expanded] [ref=e1210] [cursor=pointer]:
+        - generic [ref=e1211]: ▶
+        - generic [ref=e1212]: Jobs
+      - button "Clear finished" [ref=e1213] [cursor=pointer]
+    - generic [ref=e1214]:
+      - article [ref=e1215]:
+        - generic [ref=e1216]:
+          - generic [ref=e1217]:
+            - generic [ref=e1218]: Process Study
+            - generic [ref=e1219]: Completed - 1.bmp
+          - button "Dismiss" [ref=e1220] [cursor=pointer]
+        - paragraph [ref=e1223]: Completed
+      - article [ref=e1224]:
+        - generic [ref=e1225]:
+          - generic [ref=e1226]:
+            - generic [ref=e1227]: Analyze Teeth And Bone
+            - generic [ref=e1228]: Completed - 1.bmp
+          - button "Dismiss" [ref=e1229] [cursor=pointer]
+        - paragraph [ref=e1232]: Completed
+      - article [ref=e1233]:
+        - generic [ref=e1234]:
+          - generic [ref=e1235]:
+            - generic [ref=e1236]: Render Preview
+            - generic [ref=e1237]: Completed - 1.bmp
+          - button "Dismiss" [ref=e1238] [cursor=pointer]
+        - paragraph [ref=e1241]: Completed

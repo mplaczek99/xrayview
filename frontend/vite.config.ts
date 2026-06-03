@@ -1,10 +1,8 @@
 import { defineConfig } from "vite";
-import react from "@vitejs/plugin-react";
 
 // The browser/mock workflow uses a fixed port so desktop-facing dev helpers can
 // target it deterministically when needed.
 export default defineConfig({
-  plugins: [react()],
   clearScreen: false,
   server: {
     host: "127.0.0.1",
@@ -13,12 +11,19 @@ export default defineConfig({
   },
   envPrefix: ["VITE_"],
   build: {
-    target: ["es2022", "chrome105", "safari13"],
+    // Tauri ships a Chromium WebView (WebView2) on Windows and a WebKit WebView
+    // (WebKitGTK) on Linux — both modern, evergreen engines — and macOS is not a
+    // build target (see .github/workflows). Target each engine's real floor instead
+    // of the old `safari13` baseline, which forced esbuild to down-level class
+    // fields, logical-assignment, and optional chaining that every shipped WebView
+    // runs natively. Tauri sets TAURI_ENV_PLATFORM during its build; a plain
+    // `vite build` with no env falls back to the safe WebKit floor.
+    target: process.env.TAURI_ENV_PLATFORM === "windows" ? "chrome105" : "safari15",
     cssCodeSplit: true,
     rollupOptions: {
       output: {
         manualChunks(id) {
-          if (id.includes("node_modules/react") || id.includes("node_modules/react-dom")) {
+          if (id.includes("node_modules/htmx.org")) {
             return "vendor";
           }
         },

@@ -1,4 +1,5 @@
 import type { JobProgress, JobState } from "../../lib/generated/contracts";
+import { clamp } from "../../lib/math";
 import type { JobProgressSample, JobProgressTiming } from "./model";
 
 const MAX_SAMPLES = 8;
@@ -7,7 +8,7 @@ const MIN_PERCENT_DELTA = 0.5;
 const MIN_RATE_WINDOW_MS = 250;
 const RATE_EMA_ALPHA = 0.35;
 
-export interface ProgressSnapshotLike {
+interface ProgressSnapshotLike {
   state: JobState;
   progress: JobProgress;
   fromCache: boolean;
@@ -86,9 +87,7 @@ export function advanceJobProgressTiming(
   const deltaPercent = percent - lastSample.percent;
   const nextSample = { atMs: nowMs, percent };
   const measuredRate =
-    lastSample.percent > 0 &&
-    deltaMs >= MIN_RATE_WINDOW_MS &&
-    deltaPercent >= MIN_PERCENT_DELTA
+    lastSample.percent > 0 && deltaMs >= MIN_RATE_WINDOW_MS && deltaPercent >= MIN_PERCENT_DELTA
       ? deltaPercent / deltaMs
       : null;
 
@@ -96,21 +95,14 @@ export function advanceJobProgressTiming(
     startedAtMs: base.startedAtMs,
     lastUpdatedAtMs: nowMs,
     lastProgressAtMs: nowMs,
-    firstMeasuredSample:
-      base.firstMeasuredSample ?? (percent > 0 ? nextSample : null),
-    measuredSampleCount:
-      base.measuredSampleCount + (percent > 0 ? 1 : 0),
-    smoothedRate: measuredRate
-      ? smoothRate(base.smoothedRate, measuredRate)
-      : base.smoothedRate,
+    firstMeasuredSample: base.firstMeasuredSample ?? (percent > 0 ? nextSample : null),
+    measuredSampleCount: base.measuredSampleCount + (percent > 0 ? 1 : 0),
+    smoothedRate: measuredRate ? smoothRate(base.smoothedRate, measuredRate) : base.smoothedRate,
     samples: trimSamples([...base.samples, nextSample], nowMs),
   };
 }
 
-function smoothRate(
-  previousRate: number | null,
-  nextRate: number,
-): number {
+function smoothRate(previousRate: number | null, nextRate: number): number {
   if (previousRate === null) {
     return nextRate;
   }
@@ -118,10 +110,7 @@ function smoothRate(
   return previousRate + (nextRate - previousRate) * RATE_EMA_ALPHA;
 }
 
-function trimSamples(
-  samples: JobProgressSample[],
-  nowMs: number,
-): JobProgressSample[] {
+function trimSamples(samples: JobProgressSample[], nowMs: number): JobProgressSample[] {
   const recent = samples.filter((sample, index) => {
     if (index === samples.length - 1) {
       return true;
@@ -138,9 +127,5 @@ function clampPercent(percent: number): number {
     return 0;
   }
 
-  return clampNumber(percent, 0, 100);
-}
-
-function clampNumber(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
+  return clamp(percent, 0, 100);
 }

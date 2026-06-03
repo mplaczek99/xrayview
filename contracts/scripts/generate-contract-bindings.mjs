@@ -1,4 +1,3 @@
-import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import {
@@ -6,7 +5,6 @@ import {
   getGeneratedTargetPaths,
   loadContractSchema,
   readFileIfPresent,
-  renderGoValidationBindings,
   renderTypeScriptContracts,
   workspaceRoot,
   writeFileIfChanged,
@@ -51,7 +49,6 @@ function relativeFromWorkspace(filePath) {
 
 function buildOutputs(schemaPath) {
   const schema = loadContractSchema(schemaPath);
-  const schemaSource = fs.readFileSync(schemaPath, "utf8");
   const targets = getGeneratedTargetPaths(schema);
   const schemaRelativePath = relativeFromWorkspace(schemaPath);
 
@@ -59,9 +56,6 @@ function buildOutputs(schemaPath) {
     schema,
     targets,
     typescript: renderTypeScriptContracts(schema, { schemaRelativePath }),
-    goValidationBindings: renderGoValidationBindings(schema, schemaSource, {
-      schemaRelativePath,
-    }),
   };
 }
 
@@ -71,11 +65,6 @@ function run() {
 
   if (options.stdout === "typescript") {
     process.stdout.write(outputs.typescript);
-    return;
-  }
-
-  if (options.stdout === "go") {
-    process.stdout.write(outputs.goValidationBindings);
     return;
   }
 
@@ -90,10 +79,6 @@ function run() {
       drifted.push(relativeFromWorkspace(outputs.targets.typescript));
     }
 
-    if (readFileIfPresent(outputs.targets.goValidationBindings) !== outputs.goValidationBindings) {
-      drifted.push(relativeFromWorkspace(outputs.targets.goValidationBindings));
-    }
-
     if (drifted.length > 0) {
       throw new Error(
         `generated contract bindings are out of date: ${drifted.join(", ")}`,
@@ -104,13 +89,9 @@ function run() {
   }
 
   writeFileIfChanged(outputs.targets.typescript, outputs.typescript);
-  writeFileIfChanged(outputs.targets.goValidationBindings, outputs.goValidationBindings);
 
   process.stdout.write(
     `generated ${relativeFromWorkspace(outputs.targets.typescript)}\n`,
-  );
-  process.stdout.write(
-    `generated ${relativeFromWorkspace(outputs.targets.goValidationBindings)}\n`,
   );
 }
 

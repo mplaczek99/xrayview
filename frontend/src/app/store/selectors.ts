@@ -1,8 +1,4 @@
-import type {
-  ProcessingForm,
-  ProcessingSession,
-  WorkbenchState,
-} from "../../features/study/model";
+import type { ProcessingForm, ProcessingSession, WorkbenchState } from "../../features/study/model";
 
 type StateSelector<T> = (state: WorkbenchState) => T;
 type SelectorValues<T extends readonly StateSelector<unknown>[]> = {
@@ -10,7 +6,7 @@ type SelectorValues<T extends readonly StateSelector<unknown>[]> = {
 };
 
 // Memoize a derived value on one or more input slices using Object.is.
-export function createSelector<const Inputs extends readonly StateSelector<unknown>[], Result>(
+function createSelector<const Inputs extends readonly StateSelector<unknown>[], Result>(
   inputSelectors: Inputs,
   resultFn: (...inputs: SelectorValues<Inputs>) => Result,
 ): StateSelector<Result> {
@@ -45,11 +41,10 @@ export const selectPendingJobCount = (state: WorkbenchState) => state.pendingJob
 // Memoized on activeStudyId + studies: returns cached reference when neither changes.
 export const selectActiveStudy = createSelector(
   [(state) => state.activeStudyId, (state) => state.studies],
-  (activeStudyId, studies) =>
-    activeStudyId ? studies[activeStudyId] ?? null : null,
+  (activeStudyId, studies) => (activeStudyId ? (studies[activeStudyId] ?? null) : null),
 );
 
-export interface ProcessingTabStudyState {
+interface ProcessingTabStudyState {
   studyId: string;
   form: ProcessingForm;
   runStatus: ProcessingSession["runStatus"];
@@ -67,9 +62,7 @@ export const selectProcessingTabStudy = (() => {
   let initialized = false;
 
   return (state: WorkbenchState): ProcessingTabStudyState | null => {
-    const study = state.activeStudyId
-      ? state.studies[state.activeStudyId] ?? null
-      : null;
+    const study = state.activeStudyId ? (state.studies[state.activeStudyId] ?? null) : null;
     const studyId = study?.studyId ?? null;
     const form = study?.processing.form ?? null;
     const runStatus = study?.processing.runStatus ?? null;
@@ -93,15 +86,16 @@ export const selectProcessingTabStudy = (() => {
     lastRunStatus = runStatus;
     lastOriginalPreviewUrl = originalPreviewUrl;
     lastProcessedPreviewUrl = processedPreviewUrl;
-    lastResult = study && form && runStatus
-      ? {
-          studyId: study.studyId,
-          form,
-          runStatus,
-          originalPreviewUrl,
-          processedPreviewUrl,
-        }
-      : null;
+    lastResult =
+      study && form && runStatus
+        ? {
+            studyId: study.studyId,
+            form,
+            runStatus,
+            originalPreviewUrl,
+            processedPreviewUrl,
+          }
+        : null;
     return lastResult;
   };
 })();

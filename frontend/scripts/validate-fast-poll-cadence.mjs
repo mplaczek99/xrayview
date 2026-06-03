@@ -9,14 +9,8 @@ const DURATION_MS = Number.parseInt(
   process.env.XRAYVIEW_FAST_POLL_BENCH_DURATION_MS ?? "10000",
   10,
 );
-const JOB_COUNT = Number.parseInt(
-  process.env.XRAYVIEW_FAST_POLL_BENCH_JOBS ?? "20000",
-  10,
-);
-const SAMPLES = Number.parseInt(
-  process.env.XRAYVIEW_FAST_POLL_BENCH_SAMPLES ?? "7",
-  10,
-);
+const JOB_COUNT = Number.parseInt(process.env.XRAYVIEW_FAST_POLL_BENCH_JOBS ?? "20000", 10);
+const SAMPLES = Number.parseInt(process.env.XRAYVIEW_FAST_POLL_BENCH_SAMPLES ?? "7", 10);
 
 const BEFORE_ACTIVE_POLL_MS = 200;
 const AFTER_ACTIVE_POLL_MS = 500;
@@ -179,10 +173,14 @@ function assertCadence() {
   const after = runAfter(state);
 
   if (before.pollCount <= after.pollCount) {
-    throw new Error(`expected fewer after polls, got before=${before.pollCount}, after=${after.pollCount}`);
+    throw new Error(
+      `expected fewer after polls, got before=${before.pollCount}, after=${after.pollCount}`,
+    );
   }
   if (after.intervals[0] !== AFTER_ACTIVE_POLL_MS) {
-    throw new Error(`expected after to start at ${AFTER_ACTIVE_POLL_MS}ms, got ${after.intervals[0]}ms`);
+    throw new Error(
+      `expected after to start at ${AFTER_ACTIVE_POLL_MS}ms, got ${after.intervals[0]}ms`,
+    );
   }
 
   const transitionInterval = decideAfterInterval({
@@ -227,7 +225,9 @@ const before = benchmark("before 200ms fallback cadence", runBefore, state);
 const after = benchmark("after 500ms active cadence", runAfter, state);
 
 if (after.pollCount >= before.pollCount) {
-  throw new Error(`expected fewer after polls, got before=${before.pollCount}, after=${after.pollCount}`);
+  throw new Error(
+    `expected fewer after polls, got before=${before.pollCount}, after=${after.pollCount}`,
+  );
 }
 if (before.checksum <= after.checksum) {
   throw new Error("expected before checksum to be larger because it executes more poll work");
@@ -240,10 +240,18 @@ const requestReduction = ((before.pollCount - after.pollCount) / before.pollCoun
 console.log(
   `Fast poll cadence benchmark (${JOB_COUNT} pending jobs, ${DURATION_MS}ms fallback window, ${SAMPLES} samples)`,
 );
-console.log(`${before.label}: mean ${formatMs(before.mean)}, min ${formatMs(before.min)}, ${before.pollCount} polls`);
-console.log(`${after.label}: mean ${formatMs(after.mean)}, min ${formatMs(after.min)}, ${after.pollCount} polls`);
-console.log(`speedup time: ${speedup.toFixed(2)}x, ${formatMs(timeSaved)} faster per simulated window`);
-console.log(`poll reduction: ${requestReduction.toFixed(1)}% (${before.pollCount} -> ${after.pollCount})`);
+console.log(
+  `${before.label}: mean ${formatMs(before.mean)}, min ${formatMs(before.min)}, ${before.pollCount} polls`,
+);
+console.log(
+  `${after.label}: mean ${formatMs(after.mean)}, min ${formatMs(after.min)}, ${after.pollCount} polls`,
+);
+console.log(
+  `speedup time: ${speedup.toFixed(2)}x, ${formatMs(timeSaved)} faster per simulated window`,
+);
+console.log(
+  `poll reduction: ${requestReduction.toFixed(1)}% (${before.pollCount} -> ${after.pollCount})`,
+);
 console.log(`after intervals: [${after.intervals.join(", ")}]`);
 console.log(`samples before: ${before.samples.map(formatMs).join(", ")}`);
 console.log(`samples after: ${after.samples.map(formatMs).join(", ")}`);

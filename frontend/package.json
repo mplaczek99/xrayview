@@ -1,31 +1,34 @@
 {
   "name": "xrayview-frontend",
   "private": true,
-  "version": "0.4.1",
+  "version": "0.5.0",
   "type": "module",
   "engines": {
-    "node": ">=18.18.0"
+    "node": ">=20.0.0"
   },
   "scripts": {
     "generate:contracts": "npm --prefix .. run contracts:generate --",
     "dev": "npm run generate:contracts && node ./scripts/vite-dev.mjs",
     "build": "npm run generate:contracts && node ./scripts/parallel-build.mjs",
-    "wails:build": "npm run generate:contracts && node ./scripts/parallel-build.mjs --config vite.wails.config.ts",
     "preview": "vite preview",
     "release:smoke": "node ./scripts/release-smoke-test.mjs",
-    "release:smoke:bundle": "node ./scripts/release-smoke-test.mjs --bundle"
+    "release:smoke:bundle": "node ./scripts/release-smoke-test.mjs --bundle",
+    "bench:htmx-progress": "node ./scripts/htmx-live-progress-bench.mjs",
+    "bench:viewer-annotations": "node ./scripts/viewer-annotation-draft-bench.mjs",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "format": "biome format --write ."
   },
   "dependencies": {
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-dialog": "^2",
+    "htmx.org": "^2.0.10"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.4.15",
     "@emnapi/core": "^1.9.1",
     "@emnapi/runtime": "^1.9.1",
     "@playwright/test": "^1.59.1",
-    "@types/react": "^18.3.12",
-    "@types/react-dom": "^18.3.1",
-    "@vitejs/plugin-react": "^4.3.4",
     "typescript": "^5.7.2",
     "vite": "^5.4.18"
   }

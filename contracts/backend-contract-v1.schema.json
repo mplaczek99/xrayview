@@ -3,11 +3,9 @@
   "$id": "https://xrayview.local/contracts/backend-contract-v1.schema.json",
   "title": "XRayView Backend Contract v1",
   "description": "Language-neutral schema for the xrayview desktop/backend contract.",
-  "x-contract-version": 1,
-  "x-go-package": "contractv1",
+  "x-contract-version": 2,
   "x-generated-targets": {
-    "typescript": "frontend/src/lib/generated/contracts.ts",
-    "goValidationBindings": "contracts/contractv1/bindings.go"
+    "typescript": "frontend/src/lib/generated/contracts.ts"
   },
   "x-export-order": [
     "PaletteName",
@@ -29,6 +27,7 @@
     "JobProgress",
     "StartedJob",
     "JobCommand",
+    "GetJobsCommand",
     "OpenStudyCommand",
     "StudyRecord",
     "OpenStudyCommandResult",
@@ -51,7 +50,7 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "brightness": { "type": "number" },
+        "brightness": { "type": "integer" },
         "contrast": { "type": "number" },
         "invert": { "type": "boolean" },
         "equalize": { "type": "boolean" },
@@ -247,6 +246,17 @@
       },
       "required": ["jobId"]
     },
+    "GetJobsCommand": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "jobIds": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "required": ["jobIds"]
+    },
     "OpenStudyCommand": {
       "type": "object",
       "additionalProperties": false,
@@ -336,13 +346,10 @@
       "additionalProperties": false,
       "properties": {
         "studyId": { "type": "string" },
-        "outputPath": {
-          "type": ["string", "null"]
-        },
         "presetId": { "type": "string" },
         "invert": { "type": "boolean" },
         "brightness": {
-          "type": ["number", "null"]
+          "type": ["integer", "null"]
         },
         "contrast": {
           "type": ["number", "null"]
@@ -364,7 +371,6 @@
       "properties": {
         "studyId": { "type": "string" },
         "previewPath": { "type": "string" },
-        "dicomPath": { "type": "string" },
         "loadedWidth": { "type": "number" },
         "loadedHeight": { "type": "number" },
         "mode": { "type": "string" },
@@ -378,7 +384,6 @@
       "required": [
         "studyId",
         "previewPath",
-        "dicomPath",
         "loadedWidth",
         "loadedHeight",
         "mode"

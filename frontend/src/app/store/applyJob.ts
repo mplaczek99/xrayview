@@ -1,8 +1,8 @@
-import { formatBackendError } from "../../lib/backendErrors";
 import type { JobSnapshot } from "../../features/jobs/model";
 import type { WorkbenchStudy } from "../../features/study/model";
+import { formatBackendError } from "../../lib/backendErrors";
 
-export function applyRenderJob(study: WorkbenchStudy, job: JobSnapshot): WorkbenchStudy {
+function applyRenderJob(study: WorkbenchStudy, job: JobSnapshot): WorkbenchStudy {
   switch (job.state) {
     case "queued":
     case "running":
@@ -41,7 +41,7 @@ export function applyRenderJob(study: WorkbenchStudy, job: JobSnapshot): Workben
   }
 }
 
-export function applyAnalyzeJob(study: WorkbenchStudy, job: JobSnapshot): WorkbenchStudy {
+function applyAnalyzeJob(study: WorkbenchStudy, job: JobSnapshot): WorkbenchStudy {
   switch (job.state) {
     case "queued":
     case "running":
@@ -56,11 +56,21 @@ export function applyAnalyzeJob(study: WorkbenchStudy, job: JobSnapshot): Workbe
         return study;
       }
 
-      const status = job.result.payload.mode.includes("no reliable tooth mask")
-        ? "Analysis completed, but no reliable tooth mask was found."
-        : job.fromCache
-          ? "Tooth and bone level overlay loaded from cache."
-          : "Tooth and bone level overlay generated.";
+      const mode = job.result.payload.mode;
+      const toothUnreliable = mode.includes("no reliable tooth mask");
+      const boneUnreliable = mode.includes("no reliable bone level");
+      let status: string;
+      if (toothUnreliable && boneUnreliable) {
+        status = "Analysis completed, but no reliable tooth mask or bone level was found.";
+      } else if (toothUnreliable) {
+        status = "Analysis completed, but no reliable tooth mask was found.";
+      } else if (boneUnreliable) {
+        status = "Analysis completed, but no reliable bone level was found.";
+      } else if (job.fromCache) {
+        status = "Tooth and bone level overlay loaded from cache.";
+      } else {
+        status = "Tooth and bone level overlay generated.";
+      }
 
       return {
         ...study,
@@ -85,7 +95,7 @@ export function applyAnalyzeJob(study: WorkbenchStudy, job: JobSnapshot): Workbe
   }
 }
 
-export function applyProcessJob(study: WorkbenchStudy, job: JobSnapshot): WorkbenchStudy {
+function applyProcessJob(study: WorkbenchStudy, job: JobSnapshot): WorkbenchStudy {
   switch (job.state) {
     case "queued":
     case "running":
@@ -131,7 +141,6 @@ export function applyProcessJob(study: WorkbenchStudy, job: JobSnapshot): Workbe
           runStatus: {
             state: "success",
             jobId: job.jobId,
-            outputPath: job.result.payload.dicomPath,
             fromCache: job.fromCache,
           },
         },
@@ -145,13 +154,12 @@ export function applyProcessJob(study: WorkbenchStudy, job: JobSnapshot): Workbe
           runStatus: {
             state: "error",
             jobId: job.jobId,
-            error:
-              job.error ?? {
-                code: "internal",
-                message: "Processing failed.",
-                details: [],
-                recoverable: false,
-              },
+            error: job.error ?? {
+              code: "internal",
+              message: "Processing failed.",
+              details: [],
+              recoverable: false,
+            },
           },
         },
       };

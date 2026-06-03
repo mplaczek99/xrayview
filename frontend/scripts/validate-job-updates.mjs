@@ -5,8 +5,8 @@
 // backend snapshot carries no new information (same state, progress, error,
 // result) — the common case during polling when a job has not advanced.
 
-import { test } from "node:test";
 import assert from "node:assert/strict";
+import { test } from "node:test";
 
 // ---------------------------------------------------------------------------
 // jobSnapshotEqual — mirrors the implementation in workbenchStore.ts
@@ -83,7 +83,9 @@ function makeMinimalStore(initialSnapshot) {
 
   return {
     getListenerCount: () => listenerCount,
-    resetListenerCount: () => { listenerCount = 0; },
+    resetListenerCount: () => {
+      listenerCount = 0;
+    },
     getState: () => state,
     receiveJobUpdate_BEFORE,
     receiveJobUpdate_AFTER,
@@ -122,7 +124,11 @@ test("AFTER: identical polling snapshot fires listener only once (first time)", 
     store.receiveJobUpdate_AFTER(repeated);
   }
 
-  assert.equal(store.getListenerCount(), 0, "AFTER: 0 notifications for 5 no-op polls (snap identical to stored)");
+  assert.equal(
+    store.getListenerCount(),
+    0,
+    "AFTER: 0 notifications for 5 no-op polls (snap identical to stored)",
+  );
 });
 
 test("AFTER: progress percent change fires listener", () => {
@@ -139,7 +145,9 @@ test("AFTER: progress stage change fires listener", () => {
   const store = makeMinimalStore(snap);
   store.resetListenerCount();
 
-  store.receiveJobUpdate_AFTER(makeSnapshot({ state: "running", progress: makeProgress(30, "render", "Rendering") }));
+  store.receiveJobUpdate_AFTER(
+    makeSnapshot({ state: "running", progress: makeProgress(30, "render", "Rendering") }),
+  );
   assert.equal(store.getListenerCount(), 1, "AFTER: stage change → 1 notification");
 });
 
@@ -151,7 +159,7 @@ test("AFTER: state transition running→completed fires listener", () => {
   const done = makeSnapshot({
     state: "completed",
     progress: makeProgress(100),
-    result: { kind: "renderStudy", payload: { previewPath: "/tmp/out.png" } },
+    result: { kind: "renderStudy", payload: { previewPath: "/tmp/out.bmp" } },
   });
   store.receiveJobUpdate_AFTER(done);
   assert.equal(store.getListenerCount(), 1, "AFTER: running→completed fires listener");
@@ -175,20 +183,26 @@ test("AFTER: repeated completed snapshot does NOT fire listener again", () => {
   const done = makeSnapshot({
     state: "completed",
     progress: makeProgress(100),
-    result: { kind: "renderStudy", payload: { previewPath: "/tmp/out.png" } },
+    result: { kind: "renderStudy", payload: { previewPath: "/tmp/out.bmp" } },
   });
   const store = makeMinimalStore(done);
   store.resetListenerCount();
 
   // Simulate 3 more polls returning the same completed state (different object ref)
   for (let i = 0; i < 3; i++) {
-    store.receiveJobUpdate_AFTER(makeSnapshot({
-      state: "completed",
-      progress: makeProgress(100),
-      result: { kind: "renderStudy", payload: { previewPath: "/tmp/out.png" } },
-    }));
+    store.receiveJobUpdate_AFTER(
+      makeSnapshot({
+        state: "completed",
+        progress: makeProgress(100),
+        result: { kind: "renderStudy", payload: { previewPath: "/tmp/out.bmp" } },
+      }),
+    );
   }
-  assert.equal(store.getListenerCount(), 0, "AFTER: terminal state repeated polls → 0 notifications");
+  assert.equal(
+    store.getListenerCount(),
+    0,
+    "AFTER: terminal state repeated polls → 0 notifications",
+  );
 });
 
 test("AFTER: mixed sequence counts correctly", () => {
@@ -214,9 +228,17 @@ test("AFTER: mixed sequence counts correctly", () => {
   // Poll 8: progress 50→99 → fires
   store.receiveJobUpdate_AFTER(makeSnapshot({ state: "running", progress: makeProgress(99) }));
   // Poll 9: completed → fires
-  store.receiveJobUpdate_AFTER(makeSnapshot({ state: "completed", progress: makeProgress(100), result: {} }));
+  store.receiveJobUpdate_AFTER(
+    makeSnapshot({ state: "completed", progress: makeProgress(100), result: {} }),
+  );
   // Poll 10: repeated completed → no-op
-  store.receiveJobUpdate_AFTER(makeSnapshot({ state: "completed", progress: makeProgress(100), result: {} }));
+  store.receiveJobUpdate_AFTER(
+    makeSnapshot({ state: "completed", progress: makeProgress(100), result: {} }),
+  );
 
-  assert.equal(store.getListenerCount(), 4, "AFTER: 4 real changes in 10 polls → exactly 4 notifications");
+  assert.equal(
+    store.getListenerCount(),
+    4,
+    "AFTER: 4 real changes in 10 polls → exactly 4 notifications",
+  );
 });

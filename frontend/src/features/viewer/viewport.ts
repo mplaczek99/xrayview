@@ -1,4 +1,5 @@
 import type { AnnotationPoint } from "../../lib/generated/contracts";
+import { clamp } from "../../lib/math";
 
 export interface ViewerFrame {
   width: number;
@@ -33,7 +34,7 @@ export function createViewport(): ViewerViewport {
   };
 }
 
-export function clampZoom(zoom: number): number {
+function clampZoom(zoom: number): number {
   return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom));
 }
 
@@ -54,30 +55,21 @@ export function getViewerTransform(
   };
 }
 
-export function imageToScreen(
-  point: AnnotationPoint,
-  transform: ViewerTransform,
-): AnnotationPoint {
+function imageToScreen(point: AnnotationPoint, transform: ViewerTransform): AnnotationPoint {
   return {
     x: transform.offsetX + point.x * transform.scale,
     y: transform.offsetY + point.y * transform.scale,
   };
 }
 
-export function screenToImage(
-  point: AnnotationPoint,
-  transform: ViewerTransform,
-): AnnotationPoint {
+export function screenToImage(point: AnnotationPoint, transform: ViewerTransform): AnnotationPoint {
   return {
     x: (point.x - transform.offsetX) / transform.scale,
     y: (point.y - transform.offsetY) / transform.scale,
   };
 }
 
-export function clampPointToImage(
-  point: AnnotationPoint,
-  image: ViewerImageSize,
-): AnnotationPoint {
+export function clampPointToImage(point: AnnotationPoint, image: ViewerImageSize): AnnotationPoint {
   return {
     x: clamp(point.x, 0, image.width),
     y: clamp(point.y, 0, image.height),
@@ -105,8 +97,4 @@ export function zoomAtPoint(
     panX: next.panX + (pointer.x - anchoredScreen.x),
     panY: next.panY + (pointer.y - anchoredScreen.y),
   };
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
 }

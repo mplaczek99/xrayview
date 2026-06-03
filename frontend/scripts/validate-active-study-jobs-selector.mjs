@@ -9,8 +9,8 @@
 // AFTER:  selectActiveStudyJobs(s) compares specific job snapshot refs. Cross-study
 //         updates return the same result ref → ViewTab skips re-render.
 
-import { test } from "node:test";
 import assert from "node:assert/strict";
+import { test } from "node:test";
 
 // ---------------------------------------------------------------------------
 // Minimal fixture helpers
@@ -47,7 +47,8 @@ function createSelector2(selA, selB, resultFn) {
     const a = selA(s);
     const b = selB(s);
     if (initialized && Object.is(lastA, a) && Object.is(lastB, b)) return lastResult;
-    lastA = a; lastB = b;
+    lastA = a;
+    lastB = b;
     lastResult = resultFn(a, b);
     initialized = true;
     return lastResult;
@@ -57,7 +58,7 @@ function createSelector2(selA, selB, resultFn) {
 const selectActiveStudy = createSelector2(
   (s) => s.activeStudyId,
   (s) => s.studies,
-  (activeStudyId, studies) => activeStudyId ? studies[activeStudyId] ?? null : null,
+  (activeStudyId, studies) => (activeStudyId ? (studies[activeStudyId] ?? null) : null),
 );
 
 // ---------------------------------------------------------------------------
@@ -71,7 +72,7 @@ function selectJobs_BEFORE(s) {
 function getAnalysisJob_BEFORE(s) {
   const study = selectActiveStudy(s);
   const jobs = selectJobs_BEFORE(s);
-  return study?.analysisJobId ? jobs[study.analysisJobId] ?? null : null;
+  return study?.analysisJobId ? (jobs[study.analysisJobId] ?? null) : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -84,8 +85,8 @@ function makeSelectActiveStudyJobs() {
   let initialized = false;
   return (s) => {
     const study = selectActiveStudy(s);
-    const renderJob = study?.renderJobId ? s.jobs[study.renderJobId] ?? null : null;
-    const analysisJob = study?.analysisJobId ? s.jobs[study.analysisJobId] ?? null : null;
+    const renderJob = study?.renderJobId ? (s.jobs[study.renderJobId] ?? null) : null;
+    const analysisJob = study?.analysisJobId ? (s.jobs[study.analysisJobId] ?? null) : null;
     if (initialized && Object.is(renderJob, lastRender) && Object.is(analysisJob, lastAnalysis)) {
       return lastResult;
     }
@@ -118,8 +119,8 @@ test("BEFORE: any job update creates new jobs ref → ViewTab-equivalent re-rend
   const j2_updated = makeJob("j-render-2", "s2", "running", 30);
   const state2 = makeState({
     activeStudyId: "s1",
-    studies: { ...state1.studies },  // same study refs
-    jobs: { ...state1.jobs, "j-render-2": j2_updated },  // new jobs ref, only s2 changed
+    studies: { ...state1.studies }, // same study refs
+    jobs: { ...state1.jobs, "j-render-2": j2_updated }, // new jobs ref, only s2 changed
   });
 
   const jobs1 = selectJobs_BEFORE(state1);
@@ -246,7 +247,9 @@ test("AFTER: no active study → stable null result ref", () => {
 
   const r1 = selectActiveStudyJobs(state);
   const r2 = selectActiveStudyJobs(state);
-  const r3 = selectActiveStudyJobs(makeState({ activeStudyId: null, studies: {}, jobs: { "j-x": makeJob("j-x", "s9") } }));
+  const r3 = selectActiveStudyJobs(
+    makeState({ activeStudyId: null, studies: {}, jobs: { "j-x": makeJob("j-x", "s9") } }),
+  );
 
   assert.equal(r1, r2, "AFTER: same ref on repeated calls with no active study");
   assert.equal(r2, r3, "AFTER: stable null result even when unrelated jobs added");
@@ -305,7 +308,7 @@ test("AFTER: 10 polls of other study, 0 new refs for active study selector", () 
     const state = makeState({
       activeStudyId: "s1",
       studies: { s1: activeStudy },
-      jobs: { ...baseJobs, "j-other": otherJob },  // new jobs spread each iteration
+      jobs: { ...baseJobs, "j-other": otherJob }, // new jobs spread each iteration
     });
     const r = selectActiveStudyJobs(state);
     if (r !== prev) refChangeCount++;
@@ -344,5 +347,9 @@ test("AFTER: mixed scenario — 10 polls, 8 cross-study, 2 active-study advances
     prev = r;
   }
 
-  assert.equal(refChangeCount, 2, "AFTER: exactly 2 new result refs for 2 active-study advances in 10 polls");
+  assert.equal(
+    refChangeCount,
+    2,
+    "AFTER: exactly 2 new result refs for 2 active-study advances in 10 polls",
+  );
 });

@@ -1,0 +1,95 @@
+- generic [ref=e1560]:
+  - heading "XRayView" [level=1] [ref=e1561]
+  - tablist "Main tabs" [ref=e1562]:
+    - tab "View" [active] [selected] [ref=e1563] [cursor=pointer]
+    - tab "Processing" [ref=e1564] [cursor=pointer]
+  - tabpanel "View" [ref=e1565]:
+    - generic [ref=e1566]:
+      - heading "View" [level=2] [ref=e1567]
+      - generic [ref=e1568]:
+        - button "Open Study" [ref=e1570] [cursor=pointer]:
+          - img [ref=e1571]
+          - text: Open Study
+        - generic [ref=e1574]:
+          - button "Pan" [ref=e1575] [cursor=pointer]:
+            - img [ref=e1576]
+            - text: Pan
+          - button "Measure line" [ref=e1578] [cursor=pointer]:
+            - img [ref=e1579]
+            - text: Measure line
+        - generic [ref=e1584]:
+          - button "Analyze" [ref=e1585] [cursor=pointer]:
+            - img [ref=e1586]
+            - generic [ref=e1589]: Analyze
+          - group "Analysis overlay" [ref=e1590]:
+            - button "Outline" [pressed] [ref=e1591] [cursor=pointer]
+            - button "Sections" [ref=e1592] [cursor=pointer]
+          - button "Remove selected" [disabled] [ref=e1593]:
+            - img [ref=e1594]
+            - text: Remove selected
+        - generic [ref=e1596]: 1.bmp
+      - generic [ref=e1597]:
+        - generic [ref=e1599]:
+          - generic [ref=e1600]:
+            - generic [ref=e1601]: 100%
+            - button "Reset view" [ref=e1602] [cursor=pointer]
+          - generic [ref=e1603]:
+            - img "X-ray preview"
+            - img [ref=e1604]:
+              - generic [ref=e1607]:
+                - generic: Measurement 1 - 522.0 px
+        - complementary [ref=e1609]:
+          - generic [ref=e1610]:
+            - heading "Viewer Tools" [level=3] [ref=e1611]
+            - paragraph [ref=e1612]: Drag to pan, use the mouse wheel to zoom, then switch to Measure line to place calibrated annotations in source pixel space.
+          - generic [ref=e1613]:
+            - heading "Line Annotations" [level=3] [ref=e1614]
+            - button "Measurement 1" [ref=e1616]:
+              - generic [ref=e1617]: Measurement 1
+              - generic [ref=e1618]: Manual
+              - generic [ref=e1619]: 522.0 px
+  - status [ref=e1620]:
+    - img [ref=e1621]
+    - generic [ref=e1623]: Processing complete.
+  - region "Background jobs" [ref=e1624]:
+    - generic [ref=e1625]:
+      - button "▶ Jobs" [expanded] [ref=e1626] [cursor=pointer]:
+        - generic [ref=e1627]: ▶
+        - generic [ref=e1628]: Jobs
+      - button "Clear finished" [ref=e1629] [cursor=pointer]
+    - generic [ref=e1630]:
+      - article [ref=e1631]:
+        - generic [ref=e1632]:
+          - generic [ref=e1633]:
+            - generic [ref=e1634]: Process Study
+            - generic [ref=e1635]: Completed - 1.bmp
+          - button "Dismiss" [ref=e1636] [cursor=pointer]
+        - paragraph [ref=e1639]: Completed
+      - article [ref=e1640]:
+        - generic [ref=e1641]:
+          - generic [ref=e1642]:
+            - generic [ref=e1643]: Process Study
+            - generic [ref=e1644]: Completed - 1.bmp
+          - button "Dismiss" [ref=e1645] [cursor=pointer]
+        - paragraph [ref=e1648]: Completed
+      - article [ref=e1649]:
+        - generic [ref=e1650]:
+          - generic [ref=e1651]:
+            - generic [ref=e1652]: Process Study
+            - generic [ref=e1653]: Completed - 1.bmp
+          - button "Dismiss" [ref=e1654] [cursor=pointer]
+        - paragraph [ref=e1657]: Completed
+      - article [ref=e1658]:
+        - generic [ref=e1659]:
+          - generic [ref=e1660]:
+            - generic [ref=e1661]: Analyze Teeth And Bone
+            - generic [ref=e1662]: Completed - 1.bmp
+          - button "Dismiss" [ref=e1663] [cursor=pointer]
+        - paragraph [ref=e1666]: Completed
+      - article [ref=e1667]:
+        - generic [ref=e1668]:
+          - generic [ref=e1669]:
+            - generic [ref=e1670]: Render Preview
+            - generic [ref=e1671]: Completed - 1.bmp
+          - button "Dismiss" [ref=e1672] [cursor=pointer]
+        - paragraph [ref=e1675]: Completed

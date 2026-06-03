@@ -1,7 +1,5 @@
+import type { LineAnnotation } from "./generated/contracts";
 import type { Palette } from "./types";
-import type {
-  LineAnnotation,
-} from "./generated/contracts";
 
 // Mock previews are deterministic SVG data URLs, so cache by variant instead
 // of re-encoding the same image every time controls rerender the UI.
@@ -46,9 +44,7 @@ function overlayMarkup(palette: Palette, processed: boolean, style: MockOverlayS
         ? "rgba(94,217,197,0.24)"
         : "rgba(86,207,226,0.22)";
 
-  const overlay = style === "filled"
-    ? filledOverlayMarkup(tint)
-    : outlineOverlayMarkup(tint);
+  const overlay = style === "filled" ? filledOverlayMarkup(tint) : outlineOverlayMarkup(tint);
 
   return `
     ${overlay}

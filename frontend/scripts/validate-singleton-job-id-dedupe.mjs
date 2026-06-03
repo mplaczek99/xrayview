@@ -76,7 +76,5 @@ console.log(
 console.log(
   `Speedup: mean ${meanSpeedup.toFixed(2)}x (${meanSaved.toFixed(
     3,
-  )} ms faster/sample), min ${minSpeedup.toFixed(2)}x (${minSaved.toFixed(
-    3,
-  )} ms faster/sample)`,
+  )} ms faster/sample), min ${minSpeedup.toFixed(2)}x (${minSaved.toFixed(3)} ms faster/sample)`,
 );

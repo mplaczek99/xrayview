@@ -12,15 +12,11 @@ const generatorPath = path.join(
   "generate-contract-bindings.mjs",
 );
 
-const result = spawnSync(
-  "node",
-  [generatorPath],
-  {
-    cwd: workspaceRoot,
-    stdio: "inherit",
-    shell: process.platform === "win32",
-  },
-);
+const result = spawnSync("node", [generatorPath], {
+  cwd: workspaceRoot,
+  stdio: "inherit",
+  shell: process.platform === "win32",
+});
 
 if (result.error) {
   throw result.error;

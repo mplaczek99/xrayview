@@ -1,17 +1,14 @@
 import type { JobProgress, JobState } from "../../lib/generated/contracts";
+import { clamp } from "../../lib/math";
 import type { JobProgressTiming } from "./model";
-import { estimateRate, type EtaConfidence, type RateEstimate } from "./progressEstimator";
+import { type EtaConfidence, estimateRate, type RateEstimate } from "./progressEstimator";
 import { isPendingJobState, isTerminalJobState } from "./progressTiming";
 
 const FAST_TASK_MS = 1_000;
 
-export type ProgressDisplayMode =
-  | "hidden"
-  | "simple"
-  | "detailed"
-  | "indeterminate";
+type ProgressDisplayMode = "hidden" | "simple" | "detailed" | "indeterminate";
 
-export interface ProgressPresentation {
+interface ProgressPresentation {
   mode: ProgressDisplayMode;
   elapsedMs: number | null;
   remainingMs: number | null;
@@ -24,7 +21,7 @@ export interface ProgressPresentation {
   stalled: boolean;
 }
 
-export interface ProgressSnapshotLike {
+interface ProgressSnapshotLike {
   state: JobState;
   progress: JobProgress;
   timing: JobProgressTiming | null;
@@ -36,11 +33,8 @@ export function describeProgress(
   nowMs = Date.now(),
 ): ProgressPresentation {
   const percent = clampPercent(snapshot.progress.percent);
-  const percentLabel =
-    percent > 0 && percent < 100 ? `${Math.round(percent)}%` : null;
-  const elapsedMs = snapshot.timing
-    ? Math.max(0, nowMs - snapshot.timing.startedAtMs)
-    : null;
+  const percentLabel = percent > 0 && percent < 100 ? `${Math.round(percent)}%` : null;
+  const elapsedMs = snapshot.timing ? Math.max(0, nowMs - snapshot.timing.startedAtMs) : null;
 
   if (snapshot.fromCache || isTerminalJobState(snapshot.state)) {
     return {
@@ -79,10 +73,7 @@ export function describeProgress(
     rateEstimate.remainingMs !== null &&
     rateEstimate.confidence !== "none";
   const mode = resolveDisplayMode(percent, elapsedMs, showEta);
-  const detailParts = [
-    percentLabel,
-    etaLabel,
-  ].filter((value): value is string => Boolean(value));
+  const detailParts = [percentLabel, etaLabel].filter((value): value is string => Boolean(value));
 
   return {
     mode,
@@ -118,10 +109,7 @@ function resolveDisplayMode(
   return "simple";
 }
 
-function formatEtaLabel(
-  remainingMs: number | null,
-  confidence: EtaConfidence,
-): string | null {
+function formatEtaLabel(remainingMs: number | null, confidence: EtaConfidence): string | null {
   if (remainingMs === null) {
     return null;
   }
@@ -185,11 +173,7 @@ function clampPercent(percent: number): number {
     return 0;
   }
 
-  return clampNumber(percent, 0, 100);
-}
-
-function clampNumber(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
+  return clamp(percent, 0, 100);
 }
 
 function formatDuration(durationMs: number): string {

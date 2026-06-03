@@ -11,15 +11,11 @@ import type {
   ProcessResult,
   RuntimeMode,
 } from "../../lib/types";
+import { emptyAnnotationBundle, type ViewerTool } from "../annotations/tools";
 import type { JobSnapshot, ProcessingRunState } from "../jobs/model";
-import {
-  emptyAnnotationBundle,
-  type ViewerTool,
-} from "../annotations/tools";
 
 export interface ProcessingForm {
   controls: ProcessingControls;
-  outputPath: string | null;
   compare: boolean;
 }
 
@@ -29,7 +25,7 @@ export interface ProcessingSession {
   runStatus: ProcessingRunState;
 }
 
-export interface ViewerSession {
+interface ViewerSession {
   tool: ViewerTool;
   selectedAnnotationId: string | null;
   analysisOverlayMode: "outline" | "sections";
@@ -64,19 +60,14 @@ export interface WorkbenchState {
   workbenchStatus: string;
 }
 
-export function createProcessingForm(
-  defaultControls: ProcessingControls,
-): ProcessingForm {
+export function createProcessingForm(defaultControls: ProcessingControls): ProcessingForm {
   return {
     controls: { ...defaultControls },
-    outputPath: null,
     compare: false,
   };
 }
 
-export function defaultControlsForManifest(
-  manifest: ProcessingManifest,
-): ProcessingControls {
+export function defaultControlsForManifest(manifest: ProcessingManifest): ProcessingControls {
   const defaultPreset =
     manifest.presets.find((preset) => preset.id === manifest.defaultPresetId) ??
     manifest.presets[0];

@@ -1,15 +1,10 @@
-import type {
-  ProcessingControls,
-  ProcessingManifest,
-} from "../../lib/generated/contracts";
+import type { ProcessingControls, ProcessingManifest } from "../../lib/generated/contracts";
 import type { ProcessingPresetOption } from "../../lib/types";
 
 interface ProcessingUiState {
   defaultControls: ProcessingControls;
   presets: ProcessingPresetOption[];
 }
-
-const CUSTOM_PRESET_LABEL = "Custom";
 
 const PRESET_COPY_BY_ID: Record<string, { label: string; description: string }> = {
   default: {
@@ -58,9 +53,7 @@ export function processingControlsEqual(
   );
 }
 
-export function buildProcessingUiState(
-  manifest: ProcessingManifest,
-): ProcessingUiState {
+export function buildProcessingUiState(manifest: ProcessingManifest): ProcessingUiState {
   const presets = manifest.presets.map((preset) => ({
     id: preset.id,
     controls: { ...preset.controls },
@@ -83,15 +76,4 @@ export function buildProcessingUiState(
         },
     presets,
   };
-}
-
-export function matchPreset(
-  controls: ProcessingControls,
-  presets: readonly ProcessingPresetOption[],
-): string {
-  const matched = presets.find((preset) =>
-    processingControlsEqual(preset.controls, controls),
-  );
-
-  return matched?.label ?? CUSTOM_PRESET_LABEL;
 }

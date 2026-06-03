@@ -100,14 +100,9 @@ export function loadContractSchema(schemaPath = defaultSchemaPath) {
 export function getGeneratedTargetPaths(schema, root = workspaceRoot) {
   const targets = schema["x-generated-targets"] ?? {};
   invariant(typeof targets.typescript === "string", "schema is missing TypeScript target path");
-  invariant(
-    typeof targets.goValidationBindings === "string",
-    "schema is missing Go validation target path",
-  );
 
   return {
     typescript: path.join(root, targets.typescript),
-    goValidationBindings: path.join(root, targets.goValidationBindings),
   };
 }
 
@@ -219,42 +214,6 @@ export function renderTypeScriptContracts(
   }
 
   return `${sections.join("\n").trimEnd()}\n`;
-}
-
-function renderGoStringLiteral(value) {
-  return JSON.stringify(value);
-}
-
-export function renderGoValidationBindings(
-  schema,
-  schemaSource,
-  {
-    schemaRelativePath = path.relative(workspaceRoot, defaultSchemaPath).replaceAll(path.sep, "/"),
-  } = {},
-) {
-  const goPackage = schema["x-go-package"];
-  invariant(typeof goPackage === "string" && goPackage.length > 0, "schema is missing x-go-package");
-  const normalizedSchemaSource = schemaSource.replaceAll("\r\n", "\n").replaceAll("\r", "\n");
-
-  const definitionRefs = schemaEntries(schema)
-    .map(([name]) => `\t${renderGoStringLiteral(name)}: ${renderGoStringLiteral(`#/$defs/${name}`)},`)
-    .join("\n");
-
-  return `// Code generated from ${schemaRelativePath}. DO NOT EDIT.
-
-package ${goPackage}
-
-const BackendContractVersion = ${schema["x-contract-version"]}
-
-const BackendContractSchemaID = ${renderGoStringLiteral(schema.$id)}
-
-// BackendContractSchemaJSON is the authoritative contract schema for future Go validation.
-const BackendContractSchemaJSON = \`${normalizedSchemaSource.trimEnd()}\`
-
-var DefinitionRefs = map[string]string{
-${definitionRefs}
-}
-`;
 }
 
 function describeValue(value) {

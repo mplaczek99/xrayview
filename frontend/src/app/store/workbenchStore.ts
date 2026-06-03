@@ -1,10 +1,18 @@
-import { useSyncExternalStore } from "react";
 import {
-  FALLBACK_PROCESSING_MANIFEST,
-  buildOutputName,
-  ensureDicomExtension,
-  getRuntimeAdapter,
-} from "../../lib/runtime";
+  removeAnnotation,
+  upsertLineAnnotation,
+  type ViewerTool,
+} from "../../features/annotations/tools";
+import { recordJobSubmit } from "../../features/jobs/benchmarks";
+import type { JobSnapshot } from "../../features/jobs/model";
+import { advanceJobProgressTiming } from "../../features/jobs/progressTiming";
+import { processingControlsEqual } from "../../features/processing/presets";
+import {
+  createWorkbenchStudy,
+  defaultControlsForManifest,
+  type WorkbenchState,
+  type WorkbenchStudy,
+} from "../../features/study/model";
 import { formatBackendError } from "../../lib/backendErrors";
 import type {
   LineAnnotation,
@@ -12,22 +20,8 @@ import type {
   ProcessingManifest,
   ProcessingPreset,
 } from "../../lib/generated/contracts";
+import { FALLBACK_PROCESSING_MANIFEST, getRuntimeAdapter } from "../../lib/runtime";
 import type { ProcessingRequest } from "../../lib/types";
-import type { JobSnapshot } from "../../features/jobs/model";
-import { recordJobSubmit } from "../../features/jobs/benchmarks";
-import { advanceJobProgressTiming } from "../../features/jobs/progressTiming";
-import {
-  removeAnnotation,
-  upsertLineAnnotation,
-  type ViewerTool,
-} from "../../features/annotations/tools";
-import {
-  createWorkbenchStudy,
-  defaultControlsForManifest,
-  type WorkbenchState,
-  type WorkbenchStudy,
-} from "../../features/study/model";
-import { processingControlsEqual } from "../../features/processing/presets";
 import { applyJobToStudy } from "./applyJob";
 
 const runtime = getRuntimeAdapter();
@@ -42,7 +36,7 @@ const INITIAL_STATE: WorkbenchState = {
   jobOrder: [],
   pendingJobIds: new Set<string>(),
   isOpeningStudy: false,
-  workbenchStatus: "Open a DICOM study or BMP/TIFF image to begin.",
+  workbenchStatus: "Open a bitewing X-ray (BMP) to begin.",
 };
 
 type Listener = () => void;
@@ -60,10 +54,9 @@ function activeJob(jobId: string | null, jobs: WorkbenchState["jobs"]): JobSnaps
 }
 
 function isPendingJob(job: JobSnapshot | null): boolean {
-  return job !== null && (
-    job.state === "queued" ||
-    job.state === "running" ||
-    job.state === "cancelling"
+  return (
+    job !== null &&
+    (job.state === "queued" || job.state === "running" || job.state === "cancelling")
   );
 }
 
@@ -93,7 +86,7 @@ function nextPendingJobIds(
 //
 // Note: `timing` is intentionally excluded — it is computed locally, not from
 // the backend. Stall detection uses `lastProgressAtMs` (advanced only when
-// percent changes) and `useProgressClock` (setInterval) for re-rendering, so
+// percent changes) and the HTMX shell's interval render for ETA display, so
 // skipping timing-only writes has no visible effect on the ETA display.
 function jobSnapshotEqual(prev: JobSnapshot, next: JobSnapshot): boolean {
   return (
@@ -162,7 +155,6 @@ function processingRequestForStudy(
   return {
     controls: { ...form.controls },
     compare: form.compare,
-    outputPath: form.outputPath,
     presetId: baselinePreset.id,
     presetControls: { ...baselinePreset.controls },
   };
@@ -191,10 +183,7 @@ class WorkbenchStore {
   getState = () => this.state;
 
   async ensureManifest() {
-    if (
-      this.state.manifestStatus === "loading" ||
-      this.state.manifestStatus === "ready"
-    ) {
+    if (this.state.manifestStatus === "loading" || this.state.manifestStatus === "ready") {
       return;
     }
 
@@ -225,7 +214,7 @@ class WorkbenchStore {
     }
 
     try {
-      const selectedPath = await runtime.pickDicomFile();
+      const selectedPath = await runtime.pickBmpFile();
       if (!selectedPath) {
         return;
       }
@@ -362,16 +351,13 @@ class WorkbenchStore {
 
   deleteSelectedAnnotation() {
     const study = this.activeStudy();
-    if (!study || !study.viewer.selectedAnnotationId) {
+    if (!study?.viewer.selectedAnnotationId) {
       return;
     }
 
     this.setStudyState(study.studyId, (current) => ({
       ...current,
-      annotations: removeAnnotation(
-        current.annotations,
-        current.viewer.selectedAnnotationId ?? "",
-      ),
+      annotations: removeAnnotation(current.annotations, current.viewer.selectedAnnotationId ?? ""),
       viewer: {
         ...current.viewer,
         selectedAnnotationId: null,
@@ -400,10 +386,7 @@ class WorkbenchStore {
     }
   }
 
-  setProcessingControl<K extends keyof ProcessingControls>(
-    key: K,
-    value: ProcessingControls[K],
-  ) {
+  setProcessingControl<K extends keyof ProcessingControls>(key: K, value: ProcessingControls[K]) {
     const study = this.activeStudy();
     if (!study) {
       return;
@@ -471,55 +454,6 @@ class WorkbenchStore {
         },
       },
     }));
-  }
-
-  setProcessingOutputPath(outputPath: string | null) {
-    const study = this.activeStudy();
-    if (!study) {
-      return;
-    }
-
-    this.setStudyState(study.studyId, (current) => ({
-      ...current,
-      processing: {
-        ...current.processing,
-        form: {
-          ...current.processing.form,
-          outputPath,
-        },
-      },
-    }));
-  }
-
-  async pickProcessingOutputPath() {
-    const study = this.activeStudy();
-    if (!study) {
-      return;
-    }
-
-    try {
-      const selectedPath = await runtime.pickSaveDicomPath(buildOutputName(study.inputPath));
-      if (!selectedPath) {
-        return;
-      }
-
-      const outputPath = ensureDicomExtension(selectedPath);
-      this.setStudyState(study.studyId, (current) => ({
-        ...current,
-        processing: {
-          ...current.processing,
-          form: {
-            ...current.processing.form,
-            outputPath,
-          },
-        },
-      }));
-    } catch (error) {
-      this.setStudyState(study.studyId, (current) => ({
-        ...current,
-        status: formatBackendError(error, "Choosing the save location failed."),
-      }));
-    }
   }
 
   async runActiveStudyProcessing() {
@@ -592,26 +526,19 @@ class WorkbenchStore {
       // Skip when the polled snapshot carries no new information — same state,
       // progress, and terminal flags. Returning `current` triggers the
       // `nextState === this.state` guard in setState, preventing listener
-      // notifications and React reconciliation for no-op polls.
+      // notifications and unnecessary HTMX shell swaps for no-op polls.
       if (previous && jobSnapshotEqual(previous, job)) {
         return current;
       }
       const nextJob: JobSnapshot = {
         ...job,
-        timing: advanceJobProgressTiming(
-          previous?.timing ?? job.timing,
-          job,
-        ),
+        timing: advanceJobProgressTiming(previous?.timing ?? job.timing, job),
       };
       const jobs = {
         ...current.jobs,
         [job.jobId]: nextJob,
       };
-      const pendingJobIds = nextPendingJobIds(
-        current.pendingJobIds,
-        previous,
-        nextJob,
-      );
+      const pendingJobIds = nextPendingJobIds(current.pendingJobIds, previous, nextJob);
       const studies = { ...current.studies };
       if (nextJob.studyId && studies[nextJob.studyId]) {
         studies[nextJob.studyId] = applyJobToStudy(studies[nextJob.studyId], nextJob);
@@ -647,10 +574,7 @@ class WorkbenchStore {
     }
   }
 
-  private async measureAndStoreLineAnnotation(
-    annotation: LineAnnotation,
-    successStatus: string,
-  ) {
+  private async measureAndStoreLineAnnotation(annotation: LineAnnotation, successStatus: string) {
     const study = this.activeStudy();
     if (!study) {
       return;
@@ -675,10 +599,7 @@ class WorkbenchStore {
     }
   }
 
-  private setStudyState(
-    studyId: string,
-    updater: (study: WorkbenchStudy) => WorkbenchStudy,
-  ) {
+  private setStudyState(studyId: string, updater: (study: WorkbenchStudy) => WorkbenchStudy) {
     this.setState((current) => {
       const study = current.studies[studyId];
       if (!study) {
@@ -695,7 +616,7 @@ class WorkbenchStore {
         studies,
         workbenchStatus:
           current.activeStudyId === studyId
-            ? studies[studyId]?.status ?? current.workbenchStatus
+            ? (studies[studyId]?.status ?? current.workbenchStatus)
             : current.workbenchStatus,
       };
     });
@@ -723,10 +644,5 @@ class WorkbenchStore {
 
 export const workbenchActions = new WorkbenchStore();
 
-export function useWorkbenchStore<T>(selector: (state: WorkbenchState) => T): T {
-  return useSyncExternalStore(
-    workbenchActions.subscribe,
-    () => selector(workbenchActions.getState()),
-    () => selector(workbenchActions.getState()),
-  );
-}
+export const subscribeWorkbenchStore = workbenchActions.subscribe;
+export const getWorkbenchState = workbenchActions.getState;

@@ -5,6 +5,60 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-06-02
+
+### Added
+
+- `start_analyze_job` Tauri command and `analyzeStudy` `JobResultPayload` variant ported to the new Rust backend, with deterministic tooth/bone overlay generation
+- `GetJobsCommand` batch job-poll endpoint in the shared contract
+- Section overlay highlights now render with alpha shading, and outlines are drawn on top of section fills (previously outlines were suppressed in Section view)
+- Linux Wayland WebKit dmabuf-renderer workaround applied before GTK initializes (`desktop-tauri/src/main.rs`)
+- Custom Linux titlebar handling (native decorations hidden in favor of a CSS chrome)
+- Lint tooling: Biome on the frontend and `clippy -D warnings` on both Rust crates (`npm run lint`, `lint:ts`, `lint:rust`)
+- Project guidance docs: `CLAUDE.md` (project rules) and `AGENTS.md` (contributor guide)
+- Playwright end-to-end coverage for the BMP open → render → process → measure workflow (`frontend/tests/e2e/bmp-workflow.spec.ts`)
+- SVG favicon and browser-tab overlay (mock mode)
+- Rust-backend benchmark examples under `backend-rs/examples/` covering BMP decode, source-preview caching, render preview, tooth feature table, bone exemplar lookup, micro-allocations, and the analyze pipeline
+- `backend-rs` headless CLI binary (`xrayview-backend-rs`) exposing `print-config`, `version`, `list-commands`, `decode-source`, `render-preview`, `process-preview`, `analyze-preview`, plus the legacy workflow flags
+
+### Changed
+
+- **Backend migrated from Go to Rust** (`backend-rs/`). The library plus headless-CLI split is preserved, but everything under `backend/` (Go) has been removed in favor of `backend-rs/src/{app,analysis,annotations,bmp,cache,cli,config,contracts,persistence,processing,render}.rs`
+- **Desktop shell migrated from Wails to Tauri 2** (`desktop-tauri/`). The backend is now linked into the shell as a library and invoked via Tauri IPC instead of running as a loopback HTTP sidecar
+- **Frontend migrated from React to HTMX/TypeScript.** The viewer was consolidated into a single `ViewerController` replacing the React `ViewerCanvas`, `usePointerInteractions`, `useViewportFrame`, and `useWheelZoom` modules
+- Backend contract bumped to **v2**: `brightness` is now an integer (it was always quantized on the backend, but a `number` typing let the UI submit floats that were silently truncated); the legacy `outputPath` field on `ProcessStudyCommand` and `dicomPath` field on `OpenStudyCommandResult` have been dropped
+- PNG preview encoder replaced with a native BMP encoder, eliminating an intermediate format conversion on every render
+- Measurement labels now consume a sequence number only when a draft is committed — clicks and sub-threshold drags previously burned numbers, producing label sequences like `1, 2, 4, 8` as aborted drafts ate ids in between
+- Desktop release profile tuned: `opt-level = 3`, `lto = true`, `codegen-units = 1`, `strip = true`
+- Vite build target raised to the WebView floor we actually ship (no transpilation down to legacy targets the desktop shell never sees)
+- Minimum Node.js raised to 20+
+- Analysis hot loops parallelized with rayon; bone exemplar lookup pre-filters by dimension before hashing; tooth feature-table lookups bucketed for cache locality; bone-section mask computed once per overlay; analysis mask scratch buffers reused across the overlay pipeline
+- BMP decode reads metadata directly from the header and avoids a gray-encode buffer copy
+- Decoded source previews now cached so re-opening a study skips the decode path
+- Viewer pointer interactions throttled to one render per frame; annotation draft rendering optimized
+- Live HTMX job-progress updates take a fast path that skips the diff/swap pipeline
+- Job-update events are now broadcast on cache hits, so SSE/IPC subscribers see the terminal state for cache-served jobs instead of only via `get_job` polling
+
+### Fixed
+
+- Wayland startup crash on hosts with the WebKit DMABUF renderer enabled — `WEBKIT_DISABLE_DMABUF_RENDERER=1` is now set before Tauri initializes GTK on Linux Wayland sessions
+- Cancelling a Running job now releases its fingerprint immediately, so a follow-up `start_*_job_async` mints a fresh job instead of being deduped onto the dying one (`backend-rs/src/app.rs`)
+- BMP parser rejects pixel-data offsets that fall inside the file/DIB headers (would otherwise read header bytes as pixel data)
+- Bone-section outline no longer draws a frame around the image — the mask is snapped to the image edge before contouring so edge runs are not closed back through the border
+- Section overlay bone rendering, reference matching, and background cleanup fixes
+- Tooth analysis mask cleaned of internal noise pre-overlay
+- Analyze view no longer flickers on rerender when the analysis result swaps in
+- Analyzer bone-level warnings are surfaced through the analyze job status payload instead of being dropped
+- `/favicon.ico` 404 in the dev server
+- Measurement numbering no longer skips when a click or sub-threshold drag is aborted
+
+### Removed
+
+- Go backend module (`backend/`), Wails desktop shell (`desktop/`), and the Go contracts module (`contracts/contractv1/`). TypeScript bindings remain auto-generated from `contracts/backend-contract-v1.schema.json`; Rust types in `backend-rs/src/contracts.rs` are the matching source on the Rust side and are kept in sync manually
+- Standalone HTTP backend transport. The backend is library-only now; there is no loopback listener and no `xrayviewd` binary
+- React frontend tree (`main.tsx`, `ViewerCanvas.tsx`, `usePointerInteractions.ts`, `useViewportFrame.ts`, `useWheelZoom.ts`, `JobCenter.tsx`, `ViewTab.tsx`, `ViewSidebar.tsx`, `AnnotationLayer.tsx`, `useJobs.ts`, `useProgressClock.ts`)
+- `REMOVAL_PLAN.md` and the in-tree optimization-plan docs, after the migration and optimization passes landed
+
 ## [0.4.1] - 2026-05-17
 
 ### Added
@@ -40,6 +94,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- DICOM and TIFF input/output support has been removed in favor of a single BMP bitewing workflow, reducing maintenance and parser surface; see `REMOVAL_PLAN.md`.
 - Viewer hover coordinate readout from `ViewerCanvas` and `usePointerInteractions`
 
 ### Security

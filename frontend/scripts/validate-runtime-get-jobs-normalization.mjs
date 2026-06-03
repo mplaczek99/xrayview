@@ -4,18 +4,12 @@
 
 import { performance } from "node:perf_hooks";
 
-const JOB_COUNT = Number.parseInt(
-  process.env.XRAYVIEW_RUNTIME_GET_JOBS_BENCH_JOBS ?? "20000",
-  10,
-);
+const JOB_COUNT = Number.parseInt(process.env.XRAYVIEW_RUNTIME_GET_JOBS_BENCH_JOBS ?? "20000", 10);
 const ITERATIONS = Number.parseInt(
   process.env.XRAYVIEW_RUNTIME_GET_JOBS_BENCH_ITERATIONS ?? "100",
   10,
 );
-const SAMPLES = Number.parseInt(
-  process.env.XRAYVIEW_RUNTIME_GET_JOBS_BENCH_SAMPLES ?? "7",
-  10,
-);
+const SAMPLES = Number.parseInt(process.env.XRAYVIEW_RUNTIME_GET_JOBS_BENCH_SAMPLES ?? "7", 10);
 const RETAINED_JOBS = 1024;
 
 function makeSnapshots(jobCount) {
@@ -137,7 +131,9 @@ const before = benchmark("before map + normalize each batch", runBefore, snapsho
 const after = benchmark("after visitor normalization", runAfter, snapshots);
 
 if (before.checksum !== after.checksum) {
-  throw new Error(`benchmark checksum mismatch: before=${before.checksum}, after=${after.checksum}`);
+  throw new Error(
+    `benchmark checksum mismatch: before=${before.checksum}, after=${after.checksum}`,
+  );
 }
 
 const speedup = before.mean / after.mean;

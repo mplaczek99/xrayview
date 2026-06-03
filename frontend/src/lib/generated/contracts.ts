@@ -1,8 +1,8 @@
 // This file is generated from `contracts/backend-contract-v1.schema.json`.
 // Run `npm run contracts:generate` after changing the schema.
-// Backend contract version: v1
+// Backend contract version: v2
 
-export const BACKEND_CONTRACT_VERSION = 1 as const;
+export const BACKEND_CONTRACT_VERSION = 2 as const;
 
 export type PaletteName = "none" | "hot" | "bone";
 
@@ -108,6 +108,10 @@ export interface JobCommand {
   jobId: string;
 }
 
+export interface GetJobsCommand {
+  jobIds: string[];
+}
+
 export interface OpenStudyCommand {
   inputPath: string;
 }
@@ -151,7 +155,6 @@ export interface AnalyzeStudyCommandResult {
 
 export interface ProcessStudyCommand {
   studyId: string;
-  outputPath?: string | null;
   presetId: string;
   invert: boolean;
   brightness?: number | null;
@@ -164,7 +167,6 @@ export interface ProcessStudyCommand {
 export interface ProcessStudyCommandResult {
   studyId: string;
   previewPath: string;
-  dicomPath: string;
   loadedWidth: number;
   loadedHeight: number;
   mode: string;

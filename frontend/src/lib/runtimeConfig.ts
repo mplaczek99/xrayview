@@ -12,17 +12,7 @@ function isRuntimeMode(value: string): value is RuntimeMode {
   return value === "mock" || value === "desktop";
 }
 
-function normalizeRuntimeMode(value: string): RuntimeMode | null {
-  if (isRuntimeMode(value)) {
-    return value;
-  }
-
-  return null;
-}
-
-export function resolveRuntimeConfiguration(
-  isDesktopRuntime: boolean,
-): RuntimeConfiguration {
+export function resolveRuntimeConfiguration(isDesktopRuntime: boolean): RuntimeConfiguration {
   const warnings: string[] = [];
   const defaultMode: RuntimeMode = isDesktopRuntime ? "desktop" : "mock";
   const rawMode =
@@ -34,16 +24,12 @@ export function resolveRuntimeConfiguration(
 
   if (rawMode?.trim()) {
     selectionSource = "env";
-    const normalizedMode = rawMode.trim().toLowerCase();
-    const modeOverride = normalizeRuntimeMode(normalizedMode);
-    if (!modeOverride) {
+    const modeOverride = rawMode.trim().toLowerCase();
+    if (!isRuntimeMode(modeOverride)) {
       warnings.push(
         `${BACKEND_RUNTIME_ENV_KEY} must be one of mock or desktop. Falling back to ${defaultMode}.`,
       );
     } else if (!isDesktopRuntime && modeOverride === "desktop") {
-      // desktop mode relies on the Wails JS bridge that only exists inside
-      // the packaged shell. In a plain browser fall back to mock so the page
-      // still boots.
       warnings.push(
         `${modeOverride} requires the desktop shell. Falling back to mock in browser mode.`,
       );

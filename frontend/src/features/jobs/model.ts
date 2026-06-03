@@ -1,14 +1,5 @@
-import type {
-  BackendError,
-  JobKind,
-  JobProgress,
-  JobState,
-} from "../../lib/generated/contracts";
-import type {
-  AnalysisResult,
-  PreviewResult,
-  ProcessResult,
-} from "../../lib/types";
+import type { BackendError, JobKind, JobProgress, JobState } from "../../lib/generated/contracts";
+import type { AnalysisResult, PreviewResult, ProcessResult } from "../../lib/types";
 
 export interface JobProgressSample {
   atMs: number;
@@ -56,6 +47,6 @@ export type ProcessingRunState =
       progress: JobProgress;
       timing: JobProgressTiming | null;
     }
-  | { state: "success"; jobId: string; outputPath: string; fromCache: boolean }
+  | { state: "success"; jobId: string; fromCache: boolean }
   | { state: "error"; jobId: string; error: BackendError }
   | { state: "cancelled"; jobId: string };

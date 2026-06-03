@@ -2,11 +2,11 @@
 // Runs with: node frontend/scripts/validate-batched-updates.mjs
 //
 // Tests that multiple synchronous setState calls within the same microtask
-// are coalesced into a single listener notification, reducing React reconciliation
-// work when several rapid state changes occur together.
+// are coalesced into a single listener notification, reducing UI work when
+// several rapid state changes occur together.
 
-import { test } from "node:test";
 import assert from "node:assert/strict";
+import { test } from "node:test";
 
 // Flush all currently-queued microtasks. A single await Promise.resolve() resolves
 // after all earlier queueMicrotask callbacks have fired (microtasks run in FIFO order).
@@ -38,7 +38,9 @@ function makeStore_BEFORE(initial) {
     setState,
     getState: () => state,
     getListenerCount: () => listenerCount,
-    resetListenerCount: () => { listenerCount = 0; },
+    resetListenerCount: () => {
+      listenerCount = 0;
+    },
   };
 }
 
@@ -66,7 +68,9 @@ function makeStore_AFTER(initial) {
     setState,
     getState: () => state,
     getListenerCount: () => listenerCount,
-    resetListenerCount: () => { listenerCount = 0; },
+    resetListenerCount: () => {
+      listenerCount = 0;
+    },
   };
 }
 
@@ -101,7 +105,11 @@ test("BEFORE: no-op setState (same ref) does not fire listener", () => {
 test("AFTER: single setState fires 0 notifications immediately, 1 after flush", async () => {
   const store = makeStore_AFTER();
   store.setState((s) => ({ ...s, counter: 1 }));
-  assert.equal(store.getListenerCount(), 0, "AFTER: notification not yet fired before microtask flush");
+  assert.equal(
+    store.getListenerCount(),
+    0,
+    "AFTER: notification not yet fired before microtask flush",
+  );
   await flushMicrotasks();
   assert.equal(store.getListenerCount(), 1, "AFTER: 1 notification after flush");
 });
@@ -113,7 +121,11 @@ test("AFTER: 3 synchronous setState calls coalesce to 1 notification after flush
   store.setState((s) => ({ ...s, counter: 3 }));
   assert.equal(store.getListenerCount(), 0, "AFTER: 0 notifications before microtask flush");
   await flushMicrotasks();
-  assert.equal(store.getListenerCount(), 1, "AFTER: 3 rapid updates → exactly 1 batched notification");
+  assert.equal(
+    store.getListenerCount(),
+    1,
+    "AFTER: 3 rapid updates → exactly 1 batched notification",
+  );
   assert.equal(store.getState().counter, 3, "AFTER: final state is from last update");
 });
 
@@ -127,15 +139,19 @@ test("AFTER: no-op setState does not queue notification", async () => {
 test("AFTER: state is updated synchronously even before flush", () => {
   const store = makeStore_AFTER();
   store.setState((s) => ({ ...s, counter: 42 }));
-  // State must be readable immediately — useSyncExternalStore depends on this.
-  assert.equal(store.getState().counter, 42, "AFTER: state updated sync, readable before listener fires");
+  // State must be readable immediately by the HTMX shell after an action.
+  assert.equal(
+    store.getState().counter,
+    42,
+    "AFTER: state updated sync, readable before listener fires",
+  );
 });
 
 test("AFTER: mix of ops and no-ops — only real changes trigger notification", async () => {
   const store = makeStore_AFTER();
-  store.setState((s) => s);              // no-op
+  store.setState((s) => s); // no-op
   store.setState((s) => ({ ...s, counter: 1 })); // real change, queues microtask
-  store.setState((s) => s);              // no-op, flag already set
+  store.setState((s) => s); // no-op, flag already set
   store.setState((s) => ({ ...s, counter: 2 })); // real change, flag already set
   await flushMicrotasks();
   assert.equal(store.getListenerCount(), 1, "AFTER: mixed ops → 1 batched notification");
@@ -173,7 +189,11 @@ test("AFTER: polling scenario — 3 concurrent job updates coalesce to 1 notific
 
   assert.equal(store.getListenerCount(), 0, "AFTER: 3 job updates → 0 immediate notifications");
   await flushMicrotasks();
-  assert.equal(store.getListenerCount(), 1, "AFTER: 3 concurrent job updates → 1 batched notification");
+  assert.equal(
+    store.getListenerCount(),
+    1,
+    "AFTER: 3 concurrent job updates → 1 batched notification",
+  );
   assert.equal(store.getState().label, "job3-updated", "AFTER: final state correct");
   assert.equal(store.getState().counter, 1, "AFTER: all updates applied");
 });

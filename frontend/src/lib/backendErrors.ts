@@ -3,10 +3,7 @@ import type { BackendError } from "./generated/contracts";
 export function normalizeBackendError(error: unknown): BackendError {
   if (error && typeof error === "object") {
     const candidate = error as Partial<BackendError>;
-    if (
-      typeof candidate.message === "string" &&
-      typeof candidate.code === "string"
-    ) {
+    if (typeof candidate.message === "string" && typeof candidate.code === "string") {
       return {
         code: candidate.code,
         message: candidate.message,

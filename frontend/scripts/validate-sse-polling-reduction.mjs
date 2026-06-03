@@ -1,8 +1,9 @@
 // Validation test for step 10.2: SSE-based job updates replacing HTTP polling.
 // Runs with: node frontend/scripts/validate-sse-polling-reduction.mjs
 //
-// Measures the reduction in HTTP get_job poll requests when SSE events are
-// actively delivering job updates (desktop mode with Wails EventsOn active).
+// Measures the reduction in HTTP get_job poll requests when Tauri job-update
+// events are actively delivering job updates (desktop mode with the listener
+// attached).
 //
 // BEFORE: frontend polls /commands/get_job every 200ms while jobs are pending.
 // AFTER:  frontend skips polling when events fired within the last 10s.
@@ -10,8 +11,8 @@
 //
 // Expected result: ≥90% reduction in poll requests for jobs ≤10s duration.
 
-import { test } from "node:test";
 import assert from "node:assert/strict";
+import { test } from "node:test";
 
 // ---------------------------------------------------------------------------
 // Mock timer infrastructure.
@@ -89,7 +90,10 @@ function makePoller_BEFORE_polling_only(getJobs, notifyFetch) {
     const updatedJobs = getJobs().filter(
       (j) => j.state === "queued" || j.state === "running" || j.state === "cancelling",
     );
-    if (updatedJobs.length === 0) { scheduleNext(0); return; }
+    if (updatedJobs.length === 0) {
+      scheduleNext(0);
+      return;
+    }
 
     let anyProgress = false;
     let allQueued = true;
@@ -117,7 +121,10 @@ function makePoller_BEFORE_polling_only(getJobs, notifyFetch) {
 
   return {
     start: () => poll(),
-    cancel: () => { cancelled = true; if (timer !== undefined) mockClearTimeout(timer); },
+    cancel: () => {
+      cancelled = true;
+      if (timer !== undefined) mockClearTimeout(timer);
+    },
   };
 }
 
@@ -134,7 +141,7 @@ function makePoller_AFTER_with_sse(getJobs, notifyFetch, getLastEventAtMs, getNo
   let cancelled = false;
   let timer;
   let currentIntervalMs = FAST_POLL_MS;
-  const eventsOn = true; // desktop mode: Wails EventsOn is available
+  const eventsOn = true; // desktop mode: Tauri job-update listener is attached
 
   function scheduleNext(intervalMs) {
     if (cancelled) return;
@@ -169,7 +176,10 @@ function makePoller_AFTER_with_sse(getJobs, notifyFetch, getLastEventAtMs, getNo
     const updatedJobs = getJobs().filter(
       (j) => j.state === "queued" || j.state === "running" || j.state === "cancelling",
     );
-    if (updatedJobs.length === 0) { scheduleNext(0); return; }
+    if (updatedJobs.length === 0) {
+      scheduleNext(0);
+      return;
+    }
 
     let anyProgress = false;
     let allQueued = true;
@@ -197,7 +207,10 @@ function makePoller_AFTER_with_sse(getJobs, notifyFetch, getLastEventAtMs, getNo
 
   return {
     start: () => poll(),
-    cancel: () => { cancelled = true; if (timer !== undefined) mockClearTimeout(timer); },
+    cancel: () => {
+      cancelled = true;
+      if (timer !== undefined) mockClearTimeout(timer);
+    },
   };
 }
 
@@ -236,7 +249,10 @@ function simulateJob({ durationMs, jobTimeline, makePollerFn, withSSE }) {
 
   const poller = makePollerFn({
     getJobs: () => jobs,
-    notifyFetch: () => { jobs[0] = currentJobState(); pollCount++; },
+    notifyFetch: () => {
+      jobs[0] = currentJobState();
+      pollCount++;
+    },
     getLastEventAtMs: () => lastEventAtMs,
     getNowMs: () => wallTimeMs,
   });
@@ -255,10 +271,7 @@ function simulateJob({ durationMs, jobTimeline, makePollerFn, withSSE }) {
 
     // Fire any SSE milestones that fall between now and nextWallMs.
     if (withSSE) {
-      while (
-        milestoneIdx < jobTimeline.length &&
-        jobTimeline[milestoneIdx].atMs <= nextWallMs
-      ) {
+      while (milestoneIdx < jobTimeline.length && jobTimeline[milestoneIdx].atMs <= nextWallMs) {
         wallTimeMs = jobTimeline[milestoneIdx].atMs;
         fireSSEEvent();
         milestoneIdx++;
@@ -298,8 +311,8 @@ function afterSimulate(opts) {
 
 // Scenario: 3-second render job with frequent progress events.
 const SHORT_JOB_TIMELINE = [
-  { atMs: 400,  state: "running", percent: 10 },
-  { atMs: 800,  state: "running", percent: 20 },
+  { atMs: 400, state: "running", percent: 10 },
+  { atMs: 800, state: "running", percent: 20 },
   { atMs: 1200, state: "running", percent: 35 },
   { atMs: 1600, state: "running", percent: 50 },
   { atMs: 2000, state: "running", percent: 65 },
@@ -309,13 +322,22 @@ const SHORT_JOB_TIMELINE = [
 const SHORT_JOB_DURATION_MS = 3000;
 
 test("BEFORE (polling only): 3s job with progress every 400ms → ≥10 get_job requests", () => {
-  const result = beforeSimulate({ durationMs: SHORT_JOB_DURATION_MS, jobTimeline: SHORT_JOB_TIMELINE });
-  assert.ok(result.pollCount >= 10, `BEFORE: at least 10 polls in 3s job (got ${result.pollCount})`);
+  const result = beforeSimulate({
+    durationMs: SHORT_JOB_DURATION_MS,
+    jobTimeline: SHORT_JOB_TIMELINE,
+  });
+  assert.ok(
+    result.pollCount >= 10,
+    `BEFORE: at least 10 polls in 3s job (got ${result.pollCount})`,
+  );
   console.log(`\nBEFORE (polling only): 3s job → ${result.pollCount} HTTP get_job requests`);
 });
 
 test("AFTER (SSE active): 3s job with progress every 400ms → ≤1 poll request", () => {
-  const result = afterSimulate({ durationMs: SHORT_JOB_DURATION_MS, jobTimeline: SHORT_JOB_TIMELINE });
+  const result = afterSimulate({
+    durationMs: SHORT_JOB_DURATION_MS,
+    jobTimeline: SHORT_JOB_TIMELINE,
+  });
   // SSE event fires every 400ms, well within EVENT_STALE_MS=10s, so polling is
   // fully suppressed. Only the very first poll (before any event) may fire.
   assert.ok(
@@ -326,15 +348,22 @@ test("AFTER (SSE active): 3s job with progress every 400ms → ≤1 poll request
 });
 
 test("AFTER vs BEFORE: ≥90% fewer requests for 3s job with SSE active", () => {
-  const before = beforeSimulate({ durationMs: SHORT_JOB_DURATION_MS, jobTimeline: SHORT_JOB_TIMELINE });
-  const after  = afterSimulate({ durationMs: SHORT_JOB_DURATION_MS, jobTimeline: SHORT_JOB_TIMELINE });
+  const before = beforeSimulate({
+    durationMs: SHORT_JOB_DURATION_MS,
+    jobTimeline: SHORT_JOB_TIMELINE,
+  });
+  const after = afterSimulate({
+    durationMs: SHORT_JOB_DURATION_MS,
+    jobTimeline: SHORT_JOB_TIMELINE,
+  });
 
   assert.ok(before.pollCount > 0, "BEFORE: at least one poll");
-  const reduction = after.pollCount === 0
-    ? 100
-    : ((before.pollCount - after.pollCount) / before.pollCount) * 100;
+  const reduction =
+    after.pollCount === 0 ? 100 : ((before.pollCount - after.pollCount) / before.pollCount) * 100;
 
-  console.log(`\nSSE polling reduction (3s job): ${before.pollCount} → ${after.pollCount} requests`);
+  console.log(
+    `\nSSE polling reduction (3s job): ${before.pollCount} → ${after.pollCount} requests`,
+  );
   console.log(`Reduction: ${reduction.toFixed(1)}% (target: ≥90%)`);
 
   assert.ok(
@@ -345,8 +374,8 @@ test("AFTER vs BEFORE: ≥90% fewer requests for 3s job with SSE active", () => 
 
 // Scenario: 30-second long-running job with SSE events every 5s.
 const LONG_JOB_TIMELINE = [
-  { atMs: 1000,  state: "running", percent: 5 },
-  { atMs: 5000,  state: "running", percent: 20 },
+  { atMs: 1000, state: "running", percent: 5 },
+  { atMs: 5000, state: "running", percent: 20 },
   { atMs: 10000, state: "running", percent: 40 },
   { atMs: 15000, state: "running", percent: 60 },
   { atMs: 20000, state: "running", percent: 80 },
@@ -355,18 +384,23 @@ const LONG_JOB_TIMELINE = [
 const LONG_JOB_DURATION_MS = 30_000;
 
 test("BEFORE (polling only): 30s job with backoff → bounded request count", () => {
-  const result = beforeSimulate({ durationMs: LONG_JOB_DURATION_MS, jobTimeline: LONG_JOB_TIMELINE });
+  const result = beforeSimulate({
+    durationMs: LONG_JOB_DURATION_MS,
+    jobTimeline: LONG_JOB_TIMELINE,
+  });
   console.log(`\nBEFORE (polling only): 30s job → ${result.pollCount} HTTP get_job requests`);
   assert.ok(result.pollCount > 0, "BEFORE: should have polls");
 });
 
 test("AFTER (SSE active): 30s job with events every 5s → ≥80% fewer requests", () => {
-  const before = beforeSimulate({ durationMs: LONG_JOB_DURATION_MS, jobTimeline: LONG_JOB_TIMELINE });
-  const after  = afterSimulate({ durationMs: LONG_JOB_DURATION_MS, jobTimeline: LONG_JOB_TIMELINE });
+  const before = beforeSimulate({
+    durationMs: LONG_JOB_DURATION_MS,
+    jobTimeline: LONG_JOB_TIMELINE,
+  });
+  const after = afterSimulate({ durationMs: LONG_JOB_DURATION_MS, jobTimeline: LONG_JOB_TIMELINE });
 
-  const reduction = after.pollCount === 0
-    ? 100
-    : ((before.pollCount - after.pollCount) / before.pollCount) * 100;
+  const reduction =
+    after.pollCount === 0 ? 100 : ((before.pollCount - after.pollCount) / before.pollCount) * 100;
 
   console.log(`AFTER  (SSE active):   30s job → ${after.pollCount} HTTP get_job requests`);
   console.log(`Reduction: ${reduction.toFixed(1)}% (target: ≥80% for events every 5s)`);
@@ -378,7 +412,7 @@ test("AFTER (SSE active): 30s job with events every 5s → ≥80% fewer requests
 });
 
 test("AFTER: no SSE events → falls back to normal polling after 10s stale window", () => {
-  // Simulate a job with NO SSE events (sidecar SSE bridge disconnected).
+  // Simulate a job with NO job-update events (Tauri event bus quiet).
   // The first poll fires immediately (lastEventAtMs starts at -infinity, stale).
   // After each poll, if still no events, the exponential backoff drives future polls.
   resetTimers();

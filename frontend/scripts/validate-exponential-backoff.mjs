@@ -9,8 +9,8 @@
 // valid because the backoff decision is made after all fetches complete — the async nature
 // of getJob() doesn't affect which interval is chosen.
 
-import { test } from "node:test";
 import assert from "node:assert/strict";
+import { test } from "node:test";
 
 // ---------------------------------------------------------------------------
 // Mock setTimeout / clearTimeout — capture scheduled intervals without waiting.
@@ -213,17 +213,26 @@ function runNCycles(poller, n) {
 test("BEFORE: running job no progress → always 200ms", () => {
   resetTimers();
   const jobs = [makeJob("j1", "running", 10)];
-  const poller = makePoller_BEFORE(() => jobs, () => null);
+  const poller = makePoller_BEFORE(
+    () => jobs,
+    () => null,
+  );
 
   const intervals = runNCycles(poller, 6);
-  assert.deepEqual(intervals, [200, 200, 200, 200, 200, 200],
-    "BEFORE: fixed 200ms on every poll regardless of inactivity");
+  assert.deepEqual(
+    intervals,
+    [200, 200, 200, 200, 200, 200],
+    "BEFORE: fixed 200ms on every poll regardless of inactivity",
+  );
 });
 
 test("BEFORE: queued job → same 200ms (no distinction)", () => {
   resetTimers();
   const jobs = [makeJob("j1", "queued", 0)];
-  const poller = makePoller_BEFORE(() => jobs, () => null);
+  const poller = makePoller_BEFORE(
+    () => jobs,
+    () => null,
+  );
 
   const intervals = runNCycles(poller, 3);
   assert.deepEqual(intervals, [200, 200, 200], "BEFORE: queued same as running");
@@ -232,7 +241,10 @@ test("BEFORE: queued job → same 200ms (no distinction)", () => {
 test("BEFORE: 10 idle polls → 10 x 200ms = 2000ms total wait", () => {
   resetTimers();
   const jobs = [makeJob("j1", "running", 50)];
-  const poller = makePoller_BEFORE(() => jobs, () => null);
+  const poller = makePoller_BEFORE(
+    () => jobs,
+    () => null,
+  );
 
   const intervals = runNCycles(poller, 10);
   const total = intervals.reduce((a, b) => a + b, 0);
@@ -247,21 +259,33 @@ test("BEFORE: 10 idle polls → 10 x 200ms = 2000ms total wait", () => {
 test("AFTER: running job no progress → exponential backoff 500→1000→2000 (capped)", () => {
   resetTimers();
   const jobs = [makeJob("j1", "running", 50)];
-  const poller = makePoller_AFTER(() => jobs, () => null);
+  const poller = makePoller_AFTER(
+    () => jobs,
+    () => null,
+  );
 
   const intervals = runNCycles(poller, 6);
-  assert.deepEqual(intervals, [500, 1000, 2000, 2000, 2000, 2000],
-    "AFTER: backoff doubles each poll, caps at 2000ms");
+  assert.deepEqual(
+    intervals,
+    [500, 1000, 2000, 2000, 2000, 2000],
+    "AFTER: backoff doubles each poll, caps at 2000ms",
+  );
 });
 
 test("AFTER: queued-only jobs → steady 1000ms (not 200ms, not backoff)", () => {
   resetTimers();
   const jobs = [makeJob("j1", "queued", 0)];
-  const poller = makePoller_AFTER(() => jobs, () => null);
+  const poller = makePoller_AFTER(
+    () => jobs,
+    () => null,
+  );
 
   const intervals = runNCycles(poller, 5);
-  assert.deepEqual(intervals, [1000, 1000, 1000, 1000, 1000],
-    "AFTER: queued-only always uses QUEUED_POLL_MS");
+  assert.deepEqual(
+    intervals,
+    [1000, 1000, 1000, 1000, 1000],
+    "AFTER: queued-only always uses QUEUED_POLL_MS",
+  );
 });
 
 test("AFTER: progress detected → resets interval to 500ms", () => {
@@ -285,8 +309,11 @@ test("AFTER: progress detected → resets interval to 500ms", () => {
   // Poll 4: progress (50→60) → reset currentIntervalMs=500, schedule 500.
   // Poll 5: no progress → schedule currentIntervalMs=500, double to 1000.
   // (500ms used twice: once at reset, once as starting point of new backoff)
-  assert.deepEqual(intervals, [500, 1000, 2000, 500, 500],
-    "AFTER: backoff resets to 500ms on progress, restarts backoff from 500");
+  assert.deepEqual(
+    intervals,
+    [500, 1000, 2000, 500, 500],
+    "AFTER: backoff resets to 500ms on progress, restarts backoff from 500",
+  );
 });
 
 test("AFTER: running job >80% → stays at 200ms (near-complete fast path)", () => {
@@ -294,11 +321,17 @@ test("AFTER: running job >80% → stays at 200ms (near-complete fast path)", () 
   const jobs = [makeJob("j1", "running", 85)];
 
   // No percent change, but >80% → should stay at 200ms every poll
-  const poller = makePoller_AFTER(() => jobs, () => null);
+  const poller = makePoller_AFTER(
+    () => jobs,
+    () => null,
+  );
 
   const intervals = runNCycles(poller, 5);
-  assert.deepEqual(intervals, [200, 200, 200, 200, 200],
-    "AFTER: near-complete (>80%) always polled at 200ms");
+  assert.deepEqual(
+    intervals,
+    [200, 200, 200, 200, 200],
+    "AFTER: near-complete (>80%) always polled at 200ms",
+  );
 });
 
 test("AFTER: queued → running state transition resets interval to 200ms", () => {
@@ -322,34 +355,41 @@ test("AFTER: queued → running state transition resets interval to 200ms", () =
   // Poll 3: queued→running → anyProgress=true → currentIntervalMs=200, schedule 200.
   // Poll 4: running, no change → schedule currentIntervalMs=200, double to 400.
   // Poll 5: still no change → schedule 400, double to 800.
-  assert.deepEqual(intervals, [1000, 1000, 200, 200, 400],
-    "AFTER: state transition queued→running resets backoff to 200ms");
+  assert.deepEqual(
+    intervals,
+    [1000, 1000, 200, 200, 400],
+    "AFTER: state transition queued→running resets backoff to 200ms",
+  );
 });
 
 test("AFTER: cancelling state jobs back off when no progress", () => {
   resetTimers();
   const jobs = [makeJob("j1", "cancelling", 40)];
-  const poller = makePoller_AFTER(() => jobs, () => null);
+  const poller = makePoller_AFTER(
+    () => jobs,
+    () => null,
+  );
 
   const intervals = runNCycles(poller, 4);
-  assert.deepEqual(intervals, [500, 1000, 2000, 2000],
-    "AFTER: cancelling jobs use same backoff logic");
+  assert.deepEqual(
+    intervals,
+    [500, 1000, 2000, 2000],
+    "AFTER: cancelling jobs use same backoff logic",
+  );
 });
 
 test("AFTER: multiple jobs — progress in any job resets global interval", () => {
   resetTimers();
   let pollCount = 0;
-  const jobs = [
-    makeJob("j1", "running", 20),
-    makeJob("j2", "running", 30),
-  ];
+  const jobs = [makeJob("j1", "running", 20), makeJob("j2", "running", 30)];
 
   // j1 never advances. j2 advances on poll 4.
   const poller = makePoller_AFTER(
     () => jobs,
     (id) => {
       pollCount++;
-      if (id === "j2" && pollCount >= 7) { // 2 jobs × 3 polls = 6 calls before advance
+      if (id === "j2" && pollCount >= 7) {
+        // 2 jobs × 3 polls = 6 calls before advance
         jobs[1] = makeJob("j2", "running", 40);
       }
     },
@@ -359,8 +399,11 @@ test("AFTER: multiple jobs — progress in any job resets global interval", () =
   // Polls 1-3: no progress from either → 500, 1000, 2000.
   // Poll 4: j2 advances (30→40) → anyProgress=true → currentIntervalMs=500, schedule 500.
   // Poll 5: no progress → schedule currentIntervalMs=500, double to 1000.
-  assert.deepEqual(intervals, [500, 1000, 2000, 500, 500],
-    "AFTER: any job progress resets global backoff; restarts from 500ms");
+  assert.deepEqual(
+    intervals,
+    [500, 1000, 2000, 500, 500],
+    "AFTER: any job progress resets global backoff; restarts from 500ms",
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -378,14 +421,27 @@ test("AFTER: ≥40% fewer HTTP requests than BEFORE over 10s job", () => {
     let jobState = "queued";
     let jobPercent = 0;
 
-    const jobs = [{ jobId: "j1", state: jobState, progress: { percent: jobPercent, stage: "", message: "" } }];
+    const jobs = [
+      { jobId: "j1", state: jobState, progress: { percent: jobPercent, stage: "", message: "" } },
+    ];
 
     function syncJobs(id) {
-      if (wallTimeMs >= 9000) { jobPercent = 60; jobState = "running"; }
-      else if (wallTimeMs >= 7000) { jobPercent = 30; jobState = "running"; }
-      else if (wallTimeMs >= 5000) { jobPercent = 0; jobState = "running"; }
+      if (wallTimeMs >= 9000) {
+        jobPercent = 60;
+        jobState = "running";
+      } else if (wallTimeMs >= 7000) {
+        jobPercent = 30;
+        jobState = "running";
+      } else if (wallTimeMs >= 5000) {
+        jobPercent = 0;
+        jobState = "running";
+      }
       // else: queued
-      jobs[0] = { jobId: id, state: jobState, progress: { percent: jobPercent, stage: "", message: "" } };
+      jobs[0] = {
+        jobId: id,
+        state: jobState,
+        progress: { percent: jobPercent, stage: "", message: "" },
+      };
     }
 
     const poller = makePoller_fn(() => jobs, syncJobs);
@@ -434,13 +490,19 @@ test("AFTER: interval resets to 500ms when new job becomes pending (effect re-mo
   const jobs = [makeJob("j1", "running", 20)];
 
   // Simulate a stalled poller that has backed off to 2000ms.
-  const stalledPoller = makePoller_AFTER(() => jobs, () => null);
+  const stalledPoller = makePoller_AFTER(
+    () => jobs,
+    () => null,
+  );
   runNCycles(stalledPoller, 10); // backs off to 2000ms cap
   stalledPoller.cancel();
   resetTimers();
 
   // New effect mount: fresh poller, should start at 500ms again.
-  const freshPoller = makePoller_AFTER(() => jobs, () => null);
+  const freshPoller = makePoller_AFTER(
+    () => jobs,
+    () => null,
+  );
   freshPoller.start();
   assert.equal(timerQueue.length, 1, "AFTER: fresh poller schedules timer");
   assert.equal(timerQueue[0].ms, 500, "AFTER: fresh poller starts at 500ms (not stale 2000ms)");

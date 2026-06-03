@@ -4,18 +4,12 @@
 
 import { performance } from "node:perf_hooks";
 
-const JOB_COUNT = Number.parseInt(
-  process.env.XRAYVIEW_PENDING_JOB_SELECTOR_JOBS ?? "10000",
-  10,
-);
+const JOB_COUNT = Number.parseInt(process.env.XRAYVIEW_PENDING_JOB_SELECTOR_JOBS ?? "10000", 10);
 const ITERATIONS = Number.parseInt(
   process.env.XRAYVIEW_PENDING_JOB_SELECTOR_ITERATIONS ?? "1000",
   10,
 );
-const SAMPLES = Number.parseInt(
-  process.env.XRAYVIEW_PENDING_JOB_SELECTOR_SAMPLES ?? "7",
-  10,
-);
+const SAMPLES = Number.parseInt(process.env.XRAYVIEW_PENDING_JOB_SELECTOR_SAMPLES ?? "7", 10);
 
 const PENDING_STATES = new Set(["queued", "running", "cancelling"]);
 
@@ -97,7 +91,9 @@ const before = benchmark("before Object.values filter", selectPendingJobCountBef
 const after = benchmark("after pendingJobIds.size", selectPendingJobCountAfter, state);
 
 if (before.checksum !== after.checksum) {
-  throw new Error(`benchmark checksum mismatch: before=${before.checksum}, after=${after.checksum}`);
+  throw new Error(
+    `benchmark checksum mismatch: before=${before.checksum}, after=${after.checksum}`,
+  );
 }
 
 const speedup = before.mean / after.mean;

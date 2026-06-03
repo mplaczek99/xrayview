@@ -1,24 +1,33 @@
 {
   "name": "xrayview",
   "private": true,
-  "version": "0.4.1",
+  "version": "0.5.0",
   "engines": {
-    "node": ">=18.18.0"
+    "node": ">=20.0.0"
   },
   "scripts": {
     "contracts:generate": "node ./contracts/scripts/generate-contract-bindings.mjs",
-    "contracts:check": "node ./contracts/scripts/generate-contract-bindings.mjs --check",
+    "contracts:check": "node ./contracts/scripts/generate-contract-bindings.mjs --check && node ./contracts/scripts/validate-contract-schema-rules.mjs",
     "postinstall": "npm --prefix frontend install",
     "dev": "npm --prefix frontend run dev --",
-    "backend:build": "go -C backend build ./cmd/xrayviewd ./cmd/xrayview-cli",
-    "backend:serve": "go -C backend run ./cmd/xrayviewd",
-    "backend:test": "go -C backend test ./...",
-    "wails:build": "node ./desktop/scripts/build.mjs",
-    "wails:run": "node ./desktop/scripts/run.mjs",
+    "backend:build": "cargo build --manifest-path backend-rs/Cargo.toml",
+    "backend:cli": "cargo run --manifest-path backend-rs/Cargo.toml --",
+    "backend:test": "cargo test --manifest-path backend-rs/Cargo.toml",
+    "backend-rs:build": "cargo build --manifest-path backend-rs/Cargo.toml",
+    "backend-rs:cli": "cargo run --manifest-path backend-rs/Cargo.toml --",
+    "backend-rs:test": "cargo test --manifest-path backend-rs/Cargo.toml",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build",
     "release:smoke": "npm --prefix frontend run release:smoke --",
     "release:smoke:bundle": "npm --prefix frontend run release:smoke:bundle --",
     "playwright": "npm --prefix frontend exec playwright",
     "test:e2e": "PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS=1 npm --prefix frontend exec playwright test",
-    "playwright:install": "PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS=1 npm --prefix frontend exec playwright install chromium"
+    "playwright:install": "PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS=1 npm --prefix frontend exec playwright install chromium",
+    "lint": "npm run lint:rust && npm run lint:ts",
+    "lint:ts": "npm --prefix frontend run lint --",
+    "lint:rust": "cargo clippy --manifest-path backend-rs/Cargo.toml --all-targets --locked -- -D warnings && cargo clippy --manifest-path desktop-tauri/Cargo.toml --all-targets --locked -- -D warnings"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2"
   }
 }

@@ -1,23 +1,14 @@
-import {
-  isWailsRuntime,
-  pickWailsDicomFile,
-  pickWailsSaveDicomPath,
-} from "./wails";
+import { convertFileSrc } from "@tauri-apps/api/core";
+import { isTauriRuntime, pickTauriBmpFile } from "./tauri";
 
 export function isDesktopRuntime(): boolean {
-  return isWailsRuntime();
+  return isTauriRuntime();
 }
 
-export async function pickDesktopDicomFile(): Promise<string | null> {
-  return pickWailsDicomFile();
-}
-
-export async function pickDesktopSaveDicomPath(
-  defaultName?: string,
-): Promise<string | null> {
-  return pickWailsSaveDicomPath(defaultName);
+export async function pickDesktopBmpFile(): Promise<string | null> {
+  return pickTauriBmpFile();
 }
 
 export function buildDesktopPreviewUrl(previewPath: string): string {
-  return `/preview?path=${encodeURIComponent(previewPath)}`;
+  return convertFileSrc(previewPath);
 }

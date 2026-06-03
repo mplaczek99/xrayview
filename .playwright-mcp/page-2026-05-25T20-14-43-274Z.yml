@@ -1,0 +1,66 @@
+- generic [ref=e422]:
+  - heading "XRayView" [level=1] [ref=e423]
+  - tablist "Main tabs" [ref=e424]:
+    - tab "View" [ref=e425] [cursor=pointer]
+    - tab "Processing" [selected] [ref=e426] [cursor=pointer]
+  - tabpanel "Processing" [ref=e427]:
+    - heading "Processing" [level=2] [ref=e428]
+    - generic [ref=e429]:
+      - generic [ref=e430]:
+        - generic [ref=e431]:
+          - button "Original" [ref=e432] [cursor=pointer]
+          - button "Processed" [ref=e433] [cursor=pointer]
+          - button "Split" [ref=e434] [cursor=pointer]
+        - generic [ref=e435]:
+          - generic [ref=e436]:
+            - generic [ref=e437]: Original
+            - img "X-ray preview" [ref=e440]
+          - generic [ref=e441]:
+            - generic [ref=e442]: Processed
+            - img "X-ray preview" [ref=e445]
+      - generic [ref=e446]:
+        - generic [ref=e447]:
+          - generic [ref=e448]: Preset
+          - combobox "Preset" [ref=e449]:
+            - option "Neutral"
+            - option "Bone Focus"
+            - option "High Contrast"
+            - option "Custom" [selected]
+          - paragraph [ref=e450]: Custom controls. The backend will use the default preset plus the explicit overrides shown below.
+        - generic [ref=e451]:
+          - generic [ref=e452]: Grayscale Controls
+          - generic [ref=e453] [cursor=pointer]:
+            - checkbox "Invert" [checked] [ref=e454]
+            - generic [ref=e455]: Invert
+          - generic [ref=e456]:
+            - generic [ref=e457]: Brightness
+            - slider [ref=e458]: "0"
+            - spinbutton "Brightness" [ref=e459]: "0"
+          - generic [ref=e460]:
+            - generic [ref=e461]: Contrast
+            - slider [ref=e462]: "1"
+            - spinbutton "Contrast" [ref=e463]: "1"
+          - generic [ref=e464] [cursor=pointer]:
+            - checkbox "Equalize" [ref=e465]
+            - generic [ref=e466]: Equalize
+        - generic [ref=e467]:
+          - generic [ref=e468]: Palette
+          - combobox "Palette" [ref=e469]:
+            - option "none"
+            - option "hot" [selected]
+            - option "bone"
+        - generic [ref=e470]:
+          - generic [ref=e471] [cursor=pointer]:
+            - checkbox "Compare" [ref=e472]
+            - generic [ref=e473]: Compare
+          - paragraph [ref=e474]: Generate a side-by-side comparison preview.
+        - generic [ref=e475]:
+          - button "Run Processing" [ref=e476] [cursor=pointer]
+          - generic [ref=e477]: Processing complete.
+  - status [ref=e478]:
+    - img [ref=e479]
+    - generic [ref=e481]: Processing complete.
+  - region "Background jobs" [ref=e482]:
+    - button "▶ Jobs" [ref=e484] [cursor=pointer]:
+      - generic [ref=e485]: ▶
+      - generic [ref=e486]: Jobs
