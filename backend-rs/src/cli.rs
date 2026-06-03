@@ -184,12 +184,11 @@ fn parse_legacy_args(args: &[&str], stderr: &mut dyn Write) -> CliResult<LegacyO
                     required_flag_value(args, &mut index, &flag, inline_value)?.to_string()
             }
             "--invert" => {
-                options.invert =
-                    OptionalBool::set(parse_bool_flag(&flag, inline_value)?.unwrap_or(true))
+                options.invert = Some(parse_bool_flag(&flag, inline_value)?.unwrap_or(true))
             }
             "--brightness" => {
                 let value = required_flag_value(args, &mut index, &flag, inline_value)?;
-                options.brightness = OptionalInt::set(
+                options.brightness = Some(
                     value
                         .trim()
                         .parse::<i32>()
@@ -198,7 +197,7 @@ fn parse_legacy_args(args: &[&str], stderr: &mut dyn Write) -> CliResult<LegacyO
             }
             "--contrast" => {
                 let value = required_flag_value(args, &mut index, &flag, inline_value)?;
-                options.contrast = OptionalFloat::set(
+                options.contrast = Some(
                     value
                         .trim()
                         .parse::<f64>()
@@ -206,8 +205,7 @@ fn parse_legacy_args(args: &[&str], stderr: &mut dyn Write) -> CliResult<LegacyO
                 );
             }
             "--equalize" => {
-                options.equalize =
-                    OptionalBool::set(parse_bool_flag(&flag, inline_value)?.unwrap_or(true))
+                options.equalize = Some(parse_bool_flag(&flag, inline_value)?.unwrap_or(true))
             }
             "--compare" => options.compare = parse_bool_flag(&flag, inline_value)?.unwrap_or(true),
             "--palette" => {
@@ -355,9 +353,9 @@ fn legacy_process_command(options: &LegacyOptions) -> CliResult<ProcessStudyComm
         study_id: String::new(),
         preset_id: options.preset.clone(),
         invert: false,
-        // OptionalInt/Float carry the user's explicit value (or None for "use preset").
-        brightness: options.brightness.value,
-        contrast: options.contrast.value,
+        // Option<i32>/Option<f64> carry the user's explicit value (or None for "use preset").
+        brightness: options.brightness,
+        contrast: options.contrast,
         equalize: false,
         compare: options.compare,
         palette: parse_palette_name(&options.palette)?,
@@ -368,10 +366,10 @@ fn legacy_process_command(options: &LegacyOptions) -> CliResult<ProcessStudyComm
         command.equalize = controls.equalize;
     }
     // User overrides win over the preset defaults set above.
-    if let Some(value) = options.invert.value {
+    if let Some(value) = options.invert {
         command.invert = value;
     }
-    if let Some(value) = options.equalize.value {
+    if let Some(value) = options.equalize {
         command.equalize = value;
     }
     Ok(command)
@@ -402,10 +400,10 @@ fn parse_palette_name(value: &str) -> CliResult<Option<PaletteName>> {
 fn is_plain_preview_request(options: &LegacyOptions) -> bool {
     !options.preview_output.trim().is_empty()
         && options.preset.trim().eq_ignore_ascii_case("default")
-        && options.invert.value.is_none()
-        && options.brightness.value.is_none()
-        && options.contrast.value.is_none()
-        && options.equalize.value.is_none()
+        && options.invert.is_none()
+        && options.brightness.is_none()
+        && options.contrast.is_none()
+        && options.equalize.is_none()
         && !options.compare
         && options.palette.trim().is_empty()
 }
@@ -911,11 +909,10 @@ impl DecodeSourceSummary {
     }
 }
 
-// Parsed legacy flag state. invert/brightness/contrast/equalize use the
-// OptionalX wrappers below to carry "user didn't set this" vs "user set this
-// to false/0". Without that distinction we couldn't tell `--preset xray`
-// from `--preset xray --equalize=false` (the preset wants equalize=true,
-// the user wants it off).
+// Parsed legacy flag state. invert/brightness/contrast/equalize are
+// Option<T> so we can distinguish "user didn't set this" (None → fall back
+// to preset) from "user explicitly set this to false/0". Without that we
+// couldn't tell `--preset xray` from `--preset xray --equalize=false`.
 #[derive(Debug, Clone, Default, PartialEq)]
 struct LegacyOptions {
     input: String,
@@ -923,51 +920,12 @@ struct LegacyOptions {
     describe_presets: bool,
     describe_study: bool,
     preset: String,
-    invert: OptionalBool,
-    brightness: OptionalInt,
-    contrast: OptionalFloat,
-    equalize: OptionalBool,
+    invert: Option<bool>,
+    brightness: Option<i32>,
+    contrast: Option<f64>,
+    equalize: Option<bool>,
     compare: bool,
     palette: String,
-}
-
-// Three-state bool: None = "not set, fall back to preset"; Some(true/false)
-// = "user explicitly set this". Could be `Option<bool>` directly, but a
-// named type lets `.set(...)` read naturally at call sites.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-struct OptionalBool {
-    value: Option<bool>,
-}
-
-impl OptionalBool {
-    fn set(value: bool) -> Self {
-        Self { value: Some(value) }
-    }
-}
-
-// Same three-state pattern for i32. Used for --brightness, where 0 is a
-// valid user-chosen value distinct from "not set".
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-struct OptionalInt {
-    value: Option<i32>,
-}
-
-impl OptionalInt {
-    fn set(value: i32) -> Self {
-        Self { value: Some(value) }
-    }
-}
-
-// And for f64. No Eq because f64 isn't Eq (NaN). Used for --contrast.
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
-struct OptionalFloat {
-    value: Option<f64>,
-}
-
-impl OptionalFloat {
-    fn set(value: f64) -> Self {
-        Self { value: Some(value) }
-    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1285,7 +1243,7 @@ mod tests {
     }
 
     // Pins the override-on-top-of-preset merge order. xray preset gives
-    // invert=false + equalize=true; user OptionalBool::set(...) should
+    // invert=false + equalize=true; user-supplied Some(...) overrides should
     // overwrite both. The two-call structure is "preset defaults" vs
     // "preset + overrides" and exercises both sides of legacy_process_command.
     #[test]
@@ -1300,8 +1258,8 @@ mod tests {
 
         let overridden = legacy_process_command(&LegacyOptions {
             preset: "xray".to_string(),
-            invert: OptionalBool::set(true),
-            equalize: OptionalBool::set(false),
+            invert: Some(true),
+            equalize: Some(false),
             ..LegacyOptions::default()
         })
         .unwrap();
