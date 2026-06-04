@@ -578,65 +578,60 @@ mod tests {
         },
         thread,
     };
+    use tempfile::tempdir;
 
     // new_with_root variant — builds cache+state under a common parent.
     // Pinning the artifact path layout (artifacts/<namespace>/<key>.<ext>)
     // because external tools sometimes inspect the cache directly.
     #[test]
     fn new_with_root_builds_stable_artifact_and_state_paths() {
-        let root =
-            std::env::temp_dir().join(format!("xrayview-rs-cache-root-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&root);
-        let store = Store::new_with_root(&root);
+        let root = tempdir().unwrap();
+        let store = Store::new_with_root(root.path());
 
-        assert_eq!(store.root_dir(), root.join("cache"));
-        assert_eq!(store.persistence_dir(), root.join("state"));
+        assert_eq!(store.root_dir(), root.path().join("cache"));
+        assert_eq!(store.persistence_dir(), root.path().join("state"));
         let render_path = store
             .artifact_path("render", "fingerprint-1", "bmp")
             .unwrap();
 
         assert_eq!(
             render_path,
-            root.join("cache")
+            root.path()
+                .join("cache")
                 .join("artifacts")
                 .join("render")
                 .join("fingerprint-1.bmp")
         );
         assert!(
-            fs::metadata(root.join("cache").join("artifacts").join("render"))
+            fs::metadata(root.path().join("cache").join("artifacts").join("render"))
                 .unwrap()
                 .is_dir()
         );
-        let _ = fs::remove_dir_all(root);
     }
 
     // The `new` ctor (not new_with_root): explicit cache path, state is
     // its sibling. Used when CACHE_DIR env var is set.
     #[test]
     fn new_uses_sibling_state_directory_for_explicit_cache_root() {
-        let root =
-            std::env::temp_dir().join(format!("xrayview-rs-cache-explicit-{}", std::process::id()));
-        let cache_root = root.join("cache");
+        let root = tempdir().unwrap();
+        let cache_root = root.path().join("cache");
         let store = Store::new(&cache_root);
 
         assert_eq!(store.root_dir(), cache_root);
-        assert_eq!(store.persistence_dir(), root.join("state"));
+        assert_eq!(store.persistence_dir(), root.path().join("state"));
     }
 
     // Smoke test for ensure() — both dirs should be created from a fresh
     // root. App::prepare relies on this being idempotent.
     #[test]
     fn ensure_creates_cache_and_state_directories() {
-        let root =
-            std::env::temp_dir().join(format!("xrayview-rs-cache-ensure-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&root);
-        let store = Store::new_with_root(&root);
+        let root = tempdir().unwrap();
+        let store = Store::new_with_root(root.path());
 
         store.ensure().unwrap();
 
         assert!(fs::metadata(store.root_dir()).unwrap().is_dir());
         assert!(fs::metadata(store.persistence_dir()).unwrap().is_dir());
-        let _ = fs::remove_dir_all(root);
     }
 
     // Pins LRU-by-mtime: write a, b, c with 2ms gaps; budget 1000 bytes
@@ -645,10 +640,8 @@ mod tests {
     // is millisecond-coarse.
     #[test]
     fn evict_artifacts_over_limit_removes_oldest_files() {
-        let root =
-            std::env::temp_dir().join(format!("xrayview-rs-cache-evict-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&root);
-        let store = Store::new_with_root(&root);
+        let root = tempdir().unwrap();
+        let store = Store::new_with_root(root.path());
         let mut paths = Vec::new();
         for name in ["a", "b", "c"] {
             let path = store.artifact_path("render", name, "bmp").unwrap();
@@ -663,19 +656,14 @@ mod tests {
         assert!(!paths[0].exists());
         assert!(!paths[1].exists());
         assert!(paths[2].is_file());
-        let _ = fs::remove_dir_all(root);
     }
 
     // Two no-op cases in one: (a) artifact dir doesn't exist yet, (b) total
     // size is comfortably under budget. Both must return 0 removed.
     #[test]
     fn evict_artifacts_over_limit_noops_when_under_budget_or_missing() {
-        let root = std::env::temp_dir().join(format!(
-            "xrayview-rs-cache-under-budget-{}",
-            std::process::id()
-        ));
-        let _ = fs::remove_dir_all(&root);
-        let store = Store::new_with_root(&root);
+        let root = tempdir().unwrap();
+        let store = Store::new_with_root(root.path());
         assert_eq!(store.evict_artifacts_over_limit(100).unwrap(), 0);
 
         let path = store.artifact_path("render", "small", "bmp").unwrap();
@@ -683,7 +671,6 @@ mod tests {
 
         assert_eq!(store.evict_artifacts_over_limit(1000).unwrap(), 0);
         assert!(path.is_file());
-        let _ = fs::remove_dir_all(root);
     }
 
     // The fast-path test: tracked_bytes says we're at 500 (under the 1000
@@ -691,19 +678,14 @@ mod tests {
     // skips the walk. Proves the tracked_bytes shortcut works.
     #[test]
     fn evict_artifacts_skips_walk_when_tracked_bytes_are_under_limit() {
-        let root = std::env::temp_dir().join(format!(
-            "xrayview-rs-cache-tracked-under-{}",
-            std::process::id()
-        ));
-        let _ = fs::remove_dir_all(&root);
-        let store = Store::new_with_root(&root);
+        let root = tempdir().unwrap();
+        let store = Store::new_with_root(root.path());
         store.force_evict_state(Some(500), Some(Instant::now()));
         let path = store.artifact_path("render", "big", "bmp").unwrap();
         fs::write(&path, vec![0_u8; 2_000]).unwrap();
 
         assert_eq!(store.evict_artifacts_over_limit(1000).unwrap(), 0);
         assert!(path.is_file());
-        let _ = fs::remove_dir_all(root);
     }
 
     // add_artifact_bytes is a no-op when tracked_bytes is None (we don't
@@ -711,11 +693,8 @@ mod tests {
     // subsequent adds accumulate. Zero-delta calls also no-op.
     #[test]
     fn add_artifact_bytes_accumulates_only_when_total_is_known() {
-        let root = std::env::temp_dir().join(format!(
-            "xrayview-rs-cache-add-bytes-{}",
-            std::process::id()
-        ));
-        let store = Store::new_with_root(root);
+        let root = tempdir().unwrap();
+        let store = Store::new_with_root(root.path());
 
         store.add_artifact_bytes(1000);
         assert_eq!(store.tracked_bytes(), None);
@@ -732,11 +711,10 @@ mod tests {
     // a message that names what we tried to create.
     #[test]
     fn artifact_path_wraps_directory_creation_errors() {
-        let root =
-            std::env::temp_dir().join(format!("xrayview-rs-cache-blocked-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&root);
-        fs::write(&root, b"not-a-directory").unwrap();
-        let store = Store::new_with_paths(root.join("cache"), root.join("state"));
+        let parent = tempdir().unwrap();
+        let blocker = parent.path().join("blocker");
+        fs::write(&blocker, b"not-a-directory").unwrap();
+        let store = Store::new_with_paths(blocker.join("cache"), blocker.join("state"));
 
         let error = store
             .artifact_path("render", "fingerprint-1", "bmp")
@@ -744,7 +722,6 @@ mod tests {
 
         assert_eq!(error.code, crate::contracts::BackendErrorCode::Internal);
         assert!(error.message.contains("failed to create cache directory"));
-        let _ = fs::remove_file(root);
     }
 
     // Clone semantics + counter accounting. Mutating the returned clone
