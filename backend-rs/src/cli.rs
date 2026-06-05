@@ -217,7 +217,7 @@ fn describe_study(path: &std::path::Path, stdout: &mut dyn Write) -> CliResult<(
 }
 
 fn render_preview(args: RenderPreviewArgs, stdout: &mut dyn Write) -> CliResult<()> {
-    let rendered = bmp::render_grayscale_preview_file(&args.input_path)?;
+    let rendered = render_cli_source_preview(&args.input_path, args.full_range)?;
     render::save_gray_bmp(
         &args.output_path,
         rendered.width,
@@ -260,7 +260,7 @@ fn process_preview(args: ProcessPreviewArgs, stdout: &mut dyn Write) -> CliResul
     }
 
     let palette_name = args.palette.to_ascii_lowercase();
-    let rendered = bmp::render_grayscale_preview_file(&args.input_path)?;
+    let rendered = render_cli_source_preview(&args.input_path, args.full_range)?;
     let source = rendered_preview_image(&rendered);
     let palette = processing::normalize_palette_name(&palette_name)?;
     let controls = GrayscaleControls {
@@ -290,6 +290,17 @@ fn process_preview(args: ProcessPreviewArgs, stdout: &mut dyn Write) -> CliResul
             rendered_byte_count: processed.preview.pixels.len(),
         },
     )
+}
+
+fn render_cli_source_preview(
+    path: &std::path::Path,
+    full_range: bool,
+) -> Result<RenderedPreview, String> {
+    if full_range {
+        bmp::render_grayscale_preview_file_for_tooth_analysis(path)
+    } else {
+        bmp::render_grayscale_preview_file(path)
+    }
 }
 
 fn analyze_preview(args: AnalyzePreviewArgs, stdout: &mut dyn Write) -> CliResult<()> {
@@ -586,6 +597,59 @@ mod tests {
 
         let summary: serde_json::Value = serde_json::from_slice(&stdout).unwrap();
         assert_eq!(summary["palette"], "hot");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn render_preview_full_range_preserves_source_values() {
+        let root = unique_temp_dir("full-range");
+        fs::create_dir_all(&root).unwrap();
+        let input = root.join("study.bmp");
+        let default_output = root.join("default.bmp");
+        let full_range_output = root.join("full-range.bmp");
+        fs::write(
+            &input,
+            crate::bmp::tests::build_bmp_32(2, 1, &[(10, 10, 10), (40, 40, 40)]),
+        )
+        .unwrap();
+
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        run(
+            &[
+                "render-preview",
+                input.to_str().unwrap(),
+                default_output.to_str().unwrap(),
+            ],
+            &mut stdout,
+            &mut stderr,
+        )
+        .unwrap();
+
+        stdout.clear();
+        run(
+            &[
+                "render-preview",
+                "--full-range",
+                input.to_str().unwrap(),
+                full_range_output.to_str().unwrap(),
+            ],
+            &mut stdout,
+            &mut stderr,
+        )
+        .unwrap();
+
+        let default_pixels = bmp::decode_source_preview_file(&default_output)
+            .unwrap()
+            .pixels;
+        let full_range_pixels = bmp::decode_source_preview_file(&full_range_output)
+            .unwrap()
+            .pixels;
+
+        assert_eq!(default_pixels.as_ref(), [0, 255]);
+        assert_eq!(full_range_pixels.as_ref(), [10, 40]);
+        let summary: serde_json::Value = serde_json::from_slice(&stdout).unwrap();
+        assert_eq!(summary["windowMode"], "full-range");
         let _ = fs::remove_dir_all(root);
     }
 
