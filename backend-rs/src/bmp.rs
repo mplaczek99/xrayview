@@ -117,13 +117,13 @@ pub fn render_grayscale_preview_file_for_tooth_analysis(
 // Stretched variants are derived from this on demand.
 pub fn decode_source_preview_file(path: impl AsRef<Path>) -> Result<DecodedSourcePreview, String> {
     let path = path.as_ref();
-    let bytes = fs::read(path).map_err(|error| format!("open source file: {error}"))?;
     if !supports_bmp_path(path) {
         return Err(format!(
             "unsupported source image extension for {}; expected .bmp",
             path.display()
         ));
     }
+    let bytes = fs::read(path).map_err(|error| format!("open source file: {error}"))?;
     decode_source_preview(&bytes)
         .map_err(|error| format!("decode BMP image from {}: {error}", path.display()))
 }
@@ -134,13 +134,13 @@ fn render_grayscale_preview_file_inner(
     preserve_eight_bit_range: bool,
 ) -> Result<RenderedPreview, String> {
     let path = path.as_ref();
-    let bytes = fs::read(path).map_err(|error| format!("open source file: {error}"))?;
     if !supports_bmp_path(path) {
         return Err(format!(
             "unsupported source image extension for {}; expected .bmp",
             path.display()
         ));
     }
+    let bytes = fs::read(path).map_err(|error| format!("open source file: {error}"))?;
     render_grayscale_preview_with_options(&bytes, preserve_eight_bit_range)
         .map_err(|error| format!("decode BMP image from {}: {error}", path.display()))
 }
@@ -1000,8 +1000,12 @@ pub mod tests {
         std::fs::write(&path, build_bmp_32(1, 1, &[(0, 0, 0)])).unwrap();
 
         let error = read_file(path.to_str().unwrap()).unwrap_err();
+        let decode_error = decode_source_preview_file(&path).unwrap_err();
+        let render_error = render_grayscale_preview_file(&path).unwrap_err();
 
         assert!(error.contains("expected .bmp"));
+        assert!(decode_error.contains("expected .bmp"));
+        assert!(render_error.contains("expected .bmp"));
         let _ = std::fs::remove_file(path);
     }
 
