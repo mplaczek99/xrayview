@@ -25,3 +25,6 @@ pub mod persistence;
 pub mod processing;
 // Preview encoding to BMP (Gray8 or RGBA→BGR24).
 pub mod render;
+// Tooth-segmentation features + gradient-boosted forest, shared by the
+// analysis inference path and the offline trainer (examples/train_tooth.rs).
+pub mod tooth_model;

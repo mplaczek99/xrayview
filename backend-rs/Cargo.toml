@@ -17,3 +17,6 @@ walkdir = "2.5.0"
 
 [dev-dependencies]
 tempfile = "3"
+# Training-only: decode the ground-truth PNG masks in examples/train_tooth.rs.
+# A dev-dependency, so it is never linked into the shipped library or binary.
+png = "0.17"

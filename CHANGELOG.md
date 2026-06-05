@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- Tooth AND bone detection rebuilt to generalize across subjects. The old models keyed on absolute pixel position (a 13.4 M-entry tooth feature table; a bone feature table plus an exact full-image-hash exemplar lookup), so they effectively memorized the one labeled subject's layout and produced unreliable masks on other BMPs. Both are now gradient-boosted forests over 16 position-free, multi-scale texture features (local mean/variance at radii 2–32, gradient, exposure-invariant contrast ratios) — the texture signal that actually separates isodense tooth from alveolar bone (`backend-rs/src/tooth_model.rs`, shared by inference and trainer). The feature planes are built once per analyze and shared by both forests. Decision thresholds (tooth 0.55, bone 0.50) were chosen by a balanced-accuracy sweep on the labeled set.
+
+### Added
+
+- `examples/train_tooth.rs`: offline trainer that fits a per-class forest (`tooth`/`bone`) from the labeled BMP + PNG-mask pairs with intensity/scale augmentation, reports per-feature split usage and a Dice / balanced-accuracy threshold sweep, and writes the `XVLM2` asset (`learned_model.bin` for tooth, `bone_model.bin` for bone). `png` added as a dev-dependency (trainer-only; never linked into the shipped binary).
+
+### Removed
+
+- Embedded `feature_table_model.bin.gz` (~25 MB), `bone_feature_table_model.bin.gz`, `bone_exemplar_model.bin.gz`, the `tooth_feature_table_bench` + `bone_exemplar_bench` examples, and all the dead absolute-position feature-table / exemplar / learned-forest code in `analysis.rs`. Net analysis-asset size dropped from ~26.7 MB to ~0.43 MB.
+
 ## [0.5.0] - 2026-06-02
 
 ### Added

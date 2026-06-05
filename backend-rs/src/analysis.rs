@@ -1,40 +1,37 @@
 // Tooth + bone overlay analysis. This is the most CPU-intensive path in the
-// crate: we run a learned probability model over every pixel, then morph the
-// result into clean masks the UI can draw.
+// crate: two gradient-boosted forests score every pixel, then morphology turns
+// the raw masks into clean overlays the UI can draw.
 //
 // The pipeline at a glance:
-//   1. Extract a 4-tuple of features per pixel (gray, neighborhood stats).
-//   2. Pack the tuple into a 28-bit u32 key (`tooth_feature_table_key`).
-//   3. Look up the key in the feature probability table — a sorted u32 → u8
-//      mapping shipped as a gzipped asset in ../assets/analysis/.
-//   4. Threshold (>= 192 for tooth, >= 96 for bone), clean up with morphology
-//      (close, bridge, frame-clearance), draw outlines.
+//   1. Contrast-normalize the grayscale (crate::tooth_model::normalize_gray).
+//   2. Build the position-free texture feature planes once (FeaturePlanes —
+//      multi-scale integral-image mean/std, gradient, contrast ratios).
+//   3. Score each pixel with the tooth forest and the bone forest and threshold
+//      (crate::tooth_model). Both forests are trained offline on the labeled
+//      masks with NO absolute pixel position, so they generalize across
+//      subjects instead of memorizing one layout.
+//   4. Morphology cleanup (close, small-component removal, hole-fill, the bone
+//      section shaping + frame clearance), then draw fills/outlines.
 //
-// All four assets (bone_feature_table, bone_exemplar, tooth_feature_table,
-// learned_model) are lazily loaded into OnceLock<Result<…>> on first use —
-// see `bone_feature_table()`, `tooth_feature_table()`, etc. below. Loading
-// errors are sticky: a corrupt asset means the analyzer is permanently
-// disabled this run, but doesn't crash the app.
+// Both forest assets (learned_model = tooth, bone_model = bone) are lazily
+// decoded into OnceLock<Result<…>> on first use. Loading errors are sticky: a
+// corrupt asset disables that detector for the run but doesn't crash the app
+// (tooth falls back to a percentile threshold, bone to an empty mask).
 //
 // Hot-path engineering notes:
-//   * The feature table is bucketed by the high bits of the key so we
-//     binary-search a tiny L1/L2-resident slice, not the full 53 MB array.
-//   * Rayon parallelizes over rows (par_iter), which is the only level of
+//   * FeaturePlanes is built once and shared by both forests — the integral
+//     images (the O(pixels) precompute) are paid for a single time per analyze.
+//   * Rayon parallelizes over rows (par_chunks_mut), the only level of
 //     parallelism that pays off here — per-pixel is too fine-grained.
 //   * Morphology operations work in-place on Vec<bool> mask buffers held in
 //     a reusable MaskBuffers so we don't alloc/free per frame.
 
-use std::{
-    collections::HashMap,
-    io::{Cursor, Read},
-    sync::OnceLock,
-};
+use std::sync::OnceLock;
 
-use byteorder::{LittleEndian, ReadBytesExt};
-use flate2::read::GzDecoder;
 use rayon::prelude::*;
 
 use crate::render::{PreviewFormat, PreviewImage};
+use crate::tooth_model::{FeaturePlanes, ToothForest};
 
 // RGBA outline colors. Green for tooth, red for bone — chosen to read well
 // against both bright and dark X-rays.
@@ -43,46 +40,18 @@ const BONE_RED: [u8; 4] = [255, 0, 0, 255];
 // Sections view blends fills over the grayscale so anatomy stays readable
 // beneath the color wash and the mode is visually distinct from Outlines.
 const SECTION_FILL_ALPHA: u8 = 115;
-// Models are baked into the binary via include_bytes! so we don't have to
-// ship sidecar files. The .gz variants are deflated lazily on first use;
-// learned_model.bin is small enough to ship uncompressed.
-const BONE_FEATURE_TABLE_DATA: &[u8] =
-    include_bytes!("../assets/analysis/bone_feature_table_model.bin.gz");
-const BONE_EXEMPLAR_MODEL_DATA: &[u8] =
-    include_bytes!("../assets/analysis/bone_exemplar_model.bin.gz");
-const TOOTH_FEATURE_TABLE_DATA: &[u8] =
-    include_bytes!("../assets/analysis/feature_table_model.bin.gz");
-const LEARNED_MODEL_DATA: &[u8] = include_bytes!("../assets/analysis/learned_model.bin");
-// Tooth feature table bin counts — these define the 4D feature space the
-// model was trained on. xb=256 gray bins, yb=512 neighborhood bins, nb=64
-// normalized bins, sb=32 score bins. Changing any of these requires
-// regenerating the asset and the model.
-const TOOTH_TABLE_X_BINS: usize = 256;
-const TOOTH_TABLE_Y_BINS: usize = 512;
-const TOOTH_TABLE_NORMALIZED_BINS: usize = 64;
-const TOOTH_TABLE_SCORE_BINS: usize = 32;
-// Probability >= 192/255 → tooth. The threshold was tuned against the
-// validation set; lower numbers include more soft-tissue false positives.
-const TOOTH_TABLE_PROBABILITY_THRESHOLD: u8 = 192;
-// Bucket the sorted tooth feature-table keys by their high bits so the per-pixel
-// lookup binary-searches a small, cache-resident slice instead of probing the
-// whole ~53.7 MB key array. The key packs `xb` in bits 0..8, `yb` in bits 8..17,
-// `nb` in bits 17..23, and `sb` in bits 23..28 (`tooth_feature_table_key`), so a
-// >>12 bucket fixes (sb, nb, yb>>4) and ranges only over (yb&15, xb): on the
-// shipped 13.4 M-entry table that is ~205 keys / bucket on average (a ≤16 KB
-// search window that fits L1/L2) with a ~256 KB bucket index, negligible against
-// the 67 MB table.
-const TOOTH_TABLE_BUCKET_SHIFT: u32 = 12;
-// Bone feature table bin counts — different from the tooth table because
-// bone uses a 4D feature space tuned to soft-tissue boundaries instead.
-const BONE_TABLE_X_BINS: usize = 160;
-const BONE_TABLE_Y_BINS: usize = 224;
-const BONE_TABLE_NORMALIZED_BINS: usize = 32;
-const BONE_TABLE_GRADIENT_BINS: usize = 16;
-// Lower threshold than tooth (96 vs 192) because bone is harder to detect
-// confidently — we accept more uncertain pixels and lean on the
-// morphological cleanup below to weed out spurious blobs.
-const BONE_TABLE_PROBABILITY_THRESHOLD: u8 = 96;
+// Gradient-boosted forests (XVLM2), trained offline by examples/train_tooth.rs
+// on position-free texture features (crate::tooth_model). Baked into the binary
+// via include_bytes! so we don't ship sidecar files.
+const TOOTH_MODEL_DATA: &[u8] = include_bytes!("../assets/analysis/learned_model.bin");
+const BONE_MODEL_DATA: &[u8] = include_bytes!("../assets/analysis/bone_model.bin");
+// Forest score at/above this is the class. The trainer regresses toward {0, 1};
+// both cuts are where balanced accuracy peaks on the labeled set (the
+// examples/train_tooth threshold sweep). Tooth 0.55 stops greening the isodense
+// bone; bone 0.50 is balanced — and bone false positives over teeth are hidden
+// anyway, since the overlay draws tooth on top of bone.
+const TOOTH_SCORE_THRESHOLD: f64 = 0.55;
+const BONE_SCORE_THRESHOLD: f64 = 0.50;
 // Sub-floor blob sizes get dropped. 24px for bone, 4px for tooth — both
 // were empirically chosen to remove noise without erasing real anatomy.
 const MINIMUM_BONE_AREA_FLOOR_PIXELS: usize = 24;
@@ -104,108 +73,10 @@ const RADIOGRAPH_BACKGROUND_MAX_GRAY: u8 = 2;
 // pixels of an edge, the strip is filled so the outline ends up *at* the
 // edge instead of tracing the thin dark-vignette gap as a rectangle.
 const BONE_EDGE_SNAP_RADIUS_PIXELS: usize = 14;
-// Learned (forest-of-trees) model knobs. Threshold 0.1 was set during the
-// last retrain; LR was used during training but is kept here as documentation.
-const LEARNED_MODEL_LEARNING_RATE: f64 = 0.1;
-const LEARNED_MODEL_THRESHOLD: f64 = 0.1;
-const LEARNED_FEATURE_COUNT: usize = 18;
-
 // Lazy-loaded models. Each OnceLock holds a Result so a corrupt asset surfaces
-// once and stays that way — we don't keep retrying the gunzip on every call.
-static BONE_FEATURE_TABLE: OnceLock<Result<HashMap<u32, u8>, String>> = OnceLock::new();
-static BONE_EXEMPLAR_MODEL: OnceLock<Result<Vec<BoneExemplar>, String>> = OnceLock::new();
-static TOOTH_FEATURE_TABLE: OnceLock<Result<FeatureProbabilityTable, String>> = OnceLock::new();
-static LEARNED_MODEL: OnceLock<Result<Vec<Vec<LearnedNode>>, String>> = OnceLock::new();
-
-// One exemplar = one labeled bone region from the training set. We use these
-// at inference time for nearest-neighbor refinement of fuzzy detections.
-// `hash` is a content fingerprint that lets us dedupe identical exemplars.
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct BoneExemplar {
-    hash: u64,
-    width: u32,
-    height: u32,
-    // Packed bits — one bit per pixel, row-major. Not Vec<bool> because we
-    // need the dense packing for memory budget.
-    mask: Vec<u8>,
-}
-
-// Decision-tree node. The forest is stored as Vec<Vec<LearnedNode>> — one
-// inner Vec per tree, each with a flat array of nodes. left/right are i32
-// indexes into the same array, or negative to indicate a leaf (in which
-// case `value` is the leaf score).
-#[derive(Debug, Clone, Copy, PartialEq)]
-struct LearnedNode {
-    feature: i32,
-    threshold: f64,
-    left: i32,
-    right: i32,
-    value: f64,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct FeatureProbabilityTable {
-    keys: Vec<u32>,
-    probabilities: Vec<u8>,
-    // High-bit bucket index over the sorted `keys`: bucket `b` occupies the
-    // contiguous range `keys[bucket_starts[b]..bucket_starts[b + 1]]`, i.e. every
-    // key with `key >> TOOTH_TABLE_BUCKET_SHIFT == b`. Built once at load time from
-    // the same sorted keys, so the serialized asset is unchanged and every lookup
-    // resolves to the identical (key, probability) a full-array binary search
-    // would have.
-    bucket_starts: Vec<u32>,
-}
-
-impl FeatureProbabilityTable {
-    fn new(keys: Vec<u32>, probabilities: Vec<u8>) -> Self {
-        debug_assert!(
-            keys.windows(2).all(|pair| pair[0] < pair[1]),
-            "feature table keys must be strictly ascending for bucketed lookup"
-        );
-        // `keys` is sorted, so keys sharing a high-bit bucket are contiguous: a
-        // single forward pass records where each bucket begins. Sizing by the
-        // largest key keeps the index exactly as wide as the data needs.
-        let bucket_count = keys
-            .last()
-            .map_or(0, |&max| (max >> TOOTH_TABLE_BUCKET_SHIFT) as usize + 1);
-        let mut bucket_starts = vec![0_u32; bucket_count + 1];
-        let mut bucket = 0_usize;
-        for (index, &key) in keys.iter().enumerate() {
-            let target = (key >> TOOTH_TABLE_BUCKET_SHIFT) as usize;
-            while bucket < target {
-                bucket += 1;
-                bucket_starts[bucket] = index as u32;
-            }
-        }
-        for slot in &mut bucket_starts[bucket + 1..] {
-            *slot = keys.len() as u32;
-        }
-        Self {
-            keys,
-            probabilities,
-            bucket_starts,
-        }
-    }
-
-    fn probability(&self, key: u32) -> Option<u8> {
-        let bucket = (key >> TOOTH_TABLE_BUCKET_SHIFT) as usize;
-        // Bucket `b` spans `[bucket_starts[b], bucket_starts[b + 1])`. Reading the
-        // upper bound first rejects any key past the last populated bucket (a key
-        // larger than the table's maximum) without a separate bounds check.
-        let &end = self.bucket_starts.get(bucket + 1)?;
-        let start = self.bucket_starts[bucket] as usize;
-        let end = end as usize;
-        self.keys[start..end]
-            .binary_search(&key)
-            .ok()
-            .and_then(|offset| self.probabilities.get(start + offset).copied())
-    }
-
-    #[cfg(test)]
-    fn len(&self) -> usize {
-        self.keys.len()
-    }
-}
+// once and stays that way — we don't keep retrying the decode on every call.
+static TOOTH_MODEL: OnceLock<Result<ToothForest, String>> = OnceLock::new();
+static BONE_MODEL: OnceLock<Result<ToothForest, String>> = OnceLock::new();
 
 // The public output. `preview` is the outline overlay (drawn on top of the
 // grayscale); `filled_preview` is the filled-region version used for the
@@ -273,25 +144,14 @@ pub fn generate_tooth_overlay(preview: &PreviewImage) -> Result<ToothOverlayResu
         ));
     }
 
-    // Normalize once — both tooth and bone detectors consume the normalized
-    // version. The raw `gray` is also kept around for the gradient/exemplar
-    // paths that depend on absolute intensity.
-    let normalized = normalize_gray(&preview.pixels);
+    // Normalize once, then build the texture feature planes once — both the
+    // tooth and bone forests score off the same integral images, so we pay the
+    // O(pixels) precompute a single time per analyze.
+    let normalized = crate::tooth_model::normalize_gray(&preview.pixels);
+    let planes = FeaturePlanes::build(&normalized, width, height);
     let mut mask_buffers = MaskBuffers::new(expected_pixels);
-    let tooth_mask = detect_tooth_mask(
-        &preview.pixels,
-        &normalized,
-        width,
-        height,
-        &mut mask_buffers,
-    );
-    let bone_mask = detect_bone_line_mask(
-        &preview.pixels,
-        &normalized,
-        width,
-        height,
-        &mut mask_buffers,
-    );
+    let tooth_mask = detect_tooth_mask(&planes, width, height, &mut mask_buffers);
+    let bone_mask = detect_bone_line_mask(&planes, width, height, &mut mask_buffers);
     let tooth_pixels = count_mask(&tooth_mask);
     let bone_pixels = count_mask(&bone_mask);
     // .max(1) just in case — pre-check rejects len 0, but belt + suspenders.
@@ -366,70 +226,56 @@ pub fn generate_tooth_overlay(preview: &PreviewImage) -> Result<ToothOverlayResu
     })
 }
 
-// Tooth detection top-level. Tries the learned model first, falls back to a
-// percentile-thresholded mask if the model couldn't load. Either way the
-// resulting raw mask gets passed through clean_tooth_mask for morphological
-// polish (small-component removal, closing, hole-filling).
+// Tooth detection top-level. Runs the gradient-boosted forest over texture
+// features (crate::tooth_model) — the discriminator that actually separates
+// isodense tooth from bone — then hands the raw mask to clean_tooth_mask for
+// morphological polish (small-component removal, closing, hole-filling).
 //
-// The fallback threshold (.max(24)) ensures we don't try to threshold at
-// near-black even on very dark X-rays — pixels below ~24/255 are almost
-// always background/sensor noise.
+// If the forest asset fails to load we fall back to a high-percentile intensity
+// threshold. That fallback CANNOT separate tooth from bone (they are isodense),
+// so it is a last resort to avoid an empty overlay, not a real detector.
 fn detect_tooth_mask(
-    gray: &[u8],
-    normalized: &[u8],
+    planes: &FeaturePlanes,
     width: usize,
     height: usize,
     buffers: &mut MaskBuffers,
 ) -> Vec<bool> {
-    let mask = if let Some(mask) = detect_learned_tooth_mask(normalized, width, height) {
-        mask
-    } else {
-        let threshold = percentile(gray, 68).max(24);
-        gray.iter().map(|value| *value >= threshold).collect()
-    };
+    let mask = loaded_tooth_model()
+        .map(|forest| forest_score_mask(forest, planes, TOOTH_SCORE_THRESHOLD))
+        .unwrap_or_else(|| {
+            let normalized = planes.normalized();
+            let threshold = percentile(normalized, 82).max(24);
+            normalized.iter().map(|value| *value >= threshold).collect()
+        });
 
     clean_tooth_mask(&mask, width, height, buffers)
 }
 
-// Run the learned forest + feature-table combo. Returns None if either model
-// failed to load (None propagates up to make the caller fall back to the
-// percentile threshold). Per-pixel work is independent so par_chunks_mut
-// parallelizes over rows — finer-grained parallelism doesn't pay off because
-// the binary search is the dominant cost and isn't compute-bound.
-fn detect_learned_tooth_mask(normalized: &[u8], width: usize, height: usize) -> Option<Vec<bool>> {
-    if width == 0 || height == 0 || normalized.len() != width * height {
-        return None;
-    }
-    let scores = learned_tooth_scores(normalized, width, height)?;
-    let table = loaded_tooth_feature_table();
-    let mut mask = vec![false; normalized.len()];
-    // Per-pixel and independent (each does a read-only table binary search over a
-    // ~53 MB key array, a cache miss per pixel); parallelize over rows.
+// Threshold the forest score at every pixel. Per-pixel work is independent and
+// integral-image feature lookups are O(1), so we parallelize over rows.
+fn forest_score_mask(forest: &ToothForest, planes: &FeaturePlanes, threshold: f64) -> Vec<bool> {
+    let width = planes.width();
+    let mut mask = vec![false; width * planes.height()];
     mask.par_chunks_mut(width).enumerate().for_each(|(y, row)| {
         for (x, slot) in row.iter_mut().enumerate() {
-            let index = y * width + x;
-            let score = scores[index];
-            // Prefer the lookup table answer when the table has data for
-            // this feature tuple; otherwise fall back to the forest score.
-            // This gives us a high-precision verdict where possible and a
-            // graceful continuous estimate everywhere else.
-            *slot = if let Some(probability) = table.and_then(|table| {
-                table.probability(tooth_feature_table_key(
-                    x,
-                    y,
-                    width,
-                    height,
-                    normalized[index],
-                    score,
-                ))
-            }) {
-                probability >= TOOTH_TABLE_PROBABILITY_THRESHOLD
-            } else {
-                score >= LEARNED_MODEL_THRESHOLD
-            };
+            *slot = forest.score(&planes.features(x, y)) >= threshold;
         }
     });
-    Some(mask)
+    mask
+}
+
+fn loaded_tooth_model() -> Option<&'static ToothForest> {
+    TOOTH_MODEL
+        .get_or_init(|| ToothForest::decode(TOOTH_MODEL_DATA))
+        .as_ref()
+        .ok()
+}
+
+fn loaded_bone_model() -> Option<&'static ToothForest> {
+    BONE_MODEL
+        .get_or_init(|| ToothForest::decode(BONE_MODEL_DATA))
+        .as_ref()
+        .ok()
 }
 
 fn clean_tooth_mask(
@@ -479,75 +325,25 @@ fn minimum_tooth_area_pixels(width: usize, height: usize) -> usize {
     (width * height / 1000).clamp(MINIMUM_TOOTH_AREA_FLOOR_PIXELS, 2048)
 }
 
+// Bone detection. Same position-free texture forest approach as tooth, trained
+// on the red (bone) mask label. Bone is the high-variance trabecular region;
+// the forest leans on the coarse-scale texture features to pick it out of the
+// isodense tooth/bone mix. Returns an empty mask if the asset can't load (bone
+// is an optional overlay — better blank than a bad guess).
 fn detect_bone_line_mask(
-    gray: &[u8],
-    normalized: &[u8],
+    planes: &FeaturePlanes,
     width: usize,
     height: usize,
     buffers: &mut MaskBuffers,
 ) -> Vec<bool> {
-    if let Some(mask) = bone_exemplar_mask(gray, width, height) {
-        fill_holes_into(&mask, width, height, &mut buffers.a);
-        return buffers.a.clone();
-    }
+    let Some(forest) = loaded_bone_model() else {
+        return vec![false; width * height];
+    };
+    let mut mask = forest_score_mask(forest, planes, BONE_SCORE_THRESHOLD);
 
-    if let Some(mask) = detect_bone_feature_table_mask(normalized, width, height, buffers) {
-        return mask;
-    }
-
-    detect_bone_gradient_line_mask(gray, width, height)
-}
-
-fn detect_bone_gradient_line_mask(gray: &[u8], width: usize, height: usize) -> Vec<bool> {
-    let mut mask = vec![false; width * height];
-    if height < 3 {
-        return mask;
-    }
-
-    for x in 0..width {
-        let mut best_y = 1;
-        let mut best_gradient = 0_i16;
-        for y in 1..height - 1 {
-            let above = gray[(y - 1) * width + x] as i16;
-            let below = gray[(y + 1) * width + x] as i16;
-            let gradient = (below - above).abs();
-            if gradient > best_gradient {
-                best_gradient = gradient;
-                best_y = y;
-            }
-        }
-        if best_gradient >= 8 {
-            mask[best_y * width + x] = true;
-        }
-    }
-    mask
-}
-
-fn detect_bone_feature_table_mask(
-    normalized: &[u8],
-    width: usize,
-    height: usize,
-    buffers: &mut MaskBuffers,
-) -> Option<Vec<bool>> {
-    if width == 0 || height == 0 || normalized.len() != width * height {
-        return None;
-    }
-
-    let table = loaded_bone_feature_table()?;
-    let gradient = gradient_gray(&box_blur_gray(normalized, width, height, 2), width, height);
-    let mut mask = vec![false; normalized.len()];
-    // Per-pixel, independent, read-only table lookup; parallelize over rows.
-    mask.par_chunks_mut(width).enumerate().for_each(|(y, row)| {
-        for (x, slot) in row.iter_mut().enumerate() {
-            let index = y * width + x;
-            let key =
-                bone_feature_table_key(x, y, width, height, normalized[index], gradient[index]);
-            *slot = table
-                .get(&key)
-                .is_some_and(|probability| *probability >= BONE_TABLE_PROBABILITY_THRESHOLD);
-        }
-    });
-
+    // Light cleanup: close hairline gaps, drop specks, fill interior holes. The
+    // heavier section shaping happens later in
+    // bone_section_mask_with_ignored_cutouts.
     close_mask_into(&mask, width, height, 1, buffers);
     mask.copy_from_slice(&buffers.b);
     remove_small_components_into(
@@ -561,11 +357,7 @@ fn detect_bone_feature_table_mask(
     mask.copy_from_slice(&buffers.a);
     fill_holes_into(&mask, width, height, &mut buffers.a);
     mask.copy_from_slice(&buffers.a);
-    if mask.iter().any(|value| *value) {
-        Some(mask)
-    } else {
-        None
-    }
+    mask
 }
 
 // Single rendering path for both Outline (`fill_sections = false`) and
@@ -1235,60 +1027,6 @@ fn minimum_bone_area_pixels(width: usize, height: usize) -> usize {
     (width * height / 12_000).max(MINIMUM_BONE_AREA_FLOOR_PIXELS)
 }
 
-fn normalize_gray(pixels: &[u8]) -> Vec<u8> {
-    let (low, high) = percentile_fraction_bounds(pixels, 0.01, 0.99);
-    if high <= low {
-        return pixels.to_vec();
-    }
-
-    let range = i32::from(high) - i32::from(low);
-    let lut: [u8; 256] = std::array::from_fn(|value| {
-        let value = value as u8;
-        if value <= low {
-            0
-        } else if value >= high {
-            255
-        } else {
-            (((i32::from(value) - i32::from(low)) * 255 + range / 2) / range) as u8
-        }
-    });
-    pixels
-        .iter()
-        .map(|value| lut[usize::from(*value)])
-        .collect()
-}
-
-fn percentile_fraction_bounds(
-    pixels: &[u8],
-    low_percentile: f64,
-    high_percentile: f64,
-) -> (u8, u8) {
-    if pixels.is_empty() {
-        return (0, 0);
-    }
-
-    let mut histogram = [0_usize; 256];
-    for value in pixels {
-        histogram[*value as usize] += 1;
-    }
-
-    let low_target = percentile_fraction_target(pixels.len(), low_percentile);
-    let high_target = percentile_fraction_target(pixels.len(), high_percentile);
-    let mut low_value = None;
-    let mut cumulative = 0_isize;
-    for (value, count) in histogram.iter().enumerate() {
-        cumulative += *count as isize;
-        if low_value.is_none() && cumulative > low_target {
-            low_value = Some(value as u8);
-        }
-        if cumulative > high_target {
-            return (low_value.unwrap_or(value as u8), value as u8);
-        }
-    }
-
-    (low_value.unwrap_or(u8::MAX), u8::MAX)
-}
-
 fn percentile_fraction(pixels: &[u8], percentile: f64) -> u8 {
     if pixels.is_empty() {
         return 0;
@@ -1313,625 +1051,6 @@ fn percentile_fraction(pixels: &[u8], percentile: f64) -> u8 {
 fn percentile_fraction_target(len: usize, percentile: f64) -> isize {
     let target = ((len - 1) as f64 * percentile).round() as isize;
     target.clamp(0, len as isize - 1)
-}
-
-fn box_blur_gray(pixels: &[u8], width: usize, height: usize, radius: usize) -> Vec<u8> {
-    if radius == 0 || pixels.is_empty() || width == 0 || height == 0 {
-        return pixels.to_vec();
-    }
-
-    let window = radius * 2 + 1;
-    let max_x = width - 1;
-    let mut horizontal = vec![0_u16; pixels.len()];
-    // Horizontal pass: each output row depends only on the same row of the
-    // read-only `pixels`, so rows are independent — parallelize over them.
-    horizontal
-        .par_chunks_mut(width)
-        .enumerate()
-        .for_each(|(y, hrow)| {
-            let row = y * width;
-            let mut sum = i32::from(pixels[row]) * (radius + 1) as i32;
-            let right_edge = radius.min(max_x);
-            for x in 1..=right_edge {
-                sum += i32::from(pixels[row + x]);
-            }
-            if radius > max_x {
-                sum += i32::from(pixels[row + max_x]) * (radius - max_x) as i32;
-            }
-
-            let mut x = 0;
-            let left_border_end = radius.min(max_x);
-            while x < left_border_end {
-                hrow[x] = ((sum + (window / 2) as i32) / window as i32) as u16;
-                let right = x + radius + 1;
-                let right_value = if right < width {
-                    pixels[row + right]
-                } else {
-                    pixels[row + max_x]
-                };
-                sum += i32::from(right_value) - i32::from(pixels[row]);
-                x += 1;
-            }
-            let middle_end = max_x.saturating_sub(radius);
-            while x < middle_end {
-                hrow[x] = ((sum + (window / 2) as i32) / window as i32) as u16;
-                sum +=
-                    i32::from(pixels[row + x + radius + 1]) - i32::from(pixels[row + x - radius]);
-                x += 1;
-            }
-            while x < max_x {
-                hrow[x] = ((sum + (window / 2) as i32) / window as i32) as u16;
-                sum += i32::from(pixels[row + max_x]) - i32::from(pixels[row + x - radius]);
-                x += 1;
-            }
-            hrow[max_x] = ((sum + (window / 2) as i32) / window as i32) as u16;
-        });
-
-    let max_y = height - 1;
-    let mut blurred = vec![0_u8; pixels.len()];
-    for x in 0..width {
-        let mut sum = i32::from(horizontal[x]) * (radius + 1) as i32;
-        let bottom_edge = radius.min(max_y);
-        for y in 1..=bottom_edge {
-            sum += i32::from(horizontal[y * width + x]);
-        }
-        if radius > max_y {
-            sum += i32::from(horizontal[max_y * width + x]) * (radius - max_y) as i32;
-        }
-
-        let mut y = 0;
-        let top_border_end = radius.min(max_y);
-        while y < top_border_end {
-            blurred[y * width + x] = ((sum + (window / 2) as i32) / window as i32) as u8;
-            let bottom = y + radius + 1;
-            let bottom_value = if bottom < height {
-                horizontal[bottom * width + x]
-            } else {
-                horizontal[max_y * width + x]
-            };
-            sum += i32::from(bottom_value) - i32::from(horizontal[x]);
-            y += 1;
-        }
-        let middle_end = max_y.saturating_sub(radius);
-        while y < middle_end {
-            blurred[y * width + x] = ((sum + (window / 2) as i32) / window as i32) as u8;
-            sum += i32::from(horizontal[(y + radius + 1) * width + x])
-                - i32::from(horizontal[(y - radius) * width + x]);
-            y += 1;
-        }
-        while y < max_y {
-            blurred[y * width + x] = ((sum + (window / 2) as i32) / window as i32) as u8;
-            sum += i32::from(horizontal[max_y * width + x])
-                - i32::from(horizontal[(y - radius) * width + x]);
-            y += 1;
-        }
-        blurred[max_y * width + x] = ((sum + (window / 2) as i32) / window as i32) as u8;
-    }
-    blurred
-}
-
-fn gradient_gray(pixels: &[u8], width: usize, height: usize) -> Vec<u8> {
-    let mut gradient = vec![0_u8; pixels.len()];
-    if width < 3 || height < 3 {
-        return gradient;
-    }
-    // Each output row reads only the read-only `pixels` (rows y-1, y, y+1) and
-    // writes its own row, so rows are independent. Borders stay 0 as in the
-    // serial version.
-    gradient
-        .par_chunks_mut(width)
-        .enumerate()
-        .for_each(|(y, row)| {
-            if y == 0 || y >= height - 1 {
-                return;
-            }
-            for x in 1..width - 1 {
-                let value = (i32::from(pixels[y * width + x + 1])
-                    - i32::from(pixels[y * width + x - 1]))
-                .abs()
-                    + (i32::from(pixels[(y + 1) * width + x])
-                        - i32::from(pixels[(y - 1) * width + x]))
-                    .abs();
-                row[x] = value.min(255) as u8;
-            }
-        });
-    gradient
-}
-
-fn loaded_bone_feature_table() -> Option<&'static HashMap<u32, u8>> {
-    BONE_FEATURE_TABLE
-        .get_or_init(|| decode_bone_feature_table(BONE_FEATURE_TABLE_DATA))
-        .as_ref()
-        .ok()
-}
-
-fn loaded_tooth_feature_table() -> Option<&'static FeatureProbabilityTable> {
-    TOOTH_FEATURE_TABLE
-        .get_or_init(|| decode_feature_probability_table(TOOTH_FEATURE_TABLE_DATA, b"XVFT1"))
-        .as_ref()
-        .ok()
-}
-
-fn learned_tooth_scores(normalized: &[u8], width: usize, height: usize) -> Option<Vec<f64>> {
-    let trees = loaded_learned_model()?;
-    let blur3 = box_blur_gray(normalized, width, height, 3);
-    let blur21 = box_blur_gray(normalized, width, height, 21);
-    let gradient = gradient_gray(&blur3, width, height);
-    let mut scores = vec![0.0; normalized.len()];
-    // Each output pixel depends only on read-only inputs (normalized, blur3,
-    // blur21, gradient, trees), so rows are independent — parallelize over them.
-    // The per-pixel tree summation order is unchanged, so output is bit-identical
-    // to the serial version. This is the heaviest loop in the program
-    // (O(pixels x trees)).
-    scores
-        .par_chunks_mut(width)
-        .enumerate()
-        .for_each(|(y, row)| {
-            for (x, slot) in row.iter_mut().enumerate() {
-                let index = y * width + x;
-                let features = learned_features(
-                    x,
-                    y,
-                    width,
-                    height,
-                    normalized[index],
-                    blur3[index],
-                    blur21[index],
-                    gradient[index],
-                );
-                *slot = trees
-                    .iter()
-                    .map(|tree| LEARNED_MODEL_LEARNING_RATE * evaluate_learned_tree(tree, features))
-                    .sum();
-            }
-        });
-    Some(scores)
-}
-
-fn decode_feature_probability_table(
-    data: &[u8],
-    expected_magic: &[u8; 5],
-) -> Result<FeatureProbabilityTable, String> {
-    let mut decoder = GzDecoder::new(data);
-    let mut decoded = Vec::new();
-    decoder
-        .read_to_end(&mut decoded)
-        .map_err(|error| format!("decompress feature table: {error}"))?;
-    let mut cursor = Cursor::new(decoded.as_slice());
-    let mut magic = [0_u8; 5];
-    cursor
-        .read_exact(&mut magic)
-        .map_err(|error| format!("read feature table magic: {error}"))?;
-    if &magic != expected_magic {
-        return Err(format!(
-            "invalid feature table magic {:?}",
-            String::from_utf8_lossy(&magic)
-        ));
-    }
-
-    let count = read_le_u32(&mut cursor)? as usize;
-    let mut keys = Vec::with_capacity(count);
-    let mut probabilities = Vec::with_capacity(count);
-    for _ in 0..count {
-        keys.push(read_le_u32(&mut cursor)?);
-        let mut probability = [0_u8; 1];
-        cursor
-            .read_exact(&mut probability)
-            .map_err(|error| format!("read feature table probability: {error}"))?;
-        probabilities.push(probability[0]);
-    }
-    if cursor.position() as usize != decoded.len() {
-        return Err(format!(
-            "feature table has {} trailing bytes",
-            decoded.len() - cursor.position() as usize
-        ));
-    }
-    if let Some(window) = keys.windows(2).find(|window| window[0] >= window[1]) {
-        return Err(format!(
-            "feature table keys must be strictly ascending: {} before {}",
-            window[0], window[1]
-        ));
-    }
-    Ok(FeatureProbabilityTable::new(keys, probabilities))
-}
-
-fn loaded_learned_model() -> Option<&'static [Vec<LearnedNode>]> {
-    LEARNED_MODEL
-        .get_or_init(|| decode_learned_model(LEARNED_MODEL_DATA))
-        .as_ref()
-        .map(Vec::as_slice)
-        .ok()
-}
-
-fn decode_learned_model(data: &[u8]) -> Result<Vec<Vec<LearnedNode>>, String> {
-    let mut cursor = Cursor::new(data);
-    let mut magic = [0_u8; 5];
-    cursor
-        .read_exact(&mut magic)
-        .map_err(|error| format!("read learned model magic: {error}"))?;
-    if &magic != b"XVLM1" {
-        return Err(format!(
-            "invalid learned model magic {:?}",
-            String::from_utf8_lossy(&magic)
-        ));
-    }
-
-    let tree_count = read_le_u32(&mut cursor)? as usize;
-    let mut trees = Vec::with_capacity(tree_count);
-    for _ in 0..tree_count {
-        let node_count = read_le_u32(&mut cursor)? as usize;
-        let mut tree = Vec::with_capacity(node_count);
-        for _ in 0..node_count {
-            tree.push(LearnedNode {
-                feature: read_le_i32(&mut cursor)?,
-                threshold: read_le_f64(&mut cursor)?,
-                left: read_le_i32(&mut cursor)?,
-                right: read_le_i32(&mut cursor)?,
-                value: read_le_f64(&mut cursor)?,
-            });
-        }
-        validate_learned_tree(trees.len(), &tree)?;
-        trees.push(tree);
-    }
-    if cursor.position() as usize != data.len() {
-        return Err(format!(
-            "learned model has {} trailing bytes",
-            data.len() - cursor.position() as usize
-        ));
-    }
-    Ok(trees)
-}
-
-fn validate_learned_tree(tree_index: usize, tree: &[LearnedNode]) -> Result<(), String> {
-    if tree.is_empty() {
-        return Err(format!("learned model tree {tree_index} is empty"));
-    }
-
-    for (node_index, node) in tree.iter().enumerate() {
-        if !node.threshold.is_finite() {
-            return Err(format!(
-                "learned model tree {tree_index} node {node_index} has non-finite threshold"
-            ));
-        }
-        if !node.value.is_finite() {
-            return Err(format!(
-                "learned model tree {tree_index} node {node_index} has non-finite value"
-            ));
-        }
-        if node.feature < 0 {
-            continue;
-        }
-        if node.feature as usize >= LEARNED_FEATURE_COUNT {
-            return Err(format!(
-                "learned model tree {tree_index} node {node_index} references feature {}",
-                node.feature
-            ));
-        }
-        validate_learned_child(tree_index, node_index, "left", node.left, tree.len())?;
-        validate_learned_child(tree_index, node_index, "right", node.right, tree.len())?;
-    }
-
-    let mut visiting = vec![false; tree.len()];
-    let mut visited = vec![false; tree.len()];
-    validate_learned_tree_node(tree_index, tree, 0, &mut visiting, &mut visited)
-}
-
-fn validate_learned_child(
-    tree_index: usize,
-    node_index: usize,
-    label: &str,
-    child: i32,
-    node_count: usize,
-) -> Result<(), String> {
-    if child < 0 || child as usize >= node_count {
-        return Err(format!(
-            "learned model tree {tree_index} node {node_index} has invalid {label} child {child}"
-        ));
-    }
-    Ok(())
-}
-
-fn validate_learned_tree_node(
-    tree_index: usize,
-    tree: &[LearnedNode],
-    index: usize,
-    visiting: &mut [bool],
-    visited: &mut [bool],
-) -> Result<(), String> {
-    if visited[index] {
-        return Ok(());
-    }
-    if visiting[index] {
-        return Err(format!(
-            "learned model tree {tree_index} contains a cycle at node {index}"
-        ));
-    }
-    visiting[index] = true;
-    let node = tree[index];
-    if node.feature >= 0 {
-        validate_learned_tree_node(tree_index, tree, node.left as usize, visiting, visited)?;
-        validate_learned_tree_node(tree_index, tree, node.right as usize, visiting, visited)?;
-    }
-    visiting[index] = false;
-    visited[index] = true;
-    Ok(())
-}
-
-#[allow(clippy::too_many_arguments)]
-fn learned_features(
-    x: usize,
-    y: usize,
-    width: usize,
-    height: usize,
-    normalized: u8,
-    blur3: u8,
-    blur21: u8,
-    gradient: u8,
-) -> [f64; LEARNED_FEATURE_COUNT] {
-    let xf = x as f64 / width.saturating_sub(1).max(1) as f64;
-    let yf = y as f64 / height.saturating_sub(1).max(1) as f64;
-    let n = f64::from(normalized) / 255.0;
-    let s = f64::from(blur3) / 255.0;
-    let bg = f64::from(blur21) / 255.0;
-    let bp = (f64::from(i16::from(blur3) - i16::from(blur21)) + 255.0) / 510.0;
-    let ed = f64::from(gradient) / 255.0;
-    [
-        xf,
-        yf,
-        xf * xf,
-        yf * yf,
-        xf * yf,
-        (xf - 0.5).abs(),
-        (yf - 0.5).abs(),
-        n,
-        s,
-        bg,
-        bp,
-        ed,
-        n * yf,
-        s * yf,
-        bg * yf,
-        bp * yf,
-        n * xf,
-        s * xf,
-    ]
-}
-
-fn evaluate_learned_tree(tree: &[LearnedNode], features: [f64; LEARNED_FEATURE_COUNT]) -> f64 {
-    let mut index = 0_usize;
-    for _ in 0..=tree.len() {
-        let Some(node) = tree.get(index) else {
-            return 0.0;
-        };
-        if node.feature < 0 {
-            return node.value;
-        }
-        let Some(feature) = features.get(node.feature as usize) else {
-            return 0.0;
-        };
-        index = if *feature <= node.threshold {
-            node.left as usize
-        } else {
-            node.right as usize
-        };
-    }
-    0.0
-}
-
-fn bone_exemplar_mask(gray: &[u8], width: usize, height: usize) -> Option<Vec<bool>> {
-    let exemplars = loaded_bone_exemplar_model()?;
-    let (width, height) = (width as u32, height as u32);
-    // The exemplar table is a memorized exact-match lookup, and a hit additionally
-    // requires identical dimensions (see the inner check below). If no exemplar
-    // shares this image's (width, height), the pixel hash cannot match, so reject
-    // on a cheap scan of the dimensions and skip the full-image FNV hash — an
-    // O(pixels) pass — entirely. This is the common case for arbitrary user images.
-    if !exemplars
-        .iter()
-        .any(|exemplar| exemplar.width == width && exemplar.height == height)
-    {
-        return None;
-    }
-    let hash = hash_bone_exemplar_pixels(gray, width, height);
-    let index = exemplars.partition_point(|exemplar| exemplar.hash < hash);
-    for exemplar in &exemplars[index..] {
-        if exemplar.hash != hash {
-            break;
-        }
-        if exemplar.width == width && exemplar.height == height {
-            return Some(exemplar.mask.iter().map(|value| *value != 0).collect());
-        }
-    }
-    None
-}
-
-fn loaded_bone_exemplar_model() -> Option<&'static [BoneExemplar]> {
-    BONE_EXEMPLAR_MODEL
-        .get_or_init(|| decode_bone_exemplar_model(BONE_EXEMPLAR_MODEL_DATA))
-        .as_ref()
-        .map(Vec::as_slice)
-        .ok()
-}
-
-fn decode_bone_exemplar_model(data: &[u8]) -> Result<Vec<BoneExemplar>, String> {
-    let mut decoder = GzDecoder::new(data);
-    let mut decoded = Vec::new();
-    decoder
-        .read_to_end(&mut decoded)
-        .map_err(|error| format!("decompress bone exemplar model: {error}"))?;
-    let mut cursor = Cursor::new(decoded.as_slice());
-    let mut magic = [0_u8; 5];
-    cursor
-        .read_exact(&mut magic)
-        .map_err(|error| format!("read bone exemplar magic: {error}"))?;
-    if &magic != b"XVBE1" {
-        return Err(format!(
-            "invalid bone exemplar magic {:?}",
-            String::from_utf8_lossy(&magic)
-        ));
-    }
-
-    let count = read_le_u32(&mut cursor)? as usize;
-    let mut exemplars = Vec::with_capacity(count);
-    for _ in 0..count {
-        let hash = read_le_u64(&mut cursor)?;
-        let width = read_le_u32(&mut cursor)?;
-        let height = read_le_u32(&mut cursor)?;
-        let mask_length = read_le_u32(&mut cursor)? as usize;
-        if u64::from(width) * u64::from(height) != mask_length as u64 {
-            return Err(format!(
-                "invalid exemplar dimensions {width}x{height} for mask length {mask_length}"
-            ));
-        }
-        let mut mask = vec![0_u8; mask_length];
-        cursor
-            .read_exact(&mut mask)
-            .map_err(|error| format!("read bone exemplar mask: {error}"))?;
-        exemplars.push(BoneExemplar {
-            hash,
-            width,
-            height,
-            mask,
-        });
-    }
-    exemplars.sort_by_key(|exemplar| exemplar.hash);
-    Ok(exemplars)
-}
-
-fn hash_bone_exemplar_pixels(gray: &[u8], width: u32, height: u32) -> u64 {
-    let mut hash = 0xcbf2_9ce4_8422_2325_u64;
-    for byte in width.to_le_bytes().into_iter().chain(height.to_le_bytes()) {
-        hash ^= u64::from(byte);
-        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
-    }
-    for byte in gray {
-        hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
-    }
-    hash
-}
-
-fn decode_bone_feature_table(data: &[u8]) -> Result<HashMap<u32, u8>, String> {
-    let mut decoder = GzDecoder::new(data);
-    let mut decoded = Vec::new();
-    decoder
-        .read_to_end(&mut decoded)
-        .map_err(|error| format!("decompress bone feature table: {error}"))?;
-    let mut cursor = Cursor::new(decoded.as_slice());
-    let mut magic = [0_u8; 5];
-    cursor
-        .read_exact(&mut magic)
-        .map_err(|error| format!("read bone feature table magic: {error}"))?;
-    if &magic != b"XVBL1" {
-        return Err(format!(
-            "invalid bone feature table magic {:?}",
-            String::from_utf8_lossy(&magic)
-        ));
-    }
-    let count = read_le_u32(&mut cursor)? as usize;
-    let mut table = HashMap::with_capacity(count);
-    for _ in 0..count {
-        let key = read_le_u32(&mut cursor)?;
-        let mut probability = [0_u8; 1];
-        cursor
-            .read_exact(&mut probability)
-            .map_err(|error| format!("read bone feature table probability: {error}"))?;
-        if table.insert(key, probability[0]).is_some() {
-            return Err(format!("bone feature table has duplicate key {key}"));
-        }
-    }
-    if cursor.position() as usize != decoded.len() {
-        return Err(format!(
-            "bone feature table has {} trailing bytes",
-            decoded.len() - cursor.position() as usize
-        ));
-    }
-    Ok(table)
-}
-
-fn read_le_u32(reader: &mut impl Read) -> Result<u32, String> {
-    reader
-        .read_u32::<LittleEndian>()
-        .map_err(|error| format!("read little-endian u32: {error}"))
-}
-
-fn read_le_i32(reader: &mut impl Read) -> Result<i32, String> {
-    reader
-        .read_i32::<LittleEndian>()
-        .map_err(|error| format!("read little-endian i32: {error}"))
-}
-
-fn read_le_u64(reader: &mut impl Read) -> Result<u64, String> {
-    reader
-        .read_u64::<LittleEndian>()
-        .map_err(|error| format!("read little-endian u64: {error}"))
-}
-
-fn read_le_f64(reader: &mut impl Read) -> Result<f64, String> {
-    reader
-        .read_f64::<LittleEndian>()
-        .map_err(|error| format!("read little-endian f64: {error}"))
-}
-
-// Pack a 4D bone feature (x-pos, y-pos, normalized gray, gradient) into a
-// single u32 lookup key. Layout:
-//   bits 0..8   xb       (8 bits, 160 bins fits)
-//   bits 8..16  yb       (8 bits, 224 bins fits)
-//   bits 16..21 nb       (5 bits, 32 bins)
-//   bits 21..25 gb       (4 bits, 16 bins)
-// The .min(BINS - 1) on each is a saturation guard — integer division
-// almost-never overflows the bin count but can on the right-edge pixel.
-fn bone_feature_table_key(
-    x: usize,
-    y: usize,
-    width: usize,
-    height: usize,
-    normalized: u8,
-    gradient: u8,
-) -> u32 {
-    let mut xb = x * BONE_TABLE_X_BINS / width.max(1);
-    let mut yb = y * BONE_TABLE_Y_BINS / height.max(1);
-    let mut nb = usize::from(normalized) * BONE_TABLE_NORMALIZED_BINS / 256;
-    let mut gb = usize::from(gradient) * BONE_TABLE_GRADIENT_BINS / 256;
-    xb = xb.min(BONE_TABLE_X_BINS - 1);
-    yb = yb.min(BONE_TABLE_Y_BINS - 1);
-    nb = nb.min(BONE_TABLE_NORMALIZED_BINS - 1);
-    gb = gb.min(BONE_TABLE_GRADIENT_BINS - 1);
-    (xb as u32) | ((yb as u32) << 8) | ((nb as u32) << 16) | ((gb as u32) << 21)
-}
-
-// Same packing scheme as bone but with a different field layout because the
-// tooth feature space is bigger:
-//   bits 0..8   xb       (256 bins)
-//   bits 8..17  yb       (9 bits, 512 bins)
-//   bits 17..23 nb       (6 bits, 64 bins)
-//   bits 23..28 sb       (5 bits, 32 bins, signed score remapped to [0..32))
-//
-// The score is a continuous f64 in roughly [-4, 4]; the `(score + 4) / 8`
-// affine maps that to [0, 1], then we multiply by SCORE_BINS to bucket.
-// The post-cast clamps handle scores outside the training distribution.
-fn tooth_feature_table_key(
-    x: usize,
-    y: usize,
-    width: usize,
-    height: usize,
-    normalized: u8,
-    score: f64,
-) -> u32 {
-    let mut xb = x * TOOTH_TABLE_X_BINS / width.max(1);
-    let mut yb = y * TOOTH_TABLE_Y_BINS / height.max(1);
-    let mut nb = usize::from(normalized) * TOOTH_TABLE_NORMALIZED_BINS / 256;
-    let mut sb = ((score + 4.0) / 8.0 * TOOTH_TABLE_SCORE_BINS as f64) as isize;
-    xb = xb.min(TOOTH_TABLE_X_BINS - 1);
-    yb = yb.min(TOOTH_TABLE_Y_BINS - 1);
-    nb = nb.min(TOOTH_TABLE_NORMALIZED_BINS - 1);
-    if sb < 0 {
-        sb = 0;
-    }
-    if sb >= TOOTH_TABLE_SCORE_BINS as isize {
-        sb = TOOTH_TABLE_SCORE_BINS as isize - 1;
-    }
-    (xb as u32) | ((yb as u32) << 8) | ((nb as u32) << 17) | ((sb as u32) << 23)
 }
 
 // Histogram-based integer percentile. O(N) — one pass for the histogram,
@@ -2002,33 +1121,28 @@ fn count_components(mask: &[bool], width: usize, height: usize, visited: &mut [b
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
 
-    use flate2::{Compression, write::GzEncoder};
-
-    // Smoke test: cook a 20×20 image with a bright square (the "tooth")
-    // and a striped row (the "bone level"), confirm the analyzer returns
-    // non-empty masks + the expected mode string prefix.
+    // Smoke test: a 32×32 image with a bright smooth square (tooth-like — bright
+    // and low-texture) confirms the pipeline runs end-to-end and returns valid
+    // RGBA previews with the expected mode prefix. We assert the tooth side fires
+    // on the obvious bright blob; we do NOT assert bone, since the bone forest
+    // keys on trabecular texture that a synthetic toy image cannot reproduce.
     #[test]
     fn generate_tooth_overlay_returns_overlay_images() {
-        let mut gray = vec![24_u8; 20 * 20];
-        for y in 6..14 {
-            for x in 7..13 {
-                gray[y * 20 + x] = 210;
+        let mut gray = vec![24_u8; 32 * 32];
+        for y in 8..24 {
+            for x in 9..23 {
+                gray[y * 32 + x] = 210;
             }
         }
-        for x in 0..20 {
-            gray[10 * 20 + x] = if x % 2 == 0 { 40 } else { 180 };
-        }
 
-        let result = generate_tooth_overlay(&PreviewImage::gray(20, 20, gray)).unwrap();
+        let result = generate_tooth_overlay(&PreviewImage::gray(32, 32, gray)).unwrap();
 
-        assert_eq!(result.preview.width, 20);
-        assert_eq!(result.preview.height, 20);
+        assert_eq!(result.preview.width, 32);
+        assert_eq!(result.preview.height, 32);
         assert_eq!(result.preview.format, PreviewFormat::Rgba8);
         assert_eq!(result.filled_preview.format, PreviewFormat::Rgba8);
         assert!(result.tooth_pixels > 0);
-        assert!(result.bone_pixels > 0);
         assert!(result.coverage > 0.0);
         assert!(result.candidate_count > 0);
         assert!(
@@ -2157,128 +1271,22 @@ mod tests {
         );
     }
 
-    // Just checks that the asset deflates + parses without error. If this
-    // fails the shipped binary file has gone bad.
+    // Both shipped forests must decode and carry trees. Guards the assets
+    // produced by examples/train_tooth.rs against corruption / format drift.
     #[test]
-    fn bone_feature_table_model_loads_probabilities() {
-        let table = loaded_bone_feature_table().expect("bone feature table should load");
+    fn tooth_forest_model_loads() {
+        let forest = loaded_tooth_model().expect("tooth forest should load");
 
-        assert!(!table.is_empty());
+        assert!(!forest.trees.is_empty());
+        assert!(forest.trees.iter().all(|tree| !tree.is_empty()));
     }
 
     #[test]
-    fn decode_bone_feature_table_rejects_duplicate_keys() {
-        let data = encoded_bone_feature_table(&[(7, 42), (7, 99)], &[]);
+    fn bone_forest_model_loads() {
+        let forest = loaded_bone_model().expect("bone forest should load");
 
-        let error = decode_bone_feature_table(&data).unwrap_err();
-
-        assert!(error.contains("duplicate key 7"));
-    }
-
-    // Verifies the forest has at least one tree and every tree is non-empty.
-    #[test]
-    fn learned_tooth_model_loads_trees() {
-        let trees = loaded_learned_model().expect("learned tooth model should load");
-
-        assert!(!trees.is_empty());
-        assert!(trees.iter().all(|tree| !tree.is_empty()));
-    }
-
-    #[test]
-    fn decode_learned_model_rejects_invalid_feature_index() {
-        let data = encoded_learned_model(&[vec![LearnedNode {
-            feature: LEARNED_FEATURE_COUNT as i32,
-            threshold: 0.5,
-            left: 1,
-            right: 1,
-            value: 0.0,
-        }]]);
-
-        let error = decode_learned_model(&data).unwrap_err();
-
-        assert!(error.contains("references feature"));
-    }
-
-    #[test]
-    fn decode_learned_model_rejects_cycles() {
-        let data = encoded_learned_model(&[vec![LearnedNode {
-            feature: 0,
-            threshold: 0.5,
-            left: 0,
-            right: 0,
-            value: 0.0,
-        }]]);
-
-        let error = decode_learned_model(&data).unwrap_err();
-
-        assert!(error.contains("contains a cycle"));
-    }
-
-    // Locks the exact entry count of the shipped feature table. If anyone
-    // regenerates the asset and the count changes, update this number too —
-    // and double-check the bucket-size analysis at the top of the file.
-    #[test]
-    fn tooth_feature_table_model_loads_probabilities() {
-        let table = loaded_tooth_feature_table().expect("tooth feature table should load");
-
-        assert_eq!(table.len(), 13_441_673);
-    }
-
-    #[test]
-    fn decode_feature_probability_table_rejects_trailing_bytes() {
-        let data = encoded_feature_table(&[(1, 42)], &[99]);
-
-        let error = decode_feature_probability_table(&data, b"XVFT1").unwrap_err();
-
-        assert!(error.contains("feature table has 1 trailing bytes"));
-    }
-
-    #[test]
-    fn decode_feature_probability_table_rejects_unsorted_keys() {
-        let data = encoded_feature_table(&[(2, 12), (1, 34)], &[]);
-
-        let error = decode_feature_probability_table(&data, b"XVFT1").unwrap_err();
-
-        assert!(error.contains("feature table keys must be strictly ascending"));
-    }
-
-    // Exemplars must be sorted by hash — the inference path binary-searches
-    // by hash, so an unsorted asset would silently produce wrong matches.
-    #[test]
-    fn bone_exemplar_model_loads_sorted_entries() {
-        let exemplars = loaded_bone_exemplar_model().expect("bone exemplar model should load");
-
-        assert!(!exemplars.is_empty());
-        assert!(
-            exemplars
-                .windows(2)
-                .all(|window| window[0].hash <= window[1].hash)
-        );
-    }
-
-    // The empty-input FNV-1a hash. Pins the FNV constants — any change to
-    // the offset basis or prime breaks both this test and the shipped
-    // exemplar lookups.
-    #[test]
-    fn bone_exemplar_hash_matches_reference_fnv_layout() {
-        assert_eq!(hash_bone_exemplar_pixels(&[], 0, 0), 0xa8c7_f832_281a_39c5);
-    }
-
-    // Locks the bit-packing scheme for bone keys. If anyone rearranges the
-    // shifts in bone_feature_table_key, this fires.
-    #[test]
-    fn bone_feature_table_key_matches_reference_layout() {
-        let key = bone_feature_table_key(80, 112, 160, 224, 128, 64);
-
-        assert_eq!(key, 0x0090_7050);
-    }
-
-    // Same idea for tooth — pins bits 0..28 of the key against a known input.
-    #[test]
-    fn tooth_feature_table_key_matches_reference_layout() {
-        let key = tooth_feature_table_key(128, 256, 256, 512, 128, 0.0);
-
-        assert_eq!(key, 0x0841_0080);
+        assert!(!forest.trees.is_empty());
+        assert!(forest.trees.iter().all(|tree| !tree.is_empty()));
     }
 
     // Test fixture: paint a filled rectangle into a 1D row-major mask.
@@ -2328,52 +1336,5 @@ mod tests {
             preview.pixels[base + 1],
             preview.pixels[base + 2],
         ]
-    }
-
-    fn encoded_feature_table(entries: &[(u32, u8)], trailing: &[u8]) -> Vec<u8> {
-        let mut raw = Vec::new();
-        raw.extend_from_slice(b"XVFT1");
-        raw.extend_from_slice(&(entries.len() as u32).to_le_bytes());
-        for (key, probability) in entries {
-            raw.extend_from_slice(&key.to_le_bytes());
-            raw.push(*probability);
-        }
-        raw.extend_from_slice(trailing);
-
-        let mut encoder = GzEncoder::new(Vec::new(), Compression::fast());
-        encoder.write_all(&raw).unwrap();
-        encoder.finish().unwrap()
-    }
-
-    fn encoded_bone_feature_table(entries: &[(u32, u8)], trailing: &[u8]) -> Vec<u8> {
-        let mut raw = Vec::new();
-        raw.extend_from_slice(b"XVBL1");
-        raw.extend_from_slice(&(entries.len() as u32).to_le_bytes());
-        for (key, probability) in entries {
-            raw.extend_from_slice(&key.to_le_bytes());
-            raw.push(*probability);
-        }
-        raw.extend_from_slice(trailing);
-
-        let mut encoder = GzEncoder::new(Vec::new(), Compression::fast());
-        encoder.write_all(&raw).unwrap();
-        encoder.finish().unwrap()
-    }
-
-    fn encoded_learned_model(trees: &[Vec<LearnedNode>]) -> Vec<u8> {
-        let mut raw = Vec::new();
-        raw.extend_from_slice(b"XVLM1");
-        raw.extend_from_slice(&(trees.len() as u32).to_le_bytes());
-        for tree in trees {
-            raw.extend_from_slice(&(tree.len() as u32).to_le_bytes());
-            for node in tree {
-                raw.extend_from_slice(&node.feature.to_le_bytes());
-                raw.extend_from_slice(&node.threshold.to_le_bytes());
-                raw.extend_from_slice(&node.left.to_le_bytes());
-                raw.extend_from_slice(&node.right.to_le_bytes());
-                raw.extend_from_slice(&node.value.to_le_bytes());
-            }
-        }
-        raw
     }
 }
