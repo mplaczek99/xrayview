@@ -37,6 +37,17 @@ function requireNonBlank(value: string, fieldName: string): string {
   return trimmed;
 }
 
+function validateLineAnnotationPoints(annotation: LineAnnotation) {
+  if (
+    !Number.isFinite(annotation.start.x) ||
+    !Number.isFinite(annotation.start.y) ||
+    !Number.isFinite(annotation.end.x) ||
+    !Number.isFinite(annotation.end.y)
+  ) {
+    throw mockError("invalidInput", "line annotation points must be finite numbers");
+  }
+}
+
 function fileNameFromPath(inputPath: string): string {
   return inputPath.split(/[\\/]/).pop() ?? inputPath;
 }
@@ -270,7 +281,10 @@ export function createMockBackendAPI(): BackendAPI {
 
       return cancelling;
     },
-    measureLineAnnotation: async (_studyId, annotation): Promise<LineAnnotation> =>
-      measureMockLineAnnotation(annotation),
+    measureLineAnnotation: async (studyId, annotation): Promise<LineAnnotation> => {
+      requireNonBlank(studyId, "studyId");
+      validateLineAnnotationPoints(annotation);
+      return measureMockLineAnnotation(annotation);
+    },
   };
 }
