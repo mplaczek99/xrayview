@@ -70,8 +70,9 @@ pub struct App {
     // logic find an in-flight job for a given fingerprint without scanning.
     active_fingerprints: Mutex<HashMap<String, String>>,
     // fingerprint → completed JobResult. The "cached job" fast path serves
-    // out of this. Arc again so we can hand snapshots to subscribers cheaply.
-    result_cache: Mutex<HashMap<String, Arc<JobResult>>>,
+    // out of this. Bounded FIFO so unique processing settings don't grow the
+    // session forever. Arc again so snapshots can share payloads cheaply.
+    result_cache: Mutex<ResultCache>,
     // In-memory decoded BMP cache. Avoids re-parsing the same file across
     // back-to-back render/process/analyze on one study.
     source_preview_cache: SourcePreviewCache,
@@ -96,6 +97,8 @@ const MAX_ARTIFACT_BYTES: u64 = 256 * 1024 * 1024;
 // Cap on completed/failed/cancelled jobs we keep around. Older terminal
 // jobs get evicted FIFO so the job registry doesn't grow forever.
 const MAX_TERMINAL_JOBS: usize = 64;
+// Cap on completed result payloads served by the in-session cache.
+const MAX_RESULT_CACHE_ENTRIES: usize = 64;
 
 // Handed back to subscribe_job_updates callers. Hold the receiver to keep
 // the subscription alive; drop it (or call unsubscribe_job_updates) to stop.
@@ -116,6 +119,47 @@ enum AsyncJobReservation {
 struct JobRegistry {
     snapshots: HashMap<String, JobSnapshot>,
     terminal_order: VecDeque<String>,
+}
+
+#[derive(Default)]
+struct ResultCache {
+    entries: HashMap<String, Arc<JobResult>>,
+    order: VecDeque<String>,
+}
+
+impl ResultCache {
+    fn get(&self, fingerprint: &str) -> Option<Arc<JobResult>> {
+        self.entries.get(fingerprint).cloned()
+    }
+
+    fn remove(&mut self, fingerprint: &str) {
+        if self.entries.remove(fingerprint).is_some() {
+            self.order.retain(|entry| entry != fingerprint);
+        }
+    }
+
+    fn insert(&mut self, fingerprint: String, result: Arc<JobResult>) {
+        if self.entries.insert(fingerprint.clone(), result).is_some() {
+            self.order.retain(|entry| entry != &fingerprint);
+        }
+        self.order.push_back(fingerprint);
+        while self.entries.len() > MAX_RESULT_CACHE_ENTRIES {
+            let Some(evict_fingerprint) = self.order.pop_front() else {
+                return;
+            };
+            self.entries.remove(&evict_fingerprint);
+        }
+    }
+
+    #[cfg(test)]
+    fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    #[cfg(test)]
+    fn contains_key(&self, fingerprint: &str) -> bool {
+        self.entries.contains_key(fingerprint)
+    }
 }
 
 impl JobRegistry {
@@ -227,7 +271,7 @@ impl App {
             studies: Mutex::new(HashMap::new()),
             jobs: Mutex::new(JobRegistry::default()),
             active_fingerprints: Mutex::new(HashMap::new()),
-            result_cache: Mutex::new(HashMap::new()),
+            result_cache: Mutex::new(ResultCache::default()),
             source_preview_cache: SourcePreviewCache::default_session_cache(),
             job_update_subscribers: Mutex::new(HashMap::new()),
             persistence,
@@ -962,7 +1006,7 @@ impl App {
         job_kind: JobKind,
         study_id: String,
     ) -> Result<Option<StartedJob>, BackendError> {
-        let cached = self.result_cache.lock().get(fingerprint).cloned();
+        let cached = self.result_cache.lock().get(fingerprint);
         let Some(cached_result) = cached else {
             return Ok(None);
         };
@@ -2569,6 +2613,39 @@ mod tests {
             jobs.values()
                 .all(|snapshot| is_terminal_state(&snapshot.state))
         );
+    }
+
+    #[test]
+    fn store_completed_result_caps_result_cache_retention() {
+        let app = App::new(Config::default()).unwrap();
+
+        for index in 0..(MAX_RESULT_CACHE_ENTRIES + 5) {
+            let snapshot = completed_job_snapshot(
+                format!("job-{index}"),
+                JobKind::RenderStudy,
+                Some("study-1".to_string()),
+                JobResult {
+                    kind: JobKind::RenderStudy,
+                    payload: serde_json::json!({
+                        "studyId": "study-1",
+                        "previewPath": format!("/tmp/preview-{index}.bmp"),
+                        "loadedWidth": 1,
+                        "loadedHeight": 1,
+                        "measurementScale": null
+                    }),
+                },
+            );
+            assert!(app.store_completed_result(&format!("fingerprint-{index}"), &snapshot));
+        }
+
+        let cache = app.result_cache.lock();
+        assert_eq!(cache.len(), MAX_RESULT_CACHE_ENTRIES);
+        for index in 0..5 {
+            assert!(!cache.contains_key(&format!("fingerprint-{index}")));
+        }
+        for index in 5..(MAX_RESULT_CACHE_ENTRIES + 5) {
+            assert!(cache.contains_key(&format!("fingerprint-{index}")));
+        }
     }
 
     // The dedup path: two reserve_async_job calls with the same fingerprint
