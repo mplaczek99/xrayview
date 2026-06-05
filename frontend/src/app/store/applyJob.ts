@@ -1,8 +1,35 @@
 import type { JobSnapshot } from "../../features/jobs/model";
-import type { WorkbenchStudy } from "../../features/study/model";
+import type { WorkbenchState, WorkbenchStudy } from "../../features/study/model";
 import { formatBackendError } from "../../lib/backendErrors";
 
-function applyRenderJob(study: WorkbenchStudy, job: JobSnapshot): WorkbenchStudy {
+function isPendingJob(job: JobSnapshot | null | undefined): boolean {
+  return job?.state === "queued" || job?.state === "running" || job?.state === "cancelling";
+}
+
+function hasPendingSupersedingJob(
+  currentJobId: string | null | undefined,
+  incomingJob: JobSnapshot,
+  jobs: WorkbenchState["jobs"],
+): boolean {
+  return Boolean(
+    currentJobId && currentJobId !== incomingJob.jobId && isPendingJob(jobs[currentJobId]),
+  );
+}
+
+function processRunJobId(study: WorkbenchStudy): string | null {
+  const { runStatus } = study.processing;
+  return runStatus.state === "idle" ? null : runStatus.jobId;
+}
+
+function applyRenderJob(
+  study: WorkbenchStudy,
+  job: JobSnapshot,
+  jobs: WorkbenchState["jobs"],
+): WorkbenchStudy {
+  if (hasPendingSupersedingJob(study.renderJobId, job, jobs)) {
+    return study;
+  }
+
   switch (job.state) {
     case "queued":
     case "running":
@@ -41,7 +68,15 @@ function applyRenderJob(study: WorkbenchStudy, job: JobSnapshot): WorkbenchStudy
   }
 }
 
-function applyAnalyzeJob(study: WorkbenchStudy, job: JobSnapshot): WorkbenchStudy {
+function applyAnalyzeJob(
+  study: WorkbenchStudy,
+  job: JobSnapshot,
+  jobs: WorkbenchState["jobs"],
+): WorkbenchStudy {
+  if (hasPendingSupersedingJob(study.analysisJobId, job, jobs)) {
+    return study;
+  }
+
   switch (job.state) {
     case "queued":
     case "running":
@@ -95,7 +130,15 @@ function applyAnalyzeJob(study: WorkbenchStudy, job: JobSnapshot): WorkbenchStud
   }
 }
 
-function applyProcessJob(study: WorkbenchStudy, job: JobSnapshot): WorkbenchStudy {
+function applyProcessJob(
+  study: WorkbenchStudy,
+  job: JobSnapshot,
+  jobs: WorkbenchState["jobs"],
+): WorkbenchStudy {
+  if (hasPendingSupersedingJob(processRunJobId(study), job, jobs)) {
+    return study;
+  }
+
   switch (job.state) {
     case "queued":
     case "running":
@@ -165,13 +208,17 @@ function applyProcessJob(study: WorkbenchStudy, job: JobSnapshot): WorkbenchStud
   }
 }
 
-export function applyJobToStudy(study: WorkbenchStudy, job: JobSnapshot): WorkbenchStudy {
+export function applyJobToStudy(
+  study: WorkbenchStudy,
+  job: JobSnapshot,
+  jobs: WorkbenchState["jobs"],
+): WorkbenchStudy {
   switch (job.jobKind) {
     case "renderStudy":
-      return applyRenderJob(study, job);
+      return applyRenderJob(study, job, jobs);
     case "analyzeStudy":
-      return applyAnalyzeJob(study, job);
+      return applyAnalyzeJob(study, job, jobs);
     case "processStudy":
-      return applyProcessJob(study, job);
+      return applyProcessJob(study, job, jobs);
   }
 }

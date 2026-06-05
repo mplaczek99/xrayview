@@ -568,7 +568,7 @@ class WorkbenchStore {
       const pendingJobIds = nextPendingJobIds(current.pendingJobIds, previous, nextJob);
       const studies = { ...current.studies };
       if (nextJob.studyId && studies[nextJob.studyId]) {
-        studies[nextJob.studyId] = applyJobToStudy(studies[nextJob.studyId], nextJob);
+        studies[nextJob.studyId] = applyJobToStudy(studies[nextJob.studyId], nextJob, jobs);
       }
 
       const activeStudy = current.activeStudyId ? studies[current.activeStudyId] : null;
