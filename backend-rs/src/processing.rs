@@ -53,6 +53,10 @@ pub enum ProcessingError {
     // Width gets doubled in the compare path — guard against u32 overflow.
     #[error("compare preview width overflow")]
     CompareWidthOverflow,
+    #[error("compare preview size overflow")]
+    CompareSizeOverflow,
+    #[error("preview pixel length does not match dimensions")]
+    InvalidPreviewPixels,
     #[error("palette must be one of: none, hot, bone")]
     UnknownPalette,
 }
@@ -166,6 +170,7 @@ pub fn process_rendered_preview(
     if source_preview.format != PreviewFormat::Gray8 {
         return Err(ProcessingError::NonGray8Input);
     }
+    validate_preview_pixels(&source_preview)?;
 
     // Cheap clone — Arc<[u8]> just bumps a refcount. The CoW happens below
     // when Arc::make_mut is called.
@@ -275,6 +280,7 @@ fn apply_named_palette(
     if preview.format != PreviewFormat::Gray8 {
         return Err(ProcessingError::PaletteRequiresGray8);
     }
+    validate_preview_pixels(preview)?;
 
     let color_fn: fn(u8) -> [u8; 4] = match palette {
         Palette::Hot => hot_color,
@@ -310,6 +316,8 @@ fn combine_comparison(
     if left.width != right.width || left.height != right.height {
         return Err(ProcessingError::CompareDimensionMismatch);
     }
+    validate_preview_pixels(left)?;
+    validate_preview_pixels(right)?;
 
     let width = left.width as usize;
     // 2× width can overflow u32 for absurd inputs — refuse instead of wrapping.
@@ -318,7 +326,10 @@ fn combine_comparison(
         .checked_mul(2)
         .ok_or(ProcessingError::CompareWidthOverflow)?;
     let combined_width_usize = combined_width as usize;
-    let output_len = combined_width_usize * left.height as usize * 4;
+    let output_len = combined_width_usize
+        .checked_mul(left.height as usize)
+        .and_then(|pixels| pixels.checked_mul(4))
+        .ok_or(ProcessingError::CompareSizeOverflow)?;
     let mut pixels: Vec<u8> = Vec::with_capacity(output_len);
     let mut dst = 0;
 
@@ -374,6 +385,21 @@ fn combine_comparison(
     }
 
     Ok(PreviewImage::rgba(combined_width, left.height, pixels))
+}
+
+fn validate_preview_pixels(preview: &PreviewImage) -> Result<(), ProcessingError> {
+    let channels = match preview.format {
+        PreviewFormat::Gray8 => 1,
+        PreviewFormat::Rgba8 => 4,
+    };
+    let expected = (preview.width as usize)
+        .checked_mul(preview.height as usize)
+        .and_then(|pixels| pixels.checked_mul(channels))
+        .ok_or(ProcessingError::InvalidPreviewPixels)?;
+    if preview.pixels.len() != expected {
+        return Err(ProcessingError::InvalidPreviewPixels);
+    }
+    Ok(())
 }
 
 // LUT that maps every byte to itself — the starting point when composing
@@ -552,6 +578,36 @@ mod tests {
         assert_eq!(output.preview.width, 4);
         assert_eq!(output.preview.height, 1);
         assert_eq!(output.preview.format, PreviewFormat::Rgba8);
+    }
+
+    #[test]
+    fn process_rendered_preview_rejects_mismatched_gray_buffer() {
+        let source = PreviewImage::gray(2, 2, vec![0, 255]);
+
+        let error = process_rendered_preview(
+            source,
+            GrayscaleControls {
+                invert: false,
+                brightness: 0,
+                contrast: 1.0,
+                equalize: false,
+            },
+            Palette::None,
+            false,
+        )
+        .unwrap_err();
+
+        assert_eq!(error, ProcessingError::InvalidPreviewPixels);
+    }
+
+    #[test]
+    fn combine_comparison_rejects_mismatched_right_buffer() {
+        let left = PreviewImage::gray(2, 1, vec![0, 255]);
+        let right = PreviewImage::rgba(2, 1, vec![0, 0, 0, 255]);
+
+        let error = combine_comparison(&left, &right).unwrap_err();
+
+        assert_eq!(error, ProcessingError::InvalidPreviewPixels);
     }
 
     // The preset fallback path: brightness/contrast/palette all unset on the
