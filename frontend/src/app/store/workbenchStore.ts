@@ -60,6 +60,22 @@ function isPendingJob(job: JobSnapshot | null): boolean {
   );
 }
 
+function isTerminalJob(job: JobSnapshot): boolean {
+  return job.state === "completed" || job.state === "failed" || job.state === "cancelled";
+}
+
+function isStaleJobSnapshot(prev: JobSnapshot, next: JobSnapshot): boolean {
+  if (isTerminalJob(prev) && !isTerminalJob(next)) {
+    return true;
+  }
+
+  return (
+    prev.state === next.state &&
+    prev.progress.percent > next.progress.percent &&
+    (next.state === "queued" || next.state === "running" || next.state === "cancelling")
+  );
+}
+
 function nextPendingJobIds(
   currentIds: ReadonlySet<string>,
   previous: JobSnapshot | undefined,
@@ -540,6 +556,9 @@ class WorkbenchStore {
       // `nextState === this.state` guard in setState, preventing listener
       // notifications and unnecessary HTMX shell swaps for no-op polls.
       if (previous && jobSnapshotEqual(previous, job)) {
+        return current;
+      }
+      if (previous && isStaleJobSnapshot(previous, job)) {
         return current;
       }
       const nextJob: JobSnapshot = {

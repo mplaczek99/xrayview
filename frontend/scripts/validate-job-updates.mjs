@@ -37,6 +37,22 @@ function nullableJsonEqual(prev, next) {
   return JSON.stringify(prev) === JSON.stringify(next);
 }
 
+function isTerminalJob(job) {
+  return job.state === "completed" || job.state === "failed" || job.state === "cancelled";
+}
+
+function isStaleJobSnapshot(prev, next) {
+  if (isTerminalJob(prev) && !isTerminalJob(next)) {
+    return true;
+  }
+
+  return (
+    prev.state === next.state &&
+    prev.progress.percent > next.progress.percent &&
+    (next.state === "queued" || next.state === "running" || next.state === "cancelling")
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Minimal fixture helpers
 // ---------------------------------------------------------------------------
@@ -89,6 +105,9 @@ function makeMinimalStore(initialSnapshot) {
       const previous = current.jobs[job.jobId];
       if (previous && jobSnapshotEqual(previous, job)) {
         return current; // <-- early return, same ref → no listener notification
+      }
+      if (previous && isStaleJobSnapshot(previous, job)) {
+        return current; // delayed event/poll snapshot behind current state
       }
       const jobs = { ...current.jobs, [job.jobId]: { ...job } };
       return { ...current, jobs };
@@ -217,6 +236,45 @@ test("AFTER: repeated completed snapshot does NOT fire listener again", () => {
     0,
     "AFTER: terminal state repeated polls → 0 notifications",
   );
+});
+
+test("AFTER: delayed running snapshot does not regress completed job", () => {
+  const done = makeSnapshot({
+    state: "completed",
+    progress: makeProgress(100, "completed", "Completed"),
+    result: { kind: "renderStudy", payload: { previewPath: "/tmp/out.bmp" } },
+  });
+  const store = makeMinimalStore(done);
+  store.resetListenerCount();
+
+  store.receiveJobUpdate_AFTER(
+    makeSnapshot({
+      state: "running",
+      progress: makeProgress(75, "renderingPreview", "Rendering preview"),
+    }),
+  );
+
+  assert.equal(store.getListenerCount(), 0, "AFTER: stale running snapshot is ignored");
+  assert.equal(store.getState().jobs.j1.state, "completed", "AFTER: completed state is retained");
+});
+
+test("AFTER: delayed lower-progress running snapshot is ignored", () => {
+  const current = makeSnapshot({
+    state: "running",
+    progress: makeProgress(90, "writingPreview", "Writing preview"),
+  });
+  const store = makeMinimalStore(current);
+  store.resetListenerCount();
+
+  store.receiveJobUpdate_AFTER(
+    makeSnapshot({
+      state: "running",
+      progress: makeProgress(35, "loadingStudy", "Loading source study"),
+    }),
+  );
+
+  assert.equal(store.getListenerCount(), 0, "AFTER: lower-progress snapshot is ignored");
+  assert.equal(store.getState().jobs.j1.progress.percent, 90, "AFTER: higher progress is retained");
 });
 
 test("AFTER: changed completed result payload fires listener", () => {
