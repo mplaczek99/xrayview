@@ -45,10 +45,10 @@ use crate::{
     config::Config,
     contracts::{
         AnalyzeStudyCommand, AnalyzeStudyCommandResult, BackendError, GetJobsCommand, JobCommand,
-        JobKind, JobProgress, JobResult, JobSnapshot, JobState, MeasureLineAnnotationCommand,
-        MeasureLineAnnotationCommandResult, MeasurementScale, OpenStudyCommand,
-        OpenStudyCommandResult, ProcessStudyCommand, ProcessStudyCommandResult, ProcessingManifest,
-        RenderStudyCommand, RenderStudyCommandResult, StartedJob, StudyRecord,
+        JobKind, JobProgress, JobResult, JobSnapshot, JobState, LineAnnotation,
+        MeasureLineAnnotationCommand, MeasureLineAnnotationCommandResult, MeasurementScale,
+        OpenStudyCommand, OpenStudyCommandResult, ProcessStudyCommand, ProcessStudyCommandResult,
+        ProcessingManifest, RenderStudyCommand, RenderStudyCommandResult, StartedJob, StudyRecord,
         default_processing_manifest,
     },
     persistence, processing, render,
@@ -712,6 +712,7 @@ impl App {
             .get(study_id)
             .cloned()
             .ok_or_else(|| BackendError::not_found(format!("study not found: {study_id}")))?;
+        validate_line_annotation_points(&command.annotation)?;
 
         Ok(MeasureLineAnnotationCommandResult {
             study_id: study.study_id.clone(),
@@ -1948,6 +1949,19 @@ fn validate_input_file(input_path: &str) -> Result<(), BackendError> {
     Ok(())
 }
 
+fn validate_line_annotation_points(annotation: &LineAnnotation) -> Result<(), BackendError> {
+    if !annotation.start.x.is_finite()
+        || !annotation.start.y.is_finite()
+        || !annotation.end.x.is_finite()
+        || !annotation.end.y.is_finite()
+    {
+        return Err(BackendError::invalid_input(
+            "line annotation points must be finite numbers",
+        ));
+    }
+    Ok(())
+}
+
 fn queued_job_snapshot(job_id: String, job_kind: JobKind, study_id: Option<String>) -> JobSnapshot {
     JobSnapshot {
         job_id,
@@ -2164,6 +2178,34 @@ mod tests {
         let measurement = result.annotation.measurement.unwrap();
         assert_eq!(measurement.pixel_length, 5.0);
         assert_eq!(measurement.calibrated_length_mm, Some(1.3));
+    }
+
+    #[test]
+    fn measure_line_annotation_rejects_non_finite_points() {
+        let app = App::new(Config::default()).unwrap();
+        let study = app.register_study("/tmp/measurement.bmp", None).unwrap();
+
+        let error = app
+            .measure_line_annotation(MeasureLineAnnotationCommand {
+                study_id: study.study_id,
+                annotation: LineAnnotation {
+                    id: "line-1".to_string(),
+                    label: "Measurement 1".to_string(),
+                    source: AnnotationSource::Manual,
+                    start: AnnotationPoint {
+                        x: f64::NAN,
+                        y: 8.0,
+                    },
+                    end: AnnotationPoint { x: 14.0, y: 11.0 },
+                    editable: true,
+                    confidence: None,
+                    measurement: None,
+                },
+            })
+            .unwrap_err();
+
+        assert_eq!(error.code, crate::contracts::BackendErrorCode::InvalidInput);
+        assert!(error.message.contains("finite numbers"));
     }
 
     // Full sync render path: kicks off, runs to completion, checks that
