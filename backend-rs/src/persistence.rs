@@ -521,7 +521,7 @@ mod tests {
         opened.measurement_scale = Some(MeasurementScale {
             row_spacing_mm: 0.2,
             column_spacing_mm: 0.3,
-            source: "PixelSpacing".to_string(),
+            source: "manualCalibration".to_string(),
         });
 
         catalog.record_opened_study(&opened).unwrap();
@@ -533,7 +533,7 @@ mod tests {
             serde_json::json!({
                 "rowSpacingMm": 0.2,
                 "columnSpacingMm": 0.3,
-                "source": "PixelSpacing"
+                "source": "manualCalibration"
             })
         );
         assert_eq!(

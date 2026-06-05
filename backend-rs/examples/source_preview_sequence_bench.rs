@@ -2,8 +2,9 @@
 // render N variants from the same source) actually beat the "just call each
 // render variant from scratch" pattern? This bench answers that quantitatively.
 //
-// Reports a speedup factor — if shared-source ever stops beating legacy by a
-// solid margin, something has regressed in render_grayscale_preview_from_source.
+// Reports a speedup factor — if shared-source ever stops beating repeated
+// file-based renders by a solid margin, something has regressed in
+// render_grayscale_preview_from_source.
 
 use std::{env, fs, hint::black_box, time::Instant};
 
@@ -22,13 +23,14 @@ fn main() {
     // differ.
     assert_matching_outputs(&path).expect("matching preview outputs");
 
-    let mut legacy_pixels = 0;
-    let legacy_start = Instant::now();
+    let mut file_based_pixels = 0;
+    let file_based_start = Instant::now();
     for _ in 0..iterations {
-        legacy_pixels = render_legacy_sequence(black_box(&path)).expect("legacy sequence");
-        black_box(legacy_pixels);
+        file_based_pixels =
+            render_file_based_sequence(black_box(&path)).expect("file-based sequence");
+        black_box(file_based_pixels);
     }
-    let legacy_elapsed = legacy_start.elapsed();
+    let file_based_elapsed = file_based_start.elapsed();
 
     let mut shared_pixels = 0;
     let shared_start = Instant::now();
@@ -39,12 +41,14 @@ fn main() {
     }
     let shared_elapsed = shared_start.elapsed();
 
-    let legacy_avg = legacy_elapsed.as_secs_f64() * 1_000.0 / iterations as f64;
+    let file_based_avg = file_based_elapsed.as_secs_f64() * 1_000.0 / iterations as f64;
     let shared_avg = shared_elapsed.as_secs_f64() * 1_000.0 / iterations as f64;
-    println!("source_preview_sequence iterations={iterations} pixels_per_sequence={legacy_pixels}");
     println!(
-        "legacy(two file renders): total_ms={:.3} avg_ms={legacy_avg:.3}",
-        legacy_elapsed.as_secs_f64() * 1_000.0
+        "source_preview_sequence iterations={iterations} pixels_per_sequence={file_based_pixels}"
+    );
+    println!(
+        "file_based(two file renders): total_ms={:.3} avg_ms={file_based_avg:.3}",
+        file_based_elapsed.as_secs_f64() * 1_000.0
     );
     println!(
         "shared(decoded once): total_ms={:.3} avg_ms={shared_avg:.3}",
@@ -52,15 +56,15 @@ fn main() {
     );
     println!(
         "saved_per_sequence_ms={:.3} speedup={:.2}x vmhwm_kb={}",
-        legacy_avg - shared_avg,
-        legacy_avg / shared_avg,
+        file_based_avg - shared_avg,
+        file_based_avg / shared_avg,
         peak_resident_set_kb().unwrap_or(0),
     );
-    assert_eq!(legacy_pixels, shared_pixels);
+    assert_eq!(file_based_pixels, shared_pixels);
 }
 
-// Two separate file-based render calls — what we used to do.
-fn render_legacy_sequence(path: &str) -> Result<usize, String> {
+// Two separate file-based render calls: the straightforward baseline.
+fn render_file_based_sequence(path: &str) -> Result<usize, String> {
     let render = xrayview_backend_rs::bmp::render_grayscale_preview_file(path)?;
     let analysis =
         xrayview_backend_rs::bmp::render_grayscale_preview_file_for_tooth_analysis(path)?;
@@ -68,16 +72,16 @@ fn render_legacy_sequence(path: &str) -> Result<usize, String> {
 }
 
 fn assert_matching_outputs(path: &str) -> Result<(), String> {
-    let legacy_render = xrayview_backend_rs::bmp::render_grayscale_preview_file(path)?;
-    let legacy_analysis =
+    let file_based_render = xrayview_backend_rs::bmp::render_grayscale_preview_file(path)?;
+    let file_based_analysis =
         xrayview_backend_rs::bmp::render_grayscale_preview_file_for_tooth_analysis(path)?;
     let source = xrayview_backend_rs::bmp::decode_source_preview_file(path)?;
     let shared_render = xrayview_backend_rs::bmp::render_grayscale_preview_from_source(&source);
     let shared_analysis =
         xrayview_backend_rs::bmp::render_grayscale_preview_from_source_for_tooth_analysis(&source);
 
-    assert_eq!(legacy_render, shared_render);
-    assert_eq!(legacy_analysis, shared_analysis);
+    assert_eq!(file_based_render, shared_render);
+    assert_eq!(file_based_analysis, shared_analysis);
     Ok(())
 }
 

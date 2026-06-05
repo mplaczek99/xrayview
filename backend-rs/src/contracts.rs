@@ -139,9 +139,8 @@ pub fn default_processing_manifest() -> ProcessingManifest {
 }
 
 // Per-axis pixel spacing in millimeters. Bitewings can have non-square pixels
-// (row vs column spacing differ), so we keep them separate. `source` is the
-// metadata field this came from — e.g. "PixelSpacing" for DICOM-style — kept
-// for traceability in the UI footer.
+// (row vs column spacing differ), so we keep them separate. `source` records
+// where calibration came from so the UI can show it traceably.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct MeasurementScale {

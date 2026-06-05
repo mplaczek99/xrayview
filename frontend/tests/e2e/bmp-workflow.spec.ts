@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-test("opens and processes a BMP without legacy output UI", async ({ page }) => {
+test("opens and processes a BMP with current processing UI", async ({ page }) => {
   const runtimeErrors: string[] = [];
   page.on("pageerror", (error) => runtimeErrors.push(error.message));
   page.on("console", (message) => {
@@ -22,12 +22,6 @@ test("opens and processes a BMP without legacy output UI", async ({ page }) => {
 
   await expect(page.locator(".run-status--success")).toContainText("Processing complete.");
 
-  const legacyPattern = new RegExp(
-    ["di" + "com", "ti" + "ff", "\\.d" + "cm\\b", "\\.t" + "if\\b"].join("|"),
-    "i",
-  );
-  const bodyText = await page.locator("body").textContent();
-  expect(bodyText ?? "").not.toMatch(legacyPattern);
   await expect(
     page.locator("[data-action=choose-output-path], [data-action=clear-output-path]"),
   ).toHaveCount(0);

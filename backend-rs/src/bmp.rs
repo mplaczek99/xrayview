@@ -19,24 +19,20 @@ use byteorder::{ByteOrder, LittleEndian};
 
 use crate::contracts::MeasurementScale;
 
-// Metadata mirrors the DICOM tag names we used to surface. With BMP there's
-// no real PixelSpacing, so measurement_scale() always returns None for now —
-// kept as a method so callers compose the same way they used to.
+// Header metadata exposed to the rest of the backend. BMP files do not carry
+// pixel spacing, so measurement_scale() always returns None for now.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Metadata {
-    pub rows: u16,
-    pub columns: u16,
-    pub samples_per_pixel: u16,
-    pub bits_allocated: u16,
-    pub bits_stored: u16,
-    // "MONOCHROME2" for grayscale (white = high) or "RGB" for color. Inherited
-    // vocabulary from when this also read DICOM.
-    pub photometric_interpretation: String,
+    pub width: u32,
+    pub height: u32,
+    pub color_channel_count: u16,
+    pub bits_per_channel: u16,
+    pub color_model: String,
 }
 
 impl Metadata {
-    // BMP has no pixel-spacing metadata — always None. Left in place so the
-    // upstream code can stay format-agnostic.
+    // BMP has no pixel-spacing metadata. Left in place so callers can use the
+    // same measurement abstraction for all open studies.
     #[must_use]
     pub fn measurement_scale(&self) -> Option<MeasurementScale> {
         None
@@ -78,17 +74,16 @@ pub fn read_file(path: &str) -> Result<Metadata, String> {
         .map_err(|error| format!("read BMP metadata from {}: {error}", path.display()))
 }
 
-// The actual metadata extractor. Note we hardcode bits_allocated/stored = 8;
-// BMP can technically express 1/4/16-bit depths but we don't ship support.
+// The actual metadata extractor. We report 8-bit channels because these are
+// the only BMP depths this decoder normalizes into source-preview pixels.
 pub fn read_header(bytes: &[u8]) -> Result<Metadata, String> {
     let header = parse_bmp_header(bytes)?;
     Ok(Metadata {
-        rows: header.height as u16,
-        columns: header.width as u16,
-        samples_per_pixel: header.samples_per_pixel(),
-        bits_allocated: 8,
-        bits_stored: 8,
-        photometric_interpretation: header.photometric_interpretation().to_string(),
+        width: header.width as u32,
+        height: header.height as u32,
+        color_channel_count: header.color_channel_count(),
+        bits_per_channel: 8,
+        color_model: header.color_model().to_string(),
     })
 }
 
@@ -311,23 +306,17 @@ struct BmpHeader {
 }
 
 impl BmpHeader {
-    // 8-bit means we get one byte per pixel (palette or grayscale).
-    // 24/32-bit means three color samples. Used only in Metadata population.
-    fn samples_per_pixel(self) -> u16 {
-        if self.bits_per_pixel == 8 {
-            1
-        } else {
-            3
-        }
+    // 8-bit means one grayscale value per pixel after palette expansion.
+    // 24/32-bit means three color channels before grayscale projection.
+    fn color_channel_count(self) -> u16 {
+        if self.bits_per_pixel == 8 { 1 } else { 3 }
     }
 
-    // MONOCHROME2 in DICOM-speak means "white = high value". RGB is the
-    // obvious color case. We don't have a path for MONOCHROME1 (inverted).
-    fn photometric_interpretation(self) -> &'static str {
-        if self.samples_per_pixel() == 1 {
-            "MONOCHROME2"
+    fn color_model(self) -> &'static str {
+        if self.color_channel_count() == 1 {
+            "grayscale"
         } else {
-            "RGB"
+            "rgb"
         }
     }
 
@@ -717,7 +706,6 @@ pub mod tests {
     use super::*;
 
     // End-to-end: write a 2×2 32-bit BMP, parse the metadata back. Pins
-    // RGB photometric, samples=3 for color BMPs.
     #[test]
     fn read_file_reads_bmp_metadata() {
         let path = unique_temp_path("metadata", "bmp");
@@ -733,11 +721,11 @@ pub mod tests {
 
         let metadata = read_file(path.to_str().unwrap()).unwrap();
 
-        assert_eq!(metadata.rows, 2);
-        assert_eq!(metadata.columns, 2);
-        assert_eq!(metadata.samples_per_pixel, 3);
-        assert_eq!(metadata.bits_allocated, 8);
-        assert_eq!(metadata.photometric_interpretation, "RGB");
+        assert_eq!(metadata.width, 2);
+        assert_eq!(metadata.height, 2);
+        assert_eq!(metadata.color_channel_count, 3);
+        assert_eq!(metadata.bits_per_channel, 8);
+        assert_eq!(metadata.color_model, "rgb");
         let _ = std::fs::remove_file(path);
     }
 
@@ -754,12 +742,11 @@ pub mod tests {
 
         let metadata = read_file(path.to_str().unwrap()).unwrap();
 
-        assert_eq!(metadata.rows, 1200);
-        assert_eq!(metadata.columns, 854);
-        assert_eq!(metadata.samples_per_pixel, 3);
-        assert_eq!(metadata.bits_allocated, 8);
-        assert_eq!(metadata.bits_stored, 8);
-        assert_eq!(metadata.photometric_interpretation, "RGB");
+        assert_eq!(metadata.width, 854);
+        assert_eq!(metadata.height, 1200);
+        assert_eq!(metadata.color_channel_count, 3);
+        assert_eq!(metadata.bits_per_channel, 8);
+        assert_eq!(metadata.color_model, "rgb");
         let _ = std::fs::remove_file(path);
     }
 
@@ -879,11 +866,11 @@ pub mod tests {
         assert_eq!(preview.pixels.as_ref(), [0, 255]);
     }
 
-    // Extension guard: even if the bytes are a valid BMP, a .tif suffix
-    // means we refuse. Required because CLAUDE.md says we're BMP-only.
+    // Extension guard: even if the bytes are a valid BMP, a non-BMP suffix
+    // means we refuse.
     #[test]
     fn rejects_non_bmp_extension() {
-        let path = unique_temp_path("metadata", "tif");
+        let path = unique_temp_path("metadata", "png");
         std::fs::write(&path, build_bmp_32(1, 1, &[(0, 0, 0)])).unwrap();
 
         let error = read_file(path.to_str().unwrap()).unwrap_err();

@@ -159,8 +159,10 @@ The headless CLI runs through the backend binary.
 npm run backend:cli -- print-config      # resolved config as JSON
 npm run backend:cli -- version           # service + contract version
 npm run backend:cli -- list-commands     # supported backend commands
+npm run backend:cli -- processing-manifest # processing presets
 
 # BMP inspection
+npm run backend:cli -- describe-study /path/to/image.bmp
 npm run backend:cli -- decode-source /path/to/image.bmp
 
 # Render & process
@@ -169,17 +171,6 @@ npm run backend:cli -- render-preview --full-range /path/to/image.bmp /tmp/previ
 npm run backend:cli -- process-preview --invert --equalize /path/to/image.bmp /tmp/processed.bmp
 npm run backend:cli -- analyze-preview /path/to/image.bmp /tmp/analyze.bmp
 ```
-
-<details>
-<summary>Legacy workflow flags</summary>
-
-```bash
-npm run backend:cli -- --describe-presets
-npm run backend:cli -- --input /path/to/image.bmp --describe-study
-npm run backend:cli -- --input /path/to/image.bmp --preview-output /tmp/preview.bmp
-```
-
-</details>
 
 > See `images/README.md` for available sample assets and provenance.
 

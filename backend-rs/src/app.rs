@@ -1989,7 +1989,7 @@ mod tests {
                 Some(MeasurementScale {
                     row_spacing_mm: 0.2,
                     column_spacing_mm: 0.3,
-                    source: "PixelSpacing".to_string(),
+                    source: "manualCalibration".to_string(),
                 }),
             )
             .unwrap();

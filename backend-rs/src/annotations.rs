@@ -73,7 +73,7 @@ mod tests {
         let scale = MeasurementScale {
             row_spacing_mm: 0.2,
             column_spacing_mm: 0.3,
-            source: "PixelSpacing".to_string(),
+            source: "manualCalibration".to_string(),
         };
         let measurement = measure_line(
             AnnotationPoint { x: 10.0, y: 8.0 },

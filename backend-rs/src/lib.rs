@@ -9,8 +9,7 @@ pub mod annotations;
 pub mod app;
 // Artifact cache + in-memory source preview cache. Debounced eviction lives here.
 pub mod cache;
-// Argument parsing for the standalone binary. Has a legacy compatibility layer
-// because earlier versions of xrayview shipped different flag shapes.
+// Argument parsing for the standalone inspection/batch utility.
 pub mod cli;
 // Env-var driven config (XRAYVIEW_BACKEND_*). Defaults to a tempdir layout.
 pub mod config;
@@ -18,8 +17,7 @@ pub mod config;
 // change here in contracts/backend-contract-v1.schema.json on the TS side or
 // the contracts:check job will complain.
 pub mod contracts;
-// BMP decoding/rendering. We only ship BMP — DICOM/TIFF have been removed
-// per CLAUDE.md, don't reintroduce them here.
+// BMP decoding/rendering. The supported input format is BMP.
 pub mod bmp;
 // Recent-studies catalog with corrupt-file recovery.
 pub mod persistence;
