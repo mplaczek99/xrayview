@@ -42,6 +42,11 @@ const processStudyCommand = {
 expectValid("ProcessingControls", processingControls);
 expectInvalid(
   "ProcessingControls",
+  { ...processingControls, contrast: Number.POSITIVE_INFINITY },
+  "ProcessingControls.contrast: expected finite number",
+);
+expectInvalid(
+  "ProcessingControls",
   { ...processingControls, brightness: 1.5 },
   "ProcessingControls.brightness: expected integer",
 );

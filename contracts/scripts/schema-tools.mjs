@@ -238,7 +238,9 @@ function validateType(typeName, value, at) {
     case "string":
       return typeof value === "string" ? [] : [`${at}: expected string, received ${describeValue(value)}`];
     case "number":
-      return typeof value === "number" ? [] : [`${at}: expected number, received ${describeValue(value)}`];
+      return typeof value === "number" && Number.isFinite(value)
+        ? []
+        : [`${at}: expected finite number, received ${describeValue(value)}`];
     case "integer":
       return Number.isInteger(value)
         ? []
