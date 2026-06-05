@@ -20,6 +20,7 @@ use byteorder::{ByteOrder, LittleEndian};
 use crate::contracts::MeasurementScale;
 
 const MIN_BMP_HEADER_BYTES: usize = 54;
+const MAX_DECODED_PREVIEW_PIXELS: usize = 128 * 1024 * 1024;
 
 // Header metadata exposed to the rest of the backend. BMP files do not carry
 // pixel spacing, so measurement_scale() always returns None for now.
@@ -399,9 +400,18 @@ fn parse_bmp_header(bytes: &[u8]) -> Result<BmpHeader, String> {
     if width <= 0 || raw_height == 0 {
         return Err(format!("invalid BMP dimensions: {width}x{raw_height}"));
     }
-    if width > u16::MAX as i32 || raw_height.unsigned_abs() > u16::MAX as u32 {
+    let height = raw_height.unsigned_abs();
+    if width > u16::MAX as i32 || height > u16::MAX as u32 {
         return Err(format!(
             "BMP dimensions exceed supported range: {width}x{raw_height}"
+        ));
+    }
+    let pixel_count = (width as usize)
+        .checked_mul(height as usize)
+        .ok_or_else(|| "BMP pixel count overflow".to_string())?;
+    if pixel_count > MAX_DECODED_PREVIEW_PIXELS {
+        return Err(format!(
+            "BMP pixel count {pixel_count} exceeds supported limit {MAX_DECODED_PREVIEW_PIXELS}"
         ));
     }
 
@@ -427,7 +437,7 @@ fn parse_bmp_header(bytes: &[u8]) -> Result<BmpHeader, String> {
         width: width as usize,
         // unsigned_abs handles negative height (top-down) and zero (already
         // rejected above) without wrapping.
-        height: raw_height.unsigned_abs() as usize,
+        height: height as usize,
         top_down: raw_height < 0,
         bits_per_pixel,
     })
@@ -844,6 +854,18 @@ pub mod tests {
     }
 
     #[test]
+    fn render_rejects_absurd_pixel_count_before_allocation() {
+        let mut bmp = build_bmp_32_header(65_535, 65_535);
+
+        let error = render_grayscale_preview(&bmp).unwrap_err();
+
+        assert!(error.contains("BMP pixel count"));
+        assert!(error.contains("exceeds supported limit"));
+        bmp.truncate(54);
+        assert!(read_header(&bmp).unwrap_err().contains("BMP pixel count"));
+    }
+
+    #[test]
     fn row_stride_rejects_padding_overflow() {
         let header = BmpHeader {
             pixel_offset: 54,
@@ -982,7 +1004,23 @@ pub mod tests {
         let row_stride = width as usize * 4;
         let pixel_bytes = row_stride * height as usize;
         let file_size = 54 + pixel_bytes;
-        let mut bmp = Vec::with_capacity(file_size);
+        let mut bmp = build_bmp_32_header(width, height);
+        bmp.reserve(pixel_bytes);
+        for output_y in (0..height as usize).rev() {
+            let row = &rgb_top_down[output_y * width as usize..(output_y + 1) * width as usize];
+            for &(red, green, blue) in row {
+                bmp.extend_from_slice(&[blue, green, red, 255]);
+            }
+        }
+        debug_assert_eq!(bmp.len(), file_size);
+        bmp
+    }
+
+    fn build_bmp_32_header(width: u32, height: u32) -> Vec<u8> {
+        let row_stride = width as usize * 4;
+        let pixel_bytes = row_stride.saturating_mul(height as usize);
+        let file_size = 54_usize.saturating_add(pixel_bytes);
+        let mut bmp = Vec::with_capacity(54);
         bmp.extend_from_slice(b"BM");
         bmp.extend_from_slice(&(file_size as u32).to_le_bytes());
         bmp.extend_from_slice(&[0, 0, 0, 0]);
@@ -998,12 +1036,6 @@ pub mod tests {
         bmp.extend_from_slice(&0_i32.to_le_bytes());
         bmp.extend_from_slice(&0_u32.to_le_bytes());
         bmp.extend_from_slice(&0_u32.to_le_bytes());
-        for output_y in (0..height as usize).rev() {
-            let row = &rgb_top_down[output_y * width as usize..(output_y + 1) * width as usize];
-            for &(red, green, blue) in row {
-                bmp.extend_from_slice(&[blue, green, red, 255]);
-            }
-        }
         bmp
     }
 
