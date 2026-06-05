@@ -131,17 +131,23 @@ function makePoller_BEFORE_polling_only(getJobs, notifyFetch) {
 // ---------------------------------------------------------------------------
 // AFTER: SSE-aware polling mode (step 10.2).
 // getNowMs() returns the current simulated wall-clock time (not Date.now()).
-// When eventsOn is active and lastEventAtMs is fresh, polling is suppressed.
+// When the event listener is active and at least one recent event has arrived,
+// polling is suppressed.
 // ---------------------------------------------------------------------------
 
 const EVENT_HEARTBEAT_MS = 10_000;
 const EVENT_STALE_MS = 10_000;
 
-function makePoller_AFTER_with_sse(getJobs, notifyFetch, getLastEventAtMs, getNowMs) {
+function makePoller_AFTER_with_sse(
+  getJobs,
+  notifyFetch,
+  isEventStreamActive,
+  getLastEventAtMs,
+  getNowMs,
+) {
   let cancelled = false;
   let timer;
   let currentIntervalMs = FAST_POLL_MS;
-  const eventsOn = true; // desktop mode: Tauri job-update listener is attached
 
   function scheduleNext(intervalMs) {
     if (cancelled) return;
@@ -159,8 +165,14 @@ function makePoller_AFTER_with_sse(getJobs, notifyFetch, getLastEventAtMs, getNo
       return;
     }
 
-    // SSE suppression: skip HTTP polling when events are fresh (virtual clock).
-    if (eventsOn && getNowMs() - getLastEventAtMs() < EVENT_STALE_MS) {
+    // SSE suppression: skip HTTP polling only after the listener is active and
+    // a fresh event has actually arrived (virtual clock).
+    const lastEventAtMs = getLastEventAtMs();
+    if (
+      isEventStreamActive() &&
+      lastEventAtMs !== null &&
+      getNowMs() - lastEventAtMs < EVENT_STALE_MS
+    ) {
       scheduleNext(EVENT_HEARTBEAT_MS);
       return;
     }
@@ -225,7 +237,7 @@ function simulateJob({ durationMs, jobTimeline, makePollerFn, withSSE }) {
   resetTimers();
   let wallTimeMs = 0;
   let pollCount = 0;
-  let lastEventAtMs = withSSE ? 0 : -EVENT_STALE_MS * 10; // AFTER: starts fresh
+  let lastEventAtMs = null;
 
   function currentJobState() {
     let state = "queued";
@@ -253,6 +265,7 @@ function simulateJob({ durationMs, jobTimeline, makePollerFn, withSSE }) {
       jobs[0] = currentJobState();
       pollCount++;
     },
+    isEventStreamActive: () => withSSE,
     getLastEventAtMs: () => lastEventAtMs,
     getNowMs: () => wallTimeMs,
   });
@@ -300,8 +313,14 @@ function afterSimulate(opts) {
   return simulateJob({
     ...opts,
     withSSE: true,
-    makePollerFn: ({ getJobs, notifyFetch, getLastEventAtMs, getNowMs }) =>
-      makePoller_AFTER_with_sse(getJobs, notifyFetch, getLastEventAtMs, getNowMs),
+    makePollerFn: ({ getJobs, notifyFetch, isEventStreamActive, getLastEventAtMs, getNowMs }) =>
+      makePoller_AFTER_with_sse(
+        getJobs,
+        notifyFetch,
+        isEventStreamActive,
+        getLastEventAtMs,
+        getNowMs,
+      ),
   });
 }
 
@@ -333,21 +352,21 @@ test("BEFORE (polling only): 3s job with progress every 400ms → ≥10 get_job 
   console.log(`\nBEFORE (polling only): 3s job → ${result.pollCount} HTTP get_job requests`);
 });
 
-test("AFTER (SSE active): 3s job with progress every 400ms → ≤1 poll request", () => {
+test("AFTER (SSE active): 3s job with progress every 400ms → ≤2 poll requests", () => {
   const result = afterSimulate({
     durationMs: SHORT_JOB_DURATION_MS,
     jobTimeline: SHORT_JOB_TIMELINE,
   });
-  // SSE event fires every 400ms, well within EVENT_STALE_MS=10s, so polling is
-  // fully suppressed. Only the very first poll (before any event) may fire.
+  // SSE event fires every 400ms, well within EVENT_STALE_MS=10s. Polling stays
+  // active until the first event arrives, then is suppressed.
   assert.ok(
-    result.pollCount <= 1,
-    `AFTER: ≤1 HTTP polls for 3s job when SSE active (got ${result.pollCount})`,
+    result.pollCount <= 2,
+    `AFTER: ≤2 HTTP polls for 3s job when SSE active (got ${result.pollCount})`,
   );
   console.log(`AFTER  (SSE active):   3s job → ${result.pollCount} HTTP get_job requests`);
 });
 
-test("AFTER vs BEFORE: ≥90% fewer requests for 3s job with SSE active", () => {
+test("AFTER vs BEFORE: ≥80% fewer requests for 3s job with SSE active", () => {
   const before = beforeSimulate({
     durationMs: SHORT_JOB_DURATION_MS,
     jobTimeline: SHORT_JOB_TIMELINE,
@@ -364,11 +383,11 @@ test("AFTER vs BEFORE: ≥90% fewer requests for 3s job with SSE active", () => 
   console.log(
     `\nSSE polling reduction (3s job): ${before.pollCount} → ${after.pollCount} requests`,
   );
-  console.log(`Reduction: ${reduction.toFixed(1)}% (target: ≥90%)`);
+  console.log(`Reduction: ${reduction.toFixed(1)}% (target: ≥80%)`);
 
   assert.ok(
-    reduction >= 90,
-    `Expected ≥90% reduction, got ${reduction.toFixed(1)}% (${before.pollCount} → ${after.pollCount})`,
+    reduction >= 80,
+    `Expected ≥80% reduction, got ${reduction.toFixed(1)}% (${before.pollCount} → ${after.pollCount})`,
   );
 });
 
@@ -418,12 +437,13 @@ test("AFTER: no SSE events → falls back to normal polling after 10s stale wind
   resetTimers();
   let wallTimeMs = 0;
   let pollCount = 0;
-  const lastEventAtMs = -EVENT_STALE_MS * 10; // never fired
+  const lastEventAtMs = null; // never fired
 
   const jobs = [makeJob("j1", "running", 50)];
   const poller = makePoller_AFTER_with_sse(
     () => jobs,
     () => pollCount++,
+    () => true,
     () => lastEventAtMs,
     () => wallTimeMs,
   );
@@ -445,4 +465,24 @@ test("AFTER: no SSE events → falls back to normal polling after 10s stale wind
     `Expected fallback polling when SSE stale (got ${pollCount} polls in 25s)`,
   );
   console.log(`\nFallback (no SSE events): ${pollCount} polls in 25s simulation`);
+});
+
+test("AFTER: listener not active yet does not suppress fallback polling", () => {
+  resetTimers();
+  const wallTimeMs = 0;
+  let pollCount = 0;
+  const jobs = [makeJob("j1", "running", 20)];
+  const poller = makePoller_AFTER_with_sse(
+    () => jobs,
+    () => pollCount++,
+    () => false,
+    () => wallTimeMs,
+    () => wallTimeMs,
+  );
+
+  poller.start();
+  flushOneTimer();
+  poller.cancel();
+
+  assert.ok(pollCount >= 1, `Expected polling before listener activation, got ${pollCount}`);
 });

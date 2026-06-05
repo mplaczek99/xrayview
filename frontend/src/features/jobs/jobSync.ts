@@ -30,26 +30,28 @@ export function startJobSync(): () => void {
   let cancelled = false;
   let timer: number | undefined;
   let unlistenJobUpdate: UnlistenFn | undefined;
-  let eventsSubscribed = false;
   let currentIntervalMs = ACTIVE_POLL_MS;
-  let lastEventAtMs = 0;
+  let lastEventAtMs: number | null = null;
   let lastPendingJobCount = pendingJobCount();
 
   if (runtime.mode === "desktop") {
-    eventsSubscribed = true;
     void listen<ContractJobSnapshot>("job-update", (event) => {
       if (cancelled) {
         return;
       }
       lastEventAtMs = Date.now();
       applyJobUpdate(normalizeJobSnapshot(event.payload, runtime.mode));
-    }).then((unlisten) => {
-      if (cancelled) {
-        unlisten();
-        return;
-      }
-      unlistenJobUpdate = unlisten;
-    });
+    })
+      .then((unlisten) => {
+        if (cancelled) {
+          unlisten();
+          return;
+        }
+        unlistenJobUpdate = unlisten;
+      })
+      .catch(() => {
+        // Polling remains active when the desktop event listener is unavailable.
+      });
   }
 
   function scheduleNext(intervalMs: number) {
@@ -80,7 +82,11 @@ export function startJobSync(): () => void {
       return;
     }
 
-    if (eventsSubscribed && Date.now() - lastEventAtMs < EVENT_STALE_MS) {
+    if (
+      unlistenJobUpdate !== undefined &&
+      lastEventAtMs !== null &&
+      Date.now() - lastEventAtMs < EVENT_STALE_MS
+    ) {
       scheduleNext(EVENT_HEARTBEAT_MS);
       return;
     }
