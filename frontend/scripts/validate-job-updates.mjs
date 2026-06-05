@@ -13,14 +13,28 @@ import { test } from "node:test";
 // ---------------------------------------------------------------------------
 function jobSnapshotEqual(prev, next) {
   return (
+    prev.jobId === next.jobId &&
+    prev.jobKind === next.jobKind &&
+    prev.studyId === next.studyId &&
     prev.state === next.state &&
     prev.progress.percent === next.progress.percent &&
     prev.progress.stage === next.progress.stage &&
     prev.progress.message === next.progress.message &&
     prev.fromCache === next.fromCache &&
-    (prev.result === null) === (next.result === null) &&
-    (prev.error === null) === (next.error === null)
+    nullableJsonEqual(prev.result, next.result) &&
+    nullableJsonEqual(prev.error, next.error)
   );
+}
+
+function nullableJsonEqual(prev, next) {
+  if (prev === next) {
+    return true;
+  }
+  if (prev === null || next === null) {
+    return false;
+  }
+
+  return JSON.stringify(prev) === JSON.stringify(next);
 }
 
 // ---------------------------------------------------------------------------
@@ -203,6 +217,68 @@ test("AFTER: repeated completed snapshot does NOT fire listener again", () => {
     0,
     "AFTER: terminal state repeated polls → 0 notifications",
   );
+});
+
+test("AFTER: changed completed result payload fires listener", () => {
+  const done = makeSnapshot({
+    state: "completed",
+    progress: makeProgress(100),
+    result: {
+      kind: "renderStudy",
+      payload: { previewPath: "/tmp/old.bmp", loadedWidth: 100, loadedHeight: 100 },
+    },
+  });
+  const store = makeMinimalStore(done);
+  store.resetListenerCount();
+
+  store.receiveJobUpdate_AFTER(
+    makeSnapshot({
+      state: "completed",
+      progress: makeProgress(100),
+      result: {
+        kind: "renderStudy",
+        payload: { previewPath: "/tmp/new.bmp", loadedWidth: 100, loadedHeight: 100 },
+      },
+    }),
+  );
+
+  assert.equal(store.getListenerCount(), 1, "AFTER: terminal result payload change is applied");
+});
+
+test("AFTER: changed failed error payload fires listener", () => {
+  const failed = makeSnapshot({
+    state: "failed",
+    progress: makeProgress(40),
+    error: { code: "internal", message: "old failure", details: [], recoverable: true },
+  });
+  const store = makeMinimalStore(failed);
+  store.resetListenerCount();
+
+  store.receiveJobUpdate_AFTER(
+    makeSnapshot({
+      state: "failed",
+      progress: makeProgress(40),
+      error: { code: "internal", message: "new failure", details: [], recoverable: true },
+    }),
+  );
+
+  assert.equal(store.getListenerCount(), 1, "AFTER: terminal error payload change is applied");
+});
+
+test("AFTER: changed job identity fields fire listener", () => {
+  const snap = makeSnapshot({ state: "running", progress: makeProgress(30) });
+  const store = makeMinimalStore(snap);
+  store.resetListenerCount();
+
+  store.receiveJobUpdate_AFTER(
+    makeSnapshot({
+      jobKind: "processStudy",
+      state: "running",
+      progress: makeProgress(30),
+    }),
+  );
+
+  assert.equal(store.getListenerCount(), 1, "AFTER: job identity change is applied");
 });
 
 test("AFTER: mixed sequence counts correctly", () => {

@@ -90,16 +90,28 @@ function nextPendingJobIds(
 // skipping timing-only writes has no visible effect on the ETA display.
 function jobSnapshotEqual(prev: JobSnapshot, next: JobSnapshot): boolean {
   return (
+    prev.jobId === next.jobId &&
+    prev.jobKind === next.jobKind &&
+    prev.studyId === next.studyId &&
     prev.state === next.state &&
     prev.progress.percent === next.progress.percent &&
     prev.progress.stage === next.progress.stage &&
     prev.progress.message === next.progress.message &&
     prev.fromCache === next.fromCache &&
-    // Null-transitions (null→value or value→null) must not be skipped.
-    // Once both sides are non-null the job is terminal and immutable.
-    (prev.result === null) === (next.result === null) &&
-    (prev.error === null) === (next.error === null)
+    nullableJsonEqual(prev.result, next.result) &&
+    nullableJsonEqual(prev.error, next.error)
   );
+}
+
+function nullableJsonEqual<T>(prev: T | null, next: T | null): boolean {
+  if (prev === next) {
+    return true;
+  }
+  if (prev === null || next === null) {
+    return false;
+  }
+
+  return JSON.stringify(prev) === JSON.stringify(next);
 }
 
 function createPendingJobSnapshot(
