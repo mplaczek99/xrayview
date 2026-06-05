@@ -868,15 +868,16 @@ impl App {
         study_id: String,
     ) -> Result<Option<StartedJob>, BackendError> {
         let cached = self.result_cache.lock().get(fingerprint).cloned();
-        let Some(result) = cached else {
+        let Some(cached_result) = cached else {
             return Ok(None);
         };
-        if !result_artifacts_exist(&result) {
+        if !result_artifacts_exist(&cached_result) {
             // Stale entry — file was evicted out from under us. Drop it and
             // tell the caller to actually run the job.
             self.result_cache.lock().remove(fingerprint);
             return Ok(None);
         }
+        let result = Arc::new(cached_result_for_study(&cached_result, &study_id)?);
 
         let job_id = format!(
             "job-{}",
@@ -1747,6 +1748,41 @@ fn result_artifact_paths(result: &JobResult) -> Vec<String> {
     }
 }
 
+fn cached_result_for_study(result: &JobResult, study_id: &str) -> Result<JobResult, BackendError> {
+    let payload = match result.kind {
+        JobKind::RenderStudy => {
+            let mut payload: RenderStudyCommandResult =
+                serde_json::from_value(result.payload.clone()).map_err(|error| {
+                    BackendError::internal(format!("deserialize cached render result: {error}"))
+                })?;
+            payload.study_id = study_id.to_string();
+            serde_json::to_value(payload)
+        }
+        JobKind::AnalyzeStudy => {
+            let mut payload: AnalyzeStudyCommandResult =
+                serde_json::from_value(result.payload.clone()).map_err(|error| {
+                    BackendError::internal(format!("deserialize cached analyze result: {error}"))
+                })?;
+            payload.study_id = study_id.to_string();
+            serde_json::to_value(payload)
+        }
+        JobKind::ProcessStudy => {
+            let mut payload: ProcessStudyCommandResult =
+                serde_json::from_value(result.payload.clone()).map_err(|error| {
+                    BackendError::internal(format!("deserialize cached process result: {error}"))
+                })?;
+            payload.study_id = study_id.to_string();
+            serde_json::to_value(payload)
+        }
+    }
+    .map_err(|error| BackendError::internal(format!("serialize cached result: {error}")))?;
+
+    Ok(JobResult {
+        kind: result.kind.clone(),
+        payload,
+    })
+}
+
 fn result_artifacts_exist(result: &JobResult) -> bool {
     let paths = result_artifact_paths(result);
     !paths.is_empty() && paths.iter().all(|path| artifact_exists(path))
@@ -2301,9 +2337,12 @@ mod tests {
         assert!(!first_snapshot.from_cache);
         assert!(second_snapshot.from_cache);
         assert_eq!(second_snapshot.progress.stage, "cacheHit");
-        assert_eq!(second_snapshot.study_id, Some(second_study.study_id));
+        assert_eq!(
+            second_snapshot.study_id,
+            Some(second_study.study_id.clone())
+        );
         assert_eq!(second_payload.preview_path, first_payload.preview_path);
-        assert_eq!(second_payload.study_id, first_study.study_id);
+        assert_eq!(second_payload.study_id, second_study.study_id);
 
         let _ = fs::remove_dir_all(temp_dir);
     }
@@ -2708,7 +2747,18 @@ mod tests {
             .unwrap();
         let first_payload: ProcessStudyCommandResult =
             serde_json::from_value(first_snapshot.result.clone().unwrap().payload.clone()).unwrap();
-        let second_started = app.start_process_job(command).unwrap();
+        let second_study = app
+            .open_study(OpenStudyCommand {
+                input_path: study.input_path.clone(),
+            })
+            .unwrap()
+            .study;
+        let second_started = app
+            .start_process_job(ProcessStudyCommand {
+                study_id: second_study.study_id.clone(),
+                ..command
+            })
+            .unwrap();
         let second_snapshot = app
             .get_job(JobCommand {
                 job_id: second_started.job_id,
@@ -2720,7 +2770,12 @@ mod tests {
 
         assert!(!first_snapshot.from_cache);
         assert!(second_snapshot.from_cache);
+        assert_eq!(
+            second_snapshot.study_id,
+            Some(second_study.study_id.clone())
+        );
         assert_eq!(second_payload.preview_path, first_payload.preview_path);
+        assert_eq!(second_payload.study_id, second_study.study_id);
 
         let _ = fs::remove_dir_all(temp_dir);
     }
@@ -2899,9 +2954,15 @@ mod tests {
             .unwrap();
         let first_payload: AnalyzeStudyCommandResult =
             serde_json::from_value(first_snapshot.result.clone().unwrap().payload.clone()).unwrap();
+        let second_study = app
+            .open_study(OpenStudyCommand {
+                input_path: study.input_path.clone(),
+            })
+            .unwrap()
+            .study;
         let second_started = app
             .start_analyze_job(AnalyzeStudyCommand {
-                study_id: study.study_id.clone(),
+                study_id: second_study.study_id.clone(),
             })
             .unwrap();
         let second_snapshot = app
@@ -2915,11 +2976,16 @@ mod tests {
 
         assert!(!first_snapshot.from_cache);
         assert!(second_snapshot.from_cache);
+        assert_eq!(
+            second_snapshot.study_id,
+            Some(second_study.study_id.clone())
+        );
         assert_eq!(second_payload.preview_path, first_payload.preview_path);
         assert_eq!(
             second_payload.filled_preview_path,
             first_payload.filled_preview_path
         );
+        assert_eq!(second_payload.study_id, second_study.study_id);
 
         let _ = fs::remove_dir_all(temp_dir);
     }
