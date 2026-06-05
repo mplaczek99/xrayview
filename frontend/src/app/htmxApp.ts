@@ -28,7 +28,7 @@ const objectIds = new WeakMap<object, number>();
 let nextObjectId = 1;
 
 function clamp(value: number, min: number, max: number): number | null {
-  if (Number.isNaN(value)) {
+  if (!Number.isFinite(value)) {
     return null;
   }
   return Math.min(max, Math.max(min, value));
@@ -900,14 +900,14 @@ class HtmxWorkbenchApp {
         }
         break;
       case "brightness": {
-        const value = clamp(parseInt(target.value, 10), -100, 100);
+        const value = clamp(Math.round(Number(target.value)), -100, 100);
         if (value !== null) {
           workbenchActions.setProcessingControl(control, value);
         }
         break;
       }
       case "contrast": {
-        const value = clamp(parseFloat(target.value), 0.1, 3);
+        const value = clamp(Number(target.value), 0.1, 3);
         if (value !== null) {
           workbenchActions.setProcessingControl(control, value);
         }
