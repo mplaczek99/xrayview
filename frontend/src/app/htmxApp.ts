@@ -2,6 +2,7 @@ import type htmx from "htmx.org";
 import { startJobSync } from "../features/jobs/jobSync";
 import type { JobSnapshot, ProcessingRunState } from "../features/jobs/model";
 import { describeProgress } from "../features/jobs/progressFormatting";
+import { clampPercent } from "../features/jobs/progressTiming";
 import { buildProcessingUiState } from "../features/processing/presets";
 import type { WorkbenchState, WorkbenchStudy } from "../features/study/model";
 import { ViewerController } from "../features/viewer/ViewerController";
@@ -685,7 +686,7 @@ class HtmxWorkbenchApp {
     if (progressView.indeterminate) {
       progressBar.removeAttribute("style");
     } else {
-      const width = Math.max(job.progress.percent, job.state === "completed" ? 100 : 4);
+      const width = Math.max(clampPercent(job.progress.percent), 4);
       progressBar.style.width = `${width}%`;
     }
 

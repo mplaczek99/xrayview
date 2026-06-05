@@ -5,6 +5,7 @@ import {
 } from "../features/annotations/tools";
 import type { JobSnapshot } from "../features/jobs/model";
 import { describeProgress } from "../features/jobs/progressFormatting";
+import { clampPercent } from "../features/jobs/progressTiming";
 import { buildProcessingUiState, processingControlsEqual } from "../features/processing/presets";
 import type { WorkbenchState } from "../features/study/model";
 import { createProcessingForm } from "../features/study/model";
@@ -925,7 +926,10 @@ function renderJobCenter(state: WorkbenchState, ui: HtmxUiState, nowMs: number):
                 job.state === "failed"
                   ? formatBackendError(job.error, "Job failed.")
                   : job.progress.message;
-              const width = Math.max(job.progress.percent, job.state === "completed" ? 100 : 4);
+              const width = Math.max(
+                clampPercent(job.progress.percent),
+                job.state === "completed" ? 100 : 4,
+              );
 
               return `
               <article
