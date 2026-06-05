@@ -188,8 +188,8 @@ function renderEmptyView(isOpeningStudy: boolean): string {
 }
 
 function progressPercentLabel(job: JobSnapshot | null): string | null {
-  const percent = job?.progress.percent ?? 0;
-  if (!Number.isFinite(percent) || percent <= 0 || percent >= 100) {
+  const percent = clampPercent(job?.progress.percent ?? 0);
+  if (percent <= 0 || percent >= 100) {
     return null;
   }
   return `${Math.round(percent)}%`;

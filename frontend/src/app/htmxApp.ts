@@ -567,9 +567,8 @@ class HtmxWorkbenchApp {
     }
 
     const label = job.state === "cancelling" ? "Cancelling analysis..." : "Analyzing...";
-    const percent = job.progress.percent;
-    const detail =
-      Number.isFinite(percent) && percent > 0 && percent < 100 ? `${Math.round(percent)}%` : null;
+    const percent = clampPercent(job.progress.percent);
+    const detail = percent > 0 && percent < 100 ? `${Math.round(percent)}%` : null;
     const text = current.querySelector<HTMLElement>(".analysis-progress__text");
     const detailNode = current.querySelector<HTMLElement>(".analysis-progress__detail");
     if (!text || Boolean(detailNode) !== Boolean(detail)) {
