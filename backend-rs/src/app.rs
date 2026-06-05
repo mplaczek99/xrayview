@@ -666,7 +666,7 @@ impl App {
         &self,
         command: OpenStudyCommand,
     ) -> Result<OpenStudyCommandResult, BackendError> {
-        if command.input_path.is_empty() {
+        if command.input_path.trim().is_empty() {
             return Err(BackendError::invalid_input("inputPath is required"));
         }
 
@@ -2098,6 +2098,20 @@ mod tests {
 
         let _ = fs::remove_file(input_path);
         let _ = fs::remove_dir(temp_dir);
+    }
+
+    #[test]
+    fn open_study_rejects_blank_input_path() {
+        let app = App::new(Config::default()).unwrap();
+
+        let error = app
+            .open_study(OpenStudyCommand {
+                input_path: "  ".to_string(),
+            })
+            .unwrap_err();
+
+        assert_eq!(error.code, crate::contracts::BackendErrorCode::InvalidInput);
+        assert_eq!(error.message, "inputPath is required");
     }
 
     // Side-effect check: opening a study should land it in the on-disk
