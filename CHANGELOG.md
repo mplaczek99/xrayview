@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Manual measurement calibration. BMP carries no pixel-spacing metadata, so the calibrated-mm measurement path (`calibratedLengthMm`, the anisotropic scale math in `annotations.rs`) was previously unreachable — `measurementScale` was always null. A new `set_study_calibration` Tauri command derives an isotropic mm-per-pixel `MeasurementScale` from a reference line of known length: draw a line across a feature of known size, select it, enter its real length in mm, and the stored scale is applied to that and every existing line measurement. The scale persists in the recent-studies catalog, and a "Clear calibration" control resets it. New contract types `CalibrationReference`, `SetStudyCalibrationCommand`, `SetStudyCalibrationCommandResult`; pixel length is recomputed server-side via `annotations::measure_line` so the measurement math stays single-sourced. Works in both desktop and mock runtimes.
+
 ### Changed
 
 - Tooth AND bone detection rebuilt to generalize across subjects. The old models keyed on absolute pixel position (a 13.4 M-entry tooth feature table; a bone feature table plus an exact full-image-hash exemplar lookup), so they effectively memorized the one labeled subject's layout and produced unreliable masks on other BMPs. Both are now gradient-boosted forests over 16 position-free, multi-scale texture features (local mean/variance at radii 2–32, gradient, exposure-invariant contrast ratios) — the texture signal that actually separates isodense tooth from alveolar bone (`backend-rs/src/tooth_model.rs`, shared by inference and trainer). The feature planes are built once per analyze and shared by both forests. Decision thresholds (tooth 0.55, bone 0.50) were chosen by a balanced-accuracy sweep on the labeled set.

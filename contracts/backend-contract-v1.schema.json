@@ -39,6 +39,9 @@
     "ProcessStudyCommandResult",
     "MeasureLineAnnotationCommand",
     "MeasureLineAnnotationCommandResult",
+    "CalibrationReference",
+    "SetStudyCalibrationCommand",
+    "SetStudyCalibrationCommandResult",
     "JobResult",
     "JobSnapshot"
   ],
@@ -406,6 +409,38 @@
         "annotation": { "$ref": "#/$defs/LineAnnotation" }
       },
       "required": ["studyId", "annotation"]
+    },
+    "CalibrationReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "start": { "$ref": "#/$defs/AnnotationPoint" },
+        "end": { "$ref": "#/$defs/AnnotationPoint" },
+        "knownLengthMm": { "type": "number" }
+      },
+      "required": ["start", "end", "knownLengthMm"]
+    },
+    "SetStudyCalibrationCommand": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "studyId": { "type": "string" },
+        "reference": {
+          "anyOf": [
+            { "$ref": "#/$defs/CalibrationReference" },
+            { "type": "null" }
+          ]
+        }
+      },
+      "required": ["studyId"]
+    },
+    "SetStudyCalibrationCommandResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "study": { "$ref": "#/$defs/StudyRecord" }
+      },
+      "required": ["study"]
     },
     "JobResult": {
       "oneOf": [

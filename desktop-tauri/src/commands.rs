@@ -12,7 +12,7 @@ use xrayview_backend_rs::contracts::{
     AnalyzeStudyCommand, BackendError, GetJobsCommand, JobCommand, JobSnapshot,
     MeasureLineAnnotationCommand, MeasureLineAnnotationCommandResult, OpenStudyCommand,
     OpenStudyCommandResult, ProcessStudyCommand, ProcessingManifest, RenderStudyCommand,
-    StartedJob,
+    SetStudyCalibrationCommand, SetStudyCalibrationCommandResult, StartedJob,
 };
 
 use crate::AppState;
@@ -100,4 +100,14 @@ pub fn measure_line_annotation(
     command: MeasureLineAnnotationCommand,
 ) -> Result<MeasureLineAnnotationCommandResult, BackendError> {
     state.backend.measure_line_annotation(command)
+}
+
+// Sets or clears a study's manual measurement calibration. Sync — derives the
+// scale and updates the in-memory study record without touching job machinery.
+#[tauri::command]
+pub fn set_study_calibration(
+    state: State<'_, AppState>,
+    command: SetStudyCalibrationCommand,
+) -> Result<SetStudyCalibrationCommandResult, BackendError> {
+    state.backend.set_study_calibration(command)
 }

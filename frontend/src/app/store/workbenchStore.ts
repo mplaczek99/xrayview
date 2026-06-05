@@ -399,6 +399,102 @@ class WorkbenchStore {
     await this.measureAndStoreLineAnnotation(annotation, "Updated line measurement.", true);
   }
 
+  // Calibrate the active study from its currently selected line: the line's
+  // endpoints plus a user-supplied real-world length define the pixel scale.
+  // After the backend stores the scale, every existing line is re-measured so
+  // its mm value reflects the new calibration.
+  async calibrateActiveStudyFromSelection(knownLengthMm: number) {
+    const study = this.activeStudy();
+    if (!study) {
+      return;
+    }
+
+    const selected = study.annotations.lines.find(
+      (line) => line.id === study.viewer.selectedAnnotationId,
+    );
+    if (!selected) {
+      this.setStudyState(study.studyId, (current) => ({
+        ...current,
+        status: "Select a measured line to calibrate from.",
+      }));
+      return;
+    }
+
+    if (!Number.isFinite(knownLengthMm) || knownLengthMm <= 0) {
+      this.setStudyState(study.studyId, (current) => ({
+        ...current,
+        status: "Enter a positive length in millimetres to calibrate.",
+      }));
+      return;
+    }
+
+    try {
+      const scale = await runtime.setStudyCalibration(study.studyId, {
+        start: selected.start,
+        end: selected.end,
+        knownLengthMm,
+      });
+      this.setStudyState(study.studyId, (current) => ({
+        ...current,
+        measurementScale: scale,
+        status: scale
+          ? `Calibrated: ${scale.rowSpacingMm.toFixed(4)} mm/px.`
+          : "Calibration cleared.",
+      }));
+      await this.remeasureStudyLines(study.studyId);
+    } catch (error) {
+      this.setStudyState(study.studyId, (current) => ({
+        ...current,
+        status: formatBackendError(error, "Calibration failed."),
+      }));
+    }
+  }
+
+  async clearActiveStudyCalibration() {
+    const study = this.activeStudy();
+    if (!study) {
+      return;
+    }
+
+    try {
+      await runtime.setStudyCalibration(study.studyId, null);
+      this.setStudyState(study.studyId, (current) => ({
+        ...current,
+        measurementScale: null,
+        status: "Calibration cleared.",
+      }));
+      await this.remeasureStudyLines(study.studyId);
+    } catch (error) {
+      this.setStudyState(study.studyId, (current) => ({
+        ...current,
+        status: formatBackendError(error, "Clearing calibration failed."),
+      }));
+    }
+  }
+
+  // Re-run measurement for every stored line against the study's current scale,
+  // then write them back in one update so the existing list order is preserved
+  // (upsert prepends, so re-measuring in place would otherwise reverse it).
+  private async remeasureStudyLines(studyId: string) {
+    const study = this.state.studies[studyId];
+    if (!study || study.annotations.lines.length === 0) {
+      return;
+    }
+
+    const measured = await Promise.all(
+      study.annotations.lines.map((line) => runtime.measureLineAnnotation(studyId, line)),
+    );
+    const measuredById = new Map(measured.map((line) => [line.id, line]));
+
+    this.setStudyState(studyId, (current) => ({
+      ...current,
+      annotations: {
+        ...current.annotations,
+        lines: current.annotations.lines.map((line) => measuredById.get(line.id) ?? line),
+      },
+    }));
+  }
+
   deleteSelectedAnnotation() {
     const study = this.activeStudy();
     if (!study?.viewer.selectedAnnotationId) {

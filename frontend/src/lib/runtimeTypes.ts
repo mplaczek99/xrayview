@@ -1,7 +1,9 @@
 import type { JobSnapshot } from "../features/jobs/model";
 import type {
+  CalibrationReference,
   JobSnapshot as ContractJobSnapshot,
   LineAnnotation,
+  MeasurementScale,
   OpenStudyCommandResult,
   ProcessingManifest,
   StartedJob,
@@ -19,6 +21,10 @@ export interface BackendAPI {
   getJobs(jobIds: string[]): Promise<ContractJobSnapshot[]>;
   cancelJob(jobId: string): Promise<ContractJobSnapshot>;
   measureLineAnnotation(studyId: string, annotation: LineAnnotation): Promise<LineAnnotation>;
+  setStudyCalibration(
+    studyId: string,
+    reference: CalibrationReference | null,
+  ): Promise<MeasurementScale | null>;
 }
 
 export interface RuntimeAdapter {
@@ -33,4 +39,8 @@ export interface RuntimeAdapter {
   getJobs(jobIds: string[]): Promise<JobSnapshot[]>;
   cancelJob(jobId: string): Promise<JobSnapshot>;
   measureLineAnnotation(studyId: string, annotation: LineAnnotation): Promise<LineAnnotation>;
+  setStudyCalibration(
+    studyId: string,
+    reference: CalibrationReference | null,
+  ): Promise<MeasurementScale | null>;
 }

@@ -44,12 +44,13 @@ use crate::{
     cache::{SourcePreviewCache, Store},
     config::Config,
     contracts::{
-        AnalyzeStudyCommand, AnalyzeStudyCommandResult, BackendError, GetJobsCommand, JobCommand,
-        JobKind, JobProgress, JobResult, JobSnapshot, JobState, LineAnnotation,
-        MeasureLineAnnotationCommand, MeasureLineAnnotationCommandResult, MeasurementScale,
-        OpenStudyCommand, OpenStudyCommandResult, ProcessStudyCommand, ProcessStudyCommandResult,
-        ProcessingManifest, RenderStudyCommand, RenderStudyCommandResult, StartedJob, StudyRecord,
-        default_processing_manifest,
+        AnalyzeStudyCommand, AnalyzeStudyCommandResult, BackendError, CalibrationReference,
+        GetJobsCommand, JobCommand, JobKind, JobProgress, JobResult, JobSnapshot, JobState,
+        LineAnnotation, MeasureLineAnnotationCommand, MeasureLineAnnotationCommandResult,
+        MeasurementScale, OpenStudyCommand, OpenStudyCommandResult, ProcessStudyCommand,
+        ProcessStudyCommandResult, ProcessingManifest, RenderStudyCommand,
+        RenderStudyCommandResult, SetStudyCalibrationCommand, SetStudyCalibrationCommandResult,
+        StartedJob, StudyRecord, default_processing_manifest,
     },
     persistence, processing, render,
 };
@@ -718,6 +719,47 @@ impl App {
                 study.measurement_scale.as_ref(),
             ),
         })
+    }
+
+    // Set (or clear) a study's measurement calibration. With a reference, the
+    // pixel length of the segment is recomputed here so all measurement math
+    // lives in `annotations::measure_line`, then divided into the known mm
+    // length to get an isotropic mm-per-pixel scale. A single in-plane segment
+    // can only constrain one ratio, so row and column spacing are set equal —
+    // anisotropic spacing would need a second reference along the other axis.
+    pub fn set_study_calibration(
+        &self,
+        command: SetStudyCalibrationCommand,
+    ) -> Result<SetStudyCalibrationCommandResult, BackendError> {
+        let study_id = command.study_id.trim();
+        if study_id.is_empty() {
+            return Err(BackendError::invalid_input("studyId is required"));
+        }
+
+        let measurement_scale = match command.reference.as_ref() {
+            Some(reference) => Some(scale_from_calibration_reference(reference)?),
+            None => None,
+        };
+
+        // Rebuild the record with the new scale and swap it back in. StudyRecord
+        // is small and stored behind an Arc, so this clone-and-replace is cheap
+        // and keeps lookups lock-free after the swap.
+        let updated = {
+            let mut studies = self.studies.lock();
+            let existing = studies
+                .get(study_id)
+                .ok_or_else(|| BackendError::not_found(format!("study not found: {study_id}")))?;
+            let updated = StudyRecord {
+                measurement_scale,
+                ..(**existing).clone()
+            };
+            studies.insert(study_id.to_string(), Arc::new(updated.clone()));
+            updated
+        };
+
+        // Persist so calibration survives a reopen. Best-effort, like open_study.
+        let _ = self.persistence.record_opened_study(&updated);
+        Ok(SetStudyCalibrationCommandResult { study: updated })
     }
 
     // Mint a study_id and stash the record. Pub so test code can register
@@ -1954,6 +1996,41 @@ fn validate_line_annotation_points(annotation: &LineAnnotation) -> Result<(), Ba
     Ok(())
 }
 
+// Derive an isotropic mm-per-pixel MeasurementScale from a known-length segment.
+fn scale_from_calibration_reference(
+    reference: &CalibrationReference,
+) -> Result<MeasurementScale, BackendError> {
+    if !reference.start.x.is_finite()
+        || !reference.start.y.is_finite()
+        || !reference.end.x.is_finite()
+        || !reference.end.y.is_finite()
+    {
+        return Err(BackendError::invalid_input(
+            "calibration reference points must be finite numbers",
+        ));
+    }
+    if !reference.known_length_mm.is_finite() || reference.known_length_mm <= 0.0 {
+        return Err(BackendError::invalid_input(
+            "calibration length must be a positive number of millimetres",
+        ));
+    }
+
+    // Reuse the canonical pixel-length math instead of re-implementing hypot.
+    let pixel_length = annotations::measure_line(reference.start, reference.end, None).pixel_length;
+    if pixel_length <= 0.0 {
+        return Err(BackendError::invalid_input(
+            "calibration reference line must have a non-zero pixel length",
+        ));
+    }
+
+    let mm_per_pixel = reference.known_length_mm / pixel_length;
+    Ok(MeasurementScale {
+        row_spacing_mm: mm_per_pixel,
+        column_spacing_mm: mm_per_pixel,
+        source: "manualCalibration".to_string(),
+    })
+}
+
 fn queued_job_snapshot(job_id: String, job_kind: JobKind, study_id: Option<String>) -> JobSnapshot {
     JobSnapshot {
         job_id,
@@ -2212,6 +2289,134 @@ mod tests {
 
         assert_eq!(error.code, crate::contracts::BackendErrorCode::InvalidInput);
         assert!(error.message.contains("finite numbers"));
+    }
+
+    // set_study_calibration derives an isotropic scale from a known-length
+    // segment, and a subsequent measure picks it up. A 3-4-5 segment is 5 px;
+    // declaring it 10 mm long gives 2.0 mm/px, so a 5 px line measures 10 mm.
+    #[test]
+    fn set_study_calibration_derives_scale_used_by_measurement() {
+        let app = App::new(Config::default()).unwrap();
+        let study = app.register_study("/tmp/calibrate.bmp", None).unwrap();
+
+        let result = app
+            .set_study_calibration(SetStudyCalibrationCommand {
+                study_id: study.study_id.clone(),
+                reference: Some(CalibrationReference {
+                    start: AnnotationPoint { x: 0.0, y: 0.0 },
+                    end: AnnotationPoint { x: 3.0, y: 4.0 },
+                    known_length_mm: 10.0,
+                }),
+            })
+            .unwrap();
+
+        let scale = result.study.measurement_scale.unwrap();
+        assert_eq!(scale.row_spacing_mm, 2.0);
+        assert_eq!(scale.column_spacing_mm, 2.0);
+        assert_eq!(scale.source, "manualCalibration");
+
+        let measured = app
+            .measure_line_annotation(MeasureLineAnnotationCommand {
+                study_id: study.study_id,
+                annotation: LineAnnotation {
+                    id: "line-1".to_string(),
+                    label: "Measurement 1".to_string(),
+                    source: AnnotationSource::Manual,
+                    start: AnnotationPoint { x: 0.0, y: 0.0 },
+                    end: AnnotationPoint { x: 0.0, y: 5.0 },
+                    editable: true,
+                    confidence: None,
+                    measurement: None,
+                },
+            })
+            .unwrap();
+        assert_eq!(
+            measured
+                .annotation
+                .measurement
+                .unwrap()
+                .calibrated_length_mm,
+            Some(10.0)
+        );
+    }
+
+    // A None reference clears a previously-set calibration.
+    #[test]
+    fn set_study_calibration_clears_existing_scale() {
+        let app = App::new(Config::default()).unwrap();
+        let study = app
+            .register_study(
+                "/tmp/clear-calibration.bmp",
+                Some(MeasurementScale {
+                    row_spacing_mm: 0.2,
+                    column_spacing_mm: 0.2,
+                    source: "manualCalibration".to_string(),
+                }),
+            )
+            .unwrap();
+
+        let result = app
+            .set_study_calibration(SetStudyCalibrationCommand {
+                study_id: study.study_id,
+                reference: None,
+            })
+            .unwrap();
+
+        assert_eq!(result.study.measurement_scale, None);
+    }
+
+    #[test]
+    fn set_study_calibration_rejects_zero_length_reference() {
+        let app = App::new(Config::default()).unwrap();
+        let study = app.register_study("/tmp/zero-length.bmp", None).unwrap();
+
+        let error = app
+            .set_study_calibration(SetStudyCalibrationCommand {
+                study_id: study.study_id,
+                reference: Some(CalibrationReference {
+                    start: AnnotationPoint { x: 7.0, y: 7.0 },
+                    end: AnnotationPoint { x: 7.0, y: 7.0 },
+                    known_length_mm: 10.0,
+                }),
+            })
+            .unwrap_err();
+
+        assert_eq!(error.code, crate::contracts::BackendErrorCode::InvalidInput);
+        assert!(error.message.contains("non-zero pixel length"));
+    }
+
+    #[test]
+    fn set_study_calibration_rejects_non_positive_length() {
+        let app = App::new(Config::default()).unwrap();
+        let study = app.register_study("/tmp/bad-length.bmp", None).unwrap();
+
+        let error = app
+            .set_study_calibration(SetStudyCalibrationCommand {
+                study_id: study.study_id,
+                reference: Some(CalibrationReference {
+                    start: AnnotationPoint { x: 0.0, y: 0.0 },
+                    end: AnnotationPoint { x: 3.0, y: 4.0 },
+                    known_length_mm: 0.0,
+                }),
+            })
+            .unwrap_err();
+
+        assert_eq!(error.code, crate::contracts::BackendErrorCode::InvalidInput);
+        assert!(error.message.contains("positive number"));
+    }
+
+    #[test]
+    fn set_study_calibration_rejects_unknown_study() {
+        let app = App::new(Config::default()).unwrap();
+
+        let error = app
+            .set_study_calibration(SetStudyCalibrationCommand {
+                study_id: "study-missing".to_string(),
+                reference: None,
+            })
+            .unwrap_err();
+
+        assert_eq!(error.code, crate::contracts::BackendErrorCode::NotFound);
     }
 
     // Full sync render path: kicks off, runs to completion, checks that

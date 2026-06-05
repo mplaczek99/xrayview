@@ -414,6 +414,36 @@ pub struct MeasureLineAnnotationCommandResult {
     pub annotation: LineAnnotation,
 }
 
+// A reference segment of known physical length, used to derive a study's pixel
+// spacing. BMP carries no DICOM-style pixel-spacing metadata, so calibration is
+// manual: the user draws a line across a feature of known size (a periodontal
+// probe, a calibration marker) and supplies its real-world length in mm. The
+// pixel length is recomputed server-side from start/end so the measurement math
+// stays in one place (`annotations::measure_line`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CalibrationReference {
+    pub start: AnnotationPoint,
+    pub end: AnnotationPoint,
+    pub known_length_mm: f64,
+}
+
+// set_study_calibration payload. `reference: None` clears any existing
+// calibration; `Some` derives an isotropic MeasurementScale from the segment.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SetStudyCalibrationCommand {
+    pub study_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reference: Option<CalibrationReference>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SetStudyCalibrationCommandResult {
+    pub study: StudyRecord,
+}
+
 // Generic single-job lookup/cancel payload.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

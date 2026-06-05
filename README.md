@@ -18,7 +18,7 @@
 - Render BMP previews for the workstation viewer
 - Apply grayscale processing, palettes, and side-by-side comparison
 - Run background render and process jobs with cancellation
-- Measure line annotations
+- Measure line annotations, with manual mm calibration from a known-length reference
 - Persist a recent-studies catalog
 
 > The user-facing workflow is **BMP in, BMP previews for display and processing**.
@@ -142,6 +142,7 @@ npm run backend:test
 | `get_jobs` | List job state |
 | `cancel_job` | Cancel a running job |
 | `measure_line_annotation` | Calibration-aware line measurement |
+| `set_study_calibration` | Set/clear mm-per-pixel scale from a known-length line |
 
 Each command is reached via `invoke("<command>", { command: <payload> })`
 from the frontend.

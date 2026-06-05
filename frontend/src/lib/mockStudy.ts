@@ -1,4 +1,4 @@
-import type { LineAnnotation } from "./generated/contracts";
+import type { LineAnnotation, MeasurementScale } from "./generated/contracts";
 import type { Palette } from "./types";
 
 // Mock previews are deterministic SVG data URLs, so cache by variant instead
@@ -110,16 +110,25 @@ export function createMockPreview(
   return preview;
 }
 
-export function measureMockLineAnnotation(annotation: LineAnnotation): LineAnnotation {
+export function measureMockLineAnnotation(
+  annotation: LineAnnotation,
+  scale: MeasurementScale | null = null,
+): LineAnnotation {
   const dx = annotation.end.x - annotation.start.x;
   const dy = annotation.end.y - annotation.start.y;
-  const pixelLength = Math.round(Math.hypot(dx, dy) * 10) / 10;
+  const round = (value: number) => Math.round(value * 10) / 10;
+  const pixelLength = round(Math.hypot(dx, dy));
+  // Mirror the backend: scale each axis before hypot so anisotropic spacing
+  // works, then round to 0.1 mm.
+  const calibratedLengthMm = scale
+    ? round(Math.hypot(dx * scale.columnSpacingMm, dy * scale.rowSpacingMm))
+    : null;
 
   return {
     ...annotation,
     measurement: {
       pixelLength,
-      calibratedLengthMm: null,
+      calibratedLengthMm,
     },
   };
 }

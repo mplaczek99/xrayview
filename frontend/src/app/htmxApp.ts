@@ -753,6 +753,15 @@ class HtmxWorkbenchApp {
       case "remove-annotation":
         workbenchActions.deleteSelectedAnnotation();
         break;
+      case "calibrate-study": {
+        const input = this.root.querySelector<HTMLInputElement>("[data-calibration-length]");
+        const knownLengthMm = input ? Number(input.value) : Number.NaN;
+        void workbenchActions.calibrateActiveStudyFromSelection(knownLengthMm);
+        break;
+      }
+      case "clear-calibration":
+        void workbenchActions.clearActiveStudyCalibration();
+        break;
       case "reset-viewer":
         this.viewer.resetViewport();
         break;

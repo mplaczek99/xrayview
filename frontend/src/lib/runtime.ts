@@ -131,6 +131,7 @@ function createRuntimeAdapter(
     cancelJob: async (jobId) => normalizeJobSnapshot(await backend.cancelJob(jobId), mode),
     measureLineAnnotation: (studyId, annotation) =>
       backend.measureLineAnnotation(studyId, annotation),
+    setStudyCalibration: (studyId, reference) => backend.setStudyCalibration(studyId, reference),
   };
 }
 

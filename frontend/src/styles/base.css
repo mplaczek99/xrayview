@@ -460,6 +460,16 @@ button {
   line-height: 1.5;
 }
 
+.calibration-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.calibration-form .form-input {
+  width: 100%;
+}
+
 .measurement-section-list {
   display: flex;
   flex-direction: column;

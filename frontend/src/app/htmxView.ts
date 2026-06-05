@@ -336,23 +336,63 @@ function renderViewSidebar(
         }
       </section>
 
-      ${
-        measurementScale
-          ? `
-        <section class="measurement-card">
-          <h3 class="measurement-card__eyebrow">Calibration</h3>
+      <section class="measurement-card">
+        <h3 class="measurement-card__eyebrow">Calibration</h3>
+        ${
+          measurementScale
+            ? `
           <div class="measurement-card__hero">
-            <span class="measurement-card__hero-label">Source</span>
-            <span class="measurement-card__hero-value">${escapeHtml(measurementScale.source)}</span>
+            <span class="measurement-card__hero-label">Scale</span>
+            <span class="measurement-card__hero-value">${measurementScale.rowSpacingMm.toFixed(4)} mm/px</span>
           </div>
+          <p class="measurement-card__copy">Source: ${escapeHtml(measurementScale.source)}.</p>
+        `
+            : `
           <p class="measurement-card__copy">
-            Row ${measurementScale.rowSpacingMm.toFixed(3)} mm, column
-            ${measurementScale.columnSpacingMm.toFixed(3)} mm.
+            Not calibrated — lengths show in pixels. Draw a line across a feature
+            of known size, select it, then set its real length below.
           </p>
-        </section>
-      `
-          : ""
-      }
+        `
+        }
+        <div class="calibration-form">
+          <label class="form-label" for="calibration-length">Known length (mm)</label>
+          <input
+            class="form-input"
+            id="calibration-length"
+            type="number"
+            min="0"
+            step="0.1"
+            inputmode="decimal"
+            placeholder="e.g. 10"
+            data-calibration-length
+            ${disabled(!line)}
+          />
+          <button
+            class="button button--ghost"
+            type="button"
+            data-testid="action-calibrate-study"
+            data-action="calibrate-study"
+            ${disabled(!line)}
+          >
+            Calibrate from selected line
+          </button>
+          ${
+            measurementScale
+              ? `
+            <button
+              class="button button--ghost"
+              type="button"
+              data-testid="action-clear-calibration"
+              data-action="clear-calibration"
+            >
+              Clear calibration
+            </button>
+          `
+              : ""
+          }
+        </div>
+        ${line ? "" : `<p class="form-hint">Select a measured line to enable calibration.</p>`}
+      </section>
     </aside>
   `;
 }

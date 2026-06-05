@@ -2,10 +2,12 @@ import { normalizeBackendError } from "./backendErrors";
 import type {
   BackendError,
   BackendErrorCode,
+  CalibrationReference,
   JobSnapshot as ContractJobSnapshot,
   JobResult,
   JobState,
   LineAnnotation,
+  MeasurementScale,
   OpenStudyCommandResult,
   ProcessingManifest,
   StartedJob,
@@ -16,6 +18,10 @@ import type { BackendAPI } from "./runtimeTypes";
 
 const mockJobs = new Map<string, ContractJobSnapshot>();
 const mockJobControllers = new Map<string, { cancelled: boolean }>();
+// Per-study calibration the mock backend remembers so calibrated measurements
+// work end-to-end in browser dev mode (the desktop backend keeps this in the
+// study record; the mock has no study store, so track it here).
+const mockStudyScales = new Map<string, MeasurementScale | null>();
 
 let mockStudySequence = 0;
 let mockJobSequence = 0;
@@ -46,6 +52,34 @@ function validateLineAnnotationPoints(annotation: LineAnnotation) {
   ) {
     throw mockError("invalidInput", "line annotation points must be finite numbers");
   }
+}
+
+function scaleFromMockCalibrationReference(reference: CalibrationReference): MeasurementScale {
+  if (
+    !Number.isFinite(reference.start.x) ||
+    !Number.isFinite(reference.start.y) ||
+    !Number.isFinite(reference.end.x) ||
+    !Number.isFinite(reference.end.y)
+  ) {
+    throw mockError("invalidInput", "calibration reference points must be finite numbers");
+  }
+  if (!Number.isFinite(reference.knownLengthMm) || reference.knownLengthMm <= 0) {
+    throw mockError("invalidInput", "calibration length must be a positive number of millimetres");
+  }
+
+  const dx = reference.end.x - reference.start.x;
+  const dy = reference.end.y - reference.start.y;
+  const pixelLength = Math.round(Math.hypot(dx, dy) * 10) / 10;
+  if (pixelLength <= 0) {
+    throw mockError("invalidInput", "calibration reference line must have a non-zero pixel length");
+  }
+
+  const mmPerPixel = reference.knownLengthMm / pixelLength;
+  return {
+    rowSpacingMm: mmPerPixel,
+    columnSpacingMm: mmPerPixel,
+    source: "manualCalibration",
+  };
 }
 
 function fileNameFromPath(inputPath: string): string {
@@ -167,9 +201,11 @@ export function createMockBackendAPI(): BackendAPI {
     loadProcessingManifest: async (): Promise<ProcessingManifest> => MOCK_PROCESSING_MANIFEST,
     openStudy: async (inputPath): Promise<OpenStudyCommandResult> => {
       const resolvedInputPath = requireNonBlank(inputPath, "inputPath");
+      const studyId = nextMockStudyId();
+      mockStudyScales.set(studyId, null);
       return {
         study: {
-          studyId: nextMockStudyId(),
+          studyId,
           inputPath: resolvedInputPath,
           inputName: fileNameFromPath(resolvedInputPath),
           measurementScale: null,
@@ -282,9 +318,18 @@ export function createMockBackendAPI(): BackendAPI {
       return cancelling;
     },
     measureLineAnnotation: async (studyId, annotation): Promise<LineAnnotation> => {
-      requireNonBlank(studyId, "studyId");
+      const resolvedStudyId = requireNonBlank(studyId, "studyId");
       validateLineAnnotationPoints(annotation);
-      return measureMockLineAnnotation(annotation);
+      return measureMockLineAnnotation(annotation, mockStudyScales.get(resolvedStudyId) ?? null);
+    },
+    setStudyCalibration: async (
+      studyId,
+      reference: CalibrationReference | null,
+    ): Promise<MeasurementScale | null> => {
+      const resolvedStudyId = requireNonBlank(studyId, "studyId");
+      const scale = reference ? scaleFromMockCalibrationReference(reference) : null;
+      mockStudyScales.set(resolvedStudyId, scale);
+      return scale;
     },
   };
 }

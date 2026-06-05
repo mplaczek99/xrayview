@@ -183,6 +183,21 @@ export interface MeasureLineAnnotationCommandResult {
   annotation: LineAnnotation;
 }
 
+export interface CalibrationReference {
+  start: AnnotationPoint;
+  end: AnnotationPoint;
+  knownLengthMm: number;
+}
+
+export interface SetStudyCalibrationCommand {
+  studyId: string;
+  reference?: CalibrationReference | null;
+}
+
+export interface SetStudyCalibrationCommandResult {
+  study: StudyRecord;
+}
+
 export type JobResult =
   | { kind: "renderStudy"; payload: RenderStudyCommandResult; }
   | { kind: "analyzeStudy"; payload: AnalyzeStudyCommandResult; }

@@ -2,16 +2,20 @@ import { invoke } from "@tauri-apps/api/core";
 import { normalizeBackendError } from "./backendErrors";
 import type {
   AnalyzeStudyCommand,
+  CalibrationReference,
   JobCommand,
   JobSnapshot,
   LineAnnotation,
   MeasureLineAnnotationCommand,
   MeasureLineAnnotationCommandResult,
+  MeasurementScale,
   OpenStudyCommand,
   OpenStudyCommandResult,
   ProcessingManifest,
   ProcessStudyCommand,
   RenderStudyCommand,
+  SetStudyCalibrationCommand,
+  SetStudyCalibrationCommandResult,
   StartedJob,
 } from "./generated/contracts";
 import type { BackendAPI } from "./runtimeTypes";
@@ -85,6 +89,18 @@ export function createDesktopBackendAPI(): BackendAPI {
         },
       );
       return payload.annotation;
+    },
+    setStudyCalibration: async (
+      studyId,
+      reference: CalibrationReference | null,
+    ): Promise<MeasurementScale | null> => {
+      const payload = await invokeCommand<SetStudyCalibrationCommandResult>(
+        "set_study_calibration",
+        {
+          command: { studyId, reference } satisfies SetStudyCalibrationCommand,
+        },
+      );
+      return payload.study.measurementScale ?? null;
     },
   };
 }

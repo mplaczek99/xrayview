@@ -79,6 +79,7 @@ fn main() {
             commands::get_jobs,
             commands::cancel_job,
             commands::measure_line_annotation,
+            commands::set_study_calibration,
         ])
         .run(tauri::generate_context!())
         // Panic here is intentional — if Tauri itself can't run, the app is
