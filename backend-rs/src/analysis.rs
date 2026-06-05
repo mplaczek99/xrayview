@@ -108,6 +108,7 @@ const BONE_EDGE_SNAP_RADIUS_PIXELS: usize = 14;
 // last retrain; LR was used during training but is kept here as documentation.
 const LEARNED_MODEL_LEARNING_RATE: f64 = 0.1;
 const LEARNED_MODEL_THRESHOLD: f64 = 0.1;
+const LEARNED_FEATURE_COUNT: usize = 18;
 
 // Lazy-loaded models. Each OnceLock holds a Result so a corrupt asset surfaces
 // once and stays that way — we don't keep retrying the gunzip on every call.
@@ -1566,6 +1567,7 @@ fn decode_learned_model(data: &[u8]) -> Result<Vec<Vec<LearnedNode>>, String> {
                 value: read_le_f64(&mut cursor)?,
             });
         }
+        validate_learned_tree(trees.len(), &tree)?;
         trees.push(tree);
     }
     if cursor.position() as usize != data.len() {
@@ -1575,6 +1577,81 @@ fn decode_learned_model(data: &[u8]) -> Result<Vec<Vec<LearnedNode>>, String> {
         ));
     }
     Ok(trees)
+}
+
+fn validate_learned_tree(tree_index: usize, tree: &[LearnedNode]) -> Result<(), String> {
+    if tree.is_empty() {
+        return Err(format!("learned model tree {tree_index} is empty"));
+    }
+
+    for (node_index, node) in tree.iter().enumerate() {
+        if !node.threshold.is_finite() {
+            return Err(format!(
+                "learned model tree {tree_index} node {node_index} has non-finite threshold"
+            ));
+        }
+        if !node.value.is_finite() {
+            return Err(format!(
+                "learned model tree {tree_index} node {node_index} has non-finite value"
+            ));
+        }
+        if node.feature < 0 {
+            continue;
+        }
+        if node.feature as usize >= LEARNED_FEATURE_COUNT {
+            return Err(format!(
+                "learned model tree {tree_index} node {node_index} references feature {}",
+                node.feature
+            ));
+        }
+        validate_learned_child(tree_index, node_index, "left", node.left, tree.len())?;
+        validate_learned_child(tree_index, node_index, "right", node.right, tree.len())?;
+    }
+
+    let mut visiting = vec![false; tree.len()];
+    let mut visited = vec![false; tree.len()];
+    validate_learned_tree_node(tree_index, tree, 0, &mut visiting, &mut visited)
+}
+
+fn validate_learned_child(
+    tree_index: usize,
+    node_index: usize,
+    label: &str,
+    child: i32,
+    node_count: usize,
+) -> Result<(), String> {
+    if child < 0 || child as usize >= node_count {
+        return Err(format!(
+            "learned model tree {tree_index} node {node_index} has invalid {label} child {child}"
+        ));
+    }
+    Ok(())
+}
+
+fn validate_learned_tree_node(
+    tree_index: usize,
+    tree: &[LearnedNode],
+    index: usize,
+    visiting: &mut [bool],
+    visited: &mut [bool],
+) -> Result<(), String> {
+    if visited[index] {
+        return Ok(());
+    }
+    if visiting[index] {
+        return Err(format!(
+            "learned model tree {tree_index} contains a cycle at node {index}"
+        ));
+    }
+    visiting[index] = true;
+    let node = tree[index];
+    if node.feature >= 0 {
+        validate_learned_tree_node(tree_index, tree, node.left as usize, visiting, visited)?;
+        validate_learned_tree_node(tree_index, tree, node.right as usize, visiting, visited)?;
+    }
+    visiting[index] = false;
+    visited[index] = true;
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1587,7 +1664,7 @@ fn learned_features(
     blur3: u8,
     blur21: u8,
     gradient: u8,
-) -> [f64; 18] {
+) -> [f64; LEARNED_FEATURE_COUNT] {
     let xf = x as f64 / width.saturating_sub(1).max(1) as f64;
     let yf = y as f64 / height.saturating_sub(1).max(1) as f64;
     let n = f64::from(normalized) / 255.0;
@@ -1617,21 +1694,25 @@ fn learned_features(
     ]
 }
 
-fn evaluate_learned_tree(tree: &[LearnedNode], features: [f64; 18]) -> f64 {
+fn evaluate_learned_tree(tree: &[LearnedNode], features: [f64; LEARNED_FEATURE_COUNT]) -> f64 {
     let mut index = 0_usize;
-    loop {
+    for _ in 0..=tree.len() {
         let Some(node) = tree.get(index) else {
             return 0.0;
         };
         if node.feature < 0 {
             return node.value;
         }
-        index = if features[node.feature as usize] <= node.threshold {
+        let Some(feature) = features.get(node.feature as usize) else {
+            return 0.0;
+        };
+        index = if *feature <= node.threshold {
             node.left as usize
         } else {
             node.right as usize
         };
     }
+    0.0
 }
 
 fn bone_exemplar_mask(gray: &[u8], width: usize, height: usize) -> Option<Vec<bool>> {
@@ -2082,6 +2163,36 @@ mod tests {
         assert!(trees.iter().all(|tree| !tree.is_empty()));
     }
 
+    #[test]
+    fn decode_learned_model_rejects_invalid_feature_index() {
+        let data = encoded_learned_model(&[vec![LearnedNode {
+            feature: LEARNED_FEATURE_COUNT as i32,
+            threshold: 0.5,
+            left: 1,
+            right: 1,
+            value: 0.0,
+        }]]);
+
+        let error = decode_learned_model(&data).unwrap_err();
+
+        assert!(error.contains("references feature"));
+    }
+
+    #[test]
+    fn decode_learned_model_rejects_cycles() {
+        let data = encoded_learned_model(&[vec![LearnedNode {
+            feature: 0,
+            threshold: 0.5,
+            left: 0,
+            right: 0,
+            value: 0.0,
+        }]]);
+
+        let error = decode_learned_model(&data).unwrap_err();
+
+        assert!(error.contains("contains a cycle"));
+    }
+
     // Locks the exact entry count of the shipped feature table. If anyone
     // regenerates the asset and the count changes, update this number too —
     // and double-check the bucket-size analysis at the top of the file.
@@ -2211,5 +2322,22 @@ mod tests {
         let mut encoder = GzEncoder::new(Vec::new(), Compression::fast());
         encoder.write_all(&raw).unwrap();
         encoder.finish().unwrap()
+    }
+
+    fn encoded_learned_model(trees: &[Vec<LearnedNode>]) -> Vec<u8> {
+        let mut raw = Vec::new();
+        raw.extend_from_slice(b"XVLM1");
+        raw.extend_from_slice(&(trees.len() as u32).to_le_bytes());
+        for tree in trees {
+            raw.extend_from_slice(&(tree.len() as u32).to_le_bytes());
+            for node in tree {
+                raw.extend_from_slice(&node.feature.to_le_bytes());
+                raw.extend_from_slice(&node.threshold.to_le_bytes());
+                raw.extend_from_slice(&node.left.to_le_bytes());
+                raw.extend_from_slice(&node.right.to_le_bytes());
+                raw.extend_from_slice(&node.value.to_le_bytes());
+            }
+        }
+        raw
     }
 }
