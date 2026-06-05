@@ -10,7 +10,7 @@ use serde_json::json;
 
 use crate::{
     analysis,
-    bmp::{self, Metadata, RenderedPreview},
+    bmp::{self, DecodedSourcePreview, Metadata, RenderedPreview},
     config::Config,
     contracts::{
         BACKEND_CONTRACT_VERSION, BackendError, MeasurementScale, SERVICE_NAME, SUPPORTED_COMMANDS,
@@ -197,10 +197,10 @@ fn decode_source(path: &std::path::Path, stdout: &mut dyn Write) -> CliResult<()
         .to_str()
         .ok_or_else(|| "decode-source path must be valid UTF-8".to_string())?;
     let metadata = bmp::read_file(path_str)?;
-    let rendered = bmp::render_grayscale_preview_file(path_str)?;
+    let source = bmp::decode_source_preview_file(path)?;
     write_json(
         stdout,
-        &DecodeSourceSummary::from_rendered_and_metadata(rendered, &metadata),
+        &DecodeSourceSummary::from_source_and_metadata(source, &metadata),
     )
 }
 
@@ -362,17 +362,17 @@ struct DecodeSourceSummary {
 }
 
 impl DecodeSourceSummary {
-    fn from_rendered_and_metadata(rendered: RenderedPreview, metadata: &Metadata) -> Self {
-        let min_value = rendered.pixels.iter().copied().min().unwrap_or_default();
-        let max_value = rendered.pixels.iter().copied().max().unwrap_or_default();
-        let measurement_scale = rendered
+    fn from_source_and_metadata(source: DecodedSourcePreview, metadata: &Metadata) -> Self {
+        let min_value = source.pixels.iter().copied().min().unwrap_or_default();
+        let max_value = source.pixels.iter().copied().max().unwrap_or_default();
+        let measurement_scale = source
             .measurement_scale
             .or_else(|| metadata.measurement_scale());
         Self {
-            width: rendered.width,
-            height: rendered.height,
+            width: source.width,
+            height: source.height,
             format: "gray8",
-            pixel_count: rendered.pixels.len(),
+            pixel_count: source.pixels.len(),
             min_value,
             max_value,
             invert: false,
@@ -675,6 +675,32 @@ mod tests {
         assert_eq!(summary["width"], 4);
         assert_eq!(summary["height"], 2);
         assert!(summary.get("measurementScale").is_none());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn decode_source_reports_raw_source_range() {
+        let root = unique_temp_dir("decode-source-range");
+        fs::create_dir_all(&root).unwrap();
+        let input = root.join("study.bmp");
+        fs::write(
+            &input,
+            crate::bmp::tests::build_bmp_32(2, 1, &[(10, 10, 10), (40, 40, 40)]),
+        )
+        .unwrap();
+
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        run(
+            &["decode-source", input.to_str().unwrap()],
+            &mut stdout,
+            &mut stderr,
+        )
+        .unwrap();
+
+        let summary: serde_json::Value = serde_json::from_slice(&stdout).unwrap();
+        assert_eq!(summary["minValue"], 10);
+        assert_eq!(summary["maxValue"], 40);
         let _ = fs::remove_dir_all(root);
     }
 
