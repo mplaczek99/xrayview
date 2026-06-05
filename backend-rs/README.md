@@ -11,7 +11,7 @@ Current Rust-owned surface:
 - environment config using `XRAYVIEW_BACKEND_*`
 - Tauri IPC command handlers: manifest, open study, render, analyze, process,
   job polling, cancellation, and line measurement
-- native BMP metadata/decode, PNG previews, processing pipelines,
+- native BMP metadata/decode, BMP previews, processing pipelines,
   deterministic analysis overlays,
   recent-study catalog persistence, source-preview decode caching, session-scoped
   job result caching, artifact eviction, and in-memory job state

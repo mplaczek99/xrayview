@@ -42,7 +42,7 @@ xrayview/
 
 ### Prerequisites
 
-- [Rust](https://www.rust-lang.org/tools/install) 1.77+
+- [Rust](https://www.rust-lang.org/tools/install) 1.85+ (Rust 2024 edition)
 - [Node.js](https://nodejs.org/) 20+
 - Linux desktop builds require GTK/WebKit development packages
   On Debian/Ubuntu: `libgtk-3-dev`, `libwebkit2gtk-4.1-dev`, `librsvg2-dev`,
