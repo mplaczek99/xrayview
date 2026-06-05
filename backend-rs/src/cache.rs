@@ -25,7 +25,6 @@ use walkdir::WalkDir;
 
 // Path-name constants. Pub because the desktop shell uses them when computing
 // paths to surface in dialogs.
-pub const DEFAULT_ROOT_DIR_NAME: &str = "xrayview";
 pub const CACHE_DIR_NAME: &str = "cache";
 pub const ARTIFACT_DIR_NAME: &str = "artifacts";
 pub const STATE_DIR_NAME: &str = "state";

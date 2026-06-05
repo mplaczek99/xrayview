@@ -306,11 +306,6 @@ impl App {
     }
 
     #[must_use]
-    pub fn supported_job_kinds(&self) -> [&'static str; 3] {
-        ["renderStudy", "analyzeStudy", "processStudy"]
-    }
-
-    #[must_use]
     pub fn get_processing_manifest(&self) -> ProcessingManifest {
         default_processing_manifest()
     }

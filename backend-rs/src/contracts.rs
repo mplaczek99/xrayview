@@ -14,9 +14,6 @@ pub const SERVICE_NAME: &str = "xrayview-backend";
 // Bump this whenever the schema breaks compatibility — the desktop shell
 // refuses to talk to a backend with a different major version.
 pub const BACKEND_CONTRACT_VERSION: u32 = 2;
-// Identifier for the schema document itself; never resolved as an actual URL.
-pub const BACKEND_CONTRACT_SCHEMA_ID: &str =
-    "https://xrayview.local/contracts/backend-contract-v1.schema.json";
 
 // Command name constants. Frontend invoke() calls use these literal strings;
 // keeping them as named constants here means a rename only happens in one place.
@@ -43,12 +40,6 @@ pub const SUPPORTED_COMMANDS: [&str; 9] = [
     COMMAND_CANCEL_JOB,
     COMMAND_MEASURE_LINE_ANNOTATION,
 ];
-
-// Used by the CLI to validate `--command <name>` arguments before dispatching.
-// O(n) but n=9, so a HashSet would be slower in practice.
-pub fn is_supported_command(command: &str) -> bool {
-    SUPPORTED_COMMANDS.contains(&command)
-}
 
 // Pseudocolor palette identifier on the wire. Note this is the *contract*
 // enum — `processing::Palette` is the internal representation.
@@ -294,17 +285,6 @@ impl BackendError {
 
     pub fn internal(message: impl Into<String>) -> Self {
         Self::new(BackendErrorCode::Internal, message)
-    }
-
-    // Builder-style detail attachment so callers don't have to do
-    // `let mut err = ...; err.details = ...`.
-    pub fn with_details<I, S>(mut self, details: I) -> Self
-    where
-        I: IntoIterator<Item = S>,
-        S: Into<String>,
-    {
-        self.details = details.into_iter().map(Into::into).collect();
-        self
     }
 }
 

@@ -15,6 +15,7 @@ desktop-tauri/gen/
 .DS_Store
 *.log
 .playwright-cli/
+.playwright-mcp/
 
 # My personal images
 images/BMP/
