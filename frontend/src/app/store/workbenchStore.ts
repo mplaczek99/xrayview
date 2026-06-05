@@ -246,6 +246,7 @@ class WorkbenchStore {
       isOpeningStudy: true,
     }));
 
+    let openedStudyId: string | null = null;
     try {
       const selectedPath = await runtime.pickBmpFile();
       if (!selectedPath) {
@@ -263,6 +264,7 @@ class WorkbenchStore {
       }));
 
       const study = await runtime.openStudy(selectedPath);
+      openedStudyId = study.studyId;
       const workbenchStudy = createWorkbenchStudy(
         study,
         defaultControlsForManifest(this.state.manifest),
@@ -295,10 +297,21 @@ class WorkbenchStore {
       );
       await this.syncJob(started.jobId);
     } catch (error) {
+      const status = formatBackendError(error, "Opening the study failed.");
       this.setState((current) => ({
         ...current,
         isOpeningStudy: false,
-        workbenchStatus: formatBackendError(error, "Opening the study failed."),
+        studies:
+          openedStudyId && current.studies[openedStudyId]
+            ? {
+                ...current.studies,
+                [openedStudyId]: {
+                  ...current.studies[openedStudyId],
+                  status,
+                },
+              }
+            : current.studies,
+        workbenchStatus: status,
       }));
     }
   }
