@@ -1489,8 +1489,13 @@ fn decode_feature_probability_table(
     expected_magic: &[u8; 5],
 ) -> Result<FeatureProbabilityTable, String> {
     let mut decoder = GzDecoder::new(data);
-    let mut magic = [0_u8; 5];
+    let mut decoded = Vec::new();
     decoder
+        .read_to_end(&mut decoded)
+        .map_err(|error| format!("decompress feature table: {error}"))?;
+    let mut cursor = Cursor::new(decoded.as_slice());
+    let mut magic = [0_u8; 5];
+    cursor
         .read_exact(&mut magic)
         .map_err(|error| format!("read feature table magic: {error}"))?;
     if &magic != expected_magic {
@@ -1500,16 +1505,28 @@ fn decode_feature_probability_table(
         ));
     }
 
-    let count = read_le_u32(&mut decoder)? as usize;
+    let count = read_le_u32(&mut cursor)? as usize;
     let mut keys = Vec::with_capacity(count);
     let mut probabilities = Vec::with_capacity(count);
     for _ in 0..count {
-        keys.push(read_le_u32(&mut decoder)?);
+        keys.push(read_le_u32(&mut cursor)?);
         let mut probability = [0_u8; 1];
-        decoder
+        cursor
             .read_exact(&mut probability)
             .map_err(|error| format!("read feature table probability: {error}"))?;
         probabilities.push(probability[0]);
+    }
+    if cursor.position() as usize != decoded.len() {
+        return Err(format!(
+            "feature table has {} trailing bytes",
+            decoded.len() - cursor.position() as usize
+        ));
+    }
+    if let Some(window) = keys.windows(2).find(|window| window[0] >= window[1]) {
+        return Err(format!(
+            "feature table keys must be strictly ascending: {} before {}",
+            window[0], window[1]
+        ));
     }
     Ok(FeatureProbabilityTable::new(keys, probabilities))
 }
@@ -1899,6 +1916,9 @@ fn count_components(mask: &[bool], width: usize, height: usize, visited: &mut [b
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
+
+    use flate2::{Compression, write::GzEncoder};
 
     // Smoke test: cook a 20×20 image with a bright square (the "tooth")
     // and a striped row (the "bone level"), confirm the analyzer returns
@@ -2072,6 +2092,24 @@ mod tests {
         assert_eq!(table.len(), 13_441_673);
     }
 
+    #[test]
+    fn decode_feature_probability_table_rejects_trailing_bytes() {
+        let data = encoded_feature_table(&[(1, 42)], &[99]);
+
+        let error = decode_feature_probability_table(&data, b"XVFT1").unwrap_err();
+
+        assert!(error.contains("feature table has 1 trailing bytes"));
+    }
+
+    #[test]
+    fn decode_feature_probability_table_rejects_unsorted_keys() {
+        let data = encoded_feature_table(&[(2, 12), (1, 34)], &[]);
+
+        let error = decode_feature_probability_table(&data, b"XVFT1").unwrap_err();
+
+        assert!(error.contains("feature table keys must be strictly ascending"));
+    }
+
     // Exemplars must be sorted by hash — the inference path binary-searches
     // by hash, so an unsorted asset would silently produce wrong matches.
     #[test]
@@ -2158,5 +2196,20 @@ mod tests {
             preview.pixels[base + 1],
             preview.pixels[base + 2],
         ]
+    }
+
+    fn encoded_feature_table(entries: &[(u32, u8)], trailing: &[u8]) -> Vec<u8> {
+        let mut raw = Vec::new();
+        raw.extend_from_slice(b"XVFT1");
+        raw.extend_from_slice(&(entries.len() as u32).to_le_bytes());
+        for (key, probability) in entries {
+            raw.extend_from_slice(&key.to_le_bytes());
+            raw.push(*probability);
+        }
+        raw.extend_from_slice(trailing);
+
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::fast());
+        encoder.write_all(&raw).unwrap();
+        encoder.finish().unwrap()
     }
 }
