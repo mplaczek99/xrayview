@@ -436,7 +436,8 @@ impl App {
             .cloned()
             .ok_or_else(|| BackendError::not_found(format!("study not found: {study_id}")))?;
 
-        let fingerprint = self.process_fingerprint(&study, &command)?;
+        let resolved = processing::resolve_process_study_command(&command)?;
+        let fingerprint = self.process_fingerprint(&study, &resolved)?;
         if let Some(started) =
             self.start_cached_job(&fingerprint, JobKind::ProcessStudy, study.study_id.clone())?
         {
@@ -448,7 +449,7 @@ impl App {
             self.next_job_number.fetch_add(1, Ordering::Relaxed)
         );
 
-        let snapshot = match self.process_study_job(&job_id, &fingerprint, &study, &command) {
+        let snapshot = match self.process_study_job(&job_id, &fingerprint, &study, &resolved) {
             Ok(snapshot) => snapshot,
             Err(error) => failed_job_snapshot(
                 job_id.clone(),
@@ -483,7 +484,8 @@ impl App {
             .cloned()
             .ok_or_else(|| BackendError::not_found(format!("study not found: {study_id}")))?;
 
-        let fingerprint = self.process_fingerprint(&study, &command)?;
+        let resolved = processing::resolve_process_study_command(&command)?;
+        let fingerprint = self.process_fingerprint(&study, &resolved)?;
         if let Some(started) =
             self.start_cached_job(&fingerprint, JobKind::ProcessStudy, study.study_id.clone())?
         {
@@ -496,7 +498,7 @@ impl App {
                 let app = Arc::clone(self);
                 let worker_job_id = job_id.clone();
                 thread::spawn(move || {
-                    app.run_process_job_async(worker_job_id, fingerprint, study, command);
+                    app.run_process_job_async(worker_job_id, fingerprint, study, resolved);
                 });
                 Ok(StartedJob { job_id })
             }
@@ -804,9 +806,8 @@ impl App {
         job_id: &str,
         fingerprint: &str,
         study: &StudyRecord,
-        command: &ProcessStudyCommand,
+        resolved: &processing::ResolvedProcessStudy,
     ) -> Result<JobSnapshot, BackendError> {
-        let resolved = processing::resolve_process_study_command(command)?;
         let source = self.load_source_preview(study)?;
         let source_preview =
             render::PreviewImage::gray(source.width, source.height, source.pixels.clone());
@@ -976,20 +977,19 @@ impl App {
     fn process_fingerprint(
         &self,
         study: &StudyRecord,
-        command: &ProcessStudyCommand,
+        resolved: &processing::ResolvedProcessStudy,
     ) -> Result<String, BackendError> {
         fingerprint_json(&serde_json::json!({
             "namespace": "process-study",
             "sessionId": self.cache_session_id,
             "inputPath": study.input_path,
             "inputIdentity": current_input_file_identity(&study.input_path),
-            "presetId": command.preset_id,
-            "invert": command.invert,
-            "brightness": command.brightness,
-            "contrast": command.contrast,
-            "equalize": command.equalize,
-            "compare": command.compare,
-            "palette": command.palette,
+            "invert": resolved.controls.invert,
+            "brightness": resolved.controls.brightness,
+            "contrast": resolved.controls.contrast,
+            "equalize": resolved.controls.equalize,
+            "compare": resolved.compare,
+            "palette": resolved.palette.label(),
         }))
     }
 
@@ -1248,9 +1248,9 @@ impl App {
         job_id: String,
         fingerprint: String,
         study: Arc<StudyRecord>,
-        command: ProcessStudyCommand,
+        resolved: processing::ResolvedProcessStudy,
     ) {
-        let prepared = match self.run_job_stage(
+        let preview_path = match self.run_job_stage(
             &job_id,
             &fingerprint,
             10,
@@ -1259,12 +1259,10 @@ impl App {
             &[],
             || {
                 validate_input_file(&study.input_path)?;
-                let resolved = processing::resolve_process_study_command(&command)?;
-                let preview_path = self.cache.artifact_path("process", &fingerprint, "bmp")?;
-                Ok((resolved, preview_path))
+                self.cache.artifact_path("process", &fingerprint, "bmp")
             },
         ) {
-            Some(Ok(prepared)) => prepared,
+            Some(Ok(preview_path)) => preview_path,
             Some(Err(error)) => {
                 self.finish_async_job(
                     &job_id,
@@ -1280,7 +1278,6 @@ impl App {
             }
             None => return,
         };
-        let (resolved, preview_path) = prepared;
 
         let source = match self.run_job_stage(
             &job_id,
@@ -2911,11 +2908,12 @@ mod tests {
         let _ = fs::remove_dir_all(temp_dir);
     }
 
-    // Same input + same knobs → same fingerprint → cache hit on the
-    // second call. Tweaking any knob (brightness etc) would miss; pinned
-    // here so process_fingerprint stays sensitive to every field.
+    // Same input + same resolved knobs → same fingerprint → cache hit on
+    // the second call, even when the raw preset id needs normalization.
+    // Tweaking any resolved knob (brightness etc) would miss; pinned here
+    // so process_fingerprint stays sensitive to every output-affecting field.
     #[test]
-    fn start_process_job_reuses_in_session_cached_result_for_same_controls() {
+    fn start_process_job_reuses_cache_for_same_resolved_controls() {
         let (temp_dir, app, study) =
             app_with_renderable_study("process-cache-hit", build_renderable_test_bmp());
         let command = ProcessStudyCommand {
@@ -2946,6 +2944,7 @@ mod tests {
         let second_started = app
             .start_process_job(ProcessStudyCommand {
                 study_id: second_study.study_id.clone(),
+                preset_id: " XRAY ".to_string(),
                 ..command
             })
             .unwrap();
@@ -2966,6 +2965,32 @@ mod tests {
         );
         assert_eq!(second_payload.preview_path, first_payload.preview_path);
         assert_eq!(second_payload.study_id, second_study.study_id);
+
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn start_process_job_async_rejects_invalid_command_before_queueing() {
+        let (temp_dir, app, study) =
+            app_with_renderable_study("process-async-invalid-command", build_renderable_test_bmp());
+        let app = Arc::new(app);
+        let error = app
+            .start_process_job_async(ProcessStudyCommand {
+                study_id: study.study_id.clone(),
+                preset_id: "default".to_string(),
+                invert: false,
+                brightness: None,
+                contrast: Some(0.0),
+                equalize: false,
+                compare: false,
+                palette: None,
+            })
+            .unwrap_err();
+
+        assert_eq!(error.code, crate::contracts::BackendErrorCode::InvalidInput);
+        assert!(error.message.contains("contrast must be >="));
+        assert_eq!(app.next_job_number.load(Ordering::Relaxed), 1);
+        assert_eq!(app.jobs.lock().len(), 0);
 
         let _ = fs::remove_dir_all(temp_dir);
     }
