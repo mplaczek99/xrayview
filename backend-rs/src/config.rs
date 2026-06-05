@@ -75,12 +75,13 @@ impl Config {
         F: Fn(&str) -> Option<String>,
     {
         let mut config = Self::default();
-        let lookup_non_empty = |key| lookup(key).filter(|value| !value.is_empty());
+        let lookup_non_empty = |key| lookup(key).filter(|value| !value.trim().is_empty());
 
         // Empty strings are treated as "unset", which is the sane Unix-y
         // behavior (FOO= shouldn't break the app).
         if let Some(value) = lookup_non_empty(LOG_LEVEL_ENV_KEY) {
-            let lower = value.to_ascii_lowercase();
+            let trimmed = value.trim();
+            let lower = trimmed.to_ascii_lowercase();
             // Validate the level *before* storing it — otherwise we'd silently
             // log nothing if a typo'd level slipped through.
             if !matches!(lower.as_str(), "debug" | "info" | "warn" | "error") {
@@ -184,13 +185,39 @@ mod tests {
         );
     }
 
+    #[test]
+    fn load_from_lookup_ignores_whitespace_only_values() {
+        let config = Config::load_from_lookup(lookup_from_map(HashMap::from([
+            (LOG_LEVEL_ENV_KEY, "   "),
+            (BASE_DIR_ENV_KEY, "\t"),
+            (CACHE_DIR_ENV_KEY, "\n"),
+            (PERSISTENCE_DIR_ENV_KEY, "  \r\n"),
+        ])))
+        .unwrap();
+
+        assert_eq!(config, Config::default());
+    }
+
+    #[test]
+    fn load_from_lookup_trims_log_level() {
+        let config = Config::load_from_lookup(lookup_from_map(HashMap::from([(
+            LOG_LEVEL_ENV_KEY,
+            " WaRn ",
+        )])))
+        .unwrap();
+
+        assert_eq!(config.logging.level, "warn");
+    }
+
     // "trace" is a valid log level for the `log` crate but we don't accept
     // it — this test guards that policy.
     #[test]
     fn load_from_lookup_rejects_invalid_log_level() {
-        let error =
-            Config::load_from_lookup(lookup_from_map(HashMap::from([(LOG_LEVEL_ENV_KEY, "trace")])))
-                .unwrap_err();
+        let error = Config::load_from_lookup(lookup_from_map(HashMap::from([(
+            LOG_LEVEL_ENV_KEY,
+            "trace",
+        )])))
+        .unwrap_err();
 
         // Error must mention the env key so users know what to fix.
         assert!(error.contains(LOG_LEVEL_ENV_KEY));
