@@ -13,7 +13,7 @@ import {
   type WorkbenchState,
   type WorkbenchStudy,
 } from "../../features/study/model";
-import { formatBackendError } from "../../lib/backendErrors";
+import { formatBackendError, normalizeBackendError } from "../../lib/backendErrors";
 import type {
   LineAnnotation,
   ProcessingControls,
@@ -516,20 +516,16 @@ class WorkbenchStore {
       );
       await this.syncJob(started.jobId);
     } catch (error) {
+      const backendError = normalizeBackendError(error);
       this.setStudyState(study.studyId, (current) => ({
         ...current,
-        status: formatBackendError(error, "Processing failed."),
+        status: formatBackendError(backendError, "Processing failed."),
         processing: {
           ...current.processing,
           runStatus: {
             state: "error",
             jobId: "local-error",
-            error: {
-              code: "internal",
-              message: formatBackendError(error, "Processing failed."),
-              details: [],
-              recoverable: false,
-            },
+            error: backendError,
           },
         },
       }));
