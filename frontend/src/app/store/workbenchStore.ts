@@ -241,9 +241,18 @@ class WorkbenchStore {
       return;
     }
 
+    this.setState((current) => ({
+      ...current,
+      isOpeningStudy: true,
+    }));
+
     try {
       const selectedPath = await runtime.pickBmpFile();
       if (!selectedPath) {
+        this.setState((current) => ({
+          ...current,
+          isOpeningStudy: false,
+        }));
         return;
       }
 
