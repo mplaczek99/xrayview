@@ -148,6 +148,7 @@ function makePoller_AFTER_with_sse(
   let cancelled = false;
   let timer;
   let currentIntervalMs = FAST_POLL_MS;
+  let forceNextPoll = false;
 
   function scheduleNext(intervalMs) {
     if (cancelled) return;
@@ -168,7 +169,11 @@ function makePoller_AFTER_with_sse(
     // SSE suppression: skip HTTP polling only after the listener is active and
     // a fresh event has actually arrived (virtual clock).
     const lastEventAtMs = getLastEventAtMs();
+    const shouldForcePoll = forceNextPoll;
+    forceNextPoll = false;
+
     if (
+      !shouldForcePoll &&
       isEventStreamActive() &&
       lastEventAtMs !== null &&
       getNowMs() - lastEventAtMs < EVENT_STALE_MS
@@ -219,6 +224,15 @@ function makePoller_AFTER_with_sse(
 
   return {
     start: () => poll(),
+    notifyPendingJobCountIncreased: () => {
+      currentIntervalMs = FAST_POLL_MS;
+      forceNextPoll = true;
+      if (timer !== undefined) {
+        mockClearTimeout(timer);
+        timer = undefined;
+      }
+      poll();
+    },
     cancel: () => {
       cancelled = true;
       if (timer !== undefined) mockClearTimeout(timer);
@@ -485,4 +499,28 @@ test("AFTER: listener not active yet does not suppress fallback polling", () => 
   poller.cancel();
 
   assert.ok(pollCount >= 1, `Expected polling before listener activation, got ${pollCount}`);
+});
+
+test("AFTER: new pending job forces one poll during fresh SSE heartbeat", () => {
+  resetTimers();
+  const wallTimeMs = 100;
+  let pollCount = 0;
+  const jobs = [makeJob("j1", "running", 40)];
+  const poller = makePoller_AFTER_with_sse(
+    () => jobs,
+    () => pollCount++,
+    () => true,
+    () => 0,
+    () => wallTimeMs,
+  );
+
+  poller.start();
+  assert.equal(pollCount, 0, "fresh SSE event suppresses the ordinary poll");
+  assert.equal(timerQueue.length, 1, "ordinary suppression schedules heartbeat");
+
+  jobs.push(makeJob("j2", "queued", 0));
+  poller.notifyPendingJobCountIncreased();
+  poller.cancel();
+
+  assert.equal(pollCount, 2, "forced poll refreshes both pending jobs immediately");
 });

@@ -33,6 +33,7 @@ export function startJobSync(): () => void {
   let currentIntervalMs = ACTIVE_POLL_MS;
   let lastEventAtMs: number | null = null;
   let lastPendingJobCount = pendingJobCount();
+  let forceNextPoll = false;
 
   if (runtime.mode === "desktop") {
     void listen<ContractJobSnapshot>("job-update", (event) => {
@@ -82,7 +83,11 @@ export function startJobSync(): () => void {
       return;
     }
 
+    const shouldForcePoll = forceNextPoll;
+    forceNextPoll = false;
+
     if (
+      !shouldForcePoll &&
       unlistenJobUpdate !== undefined &&
       lastEventAtMs !== null &&
       Date.now() - lastEventAtMs < EVENT_STALE_MS
@@ -168,12 +173,21 @@ export function startJobSync(): () => void {
 
   const unsubscribe = workbenchActions.subscribe(() => {
     const nextPendingJobCount = pendingJobCount();
+    const pendingJobCountIncreased = nextPendingJobCount > lastPendingJobCount;
     if (nextPendingJobCount === lastPendingJobCount) {
       return;
     }
 
     lastPendingJobCount = nextPendingJobCount;
-    if (nextPendingJobCount > 0 && timer === undefined) {
+    if (nextPendingJobCount > 0 && pendingJobCountIncreased) {
+      currentIntervalMs = ACTIVE_POLL_MS;
+      forceNextPoll = true;
+      if (timer !== undefined) {
+        window.clearTimeout(timer);
+        timer = undefined;
+      }
+      void pollPendingJobs();
+    } else if (nextPendingJobCount > 0 && timer === undefined) {
       void pollPendingJobs();
     }
   });
