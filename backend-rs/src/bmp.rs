@@ -971,6 +971,27 @@ pub mod tests {
         assert_eq!(preview.pixels.as_ref(), [0, 255]);
     }
 
+    #[test]
+    fn render_bmp_supports_top_down_rows() {
+        let bmp = build_bmp_32_top_down(
+            2,
+            2,
+            &[(0, 0, 0), (32, 32, 32), (160, 160, 160), (255, 255, 255)],
+        );
+        let preview = render_grayscale_preview_with_options(&bmp, true).unwrap();
+
+        assert_eq!(preview.pixels.as_ref(), [0, 32, 160, 255]);
+    }
+
+    #[test]
+    fn render_bmp_rejects_partial_palette_index_out_of_range() {
+        let bmp = build_bmp_8_palette(2, 1, &[(0, 0, 0), (255, 255, 255)], &[0, 2]);
+
+        let error = render_grayscale_preview(&bmp).unwrap_err();
+
+        assert!(error.contains("BMP palette index 2 exceeds 2 entries"));
+    }
+
     // Extension guard: even if the bytes are a valid BMP, a non-BMP suffix
     // means we refuse.
     #[test]
@@ -1013,6 +1034,18 @@ pub mod tests {
             }
         }
         debug_assert_eq!(bmp.len(), file_size);
+        bmp
+    }
+
+    fn build_bmp_32_top_down(width: u32, height: u32, rgb_top_down: &[(u8, u8, u8)]) -> Vec<u8> {
+        assert_eq!(rgb_top_down.len(), width as usize * height as usize);
+        let mut bmp = build_bmp_32_header(width, height);
+        bmp[22..26].copy_from_slice(&(-(height as i32)).to_le_bytes());
+        for row in rgb_top_down.chunks_exact(width as usize) {
+            for &(red, green, blue) in row {
+                bmp.extend_from_slice(&[blue, green, red, 255]);
+            }
+        }
         bmp
     }
 
