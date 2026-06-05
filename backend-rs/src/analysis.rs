@@ -1836,7 +1836,9 @@ fn decode_bone_feature_table(data: &[u8]) -> Result<HashMap<u32, u8>, String> {
         cursor
             .read_exact(&mut probability)
             .map_err(|error| format!("read bone feature table probability: {error}"))?;
-        table.insert(key, probability[0]);
+        if table.insert(key, probability[0]).is_some() {
+            return Err(format!("bone feature table has duplicate key {key}"));
+        }
     }
     if cursor.position() as usize != decoded.len() {
         return Err(format!(
@@ -2164,6 +2166,15 @@ mod tests {
         assert!(!table.is_empty());
     }
 
+    #[test]
+    fn decode_bone_feature_table_rejects_duplicate_keys() {
+        let data = encoded_bone_feature_table(&[(7, 42), (7, 99)], &[]);
+
+        let error = decode_bone_feature_table(&data).unwrap_err();
+
+        assert!(error.contains("duplicate key 7"));
+    }
+
     // Verifies the forest has at least one tree and every tree is non-empty.
     #[test]
     fn learned_tooth_model_loads_trees() {
@@ -2322,6 +2333,21 @@ mod tests {
     fn encoded_feature_table(entries: &[(u32, u8)], trailing: &[u8]) -> Vec<u8> {
         let mut raw = Vec::new();
         raw.extend_from_slice(b"XVFT1");
+        raw.extend_from_slice(&(entries.len() as u32).to_le_bytes());
+        for (key, probability) in entries {
+            raw.extend_from_slice(&key.to_le_bytes());
+            raw.push(*probability);
+        }
+        raw.extend_from_slice(trailing);
+
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::fast());
+        encoder.write_all(&raw).unwrap();
+        encoder.finish().unwrap()
+    }
+
+    fn encoded_bone_feature_table(entries: &[(u32, u8)], trailing: &[u8]) -> Vec<u8> {
+        let mut raw = Vec::new();
+        raw.extend_from_slice(b"XVBL1");
         raw.extend_from_slice(&(entries.len() as u32).to_le_bytes());
         for (key, probability) in entries {
             raw.extend_from_slice(&key.to_le_bytes());
