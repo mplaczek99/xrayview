@@ -41,6 +41,10 @@ function isTerminalJob(job) {
   return job.state === "completed" || job.state === "failed" || job.state === "cancelled";
 }
 
+function isPendingJob(job) {
+  return job?.state === "queued" || job?.state === "running" || job?.state === "cancelling";
+}
+
 function isStaleJobSnapshot(prev, next) {
   if (isTerminalJob(prev) && !isTerminalJob(next)) {
     return true;
@@ -51,6 +55,19 @@ function isStaleJobSnapshot(prev, next) {
     prev.progress.percent > next.progress.percent &&
     (next.state === "queued" || next.state === "running" || next.state === "cancelling")
   );
+}
+
+function hasSupersedingJob(currentJobId, incomingJob, jobs) {
+  if (!currentJobId || currentJobId === incomingJob.jobId) {
+    return false;
+  }
+
+  const currentJob = jobs[currentJobId];
+  if (!currentJob) {
+    return false;
+  }
+
+  return isPendingJob(currentJob) || !isPendingJob(incomingJob);
 }
 
 // ---------------------------------------------------------------------------
@@ -275,6 +292,33 @@ test("AFTER: delayed lower-progress running snapshot is ignored", () => {
 
   assert.equal(store.getListenerCount(), 0, "AFTER: lower-progress snapshot is ignored");
   assert.equal(store.getState().jobs.j1.progress.percent, 90, "AFTER: higher progress is retained");
+});
+
+test("AFTER: pending current study job blocks superseded update", () => {
+  const jobs = {
+    current: makeSnapshot({ jobId: "current", state: "running" }),
+  };
+  const incoming = makeSnapshot({ jobId: "old", state: "completed" });
+
+  assert.equal(hasSupersedingJob("current", incoming, jobs), true);
+});
+
+test("AFTER: completed current study job blocks superseded terminal update", () => {
+  const jobs = {
+    current: makeSnapshot({ jobId: "current", state: "completed" }),
+  };
+  const incoming = makeSnapshot({ jobId: "old", state: "failed" });
+
+  assert.equal(hasSupersedingJob("current", incoming, jobs), true);
+});
+
+test("AFTER: pending retry can supersede completed study job", () => {
+  const jobs = {
+    current: makeSnapshot({ jobId: "current", state: "completed" }),
+  };
+  const incoming = makeSnapshot({ jobId: "retry", state: "queued" });
+
+  assert.equal(hasSupersedingJob("current", incoming, jobs), false);
 });
 
 test("AFTER: changed completed result payload fires listener", () => {

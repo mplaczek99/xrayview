@@ -6,14 +6,21 @@ function isPendingJob(job: JobSnapshot | null | undefined): boolean {
   return job?.state === "queued" || job?.state === "running" || job?.state === "cancelling";
 }
 
-function hasPendingSupersedingJob(
+function hasSupersedingJob(
   currentJobId: string | null | undefined,
   incomingJob: JobSnapshot,
   jobs: WorkbenchState["jobs"],
 ): boolean {
-  return Boolean(
-    currentJobId && currentJobId !== incomingJob.jobId && isPendingJob(jobs[currentJobId]),
-  );
+  if (!currentJobId || currentJobId === incomingJob.jobId) {
+    return false;
+  }
+
+  const currentJob = jobs[currentJobId];
+  if (!currentJob) {
+    return false;
+  }
+
+  return isPendingJob(currentJob) || !isPendingJob(incomingJob);
 }
 
 function processRunJobId(study: WorkbenchStudy): string | null {
@@ -26,7 +33,7 @@ function applyRenderJob(
   job: JobSnapshot,
   jobs: WorkbenchState["jobs"],
 ): WorkbenchStudy {
-  if (hasPendingSupersedingJob(study.renderJobId, job, jobs)) {
+  if (hasSupersedingJob(study.renderJobId, job, jobs)) {
     return study;
   }
 
@@ -73,7 +80,7 @@ function applyAnalyzeJob(
   job: JobSnapshot,
   jobs: WorkbenchState["jobs"],
 ): WorkbenchStudy {
-  if (hasPendingSupersedingJob(study.analysisJobId, job, jobs)) {
+  if (hasSupersedingJob(study.analysisJobId, job, jobs)) {
     return study;
   }
 
@@ -135,7 +142,7 @@ function applyProcessJob(
   job: JobSnapshot,
   jobs: WorkbenchState["jobs"],
 ): WorkbenchStudy {
-  if (hasPendingSupersedingJob(processRunJobId(study), job, jobs)) {
+  if (hasSupersedingJob(processRunJobId(study), job, jobs)) {
     return study;
   }
 
