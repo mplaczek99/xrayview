@@ -284,7 +284,7 @@ fn process_preview(args: ProcessPreviewArgs, stdout: &mut dyn Write) -> CliResul
                 "default"
             },
             mode: processed.mode,
-            palette: palette_name,
+            palette: palette.label().to_string(),
             compare: args.compare,
             measurement_scale: rendered.measurement_scale,
             rendered_byte_count: processed.preview.pixels.len(),
@@ -585,7 +585,7 @@ mod tests {
                 "process-preview",
                 "--invert",
                 "--palette",
-                "hot",
+                " HoT ",
                 input.to_str().unwrap(),
                 process_output.to_str().unwrap(),
             ],
