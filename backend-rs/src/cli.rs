@@ -250,8 +250,13 @@ fn process_preview(args: ProcessPreviewArgs, stdout: &mut dyn Write) -> CliResul
         )
         .into());
     }
-    if !args.contrast.is_finite() || args.contrast < 0.0 {
-        return Err(format!("contrast must be >= 0.0, got {}", args.contrast).into());
+    if !args.contrast.is_finite() || args.contrast < processing::MIN_CONTRAST {
+        return Err(format!(
+            "contrast must be >= {}, got {}",
+            processing::MIN_CONTRAST,
+            args.contrast
+        )
+        .into());
     }
 
     let palette_name = args.palette.to_ascii_lowercase();
@@ -505,6 +510,36 @@ mod tests {
         assert!(args.compare);
         assert_eq!(args.input_path, Path::new("input.bmp"));
         assert_eq!(args.output_path, Path::new("output.bmp"));
+    }
+
+    #[test]
+    fn process_preview_rejects_zero_contrast() {
+        let root = unique_temp_dir("zero-contrast");
+        fs::create_dir_all(&root).unwrap();
+        let input = root.join("study.bmp");
+        let output = root.join("process.bmp");
+        fs::write(&input, build_renderable_test_bmp()).unwrap();
+
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+        let error = run(
+            &[
+                "process-preview",
+                "--contrast",
+                "0",
+                input.to_str().unwrap(),
+                output.to_str().unwrap(),
+            ],
+            &mut stdout,
+            &mut stderr,
+        )
+        .unwrap_err();
+
+        assert!(stdout.is_empty());
+        assert!(stderr.is_empty());
+        assert!(error.to_string().contains("contrast must be >= 0.1"));
+        assert!(!output.exists());
+        let _ = fs::remove_dir_all(root);
     }
 
     // End-to-end: run render-preview and process-preview, confirm both

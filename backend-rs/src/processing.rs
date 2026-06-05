@@ -1,8 +1,12 @@
+#[cfg(test)]
+use crate::contracts::BackendErrorCode;
 use crate::{
     contracts::{BackendError, PaletteName, ProcessStudyCommand, default_processing_manifest},
     render::{PreviewFormat, PreviewImage},
 };
 use std::sync::Arc;
+
+pub const MIN_CONTRAST: f64 = 0.1;
 
 // The four knobs the user can flip on a study. Order of application matters
 // and is set in process_grayscale_pixels — see comments there.
@@ -117,13 +121,13 @@ pub fn resolve_process_study_command(
         )));
     }
 
-    // Contrast must be finite *and* non-negative. A negative or NaN contrast
-    // breaks the LUT math downstream and we'd rather refuse here.
+    // Contrast must be finite and above the lowest useful UI value. Zero
+    // collapses every pixel to the midpoint, producing a flat gray image.
     if let Some(contrast) = command.contrast
-        && (!contrast.is_finite() || contrast < 0.0)
+        && (!contrast.is_finite() || contrast < MIN_CONTRAST)
     {
         return Err(BackendError::invalid_input(format!(
-            "contrast must be >= 0.0, got {contrast}"
+            "contrast must be >= {MIN_CONTRAST}, got {contrast}"
         )));
     }
 
@@ -570,5 +574,23 @@ mod tests {
         assert_eq!(resolved.controls.brightness, 10);
         assert_eq!(resolved.controls.contrast, 1.4);
         assert_eq!(resolved.palette, Palette::Bone);
+    }
+
+    #[test]
+    fn resolve_process_study_command_rejects_zero_contrast() {
+        let error = resolve_process_study_command(&ProcessStudyCommand {
+            study_id: "study-1".to_string(),
+            preset_id: "default".to_string(),
+            invert: false,
+            brightness: None,
+            contrast: Some(0.0),
+            equalize: false,
+            compare: false,
+            palette: None,
+        })
+        .unwrap_err();
+
+        assert_eq!(error.code, BackendErrorCode::InvalidInput);
+        assert!(error.message.contains("contrast must be >= 0.1"));
     }
 }
