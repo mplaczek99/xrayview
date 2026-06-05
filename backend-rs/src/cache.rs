@@ -147,6 +147,10 @@ impl Store {
         key: &str,
         extension: &str,
     ) -> Result<PathBuf, BackendError> {
+        validate_artifact_segment("namespace", namespace)?;
+        validate_artifact_segment("key", key)?;
+        validate_artifact_segment("extension", extension)?;
+
         let directory = self.root_dir.join(ARTIFACT_DIR_NAME).join(namespace);
         fs::create_dir_all(&directory).map_err(|error| {
             BackendError::internal(format!(
@@ -298,6 +302,20 @@ fn collect_artifact_files(root: &Path) -> Vec<ArtifactFileInfo> {
             })
         })
         .collect()
+}
+
+fn validate_artifact_segment(label: &str, value: &str) -> Result<(), BackendError> {
+    if value.is_empty()
+        || value == "."
+        || value == ".."
+        || value.contains('/')
+        || value.contains('\\')
+    {
+        return Err(BackendError::invalid_input(format!(
+            "artifact {label} must be a safe path segment"
+        )));
+    }
+    Ok(())
 }
 
 // In-memory LRU cache for decoded source previews. The whole state lives
@@ -722,6 +740,26 @@ mod tests {
 
         assert_eq!(error.code, crate::contracts::BackendErrorCode::Internal);
         assert!(error.message.contains("failed to create cache directory"));
+    }
+
+    #[test]
+    fn artifact_path_rejects_unsafe_path_segments() {
+        let root = tempdir().unwrap();
+        let store = Store::new_with_root(root.path());
+
+        for (namespace, key, extension) in [
+            ("../render", "fingerprint-1", "bmp"),
+            ("render", "../fingerprint-1", "bmp"),
+            ("render", "fingerprint-1", "../bmp"),
+            ("render", "fingerprint/1", "bmp"),
+            ("render", "fingerprint\\1", "bmp"),
+            ("render", ".", "bmp"),
+            ("render", "", "bmp"),
+        ] {
+            let error = store.artifact_path(namespace, key, extension).unwrap_err();
+            assert_eq!(error.code, crate::contracts::BackendErrorCode::InvalidInput);
+            assert!(error.message.contains("safe path segment"));
+        }
     }
 
     // Clone semantics + counter accounting. Mutating the returned clone
