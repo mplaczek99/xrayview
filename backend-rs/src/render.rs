@@ -104,6 +104,9 @@ fn validate_preview_pixels(
     if width == 0 || height == 0 {
         return Err("preview dimensions must be non-zero".to_string());
     }
+    if width > i32::MAX as u32 || height > i32::MAX as u32 {
+        return Err("BMP dimensions exceed signed 32-bit header limits".to_string());
+    }
     let channels: usize = match format {
         PreviewFormat::Gray8 => 1,
         PreviewFormat::Rgba8 => 4,
@@ -296,6 +299,13 @@ mod tests {
         let error = encode_gray_bmp(0, 2, &[]).unwrap_err();
 
         assert!(error.contains("non-zero"));
+    }
+
+    #[test]
+    fn encode_gray_bmp_rejects_dimensions_outside_signed_header_range() {
+        let error = encode_gray_bmp(i32::MAX as u32 + 1, 1, &[]).unwrap_err();
+
+        assert!(error.contains("signed 32-bit header limits"));
     }
 
     // The 4-byte row padding is the single most error-prone part of the BMP
