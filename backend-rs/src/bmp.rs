@@ -13,11 +13,13 @@
 // because the analyzer depends on the raw values being comparable across
 // images.
 
-use std::{fs, path::Path, sync::Arc};
+use std::{fs, io::Read, path::Path, sync::Arc};
 
 use byteorder::{ByteOrder, LittleEndian};
 
 use crate::contracts::MeasurementScale;
+
+const MIN_BMP_HEADER_BYTES: usize = 54;
 
 // Header metadata exposed to the rest of the backend. BMP files do not carry
 // pixel spacing, so measurement_scale() always returns None for now.
@@ -63,15 +65,24 @@ pub struct RenderedPreview {
 // Metadata. Doesn't decode pixel data, so it's fast on huge files.
 pub fn read_file(path: &str) -> Result<Metadata, String> {
     let path = Path::new(path);
-    let bytes = fs::read(path).map_err(|error| format!("open source file: {error}"))?;
     if !supports_bmp_path(path) {
         return Err(format!(
             "unsupported source image extension for {}; expected .bmp",
             path.display()
         ));
     }
-    read_header(&bytes)
+    let mut file = fs::File::open(path).map_err(|error| format!("open source file: {error}"))?;
+    read_header_prefix(&mut file)
         .map_err(|error| format!("read BMP metadata from {}: {error}", path.display()))
+}
+
+fn read_header_prefix(reader: &mut impl Read) -> Result<Metadata, String> {
+    let mut bytes = Vec::with_capacity(MIN_BMP_HEADER_BYTES);
+    reader
+        .take(MIN_BMP_HEADER_BYTES as u64)
+        .read_to_end(&mut bytes)
+        .map_err(|error| format!("read BMP header: {error}"))?;
+    read_header(&bytes)
 }
 
 // The actual metadata extractor. We report 8-bit channels because these are
@@ -360,7 +371,7 @@ enum BmpPixelFormat {
 fn parse_bmp_header(bytes: &[u8]) -> Result<BmpHeader, String> {
     // 54 = 14 (file header) + 40 (minimum DIB header). Anything smaller
     // can't possibly be a valid BMP.
-    if bytes.len() < 54 || &bytes[..2] != b"BM" {
+    if bytes.len() < MIN_BMP_HEADER_BYTES || &bytes[..2] != b"BM" {
         return Err("unsupported BMP header".to_string());
     }
 
@@ -374,10 +385,6 @@ fn parse_bmp_header(bytes: &[u8]) -> Result<BmpHeader, String> {
     let dib_end = 14_usize
         .checked_add(dib_size_usize)
         .ok_or_else(|| "BMP DIB header size overflow".to_string())?;
-    // Make sure the DIB header is actually present in full.
-    if bytes.len() < dib_end {
-        return Err("truncated BMP DIB header".to_string());
-    }
     let minimum_pixel_offset = dib_end;
     if pixel_offset < minimum_pixel_offset {
         return Err(format!(
@@ -760,6 +767,42 @@ pub mod tests {
         let _ = std::fs::remove_file(path);
     }
 
+    #[test]
+    fn read_header_prefix_stops_before_pixel_data() {
+        struct HeaderOnlyReader {
+            bytes: Vec<u8>,
+            position: usize,
+        }
+
+        impl std::io::Read for HeaderOnlyReader {
+            fn read(&mut self, output: &mut [u8]) -> std::io::Result<usize> {
+                if self.position >= MIN_BMP_HEADER_BYTES {
+                    return Err(std::io::Error::other("pixel data was read"));
+                }
+                let remaining_header = MIN_BMP_HEADER_BYTES - self.position;
+                let count = remaining_header.min(output.len());
+                output[..count].copy_from_slice(&self.bytes[self.position..self.position + count]);
+                self.position += count;
+                Ok(count)
+            }
+        }
+
+        let mut reader = HeaderOnlyReader {
+            bytes: build_bmp_32(
+                2,
+                2,
+                &[(0, 0, 0), (255, 0, 0), (0, 255, 0), (255, 255, 255)],
+            ),
+            position: 0,
+        };
+
+        let metadata = read_header_prefix(&mut reader).unwrap();
+
+        assert_eq!(metadata.width, 2);
+        assert_eq!(metadata.height, 2);
+        assert_eq!(reader.position, MIN_BMP_HEADER_BYTES);
+    }
+
     // Symmetric to the above — the *render* path must NOT accept a
     // header-only file; it needs real pixels.
     #[test]
@@ -796,6 +839,7 @@ pub mod tests {
         assert!(
             error.contains("BMP DIB header size overflow")
                 || error.contains("truncated BMP DIB header")
+                || error.contains("invalid BMP pixel data offset")
         );
     }
 
