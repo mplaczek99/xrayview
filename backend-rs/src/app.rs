@@ -21,7 +21,7 @@
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::{
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     fs,
     path::Path,
     sync::{
@@ -64,8 +64,8 @@ pub struct App {
     // study_id → StudyRecord. Arc so callers can hold a snapshot without
     // pinning the lock.
     studies: Mutex<HashMap<String, Arc<StudyRecord>>>,
-    // job_id → current snapshot. Updated on every state transition.
-    jobs: Mutex<HashMap<String, JobSnapshot>>,
+    // job_id → current snapshot plus deterministic terminal-retention order.
+    jobs: Mutex<JobRegistry>,
     // fingerprint → job_id, only for jobs currently running. Lets dedup
     // logic find an in-flight job for a given fingerprint without scanning.
     active_fingerprints: Mutex<HashMap<String, String>>,
@@ -94,7 +94,7 @@ pub const JOB_UPDATE_BUFFER_SIZE: usize = 16;
 // we cross this.
 const MAX_ARTIFACT_BYTES: u64 = 256 * 1024 * 1024;
 // Cap on completed/failed/cancelled jobs we keep around. Older terminal
-// jobs get evicted FIFO so the jobs HashMap doesn't grow forever.
+// jobs get evicted FIFO so the job registry doesn't grow forever.
 const MAX_TERMINAL_JOBS: usize = 64;
 
 // Handed back to subscribe_job_updates callers. Hold the receiver to keep
@@ -110,6 +110,98 @@ pub struct JobUpdateSubscription {
 enum AsyncJobReservation {
     Existing(String),
     Created(String),
+}
+
+#[derive(Default)]
+struct JobRegistry {
+    snapshots: HashMap<String, JobSnapshot>,
+    terminal_order: VecDeque<String>,
+}
+
+impl JobRegistry {
+    fn get(&self, job_id: &str) -> Option<&JobSnapshot> {
+        self.snapshots.get(job_id)
+    }
+
+    fn insert(&mut self, snapshot: JobSnapshot) {
+        let job_id = snapshot.job_id.clone();
+        let previous_state = self
+            .snapshots
+            .get(&job_id)
+            .map(|current| current.state.clone());
+        self.snapshots.insert(job_id.clone(), snapshot);
+        self.sync_terminal_order(&job_id, previous_state.as_ref());
+        self.evict_old_terminal_jobs(&job_id);
+    }
+
+    fn mutate_snapshot<R>(
+        &mut self,
+        job_id: &str,
+        updater: impl FnOnce(&mut JobSnapshot) -> R,
+    ) -> Option<(R, JobSnapshot)> {
+        let previous_state = self
+            .snapshots
+            .get(job_id)
+            .map(|current| current.state.clone());
+        let result = {
+            let snapshot = self.snapshots.get_mut(job_id)?;
+            updater(snapshot)
+        };
+        self.sync_terminal_order(job_id, previous_state.as_ref());
+        self.evict_old_terminal_jobs(job_id);
+        let snapshot = self.snapshots.get(job_id)?.clone();
+        Some((result, snapshot))
+    }
+
+    #[cfg(test)]
+    fn len(&self) -> usize {
+        self.snapshots.len()
+    }
+
+    #[cfg(test)]
+    fn contains_key(&self, job_id: &str) -> bool {
+        self.snapshots.contains_key(job_id)
+    }
+
+    #[cfg(test)]
+    fn values(&self) -> impl Iterator<Item = &JobSnapshot> {
+        self.snapshots.values()
+    }
+
+    fn sync_terminal_order(&mut self, job_id: &str, previous_state: Option<&JobState>) {
+        let was_terminal = previous_state.is_some_and(is_terminal_state);
+        let is_terminal = self
+            .snapshots
+            .get(job_id)
+            .is_some_and(|snapshot| is_terminal_state(&snapshot.state));
+
+        match (was_terminal, is_terminal) {
+            (false, true) => self.terminal_order.push_back(job_id.to_string()),
+            (true, false) => self.terminal_order.retain(|entry| entry != job_id),
+            _ => {}
+        }
+    }
+
+    fn evict_old_terminal_jobs(&mut self, keep_job_id: &str) {
+        while self.snapshots.len() > MAX_TERMINAL_JOBS {
+            let Some(evict_index) = self.terminal_order.iter().position(|job_id| {
+                job_id != keep_job_id
+                    && self
+                        .snapshots
+                        .get(job_id)
+                        .is_some_and(|snapshot| is_terminal_state(&snapshot.state))
+            }) else {
+                // No more terminal jobs to evict and we're still over the cap:
+                // every remaining job is active or the just-inserted terminal
+                // job. The cap resolves when a job completes.
+                return;
+            };
+            let Some(evict_job_id) = self.terminal_order.remove(evict_index) else {
+                return;
+            };
+            self.snapshots.remove(&evict_job_id);
+        }
+    }
 }
 
 impl App {
@@ -133,7 +225,7 @@ impl App {
             cache_session_id,
             cache,
             studies: Mutex::new(HashMap::new()),
-            jobs: Mutex::new(HashMap::new()),
+            jobs: Mutex::new(JobRegistry::default()),
             active_fingerprints: Mutex::new(HashMap::new()),
             result_cache: Mutex::new(HashMap::new()),
             source_preview_cache: SourcePreviewCache::default_session_cache(),
@@ -486,36 +578,37 @@ impl App {
 
         let (snapshot, changed) = {
             let mut jobs = self.jobs.lock();
-            let snapshot = jobs
-                .get_mut(job_id)
-                .ok_or_else(|| BackendError::not_found(format!("job not found: {job_id}")))?;
-            let changed = if snapshot.state == JobState::Queued {
-                snapshot.state = JobState::Cancelled;
-                snapshot.progress.message = "Cancelled before start".to_string();
-                snapshot.result = None;
-                snapshot.error = None;
-                self.active_fingerprints
-                    .lock()
-                    .retain(|_, active_job_id| active_job_id != job_id);
-                true
-            } else if matches!(snapshot.state, JobState::Running | JobState::Cancelling) {
-                snapshot.state = JobState::Cancelling;
-                snapshot.progress.message = "Cancellation requested".to_string();
-                snapshot.result = None;
-                snapshot.error = None;
-                // Free the fingerprint immediately so a follow-up start_*_job_async
-                // can mint a fresh job instead of being deduped onto this dying one.
-                // The worker's finish_cancelled_if_requested only removes when the
-                // active entry still points at this job_id, so a replacement
-                // reservation that has since claimed the fingerprint is safe.
-                self.active_fingerprints
-                    .lock()
-                    .retain(|_, active_job_id| active_job_id != job_id);
-                true
-            } else {
-                false
+            let Some((changed, snapshot)) = jobs.mutate_snapshot(job_id, |snapshot| {
+                if snapshot.state == JobState::Queued {
+                    snapshot.state = JobState::Cancelled;
+                    snapshot.progress.message = "Cancelled before start".to_string();
+                    snapshot.result = None;
+                    snapshot.error = None;
+                    self.active_fingerprints
+                        .lock()
+                        .retain(|_, active_job_id| active_job_id != job_id);
+                    true
+                } else if matches!(snapshot.state, JobState::Running | JobState::Cancelling) {
+                    snapshot.state = JobState::Cancelling;
+                    snapshot.progress.message = "Cancellation requested".to_string();
+                    snapshot.result = None;
+                    snapshot.error = None;
+                    // Free the fingerprint immediately so a follow-up start_*_job_async
+                    // can mint a fresh job instead of being deduped onto this dying one.
+                    // The worker's finish_cancelled_if_requested only removes when the
+                    // active entry still points at this job_id, so a replacement
+                    // reservation that has since claimed the fingerprint is safe.
+                    self.active_fingerprints
+                        .lock()
+                        .retain(|_, active_job_id| active_job_id != job_id);
+                    true
+                } else {
+                    false
+                }
+            }) else {
+                return Err(BackendError::not_found(format!("job not found: {job_id}")));
             };
-            (snapshot.clone(), changed)
+            (snapshot, changed)
         };
         if changed {
             self.publish_job_update(&snapshot);
@@ -787,9 +880,11 @@ impl App {
         &self,
         study: &StudyRecord,
     ) -> Result<bmp::RenderedPreview, BackendError> {
-        Ok(bmp::render_grayscale_preview_from_source_for_tooth_analysis(
-            &self.cached_source_preview(study)?,
-        ))
+        Ok(
+            bmp::render_grayscale_preview_from_source_for_tooth_analysis(
+                &self.cached_source_preview(study)?,
+            ),
+        )
     }
 
     fn cached_source_preview(
@@ -926,9 +1021,7 @@ impl App {
             self.next_job_number.fetch_add(1, Ordering::Relaxed)
         );
         let snapshot = queued_job_snapshot(job_id.clone(), job_kind, Some(study_id));
-        jobs.insert(job_id.clone(), snapshot.clone());
-        // Bound the jobs map — drop oldest terminal entries past MAX_TERMINAL_JOBS.
-        evict_old_terminal_jobs(&mut jobs, &job_id);
+        jobs.insert(snapshot.clone());
         active.insert(fingerprint.to_string(), job_id.clone());
         // Explicit drops so we release the locks before publish_job_update,
         // which can call into subscriber channels and shouldn't be done
@@ -944,10 +1037,8 @@ impl App {
     // publish_job_update, so synchronous (non-async) job paths also get
     // bounded.
     fn store_job_snapshot(&self, snapshot: JobSnapshot) {
-        let job_id = snapshot.job_id.clone();
         let mut jobs = self.jobs.lock();
-        jobs.insert(job_id.clone(), snapshot);
-        evict_old_terminal_jobs(&mut jobs, &job_id);
+        jobs.insert(snapshot);
     }
 
     fn run_render_job_async(
@@ -1466,20 +1557,25 @@ impl App {
     ) {
         let snapshot = {
             let mut jobs = self.jobs.lock();
-            let Some(snapshot) = jobs.get_mut(job_id) else {
+            let Some((changed, snapshot)) = jobs.mutate_snapshot(job_id, |snapshot| {
+                if is_terminal_state(&snapshot.state) || snapshot.state == JobState::Cancelling {
+                    return false;
+                }
+                snapshot.state = state;
+                snapshot.progress = JobProgress {
+                    percent,
+                    stage: stage.to_string(),
+                    message: message.to_string(),
+                };
+                snapshot.error = None;
+                true
+            }) else {
                 return;
             };
-            if is_terminal_state(&snapshot.state) || snapshot.state == JobState::Cancelling {
+            if !changed {
                 return;
             }
-            snapshot.state = state;
-            snapshot.progress = JobProgress {
-                percent,
-                stage: stage.to_string(),
-                message: message.to_string(),
-            };
-            snapshot.error = None;
-            snapshot.clone()
+            snapshot
         };
         self.publish_job_update(&snapshot);
     }
@@ -1558,8 +1654,7 @@ impl App {
             if !stage.is_empty() {
                 snapshot.progress.stage = stage.to_string();
             }
-            jobs.insert(job_id.to_string(), snapshot.clone());
-            evict_old_terminal_jobs(&mut jobs, job_id);
+            jobs.insert(snapshot.clone());
             snapshot
         };
         self.publish_job_update(&snapshot);
@@ -1589,8 +1684,7 @@ impl App {
                 Some(current) if is_terminal_state(&current.state) => current,
                 _ => terminal_snapshot,
             };
-            jobs.insert(job_id.to_string(), snapshot.clone());
-            evict_old_terminal_jobs(&mut jobs, job_id);
+            jobs.insert(snapshot.clone());
             snapshot
         };
 
@@ -1920,29 +2014,6 @@ fn is_terminal_state(state: &JobState) -> bool {
     )
 }
 
-// Bound the jobs map by evicting the oldest terminal entries when we go past
-// MAX_TERMINAL_JOBS. `keep_job_id` is the just-inserted job — we never evict
-// it even if it's already terminal. HashMap iteration order isn't FIFO but
-// for capacity-bounding it doesn't really matter; we just need to drop *some*
-// terminal job each pass.
-fn evict_old_terminal_jobs(jobs: &mut HashMap<String, JobSnapshot>, keep_job_id: &str) {
-    while jobs.len() > MAX_TERMINAL_JOBS {
-        let Some(evict_job_id) = jobs
-            .iter()
-            .find(|(job_id, snapshot)| {
-                job_id.as_str() != keep_job_id && is_terminal_state(&snapshot.state)
-            })
-            .map(|(job_id, _)| job_id.clone())
-        else {
-            // No more terminal jobs to evict and we're still over the cap —
-            // means every remaining job is active. Live with it; cap will
-            // resolve as soon as a job completes.
-            return;
-        };
-        jobs.remove(&evict_job_id);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2244,10 +2315,8 @@ mod tests {
     // without spawning a worker.
     #[test]
     fn start_render_job_async_broadcasts_cached_completed_job_update() {
-        let (temp_dir, app, study) = app_with_renderable_study(
-            "render-async-cache-hit-event",
-            build_renderable_test_bmp(),
-        );
+        let (temp_dir, app, study) =
+            app_with_renderable_study("render-async-cache-hit-event", build_renderable_test_bmp());
         let app = std::sync::Arc::new(app);
 
         // Drive the first run end-to-end through the async pipeline so its
@@ -2391,18 +2460,15 @@ mod tests {
     #[test]
     fn get_jobs_skips_blank_and_unknown_ids() {
         let app = App::new(Config::default()).unwrap();
-        app.jobs.lock().insert(
+        app.jobs.lock().insert(completed_job_snapshot(
             "job-1".to_string(),
-            completed_job_snapshot(
-                "job-1".to_string(),
-                JobKind::RenderStudy,
-                Some("study-1".to_string()),
-                JobResult {
-                    kind: JobKind::RenderStudy,
-                    payload: serde_json::json!({ "studyId": "study-1" }),
-                },
-            ),
-        );
+            JobKind::RenderStudy,
+            Some("study-1".to_string()),
+            JobResult {
+                kind: JobKind::RenderStudy,
+                payload: serde_json::json!({ "studyId": "study-1" }),
+            },
+        ));
 
         let snapshots = app
             .get_jobs(GetJobsCommand {
@@ -2475,8 +2541,8 @@ mod tests {
         app.unsubscribe_job_updates(subscription.id);
     }
 
-    // The MAX_TERMINAL_JOBS bound in action: insert > cap, confirm we
-    // evicted old terminal jobs and that the just-inserted one survived.
+    // The MAX_TERMINAL_JOBS bound in action: insert > cap, confirm FIFO
+    // terminal retention keeps the newest terminal jobs.
     #[test]
     fn store_job_snapshot_caps_terminal_job_retention_and_keeps_latest() {
         let app = App::new(Config::default()).unwrap();
@@ -2493,7 +2559,12 @@ mod tests {
 
         let jobs = app.jobs.lock();
         assert_eq!(jobs.len(), MAX_TERMINAL_JOBS);
-        assert!(jobs.contains_key(&format!("job-{}", MAX_TERMINAL_JOBS + 4)));
+        for index in 0..5 {
+            assert!(!jobs.contains_key(&format!("job-{index}")));
+        }
+        for index in 5..(MAX_TERMINAL_JOBS + 5) {
+            assert!(jobs.contains_key(&format!("job-{index}")));
+        }
         assert!(
             jobs.values()
                 .all(|snapshot| is_terminal_state(&snapshot.state))
