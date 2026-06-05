@@ -370,11 +370,11 @@ class WorkbenchStore {
   }
 
   async createLineAnnotation(annotation: LineAnnotation) {
-    await this.measureAndStoreLineAnnotation(annotation, "Saved manual measurement.");
+    await this.measureAndStoreLineAnnotation(annotation, "Saved manual measurement.", false);
   }
 
   async updateLineAnnotation(annotation: LineAnnotation) {
-    await this.measureAndStoreLineAnnotation(annotation, "Updated line measurement.");
+    await this.measureAndStoreLineAnnotation(annotation, "Updated line measurement.", true);
   }
 
   deleteSelectedAnnotation() {
@@ -605,7 +605,11 @@ class WorkbenchStore {
     }
   }
 
-  private async measureAndStoreLineAnnotation(annotation: LineAnnotation, successStatus: string) {
+  private async measureAndStoreLineAnnotation(
+    annotation: LineAnnotation,
+    successStatus: string,
+    requireExisting: boolean,
+  ) {
     const study = this.activeStudy();
     if (!study) {
       return;
@@ -613,15 +617,24 @@ class WorkbenchStore {
 
     try {
       const measured = await runtime.measureLineAnnotation(study.studyId, annotation);
-      this.setStudyState(study.studyId, (current) => ({
-        ...current,
-        annotations: upsertLineAnnotation(current.annotations, measured),
-        viewer: {
-          ...current.viewer,
-          selectedAnnotationId: measured.id,
-        },
-        status: successStatus,
-      }));
+      this.setStudyState(study.studyId, (current) => {
+        if (
+          requireExisting &&
+          !current.annotations.lines.some((line) => line.id === annotation.id)
+        ) {
+          return current;
+        }
+
+        return {
+          ...current,
+          annotations: upsertLineAnnotation(current.annotations, measured),
+          viewer: {
+            ...current.viewer,
+            selectedAnnotationId: measured.id,
+          },
+          status: successStatus,
+        };
+      });
     } catch (error) {
       this.setStudyState(study.studyId, (current) => ({
         ...current,
