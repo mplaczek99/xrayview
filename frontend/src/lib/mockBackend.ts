@@ -1,5 +1,7 @@
 import { normalizeBackendError } from "./backendErrors";
 import type {
+  BackendError,
+  BackendErrorCode,
   JobSnapshot as ContractJobSnapshot,
   JobResult,
   JobState,
@@ -17,6 +19,23 @@ const mockJobControllers = new Map<string, { cancelled: boolean }>();
 
 let mockStudySequence = 0;
 let mockJobSequence = 0;
+
+function mockError(code: BackendErrorCode, message: string, recoverable = true): BackendError {
+  return normalizeBackendError({
+    code,
+    message,
+    details: [],
+    recoverable,
+  });
+}
+
+function requireNonBlank(value: string, fieldName: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    throw mockError("invalidInput", `${fieldName} is required`);
+  }
+  return trimmed;
+}
 
 function fileNameFromPath(inputPath: string): string {
   return inputPath.split(/[\\/]/).pop() ?? inputPath;
@@ -59,12 +78,7 @@ function updateMockJob(
 ): ContractJobSnapshot {
   const current = mockJobs.get(jobId);
   if (!current) {
-    throw normalizeBackendError({
-      code: "notFound",
-      message: `job not found: ${jobId}`,
-      details: [],
-      recoverable: true,
-    });
+    throw mockError("notFound", `job not found: ${jobId}`);
   }
 
   const next = updater(current);
@@ -140,30 +154,36 @@ export function createMockBackendAPI(): BackendAPI {
   return {
     mode: "mock",
     loadProcessingManifest: async (): Promise<ProcessingManifest> => MOCK_PROCESSING_MANIFEST,
-    openStudy: async (inputPath): Promise<OpenStudyCommandResult> => ({
-      study: {
-        studyId: nextMockStudyId(),
-        inputPath,
-        inputName: fileNameFromPath(inputPath),
-        measurementScale: null,
-      },
-    }),
-    startRenderStudyJob: async (studyId) =>
-      startMockJob("renderStudy", studyId, () => ({
+    openStudy: async (inputPath): Promise<OpenStudyCommandResult> => {
+      const resolvedInputPath = requireNonBlank(inputPath, "inputPath");
+      return {
+        study: {
+          studyId: nextMockStudyId(),
+          inputPath: resolvedInputPath,
+          inputName: fileNameFromPath(resolvedInputPath),
+          measurementScale: null,
+        },
+      };
+    },
+    startRenderStudyJob: async (studyId) => {
+      const resolvedStudyId = requireNonBlank(studyId, "studyId");
+      return startMockJob("renderStudy", resolvedStudyId, () => ({
         kind: "renderStudy",
         payload: {
-          studyId,
+          studyId: resolvedStudyId,
           previewPath: createMockPreview(false, "none"),
           loadedWidth: 1200,
           loadedHeight: 820,
           measurementScale: null,
         },
-      })),
-    startAnalyzeStudyJob: async (studyId) =>
-      startMockJob("analyzeStudy", studyId, () => ({
+      }));
+    },
+    startAnalyzeStudyJob: async (studyId) => {
+      const resolvedStudyId = requireNonBlank(studyId, "studyId");
+      return startMockJob("analyzeStudy", resolvedStudyId, () => ({
         kind: "analyzeStudy",
         payload: {
-          studyId,
+          studyId: resolvedStudyId,
           previewPath: createMockPreview(true, "none", "outline"),
           filledPreviewPath: createMockPreview(true, "none", "filled"),
           loadedWidth: 1200,
@@ -171,47 +191,42 @@ export function createMockBackendAPI(): BackendAPI {
           mode: "dynamic tooth and bone level overlay",
           measurementScale: null,
         },
-      })),
-    startProcessStudyJob: async (studyId, request) =>
-      startMockJob("processStudy", studyId, () => ({
+      }));
+    },
+    startProcessStudyJob: async (studyId, request) => {
+      const resolvedStudyId = requireNonBlank(studyId, "studyId");
+      return startMockJob("processStudy", resolvedStudyId, () => ({
         kind: "processStudy",
         payload: {
-          studyId,
+          studyId: resolvedStudyId,
           previewPath: createMockPreview(true, request.controls.palette),
           loadedWidth: 1200,
           loadedHeight: 820,
           mode: request.compare ? "comparison output" : "processed preview",
           measurementScale: null,
         },
-      })),
+      }));
+    },
     getJob: async (jobId): Promise<ContractJobSnapshot> => {
-      const snapshot = mockJobs.get(jobId);
+      const resolvedJobId = requireNonBlank(jobId, "jobId");
+      const snapshot = mockJobs.get(resolvedJobId);
       if (!snapshot) {
-        throw normalizeBackendError({
-          code: "notFound",
-          message: `job not found: ${jobId}`,
-          details: [],
-          recoverable: true,
-        });
+        throw mockError("notFound", `job not found: ${resolvedJobId}`);
       }
 
       return snapshot;
     },
     getJobs: async (jobIds): Promise<ContractJobSnapshot[]> => {
-      return [...new Set(jobIds)].flatMap((jobId) => {
+      return [...new Set(jobIds.map((jobId) => jobId.trim()).filter(Boolean))].flatMap((jobId) => {
         const snapshot = mockJobs.get(jobId);
         return snapshot ? [snapshot] : [];
       });
     },
     cancelJob: async (jobId): Promise<ContractJobSnapshot> => {
-      const snapshot = mockJobs.get(jobId);
+      const resolvedJobId = requireNonBlank(jobId, "jobId");
+      const snapshot = mockJobs.get(resolvedJobId);
       if (!snapshot) {
-        throw normalizeBackendError({
-          code: "notFound",
-          message: `job not found: ${jobId}`,
-          details: [],
-          recoverable: true,
-        });
+        throw mockError("notFound", `job not found: ${resolvedJobId}`);
       }
 
       if (
@@ -222,12 +237,12 @@ export function createMockBackendAPI(): BackendAPI {
         return snapshot;
       }
 
-      const controller = mockJobControllers.get(jobId);
+      const controller = mockJobControllers.get(resolvedJobId);
       if (controller) {
         controller.cancelled = true;
       }
 
-      const cancelling = updateMockJob(jobId, (job) => ({
+      const cancelling = updateMockJob(resolvedJobId, (job) => ({
         ...job,
         state: job.state === "queued" ? "cancelled" : "cancelling",
         progress: {
@@ -238,7 +253,7 @@ export function createMockBackendAPI(): BackendAPI {
 
       if (cancelling.state === "cancelling") {
         setTimeout(() => {
-          updateMockJob(jobId, (job) => ({
+          updateMockJob(resolvedJobId, (job) => ({
             ...job,
             state: "cancelled",
             progress: {
@@ -247,10 +262,10 @@ export function createMockBackendAPI(): BackendAPI {
               message: "Cancelled by user",
             },
           }));
-          mockJobControllers.delete(jobId);
+          mockJobControllers.delete(resolvedJobId);
         }, 30);
       } else {
-        mockJobControllers.delete(jobId);
+        mockJobControllers.delete(resolvedJobId);
       }
 
       return cancelling;
