@@ -331,7 +331,12 @@ impl BmpHeader {
         self.width
             .checked_mul(self.bytes_per_pixel())
             .ok_or_else(|| "BMP row size overflow".to_string())
-            .map(|row_bytes| row_bytes.div_ceil(4) * 4)
+            .and_then(|row_bytes| {
+                let padding = (4 - row_bytes % 4) % 4;
+                row_bytes
+                    .checked_add(padding)
+                    .ok_or_else(|| "BMP row size overflow".to_string())
+            })
     }
 }
 
@@ -364,11 +369,16 @@ fn parse_bmp_header(bytes: &[u8]) -> Result<BmpHeader, String> {
     if dib_size < 40 {
         return Err(format!("unsupported BMP DIB header size: {dib_size}"));
     }
+    let dib_size_usize =
+        usize::try_from(dib_size).map_err(|_| "BMP DIB header size overflow".to_string())?;
+    let dib_end = 14_usize
+        .checked_add(dib_size_usize)
+        .ok_or_else(|| "BMP DIB header size overflow".to_string())?;
     // Make sure the DIB header is actually present in full.
-    if bytes.len() < 14 + dib_size as usize {
+    if bytes.len() < dib_end {
         return Err("truncated BMP DIB header".to_string());
     }
-    let minimum_pixel_offset = 14 + dib_size as usize;
+    let minimum_pixel_offset = dib_end;
     if pixel_offset < minimum_pixel_offset {
         return Err(format!(
             "invalid BMP pixel data offset: {pixel_offset}, want at least {minimum_pixel_offset}"
@@ -774,6 +784,35 @@ pub mod tests {
         let error = render_grayscale_preview(&bmp).unwrap_err();
 
         assert!(error.contains("invalid BMP pixel data offset"));
+    }
+
+    #[test]
+    fn render_rejects_absurd_dib_header_size_without_panicking() {
+        let mut bmp = build_bmp_32(1, 1, &[(255, 255, 255)]);
+        bmp[14..18].copy_from_slice(&u32::MAX.to_le_bytes());
+
+        let error = render_grayscale_preview(&bmp).unwrap_err();
+
+        assert!(
+            error.contains("BMP DIB header size overflow")
+                || error.contains("truncated BMP DIB header")
+        );
+    }
+
+    #[test]
+    fn row_stride_rejects_padding_overflow() {
+        let header = BmpHeader {
+            pixel_offset: 54,
+            dib_size: 40,
+            width: usize::MAX,
+            height: 1,
+            top_down: false,
+            bits_per_pixel: 8,
+        };
+
+        let error = header.row_stride().unwrap_err();
+
+        assert!(error.contains("BMP row size overflow"));
     }
 
     // Full render pipeline on a tiny 2×2 color BMP. Compares against the
