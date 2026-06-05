@@ -262,11 +262,14 @@ pub fn generate_tooth_overlay(preview: &PreviewImage) -> Result<ToothOverlayResu
             preview.width, preview.height
         ));
     }
-    if preview.pixels.len() != width * height {
+    let expected_pixels = width
+        .checked_mul(height)
+        .ok_or_else(|| "preview dimensions overflow".to_string())?;
+    if preview.pixels.len() != expected_pixels {
         return Err(format!(
             "preview pixel length = {}, want {}",
             preview.pixels.len(),
-            width * height
+            expected_pixels
         ));
     }
 
@@ -274,7 +277,7 @@ pub fn generate_tooth_overlay(preview: &PreviewImage) -> Result<ToothOverlayResu
     // version. The raw `gray` is also kept around for the gradient/exemplar
     // paths that depend on absolute intensity.
     let normalized = normalize_gray(&preview.pixels);
-    let mut mask_buffers = MaskBuffers::new(width * height);
+    let mut mask_buffers = MaskBuffers::new(expected_pixels);
     let tooth_mask = detect_tooth_mask(
         &preview.pixels,
         &normalized,
@@ -2031,6 +2034,13 @@ mod tests {
                 .mode
                 .starts_with("dynamic tooth and bone level overlay")
         );
+    }
+
+    #[test]
+    fn generate_tooth_overlay_rejects_mismatched_buffer_length() {
+        let error = generate_tooth_overlay(&PreviewImage::gray(8, 8, vec![0_u8; 63])).unwrap_err();
+
+        assert!(error.contains("preview pixel length = 63, want 64"));
     }
 
     // Two morphological invariants in one: (a) lone pixels in the corner
