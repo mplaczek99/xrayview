@@ -1,7 +1,7 @@
 // Validation test: applyAnalyzeJob must surface both backend analyzer warnings.
 // Runs with: node frontend/scripts/validate-analyze-warnings.mjs
 //
-// The Rust analyzer (backend-rs/src/analysis.rs) appends two distinct
+// The backend analyzer appends two distinct
 // substrings to the result's `mode` string when detection is unreliable:
 //   * "; no reliable tooth mask found" — fires when tooth detection is weak
 //   * "; no reliable bone level found" — fires when bone detection is weak

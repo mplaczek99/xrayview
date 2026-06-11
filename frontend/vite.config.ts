@@ -11,14 +11,14 @@ export default defineConfig({
   },
   envPrefix: ["VITE_"],
   build: {
-    // Tauri ships a Chromium WebView (WebView2) on Windows and a WebKit WebView
+    // Wails ships a Chromium WebView (WebView2) on Windows and a WebKit WebView
     // (WebKitGTK) on Linux — both modern, evergreen engines — and macOS is not a
     // build target (see .github/workflows). Target each engine's real floor instead
     // of the old `safari13` baseline, which forced esbuild to down-level class
     // fields, logical-assignment, and optional chaining that every shipped WebView
-    // runs natively. Tauri sets TAURI_ENV_PLATFORM during its build; a plain
-    // `vite build` with no env falls back to the safe WebKit floor.
-    target: process.env.TAURI_ENV_PLATFORM === "windows" ? "chrome105" : "safari15",
+    // runs natively. Windows builds run on Windows hosts; otherwise fall back to
+    // the safe WebKit floor.
+    target: process.platform === "win32" ? "chrome105" : "safari15",
     cssCodeSplit: true,
     rollupOptions: {
       output: {

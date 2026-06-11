@@ -1,4 +1,3 @@
-import { convertFileSrc } from "@tauri-apps/api/core";
 import type { JobResultPayload, JobSnapshot } from "../features/jobs/model";
 import { createDesktopBackendAPI } from "./desktopBackend";
 import type {
@@ -13,7 +12,6 @@ import { createMockBackendAPI } from "./mockBackend";
 import { MOCK_PROCESSING_MANIFEST } from "./mockProcessingManifest";
 import { resolveRuntimeConfiguration } from "./runtimeConfig";
 import type { RuntimeAdapter } from "./runtimeTypes";
-import { isTauriRuntime, pickTauriBmpFile } from "./tauri";
 import type {
   AnalysisResult,
   OpenedStudy,
@@ -21,13 +19,16 @@ import type {
   ProcessResult,
   RuntimeMode,
 } from "./types";
+import { isWailsRuntime, pickBmpFile as pickDesktopBmpFile } from "./wails";
 
 export const FALLBACK_PROCESSING_MANIFEST = MOCK_PROCESSING_MANIFEST;
 
 const MOCK_BMP_PATH = "images/BMP/1.bmp";
 
 function resolvePreviewUrl(previewPath: string, runtime: RuntimeMode): string {
-  return runtime === "desktop" ? convertFileSrc(previewPath) : previewPath;
+  // Desktop previews are streamed by the Wails asset handler (desktop/assets.go);
+  // the browser mock serves the path as-is.
+  return runtime === "desktop" ? `/previews?path=${encodeURIComponent(previewPath)}` : previewPath;
 }
 
 function asOpenedStudy(payload: OpenStudyCommandResult, runtime: RuntimeMode): OpenedStudy {
@@ -113,7 +114,7 @@ function createRuntimeAdapter(
 ): RuntimeAdapter {
   const { mode } = configuration;
   const backend = mode === "mock" ? createMockBackendAPI() : createDesktopBackendAPI();
-  const pickBmpFile = mode === "mock" ? async () => MOCK_BMP_PATH : () => pickTauriBmpFile();
+  const pickBmpFile = mode === "mock" ? async () => MOCK_BMP_PATH : () => pickDesktopBmpFile();
 
   return {
     mode,
@@ -139,7 +140,7 @@ let activeRuntime: RuntimeAdapter | null = null;
 
 export function getRuntimeAdapter(): RuntimeAdapter {
   if (!activeRuntime) {
-    const configuration = resolveRuntimeConfiguration(isTauriRuntime());
+    const configuration = resolveRuntimeConfiguration(isWailsRuntime());
     activeRuntime = createRuntimeAdapter(configuration);
 
     for (const warning of configuration.warnings) {

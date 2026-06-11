@@ -1,7 +1,7 @@
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { workbenchActions } from "../../app/store/workbenchStore";
 import type { JobSnapshot as ContractJobSnapshot } from "../../lib/generated/contracts";
 import { getRuntimeAdapter, normalizeJobSnapshot } from "../../lib/runtime";
+import { onWailsEvent } from "../../lib/wails";
 import { clearJobSubmitTiming, logCompletedJobVisibleTiming } from "./benchmarks";
 
 const ACTIVE_POLL_MS = 500;
@@ -29,30 +29,29 @@ function applyJobUpdate(job: Awaited<ReturnType<typeof runtime.getJob>>) {
 export function startJobSync(): () => void {
   let cancelled = false;
   let timer: number | undefined;
-  let unlistenJobUpdate: UnlistenFn | undefined;
+  let unlistenJobUpdate: (() => void) | undefined;
   let currentIntervalMs = ACTIVE_POLL_MS;
   let lastEventAtMs: number | null = null;
   let lastPendingJobCount = pendingJobCount();
   let forceNextPoll = false;
 
   if (runtime.mode === "desktop") {
-    void listen<ContractJobSnapshot>("job-update", (event) => {
-      if (cancelled) {
-        return;
-      }
-      lastEventAtMs = Date.now();
-      applyJobUpdate(normalizeJobSnapshot(event.payload, runtime.mode));
-    })
-      .then((unlisten) => {
+    try {
+      const unlisten = onWailsEvent("job-update", (payload) => {
         if (cancelled) {
-          unlisten();
           return;
         }
-        unlistenJobUpdate = unlisten;
-      })
-      .catch(() => {
-        // Polling remains active when the desktop event listener is unavailable.
+        lastEventAtMs = Date.now();
+        applyJobUpdate(normalizeJobSnapshot(payload as ContractJobSnapshot, runtime.mode));
       });
+      if (cancelled) {
+        unlisten();
+      } else {
+        unlistenJobUpdate = unlisten;
+      }
+    } catch {
+      // Polling remains active when the desktop event listener is unavailable.
+    }
   }
 
   function scheduleNext(intervalMs: number) {

@@ -1,0 +1,14 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "xrayview",
+  "outputfilename": "xrayview",
+  "frontend:dir": ".",
+  "frontend:install": "",
+  "frontend:build": "node scripts/build-frontend.mjs",
+  "frontend:dev:watcher": "node scripts/dev-frontend.mjs",
+  "frontend:dev:serverUrl": "http://localhost:5173",
+  "wailsjsdir": "./wailsjs",
+  "author": {
+    "name": "xrayview"
+  }
+}

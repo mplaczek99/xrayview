@@ -53,8 +53,13 @@ jobs:
             package-lock.json
             frontend/package-lock.json
 
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+
+      - name: Install Wails CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
 
       - name: Install root dependencies
         run: npm ci --ignore-scripts
@@ -63,23 +68,25 @@ jobs:
         run: npm ci
         working-directory: frontend
 
-      - name: Build and smoke-test desktop bundles
-        run: npm run release:smoke:bundle
+      - name: Build and smoke-test desktop binary
+        run: npm run release:smoke
 
       - name: Collect release assets
         run: |
           asset_dir="$RUNNER_TEMP/release-assets"
           mkdir -p "$asset_dir"
 
-          find desktop-tauri/target/release/bundle -type f \
-            \( -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' -o -name '*.msi' -o -name '*.exe' \) \
-            -exec cp {} "$asset_dir/" \;
+          binary="desktop/build/bin/xrayview"
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            binary="desktop/build/bin/xrayview.exe"
+          fi
 
-          if ! find "$asset_dir" -type f | grep -q .; then
-            printf 'No Tauri bundle assets found\n' >&2
+          if [ ! -f "$binary" ]; then
+            printf 'No Wails desktop binary found at %s\n' "$binary" >&2
             exit 1
           fi
 
+          cp "$binary" "$asset_dir/"
           printf 'ASSET_DIR=%s\n' "$asset_dir" >> "$GITHUB_ENV"
 
       - name: Upload release asset artifact

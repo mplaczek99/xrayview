@@ -1,8 +1,8 @@
-import { invoke } from "@tauri-apps/api/core";
 import { normalizeBackendError } from "./backendErrors";
 import type {
   AnalyzeStudyCommand,
   CalibrationReference,
+  GetJobsCommand,
   JobCommand,
   JobSnapshot,
   LineAnnotation,
@@ -20,13 +20,13 @@ import type {
 } from "./generated/contracts";
 import type { BackendAPI } from "./runtimeTypes";
 import type { ProcessingRequest } from "./types";
+import { getWailsBackend, type WailsBackend } from "./wails";
 
-async function invokeCommand<TResult>(
-  command: string,
-  args: Record<string, unknown> = {},
+async function call<TResult>(
+  invoke: (backend: WailsBackend) => Promise<unknown>,
 ): Promise<TResult> {
   try {
-    return await invoke<TResult>(command, args);
+    return (await invoke(getWailsBackend())) as TResult;
   } catch (error) {
     throw normalizeBackendError(error);
   }
@@ -52,41 +52,40 @@ function buildProcessStudyCommand(
 export function createDesktopBackendAPI(): BackendAPI {
   return {
     mode: "desktop",
-    loadProcessingManifest: () => invokeCommand<ProcessingManifest>("get_processing_manifest"),
+    loadProcessingManifest: () =>
+      call<ProcessingManifest>((backend) => backend.GetProcessingManifest()),
     openStudy: (inputPath) =>
-      invokeCommand<OpenStudyCommandResult>("open_study", {
-        command: { inputPath } satisfies OpenStudyCommand,
-      }),
+      call<OpenStudyCommandResult>((backend) =>
+        backend.OpenStudy({ inputPath } satisfies OpenStudyCommand),
+      ),
     startRenderStudyJob: (studyId) =>
-      invokeCommand<StartedJob>("start_render_job", {
-        command: { studyId } satisfies RenderStudyCommand,
-      }),
+      call<StartedJob>((backend) =>
+        backend.StartRenderJob({ studyId } satisfies RenderStudyCommand),
+      ),
     startAnalyzeStudyJob: (studyId) =>
-      invokeCommand<StartedJob>("start_analyze_job", {
-        command: { studyId } satisfies AnalyzeStudyCommand,
-      }),
+      call<StartedJob>((backend) =>
+        backend.StartAnalyzeJob({ studyId } satisfies AnalyzeStudyCommand),
+      ),
     startProcessStudyJob: (studyId, request) =>
-      invokeCommand<StartedJob>("start_process_job", {
-        command: buildProcessStudyCommand(studyId, request) satisfies ProcessStudyCommand,
-      }),
+      call<StartedJob>((backend) =>
+        backend.StartProcessJob(
+          buildProcessStudyCommand(studyId, request) satisfies ProcessStudyCommand,
+        ),
+      ),
     getJob: (jobId) =>
-      invokeCommand<JobSnapshot>("get_job", {
-        command: { jobId } satisfies JobCommand,
-      }),
+      call<JobSnapshot>((backend) => backend.GetJob({ jobId } satisfies JobCommand)),
     getJobs: (jobIds) =>
-      invokeCommand<JobSnapshot[]>("get_jobs", {
-        command: { jobIds: [...new Set(jobIds)] },
-      }),
+      call<JobSnapshot[]>((backend) =>
+        backend.GetJobs({ jobIds: [...new Set(jobIds)] } satisfies GetJobsCommand),
+      ),
     cancelJob: (jobId) =>
-      invokeCommand<JobSnapshot>("cancel_job", {
-        command: { jobId } satisfies JobCommand,
-      }),
+      call<JobSnapshot>((backend) => backend.CancelJob({ jobId } satisfies JobCommand)),
     measureLineAnnotation: async (studyId, annotation): Promise<LineAnnotation> => {
-      const payload = await invokeCommand<MeasureLineAnnotationCommandResult>(
-        "measure_line_annotation",
-        {
-          command: { studyId, annotation } satisfies MeasureLineAnnotationCommand,
-        },
+      const payload = await call<MeasureLineAnnotationCommandResult>((backend) =>
+        backend.MeasureLineAnnotation({
+          studyId,
+          annotation,
+        } satisfies MeasureLineAnnotationCommand),
       );
       return payload.annotation;
     },
@@ -94,11 +93,8 @@ export function createDesktopBackendAPI(): BackendAPI {
       studyId,
       reference: CalibrationReference | null,
     ): Promise<MeasurementScale | null> => {
-      const payload = await invokeCommand<SetStudyCalibrationCommandResult>(
-        "set_study_calibration",
-        {
-          command: { studyId, reference } satisfies SetStudyCalibrationCommand,
-        },
+      const payload = await call<SetStudyCalibrationCommandResult>((backend) =>
+        backend.SetStudyCalibration({ studyId, reference } satisfies SetStudyCalibrationCommand),
       );
       return payload.study.measurementScale ?? null;
     },

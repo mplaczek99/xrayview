@@ -1,4 +1,4 @@
-/* Core application layout shared by the browser mock and the Tauri shell. */
+/* Core application layout shared by the browser mock and the desktop shell. */
 * {
   box-sizing: border-box;
 }

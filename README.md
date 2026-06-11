@@ -2,7 +2,7 @@
 
 <p align="center">
   A BMP bitewing X-ray visualization workstation<br>
-  built with a <strong>Tauri</strong> desktop shell, an <strong>HTMX/TypeScript</strong> frontend, and a <strong>Rust</strong> backend (in-process).
+  built with a <strong>Go + Wails</strong> desktop shell, an <strong>HTMX/TypeScript</strong> frontend, and a <strong>Go</strong> backend.
 </p>
 
 > [!CAUTION]
@@ -30,8 +30,8 @@
 ```
 xrayview/
 ├── frontend/        HTMX/TypeScript workstation UI (Vite)
-├── desktop-tauri/   Tauri 2 desktop shell (Rust crate; links backend-rs as a library)
-├── backend-rs/      Rust backend library + headless CLI binary
+├── desktop/         Go + Wails 2 desktop shell (binds the backend in-process)
+├── backend/         Go backend library, headless CLI, and the `shell` bind seam
 ├── contracts/       shared JSON schema + generated TypeScript bindings
 └── images/          sample image assets for dev & detector tuning
 ```
@@ -42,15 +42,15 @@ xrayview/
 
 ### Prerequisites
 
-- [Rust](https://www.rust-lang.org/tools/install) 1.85+ (Rust 2024 edition)
+- [Go](https://go.dev/doc/install) 1.26+
 - [Node.js](https://nodejs.org/) 20+
-- Linux desktop builds require GTK/WebKit development packages
-  On Debian/Ubuntu: `libgtk-3-dev`, `libwebkit2gtk-4.1-dev`, `librsvg2-dev`,
-  `patchelf`
-  AppImage releases bundle WebKitGTK media-framework dependencies for runtime
-  users. Build release AppImages on the oldest supported Linux baseline, because
-  bundled shared libraries inherit the builder's glibc requirement.
-- Windows desktop builds use WebView2 (auto-installed by the Tauri bundler)
+- [Wails CLI](https://wails.io): `go install github.com/wailsapp/wails/v2/cmd/wails@latest`
+  (ensure `$(go env GOPATH)/bin` is on your `PATH`); run `wails doctor` to check
+  platform deps
+- Linux desktop builds require GTK/WebKit development packages.
+  On Debian/Ubuntu: `libgtk-3-dev`, `libwebkit2gtk-4.1-dev`, `librsvg2-dev`.
+  The `webkit2_41` build tag is passed automatically by the desktop scripts.
+- Windows desktop builds use WebView2 (bundled/auto-installed by Wails)
 
 ### Install & verify
 
@@ -70,12 +70,11 @@ npm run dev
 
 ### Desktop app
 
-Build and launch the Tauri shell with the in-process Rust backend:
+Build and launch the Wails shell (the Go backend runs in-process):
 
 ```bash
-npm run tauri:dev               # dev launch
-npm run tauri:build             # release binary + installer bundles
-npm run tauri:build -- --no-bundle   # release binary only
+npm run desktop:dev             # hot-reload dev launch
+npm run desktop:build           # release binary
 ```
 
 <details>
@@ -83,9 +82,8 @@ npm run tauri:build -- --no-bundle   # release binary only
 
 | Artifact | Path |
 |---|---|
-| Frontend assets | `frontend/dist/` (bundled into the Tauri binary) |
-| Desktop binary | `desktop-tauri/target/release/xrayview` |
-| Installer bundles | `desktop-tauri/target/release/bundle/<format>/...` |
+| Frontend assets | `frontend/dist/`, synced into `desktop/dist/` and embedded in the binary |
+| Desktop binary | `desktop/build/bin/xrayview` |
 
 </details>
 
@@ -95,9 +93,8 @@ npm run tauri:build -- --no-bundle   # release binary only
 npm run release:smoke
 ```
 
-Checks contract drift, runs backend tests, builds the frontend, then runs
-`tauri build --no-bundle`. Pass `release:smoke:bundle` to include installer
-bundles.
+Checks contract drift, runs Go backend tests, builds the frontend, then runs the
+Wails desktop build (`npm run desktop:build`).
 
 ---
 
@@ -106,10 +103,10 @@ bundles.
 | Mode | Default in | Description |
 |---|---|---|
 | `mock` | Browser / Vite | Synthetic data, no backend |
-| `desktop` | Tauri shell | Live Rust backend in-process via Tauri IPC |
+| `desktop` | Wails shell | Live in-process Go backend via Wails IPC |
 
-The runtime is normally auto-detected (`window.__TAURI_INTERNALS__` is injected
-by the WebView). To override:
+The runtime is normally auto-detected (Wails injects `window.runtime` and
+`window.go` into the WebView). To override:
 
 ```bash
 XRAYVIEW_BACKEND_RUNTIME=mock npm run dev
@@ -117,19 +114,21 @@ XRAYVIEW_BACKEND_RUNTIME=mock npm run dev
 
 ---
 
-## Rust Backend
+## Go Backend
 
-`backend-rs/` is a library used in-process by the desktop shell. It also ships
-a headless CLI binary (`xrayview-backend-rs`) for scripted/manual inspection
-of BMP studies; the CLI calls the same library code directly — there is no
-local HTTP server.
+`backend/` contains the backend packages plus the headless
+`xrayview-backend` binary for scripted/manual inspection of BMP studies. The
+Wails desktop shell runs the backend in-process and binds its methods through the
+public `backend/shell` seam; there is no sidecar process and no local HTTP
+server. (The stdio `serve-ipc` server remains in `backend/internal/ipc` and is
+exercised by tests, but the GUI no longer uses it.)
 
 ```bash
 npm run backend:build
 npm run backend:test
 ```
 
-### Command surface (Tauri IPC)
+### Command surface (Wails IPC)
 
 | Command | Purpose |
 |---|---|
@@ -144,8 +143,8 @@ npm run backend:test
 | `measure_line_annotation` | Calibration-aware line measurement |
 | `set_study_calibration` | Set/clear mm-per-pixel scale from a known-length line |
 
-Each command is reached via `invoke("<command>", { command: <payload> })`
-from the frontend.
+Each command is reached via `window.go.main.App.<Command>(<payload>)` from the
+frontend (the methods are PascalCased, e.g. `OpenStudy`).
 
 ---
 
@@ -190,28 +189,28 @@ Generated file (do not edit manually):
 
 - `frontend/src/lib/generated/contracts.ts`
 
-Rust types in `backend-rs/src/contracts.rs` are the matching source on the Rust
+Go types in `backend/internal/contracts` are the matching backend source
 side (manually kept in sync; not generated).
 
 ---
 
 ## Architecture
 
-The project is a monorepo with a Rust backend library and a Tauri 2 desktop
-shell that links it in-process.
+The project is a pure-Go + TypeScript monorepo. The Wails desktop shell hosts the
+native webview and runs the Go backend in-process — no sidecar.
 
 | Module | Responsibility |
 |---|---|
 | `frontend/` | Workstation UI and mock-mode behavior |
-| `desktop-tauri/` | Tauri shell: window lifecycle, file dialogs, IPC command wrappers, job-event forwarding |
-| `backend-rs/` | Rust library: BMP decode, render, processing, annotations, jobs. Also ships a headless CLI binary |
+| `desktop/` | Go + Wails shell: window lifecycle, file dialog, command bindings, job-event forwarding, preview asset handler |
+| `backend/` | Go backend: BMP decode, render, processing, analysis overlays, annotations, jobs, CLI; `shell` is the public bind seam |
 | `contracts/` | Shared command payload shapes via JSON schema |
 
 ```
-┌─────────────┐    Tauri IPC    ┌──────────────────────────────────────┐
-│  HTMX UI    │ ◄─────────────► │ desktop-tauri (Rust shell)           │
-│  (frontend) │                  │   ↳ backend-rs::App (in-process)     │
-└─────────────┘                  └──────────────────────────────────────┘
+┌─────────────┐   Wails IPC     ┌──────────────────────────────────────┐
+│  HTMX UI    │ ◄────────────►  │ desktop (Go + Wails)                 │
+│  (frontend) │  window.go.*    │   ↳ backend/shell → backend (in-proc)│
+└─────────────┘                 └──────────────────────────────────────┘
         ▲                                            ▲
         └───────────────── contracts ────────────────┘
 ```

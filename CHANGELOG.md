@@ -9,19 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Manual measurement calibration. BMP carries no pixel-spacing metadata, so the calibrated-mm measurement path (`calibratedLengthMm`, the anisotropic scale math in `annotations.rs`) was previously unreachable — `measurementScale` was always null. A new `set_study_calibration` Tauri command derives an isotropic mm-per-pixel `MeasurementScale` from a reference line of known length: draw a line across a feature of known size, select it, enter its real length in mm, and the stored scale is applied to that and every existing line measurement. The scale persists in the recent-studies catalog, and a "Clear calibration" control resets it. New contract types `CalibrationReference`, `SetStudyCalibrationCommand`, `SetStudyCalibrationCommandResult`; pixel length is recomputed server-side via `annotations::measure_line` so the measurement math stays single-sourced. Works in both desktop and mock runtimes.
+- Manual measurement calibration. BMP carries no pixel-spacing metadata, so the calibrated-mm measurement path was previously unreachable — `measurementScale` was always null. A `set_study_calibration` command derives an isotropic mm-per-pixel `MeasurementScale` from a reference line of known length: draw a line across a feature of known size, select it, enter its real length in mm, and the scale is applied to that and every existing line measurement. The scale persists in the recent-studies catalog, and a "Clear calibration" control resets it. New contract types `CalibrationReference`, `SetStudyCalibrationCommand`, `SetStudyCalibrationCommandResult`; pixel length is recomputed server-side so the measurement math stays single-sourced. Works in both desktop and mock runtimes.
+- Expanded BMP-workflow end-to-end coverage (`frontend/tests/e2e/bmp-workflow.spec.ts`).
 
 ### Changed
 
-- Tooth AND bone detection rebuilt to generalize across subjects. The old models keyed on absolute pixel position (a 13.4 M-entry tooth feature table; a bone feature table plus an exact full-image-hash exemplar lookup), so they effectively memorized the one labeled subject's layout and produced unreliable masks on other BMPs. Both are now gradient-boosted forests over 16 position-free, multi-scale texture features (local mean/variance at radii 2–32, gradient, exposure-invariant contrast ratios) — the texture signal that actually separates isodense tooth from alveolar bone (`backend-rs/src/tooth_model.rs`, shared by inference and trainer). The feature planes are built once per analyze and shared by both forests. Decision thresholds (tooth 0.55, bone 0.50) were chosen by a balanced-accuracy sweep on the labeled set.
-
-### Added
-
-- `examples/train_tooth.rs`: offline trainer that fits a per-class forest (`tooth`/`bone`) from the labeled BMP + PNG-mask pairs with intensity/scale augmentation, reports per-feature split usage and a Dice / balanced-accuracy threshold sweep, and writes the `XVLM2` asset (`learned_model.bin` for tooth, `bone_model.bin` for bone). `png` added as a dev-dependency (trainer-only; never linked into the shipped binary).
+- **Backend rewritten from Rust to Go** (`backend/`, module `xrayview/backend`) and the **desktop shell migrated from Tauri 2 to Wails v2** (`desktop/`). The shell hosts the native webview and runs the Go backend in-process through the public `backend/shell` bind seam — no sidecar, no Rust anywhere in the project.
+- Frontend transport rebound from Tauri IPC to Wails: command `invoke("x", { command })` → `window.go.main.App.X(command)`, event `listen("job-update")` → `window.runtime.EventsOn`, native file dialog → bound `PickBmpFile`, and rendered previews served by a Wails asset handler (`/previews?path=…`) instead of `convertFileSrc`. Structured `BackendError`s are preserved across the Wails boundary via JSON-in-error-message (`desktop/app.go` `bindErr` ↔ `normalizeBackendError`).
+- Tooth AND bone detection rebuilt to generalize across subjects: gradient-boosted forests over 16 position-free, multi-scale texture features (local mean/variance at radii 2–32, gradient, exposure-invariant contrast ratios), replacing the old absolute-position feature-table + exemplar models that memorized one labeled subject's layout. The feature planes are built once per analyze and shared by both forests; decision thresholds (tooth 0.55, bone 0.50) from a balanced-accuracy sweep. Net analysis-asset size dropped from ~26.7 MB to ~0.43 MB.
+- Build tooling: `tauri:dev`/`tauri:build` → `desktop:dev`/`desktop:build` (Wails CLI); dropped `lint:rust`/clippy; `release:smoke` and the release CI workflows now build the Wails binary (`desktop/build/bin/xrayview`).
 
 ### Removed
 
-- Embedded `feature_table_model.bin.gz` (~25 MB), `bone_feature_table_model.bin.gz`, `bone_exemplar_model.bin.gz`, the `tooth_feature_table_bench` + `bone_exemplar_bench` examples, and all the dead absolute-position feature-table / exemplar / learned-forest code in `analysis.rs`. Net analysis-asset size dropped from ~26.7 MB to ~0.43 MB.
+- Tauri desktop shell (`desktop-tauri/`), the Rust backend crate (`backend-rs/`), and the `@tauri-apps/*` frontend dependencies.
+- Old position-overfit analysis assets (`feature_table_model.bin.gz` ~25 MB, `bone_feature_table_model.bin.gz`, `bone_exemplar_model.bin.gz`).
 
 ## [0.5.0] - 2026-06-02
 

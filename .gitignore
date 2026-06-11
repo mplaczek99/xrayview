@@ -6,8 +6,15 @@ frontend/.vite/
 frontend/*.tsbuildinfo
 frontend/vite.config.js
 frontend/vite.config.d.ts
-target/
-desktop-tauri/gen/
+backend/bin/
+backend/.gocache/
+
+# Desktop (Wails) build artifacts
+desktop/.gocache/
+desktop/build/
+desktop/wailsjs/
+desktop/dist/*
+!desktop/dist/.gitkeep
 
 # Local agent/editor/system files
 .codex
@@ -21,3 +28,6 @@ desktop-tauri/gen/
 images/BMP/
 images/PNG/
 images/TIF/
+
+# Stray `go build ./...` output (use desktop:build instead)
+desktop/desktop
