@@ -2,21 +2,12 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-The repo's shared agent guidelines — structure, build/test commands, coding style, testing, commit/PR conventions, and the contracts + scope rules — live in `AGENTS.md` and apply here too:
+Full conventions (structure, commands, style, contracts, scope) live in @AGENTS.md. Notes below are the non-obvious bits that aren't there.
 
-@AGENTS.md
+## Gotchas
 
-## Engineering priorities
-
-Weight performance, memory usage, and memory safety heavily in design tradeoffs. Prefer zero-copy and streaming over buffering; avoid allocations in hot paths (decode, render, process). When trading off, pick the faster, more memory-efficient path unless it would break correctness.
-
-## Build topology
-
-The stack is pure Go + TypeScript — no Rust. The backend is Go under `backend/`; the desktop shell is a Go + [Wails v2](https://wails.io) app under `desktop/`, its own module so the webkit/cgo dependency stays out of the backend (which builds and tests as pure Go). The desktop module binds backend methods through the public `backend/shell` seam (Go forbids importing another module's `internal/` packages). Always go through the npm scripts (`backend:test`, `lint`, `release:smoke`) so Go, the desktop build, frontend, and contract checks run with the expected paths. Before declaring a change done, run the full gate: `npm run release:smoke`.
-
-The Wails CLI must be installed (`go install github.com/wailsapp/wails/v2/cmd/wails@latest`) and on `PATH` (or in `$(go env GOPATH)/bin`) for `npm run desktop:dev` / `desktop:build`. On Linux the `webkit2_41` build tag is passed automatically.
-
-## Other gotchas
-
-- Backend env vars (`XRAYVIEW_BACKEND_*`) are resolved in `backend/internal/config`; defaults apply if unset.
-- Image fixtures `images/{BMP,PNG,TIF}/` are gitignored and developer-local — do not assume they exist on a fresh clone or in CI.
+- **Run Go via the npm scripts**, not raw `go`. They pin `GOCACHE=$PWD/backend/.gocache` (`npm run backend:test`, `npm run lint:go`). Single test: `GOCACHE=$PWD/backend/.gocache go test ./backend/internal/<pkg> -run TestName`. `go.work` ties two modules: `backend/` (library + CLI) and `desktop/` (Wails shell, separate module, vets with `-tags webkit2_41`).
+- **Desktop binary** lands at `desktop/build/bin/xrayview` after `npm run desktop:build`. `npm run desktop:dev` runs the Wails app (Go backend in-process) with hot reload.
+- **IPC, not HTTP.** Backend is in-process; the frontend invokes commands as `window.go.main.App.<PascalCaseCommand>(payload)`. The stdio `serve-ipc` server in `backend/internal/ipc` is legacy and unused by the GUI.
+- **No Rust.** The backend and detector are pure Go (`backend/internal/analysis/` GBDT forests + embedded `*.bin` XVLM2 assets). Ignore any stale Rust references in older tooling or docs.
+- **Branch flow:** commit straight to `dev`; `main` is the release branch (a `v*` tag triggers the publish workflow).
