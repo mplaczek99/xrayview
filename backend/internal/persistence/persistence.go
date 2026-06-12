@@ -72,7 +72,7 @@ func (catalog *Catalog) SetNow(now func() time.Time) {
 }
 
 func (catalog *Catalog) Ensure() error {
-	if err := os.MkdirAll(catalog.rootDir, 0o777); err != nil {
+	if err := os.MkdirAll(catalog.rootDir, 0o700); err != nil {
 		backendErr := contracts.InternalError(fmt.Sprintf("failed to create catalog directory %s: %v", catalog.rootDir, err))
 		return backendErr
 	}
@@ -189,7 +189,7 @@ func (catalog *Catalog) save(value StudyCatalog) error {
 		backendErr := contracts.InternalError(fmt.Sprintf("serialize study catalog: %v", err))
 		return backendErr
 	}
-	if err := os.WriteFile(catalog.path, payload, 0o666); err != nil {
+	if err := os.WriteFile(catalog.path, payload, 0o600); err != nil {
 		backendErr := contracts.InternalError(fmt.Sprintf("failed to write study catalog %s: %v", catalog.path, err))
 		return backendErr
 	}

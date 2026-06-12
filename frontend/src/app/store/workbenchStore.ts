@@ -481,10 +481,19 @@ class WorkbenchStore {
       return;
     }
 
-    const measured = await Promise.all(
+    // allSettled so one failed re-measure keeps the saved calibration status and
+    // the remaining lines instead of rejecting into the caller's catch (which
+    // would report the already-applied calibration as failed).
+    const settled = await Promise.allSettled(
       study.annotations.lines.map((line) => runtime.measureLineAnnotation(studyId, line)),
     );
-    const measuredById = new Map(measured.map((line) => [line.id, line]));
+    const measuredById = new Map(
+      settled
+        .filter((entry): entry is PromiseFulfilledResult<LineAnnotation> => {
+          return entry.status === "fulfilled";
+        })
+        .map((entry) => [entry.value.id, entry.value]),
+    );
 
     this.setStudyState(studyId, (current) => ({
       ...current,

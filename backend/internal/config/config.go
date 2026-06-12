@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"xrayview/backend/internal/contracts"
@@ -34,10 +35,13 @@ type PathsConfig struct {
 	PersistenceDir string `json:"persistenceDir"`
 }
 
-// Default returns the same ephemeral tempdir-based defaults as the Rust
-// backend. The desktop shell is expected to override BaseDir in production.
+// Default places backend data under the per-user cache directory (e.g.
+// ~/.cache/xrayview on Linux). A world-shared location like /tmp/xrayview is
+// unsafe on multi-user systems: another user could pre-create the directory or
+// read rendered X-ray artifacts, so the temp fallback is suffixed with the UID
+// and only used when no user cache directory can be resolved.
 func Default() Config {
-	baseDir := filepath.Join(os.TempDir(), "xrayview")
+	baseDir := defaultBaseDir()
 	return Config{
 		ServiceName: contracts.ServiceName,
 		Logging: LoggingConfig{
@@ -49,6 +53,13 @@ func Default() Config {
 			PersistenceDir: filepath.Join(baseDir, "state"),
 		},
 	}
+}
+
+func defaultBaseDir() string {
+	if userCacheDir, err := os.UserCacheDir(); err == nil && strings.TrimSpace(userCacheDir) != "" {
+		return filepath.Join(userCacheDir, "xrayview")
+	}
+	return filepath.Join(os.TempDir(), "xrayview-"+strconv.Itoa(os.Getuid()))
 }
 
 // Load reads configuration from the process environment.

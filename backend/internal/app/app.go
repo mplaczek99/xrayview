@@ -922,7 +922,9 @@ func (app *App) reserveAsyncJob(fingerprint string, kind contracts.JobKind, stud
 	snapshot := queuedJobSnapshot(jobID, kind, &studyID)
 	app.jobs.insert(snapshot)
 	app.activeFingerprints[fingerprint] = jobID
-	go app.publishJobUpdate(snapshot)
+	// Publish synchronously (sends are non-blocking) so subscribers see the
+	// queued snapshot before the job goroutine can emit running updates.
+	app.publishJobUpdate(snapshot)
 	return jobID, true
 }
 
@@ -982,12 +984,18 @@ func (app *App) finishCancelledIfRequested(jobID, fingerprint, stage string, cle
 		return false
 	}
 
-	cleanup(cleanupPaths)
 	app.activeMu.Lock()
-	if activeJobID, ok := app.activeFingerprints[fingerprint]; ok && activeJobID == jobID {
+	activeJobID, active := app.activeFingerprints[fingerprint]
+	if active && activeJobID == jobID {
 		delete(app.activeFingerprints, fingerprint)
 	}
 	app.activeMu.Unlock()
+	// CancelJob releases the fingerprint immediately, so a restarted job may
+	// already own the same artifact paths; only delete them while no other job
+	// does.
+	if !active || activeJobID == jobID {
+		cleanup(cleanupPaths)
+	}
 
 	snapshot.State = contracts.JobStateCancelled
 	snapshot.Progress.Message = "Cancelled by user"
@@ -1003,15 +1011,19 @@ func (app *App) finishCancelledIfRequested(jobID, fingerprint, stage string, cle
 
 func (app *App) finishAsyncJob(jobID, fingerprint string, terminalSnapshot contracts.JobSnapshot) {
 	app.activeMu.Lock()
-	if activeJobID, ok := app.activeFingerprints[fingerprint]; ok && activeJobID == jobID {
+	activeJobID, active := app.activeFingerprints[fingerprint]
+	if active && activeJobID == jobID {
 		delete(app.activeFingerprints, fingerprint)
 	}
 	app.activeMu.Unlock()
+	// See finishCancelledIfRequested: after a cancel, a restarted job may share
+	// this job's fingerprint-derived artifact paths.
+	fingerprintReassigned := active && activeJobID != jobID
 
 	app.jobsMu.Lock()
 	current, ok := app.jobs.snapshots[jobID]
 	if ok && (current.State == contracts.JobStateCancelling || current.State == contracts.JobStateCancelled) {
-		if terminalSnapshot.Result != nil {
+		if terminalSnapshot.Result != nil && !fingerprintReassigned {
 			cleanup(resultArtifactPaths(*terminalSnapshot.Result))
 		}
 		terminalSnapshot = current

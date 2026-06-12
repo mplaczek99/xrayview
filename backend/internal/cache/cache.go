@@ -76,11 +76,11 @@ func (store *Store) PersistenceDir() string {
 
 // Ensure creates cache and state directories. It is safe to call repeatedly.
 func (store *Store) Ensure() error {
-	if err := os.MkdirAll(store.rootDir, 0o777); err != nil {
+	if err := os.MkdirAll(store.rootDir, 0o700); err != nil {
 		backendErr := contracts.InternalError(fmt.Sprintf("failed to create cache directory %s: %v", store.rootDir, err))
 		return backendErr
 	}
-	if err := os.MkdirAll(store.persistenceDir, 0o777); err != nil {
+	if err := os.MkdirAll(store.persistenceDir, 0o700); err != nil {
 		backendErr := contracts.InternalError(fmt.Sprintf("failed to create state directory %s: %v", store.persistenceDir, err))
 		return backendErr
 	}
@@ -101,7 +101,7 @@ func (store *Store) ArtifactPath(namespace, key, extension string) (string, erro
 	}
 
 	directory := filepath.Join(store.rootDir, ArtifactDirName, namespace)
-	if err := os.MkdirAll(directory, 0o777); err != nil {
+	if err := os.MkdirAll(directory, 0o700); err != nil {
 		backendErr := contracts.InternalError(fmt.Sprintf("failed to create cache directory %s: %v", directory, err))
 		return "", backendErr
 	}

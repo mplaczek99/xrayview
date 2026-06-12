@@ -3,13 +3,19 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
 
-func TestDefaultConfigUsesTempBaseDir(t *testing.T) {
+func TestDefaultConfigUsesPerUserBaseDir(t *testing.T) {
 	config := Default()
-	baseDir := filepath.Join(os.TempDir(), "xrayview")
+	var baseDir string
+	if userCacheDir, err := os.UserCacheDir(); err == nil && strings.TrimSpace(userCacheDir) != "" {
+		baseDir = filepath.Join(userCacheDir, "xrayview")
+	} else {
+		baseDir = filepath.Join(os.TempDir(), "xrayview-"+strconv.Itoa(os.Getuid()))
+	}
 
 	if config.Logging.Level != "info" {
 		t.Fatalf("level = %q, want info", config.Logging.Level)

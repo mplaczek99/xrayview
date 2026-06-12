@@ -40,7 +40,7 @@ func SavePreviewBMP(path string, preview PreviewImage) error {
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(path, encoded, 0o666); err != nil {
+	if err := os.WriteFile(path, encoded, 0o600); err != nil {
 		return fmt.Errorf("write preview BMP %s: %w", path, err)
 	}
 	return nil
@@ -52,7 +52,7 @@ func SaveGrayBMP(path string, width, height uint32, pixels []byte) error {
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(path, encoded, 0o666); err != nil {
+	if err := os.WriteFile(path, encoded, 0o600); err != nil {
 		return fmt.Errorf("write preview BMP %s: %w", path, err)
 	}
 	return nil
@@ -124,7 +124,7 @@ func encodeGray8BMP(width, height uint32, pixels []byte) ([]byte, error) {
 	if !ok {
 		return nil, fmt.Errorf("BMP file size overflow")
 	}
-	if fileSize > maxUint32 {
+	if int64(fileSize) > maxUint32 {
 		return nil, fmt.Errorf("BMP file exceeds 4 GB")
 	}
 
@@ -162,7 +162,7 @@ func encodeRGBA8AsBGR24BMP(width, height uint32, pixels []byte) ([]byte, error) 
 	if !ok {
 		return nil, fmt.Errorf("BMP file size overflow")
 	}
-	if fileSize > maxUint32 {
+	if int64(fileSize) > maxUint32 {
 		return nil, fmt.Errorf("BMP file exceeds 4 GB")
 	}
 
@@ -234,7 +234,8 @@ func checkedAdd(left, right int) (int, bool) {
 }
 
 const (
-	maxInt32  = int32(^uint32(0) >> 1)
-	maxUint32 = int(^uint32(0))
-	maxInt    = int(^uint(0) >> 1)
+	maxInt32 = int32(^uint32(0) >> 1)
+	// int64 so the 4 GB header guard also works where int is 32 bits wide.
+	maxUint32 int64 = 1<<32 - 1
+	maxInt          = int(^uint(0) >> 1)
 )
