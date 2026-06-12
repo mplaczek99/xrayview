@@ -22,15 +22,33 @@ const (
 	boneOutlineThicknessPixels  = 2
 	toothMaskCloseRadiusPixels  = 2
 
-	boneToothCutoutBridgeRadiusPixels = 24
-	radiographBackgroundMaxGray       = 2
-	boneEdgeSnapRadiusPixels          = 14
+	radiographBackgroundMaxGray = 2
 
 	// Forest score at/above this is the class. The trainer regresses toward
 	// {0, 1}; both cuts are where balanced accuracy peaks on the labeled set.
 	// Tooth 0.55 stops greening the isodense bone; bone 0.50 is balanced.
+	// Used only by the per-detector fallback (detectToothMask/detectBoneLineMask).
 	toothScoreThreshold = 0.55
 	boneScoreThreshold  = 0.50
+
+	// Joint argmax classifier (detectToothAndBoneMasks). The forests are scored
+	// per pixel, the score maps are box-blurred to a radius of min(w,h)/scoreBlurDivisor,
+	// then each pixel takes the argmax of {tooth, bone, background}. Smoothing the
+	// SCORES (not the hard masks) is what turns isodense per-pixel speckle into the
+	// coherent regions the hand-drawn references show.
+	scoreBlurDivisor   = 36
+	scoreBlurMaxRadius = 40
+	// A pixel is background unless at least one forest scores at/above this floor.
+	classScoreFloor = 0.50
+	// Tooth/bone ties are broken toward tooth by this margin: isodense roots read
+	// as trabecular bone to the texture forest, but the references label them tooth.
+	// Swept on the 38 labeled pairs — peaks tooth Dice without costing bone Dice.
+	argmaxToothBias = 0.05
+
+	// Region-mask polish for the argmax output.
+	regionMinAreaDivisor    = 400
+	regionCloseRadiusFactor = 200
+	regionCloseRadiusMax    = 6
 )
 
 // Gradient-boosted forests (XVLM2), trained offline on position-free texture
@@ -87,8 +105,7 @@ func GenerateToothOverlay(preview render.PreviewImage) (OverlayResult, error) {
 	normalized := normalizeGray(preview.Pixels)
 	planes := buildFeaturePlanes(normalized, width, height)
 	buffers := newMaskBuffers(expectedPixels)
-	toothMask := detectToothMask(planes, width, height, buffers)
-	boneMask := detectBoneLineMask(planes, width, height, buffers)
+	toothMask, boneMask := detectToothAndBoneMasks(planes, width, height, buffers)
 
 	toothPixels := countMask(toothMask)
 	bonePixels := countMask(boneMask)
@@ -103,12 +120,15 @@ func GenerateToothOverlay(preview render.PreviewImage) (OverlayResult, error) {
 		mode += "; no reliable bone level found"
 	}
 
-	boneSection := boneSectionMaskWithIgnoredCutouts(preview.Pixels, boneMask, toothMask, width, height, buffers)
-	snapMaskToImageEdge(boneSection, width, height, boneEdgeSnapRadiusPixels, buffers)
+	// Tooth and bone come out of the argmax mutually exclusive, so the bone mask
+	// is used as the section directly — only the pure-black frame border is
+	// cleared (in place; BonePixels was counted above) so bone can't bleed into
+	// the unexposed margins.
+	clearBorderBackgroundFromMask(boneMask, preview.Pixels, width, height, buffers.visited)
 
 	return OverlayResult{
-		Preview:        overlayPreview(preview.Pixels, preview.Width, preview.Height, toothMask, boneSection, false, buffers),
-		FilledPreview:  overlayPreview(preview.Pixels, preview.Width, preview.Height, toothMask, boneSection, true, buffers),
+		Preview:        overlayPreview(preview.Pixels, preview.Width, preview.Height, toothMask, boneMask, false, buffers),
+		FilledPreview:  overlayPreview(preview.Pixels, preview.Width, preview.Height, toothMask, boneMask, true, buffers),
 		ToothPixels:    toothPixels,
 		BonePixels:     bonePixels,
 		Coverage:       coverage,
@@ -154,35 +174,13 @@ func detectToothMask(planes *featurePlanes, width, height int, buffers *maskBuff
 	return cleanToothMask(mask, width, height, buffers)
 }
 
-// forestScoreMask thresholds the forest score at every pixel. Per-pixel work is
-// independent and integral-image feature lookups are O(1), so it parallelizes
-// over row ranges.
+// forestScoreMask thresholds the forest score at every pixel.
 func forestScoreMask(forest *toothForest, planes *featurePlanes, threshold float64) []bool {
-	width := planes.width
-	height := planes.height
-	mask := make([]bool, width*height)
-	workers := min(max(runtime.NumCPU(), 1), max(height, 1))
-	chunk := (height + workers - 1) / workers
-	var wg sync.WaitGroup
-	for w := 0; w < workers; w++ {
-		yStart := w * chunk
-		if yStart >= height {
-			break
-		}
-		yEnd := min(yStart+chunk, height)
-		wg.Add(1)
-		go func(yStart, yEnd int) {
-			defer wg.Done()
-			for y := yStart; y < yEnd; y++ {
-				row := y * width
-				for x := 0; x < width; x++ {
-					features := planes.features(x, y)
-					mask[row+x] = forest.score(&features) >= threshold
-				}
-			}
-		}(yStart, yEnd)
+	scores := forestScoreValues(forest, planes)
+	mask := make([]bool, len(scores))
+	for index, score := range scores {
+		mask[index] = score >= threshold
 	}
-	wg.Wait()
 	return mask
 }
 
@@ -221,8 +219,7 @@ func detectBoneLineMask(planes *featurePlanes, width, height int, buffers *maskB
 	}
 	mask := forestScoreMask(forest, planes, boneScoreThreshold)
 
-	// Light cleanup: close hairline gaps, drop specks, fill interior holes. The
-	// heavier section shaping happens later in boneSectionMaskWithIgnoredCutouts.
+	// Light cleanup: close hairline gaps, drop specks, fill interior holes.
 	closeMaskInto(mask, width, height, 1, buffers)
 	copy(mask, buffers.b)
 	removeSmallComponentsInto(mask, width, height, minimumBoneAreaPixels(width, height), buffers.a, buffers.visited)
@@ -230,6 +227,222 @@ func detectBoneLineMask(planes *featurePlanes, width, height int, buffers *maskB
 	fillHolesInto(mask, width, height, buffers.a)
 	copy(mask, buffers.a)
 	return mask
+}
+
+// detectToothAndBoneMasks classifies every pixel as tooth, bone, or background
+// from the two forests jointly. Per-pixel forest scores are noisy because tooth
+// and bone are isodense; box-blurring the SCORE maps and then taking an argmax
+// (rather than thresholding each forest independently) yields the coherent,
+// mutually exclusive regions the hand-drawn references show — and the
+// tooth/bone boundary it draws is the alveolar bone level. Falls back to the
+// independent per-detector path if either forest asset fails to load.
+func detectToothAndBoneMasks(planes *featurePlanes, width, height int, buffers *maskBuffers) (toothMask, boneMask []bool) {
+	toothForest, toothOK := loadedToothModel()
+	boneForest, boneOK := loadedBoneModel()
+	if !toothOK || !boneOK {
+		return detectToothMask(planes, width, height, buffers),
+			detectBoneLineMask(planes, width, height, buffers)
+	}
+
+	radius := scoreBlurRadius(width, height)
+	toothScores := boxBlurMeanFloat(forestScoreValues(toothForest, planes), width, height, radius)
+	boneScores := boxBlurMeanFloat(forestScoreValues(boneForest, planes), width, height, radius)
+
+	toothMask = make([]bool, width*height)
+	boneMask = make([]bool, width*height)
+	for index := range toothScores {
+		tooth := toothScores[index]
+		bone := boneScores[index]
+		if tooth < classScoreFloor && bone < classScoreFloor {
+			continue // background: neither forest is confident here
+		}
+		if tooth+argmaxToothBias >= bone {
+			toothMask[index] = true
+		} else {
+			boneMask[index] = true
+		}
+	}
+
+	// Keep only the tooth surface down to the bone level; the embedded root
+	// (tooth past the alveolar crest) becomes bone.
+	clipToothToBoneLevel(toothMask, boneMask, width, height)
+
+	cleanRegionMask(toothMask, width, height, buffers)
+	cleanRegionMask(boneMask, width, height, buffers)
+
+	// Closing and hole-filling each mask independently can re-introduce overlap
+	// at the shared boundary; clearing it keeps the classes mutually exclusive
+	// (and Coverage ≤ 1). Tooth wins, consistent with argmaxToothBias.
+	for index := range boneMask {
+		if toothMask[index] {
+			boneMask[index] = false
+		}
+	}
+	return toothMask, boneMask
+}
+
+// clipToothToBoneLevel keeps only each tooth's crown — the surface exposed to
+// the open space — and reclassifies the embedded root as bone. A tooth pixel is
+// crown if the open background (the occlusal/interproximal space the crowns
+// project into) is geodesically nearer than bone, and root if bone is nearer;
+// the equidistant locus is the alveolar bone level. The split is a single
+// multi-source breadth-first flood: every background pixel seeds the crown front
+// and every bone pixel seeds the root front, both at distance 0, so each tooth
+// pixel inherits whichever front reaches it first. Background is enqueued before
+// bone, so an equidistant tie keeps the pixel as tooth. With no bone present
+// nothing is reclassified (the whole tooth is kept). Orientation-free: it needs
+// no assumption about where the arch sits.
+func clipToothToBoneLevel(toothMask, boneMask []bool, width, height int) {
+	n := width * height
+	if width == 0 || height == 0 || len(toothMask) != n || len(boneMask) != n {
+		return
+	}
+	const (
+		unset = int8(0)
+		crown = int8(1)
+		root  = int8(2)
+	)
+	label := make([]int8, n)
+	queue := make([]int, 0, n)
+	for index := range toothMask {
+		if !toothMask[index] && !boneMask[index] {
+			label[index] = crown
+			queue = append(queue, index)
+		}
+	}
+	boneSeen := false
+	for index := range boneMask {
+		if boneMask[index] {
+			label[index] = root
+			queue = append(queue, index)
+			boneSeen = true
+		}
+	}
+	if !boneSeen {
+		return
+	}
+	for head := 0; head < len(queue); head++ {
+		index := queue[head]
+		front := label[index]
+		x := index % width
+		y := index / width
+		visit := func(neighbor int) {
+			if label[neighbor] == unset {
+				label[neighbor] = front
+				queue = append(queue, neighbor)
+			}
+		}
+		if x > 0 {
+			visit(index - 1)
+		}
+		if x+1 < width {
+			visit(index + 1)
+		}
+		if y > 0 {
+			visit(index - width)
+		}
+		if y+1 < height {
+			visit(index + width)
+		}
+	}
+	for index := range toothMask {
+		if toothMask[index] && label[index] == root {
+			toothMask[index] = false
+			boneMask[index] = true
+		}
+	}
+}
+
+// forestScoreValues returns the raw forest score at every pixel (continuous,
+// roughly [0, 1]). Per-pixel work is independent and integral-image feature
+// lookups are O(1), so it parallelizes over disjoint row ranges — each worker
+// writes only its own rows of scores, so the slice needs no synchronization
+// beyond the WaitGroup.
+func forestScoreValues(forest *toothForest, planes *featurePlanes) []float64 {
+	width := planes.width
+	height := planes.height
+	scores := make([]float64, width*height)
+	workers := min(max(runtime.NumCPU(), 1), max(height, 1))
+	chunk := (height + workers - 1) / workers
+	var wg sync.WaitGroup
+	for w := 0; w < workers; w++ {
+		yStart := w * chunk
+		if yStart >= height {
+			break
+		}
+		yEnd := min(yStart+chunk, height)
+		wg.Add(1)
+		go func(yStart, yEnd int) {
+			defer wg.Done()
+			for y := yStart; y < yEnd; y++ {
+				row := y * width
+				for x := 0; x < width; x++ {
+					features := planes.features(x, y)
+					scores[row+x] = forest.score(&features)
+				}
+			}
+		}(yStart, yEnd)
+	}
+	wg.Wait()
+	return scores
+}
+
+// boxBlurMeanFloat replaces each value with the mean of the clamped radius-r
+// window via an integral image: O(1) per pixel, one allocation for the integral
+// and one for the result.
+func boxBlurMeanFloat(src []float64, width, height, radius int) []float64 {
+	if radius <= 0 || width == 0 || height == 0 || len(src) != width*height {
+		return append([]float64(nil), src...)
+	}
+	stride := width + 1
+	integral := make([]float64, stride*(height+1))
+	for y := 0; y < height; y++ {
+		var row float64
+		for x := 0; x < width; x++ {
+			row += src[y*width+x]
+			integral[(y+1)*stride+x+1] = integral[y*stride+x+1] + row
+		}
+	}
+	out := make([]float64, width*height)
+	for y := 0; y < height; y++ {
+		y0 := max(y-radius, 0)
+		y1 := min(y+radius+1, height)
+		for x := 0; x < width; x++ {
+			x0 := max(x-radius, 0)
+			x1 := min(x+radius+1, width)
+			area := float64((x1 - x0) * (y1 - y0))
+			sum := integral[y1*stride+x1] - integral[y0*stride+x1] - integral[y1*stride+x0] + integral[y0*stride+x0]
+			out[y*width+x] = sum / area
+		}
+	}
+	return out
+}
+
+func scoreBlurRadius(width, height int) int {
+	return clamp(min(width, height)/scoreBlurDivisor, 0, scoreBlurMaxRadius)
+}
+
+// cleanRegionMask polishes an argmax region mask in place: drop specks, close
+// hairline gaps, and fill interior holes so the filled overlay reads as solid
+// anatomy rather than a ragged threshold edge.
+func cleanRegionMask(mask []bool, width, height int, buffers *maskBuffers) {
+	if width == 0 || height == 0 || len(mask) != width*height {
+		return
+	}
+	removeSmallComponentsInto(mask, width, height, regionMinArea(width, height), buffers.a, buffers.visited)
+	copy(mask, buffers.a)
+	closeMaskInto(mask, width, height, regionCloseRadius(width, height), buffers)
+	copy(mask, buffers.b)
+	fillHolesInto(mask, width, height, buffers.a)
+	copy(mask, buffers.a)
+}
+
+func regionMinArea(width, height int) int {
+	return clamp(width*height/regionMinAreaDivisor, minimumToothAreaFloorPixels, 8192)
+}
+
+func regionCloseRadius(width, height int) int {
+	return clamp(min(width, height)/regionCloseRadiusFactor, 1, regionCloseRadiusMax)
 }
 
 func overlayPreview(gray []byte, width, height uint32, toothMask, boneMask []bool, fillSections bool, buffers *maskBuffers) render.PreviewImage {
@@ -291,74 +504,6 @@ func blendMaskFill(pixels []byte, mask []bool, color [4]byte, alpha byte, exclud
 
 func blendChannel(dst, src byte, alpha, invAlpha uint32) byte {
 	return byte((uint32(src)*alpha + uint32(dst)*invAlpha + 127) / 255)
-}
-
-func boneSectionMaskWithIgnoredCutouts(gray []byte, boneMask, toothMask []bool, width, height int, buffers *maskBuffers) []bool {
-	if len(boneMask) == 0 || len(toothMask) != len(boneMask) {
-		return append([]bool(nil), boneMask...)
-	}
-	sectionMask := append([]bool(nil), boneMask...)
-	radius := boneToothCutoutBridgeRadius(width, height)
-	if radius == 0 || width < 8 || height < 8 {
-		return sectionMask
-	}
-	dilateMaskInto(boneMask, width, height, radius, buffers.scratch, buffers.a)
-	dilateMaskInto(toothMask, width, height, radius, buffers.scratch, buffers.b)
-	for index := range sectionMask {
-		if buffers.b[index] && buffers.a[index] {
-			sectionMask[index] = true
-		}
-	}
-	closeMaskInto(sectionMask, width, height, clamp(radius/2, 1, 8), buffers)
-	fillHolesInto(buffers.b, width, height, buffers.a)
-	removeSmallComponentsInto(buffers.a, width, height, minimumBoneOutlineAreaPixels(width, height), buffers.b, buffers.visited)
-	cleaned := append([]bool(nil), buffers.b...)
-	clearBorderBackgroundFromMask(cleaned, gray, width, height, buffers.visited)
-	return cleaned
-}
-
-func snapMaskToImageEdge(mask []bool, width, height, snapRadius int, buffers *maskBuffers) {
-	if snapRadius == 0 || width == 0 || height == 0 || len(mask) != width*height || len(buffers.a) != len(mask) {
-		return
-	}
-	dilateMaskInto(mask, width, height, snapRadius, buffers.scratch, buffers.a)
-	strip := min(snapRadius, height)
-	for y := 0; y < strip; y++ {
-		for x := 0; x < width; x++ {
-			if buffers.a[y*width+x] {
-				mask[y*width+x] = true
-			}
-		}
-	}
-	for y := max(height-strip, 0); y < height; y++ {
-		for x := 0; x < width; x++ {
-			if buffers.a[y*width+x] {
-				mask[y*width+x] = true
-			}
-		}
-	}
-	hStrip := min(snapRadius, width)
-	for y := 0; y < height; y++ {
-		row := y * width
-		for x := 0; x < hStrip; x++ {
-			if buffers.a[row+x] {
-				mask[row+x] = true
-			}
-		}
-		for x := max(width-hStrip, 0); x < width; x++ {
-			if buffers.a[row+x] {
-				mask[row+x] = true
-			}
-		}
-	}
-}
-
-func boneToothCutoutBridgeRadius(width, height int) int {
-	return min(boneToothCutoutBridgeRadiusPixels, max(boneOutlineThicknessPixels, min(width, height)/32))
-}
-
-func minimumBoneOutlineAreaPixels(width, height int) int {
-	return clamp(width*height/1000, 16, 128)
 }
 
 func innerOutlineMask(mask []bool, width, height, thickness int, buffers *maskBuffers) []bool {

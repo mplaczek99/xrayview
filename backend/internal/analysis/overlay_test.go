@@ -102,6 +102,42 @@ func TestFilledOverlayDrawsOutlinesOverBlendedSections(t *testing.T) {
 	}
 }
 
+func TestClipToothToBoneLevelKeepsCrownReclassifiesRoot(t *testing.T) {
+	const width = 9
+	const height = 10
+	tooth := make([]bool, width*height)
+	bone := make([]bool, width*height)
+	fillMaskRect(tooth, width, 3, 0, 3, height) // one vertical tooth, crown to root
+	fillMaskRect(bone, width, 0, 5, 3, 5)       // interdental bone, lower-left
+	fillMaskRect(bone, width, 6, 5, 3, 5)       // interdental bone, lower-right
+
+	clipToothToBoneLevel(tooth, bone, width, height)
+
+	// Crown (top): open background is nearer than bone, so it stays tooth.
+	if !tooth[1*width+4] {
+		t.Fatalf("crown pixel was clipped")
+	}
+	// Root (bottom): bone flanks both sides, so it is reclassified as bone.
+	if tooth[8*width+4] || !bone[8*width+4] {
+		t.Fatalf("root pixel not reclassified to bone: tooth=%v bone=%v", tooth[8*width+4], bone[8*width+4])
+	}
+}
+
+func TestClipToothToBoneLevelKeepsAllWhenNoBone(t *testing.T) {
+	const width = 8
+	const height = 8
+	tooth := make([]bool, width*height)
+	bone := make([]bool, width*height)
+	fillMaskRect(tooth, width, 2, 2, 4, 4)
+	before := countMask(tooth)
+
+	clipToothToBoneLevel(tooth, bone, width, height)
+
+	if got := countMask(tooth); got != before {
+		t.Fatalf("tooth changed without bone: before=%d after=%d", before, got)
+	}
+}
+
 func analysisFixtureGray() []byte {
 	pixels := make([]byte, 32*32)
 	for index := range pixels {
